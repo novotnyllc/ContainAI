@@ -248,15 +248,16 @@ test_bash_aliases_linked_assertions() {
         return 1
     }
 
-    # Container should have it linked as ~/.bash_aliases_imported
-    assert_symlink_target "/home/agent/.bash_aliases_imported" "/mnt/agent-data/shell/bash_aliases" || {
-        printf '%s\n' "[DEBUG] ~/.bash_aliases_imported should symlink to /mnt/agent-data/shell/bash_aliases" >&2
-        # Debug: show what the symlink actually points to
-        local actual_target
-        actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.bash_aliases_imported" 2>/dev/null) || true
-        printf '%s\n' "[DEBUG] Actual symlink target: $actual_target" >&2
+    # Container should have it linked as ~/.bash_aliases_imported (guarded for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.bash_aliases_imported" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.bash_aliases_imported" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/bash_aliases" ]]; then
+        printf '%s\n' "[DEBUG] ~/.bash_aliases_imported symlink target='$actual_target', expected '/mnt/agent-data/shell/bash_aliases'" >&2
+        return 1
+    fi
 
     # Verify the alias content
     local alias_content
@@ -328,11 +329,16 @@ test_inputrc_synced_assertions() {
         return 1
     }
 
-    # Verify symlink in container
-    assert_symlink_target "/home/agent/.inputrc" "/mnt/agent-data/shell/inputrc" || {
-        printf '%s\n' "[DEBUG] ~/.inputrc should symlink to /mnt/agent-data/shell/inputrc" >&2
+    # Verify symlink in container (guarded for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.inputrc" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.inputrc" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/inputrc" ]]; then
+        printf '%s\n' "[DEBUG] ~/.inputrc symlink target='$actual_target', expected '/mnt/agent-data/shell/inputrc'" >&2
+        return 1
+    fi
 
     # Verify content
     local content
@@ -367,11 +373,16 @@ test_zshrc_synced_assertions() {
         return 1
     }
 
-    # Verify symlink in container
-    assert_symlink_target "/home/agent/.zshrc" "/mnt/agent-data/shell/zshrc" || {
-        printf '%s\n' "[DEBUG] ~/.zshrc should symlink to /mnt/agent-data/shell/zshrc" >&2
+    # Verify symlink in container (guarded for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.zshrc" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.zshrc" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/zshrc" ]]; then
+        printf '%s\n' "[DEBUG] ~/.zshrc symlink target='$actual_target', expected '/mnt/agent-data/shell/zshrc'" >&2
+        return 1
+    fi
 
     # Verify content
     local content
@@ -402,11 +413,16 @@ test_zprofile_synced_assertions() {
         return 1
     }
 
-    # Verify symlink in container
-    assert_symlink_target "/home/agent/.zprofile" "/mnt/agent-data/shell/zprofile" || {
-        printf '%s\n' "[DEBUG] ~/.zprofile should symlink to /mnt/agent-data/shell/zprofile" >&2
+    # Verify symlink in container (guarded for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.zprofile" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.zprofile" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/zprofile" ]]; then
+        printf '%s\n' "[DEBUG] ~/.zprofile symlink target='$actual_target', expected '/mnt/agent-data/shell/zprofile'" >&2
+        return 1
+    fi
 
     # Verify content
     local content
@@ -437,11 +453,16 @@ test_zshenv_synced_assertions() {
         return 1
     }
 
-    # Verify symlink in container
-    assert_symlink_target "/home/agent/.zshenv" "/mnt/agent-data/shell/zshenv" || {
-        printf '%s\n' "[DEBUG] ~/.zshenv should symlink to /mnt/agent-data/shell/zshenv" >&2
+    # Verify symlink in container (guarded for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.zshenv" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.zshenv" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/zshenv" ]]; then
+        printf '%s\n' "[DEBUG] ~/.zshenv symlink target='$actual_target', expected '/mnt/agent-data/shell/zshenv'" >&2
+        return 1
+    fi
 
     # Verify content
     local content
@@ -502,11 +523,16 @@ test_ohmyzsh_custom_synced_assertions() {
         return 1
     }
 
-    # Verify symlink in container
-    assert_symlink_target "/home/agent/.oh-my-zsh/custom" "/mnt/agent-data/shell/oh-my-zsh-custom" || {
-        printf '%s\n' "[DEBUG] ~/.oh-my-zsh/custom should symlink to /mnt/agent-data/shell/oh-my-zsh-custom" >&2
+    # Verify symlink in container (guarded check for set -e safety)
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.oh-my-zsh/custom" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Failed to read symlink ~/.oh-my-zsh/custom" >&2
         return 1
-    }
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/oh-my-zsh-custom" ]]; then
+        printf '%s\n' "[DEBUG] ~/.oh-my-zsh/custom symlink target='$actual_target', expected '/mnt/agent-data/shell/oh-my-zsh-custom'" >&2
+        return 1
+    fi
 
     # Verify content markers
     local theme_content
@@ -533,6 +559,104 @@ test_ohmyzsh_custom_synced_assertions() {
     fi
 
     return 0
+}
+
+# ==============================================================================
+# Test 10: .oh-my-zsh/custom R flag removes pre-existing content
+# ==============================================================================
+# This test verifies the R flag behavior by pre-seeding a sentinel file in the
+# volume before import, then asserting it's removed after import.
+
+run_ohmyzsh_rflag_test() {
+    local test_name="ohmyzsh-rflag"
+    local import_output import_exit=0
+
+    # Create fresh volume for this test
+    SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
+    SYNC_TEST_DATA_VOLUME=$(create_test_volume "shell-data-${SYNC_TEST_COUNTER}")
+
+    # Create container
+    create_test_container "$test_name" \
+        --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
+        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+
+    # Start container to seed sentinel file
+    start_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+    SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Create sentinel file in the volume BEFORE import
+    # This simulates pre-existing content that should be removed by R flag
+    exec_in_container "$SYNC_TEST_CONTAINER" mkdir -p "/mnt/agent-data/shell/oh-my-zsh-custom" || {
+        sync_test_fail "$test_name: failed to create sentinel directory"
+        stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        return
+    }
+    exec_in_container "$SYNC_TEST_CONTAINER" sh -c 'echo "SENTINEL_SHOULD_BE_REMOVED" > /mnt/agent-data/shell/oh-my-zsh-custom/sentinel.txt' || {
+        sync_test_fail "$test_name: failed to create sentinel file"
+        stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        return
+    }
+
+    # Verify sentinel exists
+    if ! assert_file_exists_in_volume "shell/oh-my-zsh-custom/sentinel.txt"; then
+        sync_test_fail "$test_name: sentinel file not created"
+        stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        return
+    fi
+
+    # Stop container before import
+    stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Set up fixture
+    setup_ohmyzsh_custom_fixture
+
+    # Run import - this should remove the sentinel via R flag
+    import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+    if [[ $import_exit -ne 0 ]]; then
+        sync_test_fail "$test_name: import failed (exit=$import_exit)"
+        printf '%s\n' "$import_output" | head -20 >&2
+        find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        return
+    fi
+
+    # Restart container for assertions
+    start_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Assert: sentinel file should be GONE (removed by R flag)
+    if assert_path_exists_in_volume "shell/oh-my-zsh-custom/sentinel.txt" 2>/dev/null; then
+        sync_test_fail "$test_name: sentinel.txt should be removed by R flag"
+        stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        return
+    fi
+
+    # Assert: new content should exist
+    if ! assert_file_exists_in_volume "shell/oh-my-zsh-custom/themes/custom.zsh-theme"; then
+        sync_test_fail "$test_name: new content not synced after R flag removal"
+        stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        return
+    fi
+
+    sync_test_pass "$test_name"
+
+    # Cleanup
+    stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+    "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+    find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 }
 
 # ==============================================================================
@@ -568,6 +692,9 @@ main() {
 
     # Test 9: .oh-my-zsh/custom synced with R flag
     run_shell_sync_test "ohmyzsh-custom" setup_ohmyzsh_custom_fixture test_ohmyzsh_custom_synced_assertions
+
+    # Test 10: .oh-my-zsh/custom R flag removes pre-existing content
+    run_ohmyzsh_rflag_test
 
     sync_test_section "Summary"
     if [[ $SYNC_TEST_FAILED -eq 0 ]]; then
