@@ -108,8 +108,8 @@ assert_equal "$expected" "$result" "custom template path"
 # Test: _cai_validate_template_name accepts valid names
 # ==============================================================================
 
-test_start "_cai_validate_template_name accepts valid names"
-valid_names=("default" "my-template" "template_v1" "Template.1" "a1b2c3")
+test_start "_cai_validate_template_name accepts valid names (lowercase only)"
+valid_names=("default" "my-template" "template_v1" "template.1" "a1b2c3")
 all_passed=true
 for name in "${valid_names[@]}"; do
     if ! _cai_validate_template_name "$name"; then
@@ -145,7 +145,7 @@ fi
 # ==============================================================================
 
 test_start "_cai_validate_template_name rejects invalid patterns"
-invalid_patterns=("" "_invalid" "-invalid" ".invalid" "in valid" "name@123")
+invalid_patterns=("" "_invalid" "-invalid" ".invalid" "in valid" "name@123" "Template" "UPPER" "mixedCase")
 all_rejected=true
 for name in "${invalid_patterns[@]}"; do
     if _cai_validate_template_name "$name" 2>/dev/null; then

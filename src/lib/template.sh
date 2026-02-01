@@ -70,9 +70,9 @@ _CAI_TEMPLATE_DIR="${_CAI_CONFIG_DIR:-$HOME/.config/containai}/templates"
 # Template Name Validation
 # ==============================================================================
 
-# Validate template name to prevent path traversal
-# Pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
-# Rejects: empty, slashes, .., or names not matching safe pattern
+# Validate template name to prevent path traversal and Docker build failures
+# Pattern: ^[a-z0-9][a-z0-9_.-]*$ (lowercase only - Docker repos must be lowercase)
+# Rejects: empty, slashes, .., uppercase, or names not matching safe pattern
 # Returns: 0=valid, 1=invalid
 _cai_validate_template_name() {
     local name="${1:-}"
@@ -87,8 +87,10 @@ _cai_validate_template_name() {
         return 1
     fi
 
-    # Check pattern: must start with alphanumeric, followed by alphanumeric, underscore, dot, or dash
-    if [[ ! "$name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
+    # Check pattern: must start with lowercase alphanumeric, followed by lowercase alphanumeric, underscore, dot, or dash
+    # Lowercase only because template names are used in Docker image repo names (containai-template-{name}:local)
+    # and Docker repository names must be lowercase
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]; then
         return 1
     fi
 
