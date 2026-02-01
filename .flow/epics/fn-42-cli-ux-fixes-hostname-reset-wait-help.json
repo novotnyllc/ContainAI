@@ -6,13 +6,15 @@
   "default_impl": null,
   "default_review": null,
   "default_sync": null,
-  "depends_on_epics": ["fn-33-lp4"],
+  "depends_on_epics": [
+    "fn-33-lp4"
+  ],
   "id": "fn-42-cli-ux-fixes-hostname-reset-wait-help",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-01T12:15:25.790368Z",
   "spec_path": ".flow/specs/fn-42-cli-ux-fixes-hostname-reset-wait-help.md",
   "status": "open",
   "title": "CLI UX Fixes: Hostname, Reset Wait, Help Defaults",
-  "updated_at": "2026-01-31T23:02:48.524634Z"
+  "updated_at": "2026-02-01T12:15:25.790386Z"
 }

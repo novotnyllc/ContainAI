@@ -6,13 +6,15 @@
   "default_impl": null,
   "default_review": null,
   "default_sync": null,
-  "depends_on_epics": ["fn-39-ua0"],
+  "depends_on_epics": [
+    "fn-39-ua0"
+  ],
   "id": "fn-43-container-network-security-private",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-01T12:15:25.878830Z",
   "spec_path": ".flow/specs/fn-43-container-network-security-private.md",
   "status": "open",
   "title": "Container Network Security: Private Range Blocking & Metadata Protection",
-  "updated_at": "2026-01-31T23:56:10.464246Z"
+  "updated_at": "2026-02-01T12:15:25.878844Z"
 }
