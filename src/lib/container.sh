@@ -335,6 +335,55 @@ _cai_sanitize_hostname() {
     printf '%s' "$sanitized"
 }
 
+# Detect host timezone for container synchronization
+# Tries multiple methods in order of reliability for cross-platform support:
+# 1. /etc/timezone file (Debian/Ubuntu)
+# 2. /etc/localtime symlink (most Linux distros, macOS)
+# 3. timedatectl (systemd)
+# 4. Fallback to UTC
+# Returns: IANA timezone string via stdout (e.g., "America/New_York", "UTC")
+_cai_detect_host_timezone() {
+    local tz=""
+
+    # Method 1: /etc/timezone file (Debian/Ubuntu style)
+    if [[ -f /etc/timezone ]]; then
+        tz=$(tr -d '[:space:]' < /etc/timezone 2>/dev/null)
+        if [[ -n "$tz" ]]; then
+            printf '%s' "$tz"
+            return 0
+        fi
+    fi
+
+    # Method 2: /etc/localtime symlink (most Linux, macOS)
+    # Linux: /etc/localtime -> /usr/share/zoneinfo/America/New_York
+    # macOS: /etc/localtime -> /var/db/timezone/zoneinfo/America/New_York
+    if [[ -L /etc/localtime ]]; then
+        local link_target
+        link_target=$(readlink /etc/localtime 2>/dev/null) || link_target=""
+        if [[ -n "$link_target" ]]; then
+            # Extract timezone from path (handles both Linux and macOS paths)
+            # Pattern: .../zoneinfo/Region/City or .../zoneinfo/UTC
+            tz=$(printf '%s' "$link_target" | sed -n 's|.*/zoneinfo/||p')
+            if [[ -n "$tz" ]]; then
+                printf '%s' "$tz"
+                return 0
+            fi
+        fi
+    fi
+
+    # Method 3: timedatectl (systemd-based systems)
+    if command -v timedatectl >/dev/null 2>&1; then
+        tz=$(timedatectl show --property=Timezone --value 2>/dev/null) || tz=""
+        if [[ -n "$tz" ]]; then
+            printf '%s' "$tz"
+            return 0
+        fi
+    fi
+
+    # Fallback: UTC (safe default)
+    printf 'UTC'
+}
+
 # Generate container name from workspace path
 # Format: {repo}-{branch_leaf}, max 24 chars (no prefix)
 # Branch leaf = last segment of '/'-separated branch (e.g., feature/oauth → oauth)
@@ -2530,6 +2579,10 @@ _containai_start_container() {
             # Environment variables - only stable non-secret vars at container creation
             # User-provided --env values are passed via SSH as VAR=value command prefix
             args+=(-e "CAI_HOST_WORKSPACE=$workspace_resolved")
+            # Sync timezone from host to container (overrides TZ=UTC default in Dockerfile)
+            local host_tz
+            host_tz=$(_cai_detect_host_timezone)
+            args+=(-e "TZ=$host_tz")
 
             # Working directory
             args+=(-w /home/agent/workspace)

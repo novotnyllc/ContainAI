@@ -76,9 +76,8 @@ Follow pattern from `.gitignore_global`:
 - [ ] Signing config stripped: `user.signingkey`, `commit.gpgsign`, `tag.gpgsign`, `gpg.program`, `gpg.format`
 - [ ] Manifest consistency check passes
 ## Done summary
-TBD
-
+Changed .gitconfig from copied file to symlink pointing to data volume (git/gitconfig), enabling git config changes inside container to persist across restarts. Added GPG signing config stripping (user.signingkey, commit.gpgsign, tag.gpgsign, gpg.program, gpg.format) to the git-filter in addition to credential.helper.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5545b48, a46a0cb, d1eea3c, dd77043
+- Tests: shellcheck -x src/lib/import.sh src/container/*.sh, scripts/check-manifest-consistency.sh
 - PRs:

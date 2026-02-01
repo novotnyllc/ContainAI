@@ -70,6 +70,15 @@ RUN printf '%s\n' \
     'export PATH="/home/agent/.local/bin:${PATH}"' \
     > /home/agent/.bashrc.d/01-oai-env-vars.sh
 
+# Configure bash history to persist in data volume (survives --fresh)
+# History file is per-workspace since each workspace has its own data volume
+RUN printf '%s\n' \
+    '# Persist bash history to data volume' \
+    'export HISTFILE=/mnt/agent-data/shell/history' \
+    'export HISTSIZE=10000' \
+    'export HISTFILESIZE=20000' \
+    > /home/agent/.bashrc.d/02-shell-history.sh
+
 ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Install Gemini CLI, Codex, and agent-browser via bun

@@ -316,3 +316,6 @@ Stale flag cleanup should fail (return 1) not succeed - returning success can ma
 
 ## 2026-02-01 manual [pitfall]
 Git config section names and keys are case-insensitive; use tolower() in awk filters to match [User], [CREDENTIAL], SigningKey, etc.
+
+## 2026-02-01 manual [pitfall]
+When changing config file paths on volumes, add a migration step to move content from old path to new path on startup to prevent data loss during upgrades
