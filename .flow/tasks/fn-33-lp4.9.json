@@ -8,7 +8,7 @@
   "id": "fn-33-lp4.9",
   "priority": 9,
   "spec_path": ".flow/tasks/fn-33-lp4.9.md",
-  "status": "todo",
+  "status": "done",
   "title": "Add --template parameter",
   "updated_at": "2026-01-28T10:18:47.529614Z"
 }
