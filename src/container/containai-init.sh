@@ -183,27 +183,33 @@ _load_env_file() {
     done <"$env_file"
 }
 
-# Copy .gitconfig from data volume to $HOME if it exists
+# Setup git config from data volume
+# New containers: ~/.gitconfig is symlinked to /mnt/agent-data/git/gitconfig (no copy needed)
+# Legacy containers: copy from /mnt/agent-data/.gitconfig to ~/.gitconfig
 _setup_git_config() {
-    local src="${DATA_DIR}/.gitconfig"
     local dst="${HOME}/.gitconfig"
 
-    if [[ -L "$src" ]]; then
-        log "[WARN] Source .gitconfig is symlink - skipping"
+    # New containers have ~/.gitconfig as symlink - nothing to do
+    if [[ -L "$dst" ]]; then
         return 0
     fi
-    if [[ ! -f "$src" ]]; then
+
+    # Legacy container: find source file (old path, then new path)
+    local src=""
+    if [[ -f "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
+        src="${DATA_DIR}/.gitconfig"
+    elif [[ -f "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
+        src="${DATA_DIR}/git/gitconfig"
+    fi
+
+    if [[ -z "$src" ]]; then
         return 0
     fi
     if [[ ! -r "$src" ]]; then
-        log "[WARN] Source .gitconfig unreadable - skipping"
+        log "[WARN] Source git config unreadable - skipping"
         return 0
     fi
 
-    if [[ -L "$dst" ]]; then
-        log "[WARN] Destination $dst is symlink - refusing to overwrite"
-        return 0
-    fi
     if [[ -e "$dst" && ! -f "$dst" ]]; then
         log "[WARN] Destination $dst exists but is not a regular file - skipping"
         return 0
@@ -214,7 +220,7 @@ _setup_git_config() {
         log "[INFO] Git config loaded from data volume"
     else
         rm -f "$tmp_dst" 2>/dev/null || true
-        log "[WARN] Failed to copy .gitconfig to $HOME"
+        log "[WARN] Failed to copy git config to $HOME"
     fi
 }
 

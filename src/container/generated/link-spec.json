@@ -15,6 +15,7 @@
     {"link": "/home/agent/.claude/CLAUDE.md", "target": "/mnt/agent-data/claude/CLAUDE.md", "remove_first": 0},
     {"link": "/home/agent/.config/gh/hosts.yml", "target": "/mnt/agent-data/config/gh/hosts.yml", "remove_first": 0},
     {"link": "/home/agent/.config/gh/config.yml", "target": "/mnt/agent-data/config/gh/config.yml", "remove_first": 0},
+    {"link": "/home/agent/.gitconfig", "target": "/mnt/agent-data/git/gitconfig", "remove_first": 0},
     {"link": "/home/agent/.gitignore_global", "target": "/mnt/agent-data/git/gitignore_global", "remove_first": 0},
     {"link": "/home/agent/.ssh/config", "target": "/mnt/agent-data/ssh/config", "remove_first": 0},
     {"link": "/home/agent/.ssh/known_hosts", "target": "/mnt/agent-data/ssh/known_hosts", "remove_first": 0},

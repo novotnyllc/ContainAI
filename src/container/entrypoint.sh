@@ -276,31 +276,34 @@ ensure_volume_structure
 # Load .env after ownership fix completes (volume readable now)
 _load_env_file
 
-# Copy .gitconfig from data volume to $HOME if it exists
-# This enables git commits inside the container with the user's identity
-# and sets safe.directory for the workspace mount
+# Setup git config from data volume
+# New containers: ~/.gitconfig is symlinked to /mnt/agent-data/git/gitconfig (no copy needed)
+# Legacy containers: copy from /mnt/agent-data/.gitconfig to ~/.gitconfig
 _setup_git_config() {
-    local src="${DATA_DIR}/.gitconfig"
     local dst="${HOME}/.gitconfig"
 
-    # Check source: symlink FIRST (before -f) to properly reject symlinks
-    if [[ -L "$src" ]]; then
-        log "[WARN] Source .gitconfig is symlink - skipping"
+    # New containers have ~/.gitconfig as symlink - nothing to do
+    if [[ -L "$dst" ]]; then
         return 0
     fi
-    if [[ ! -f "$src" ]]; then
+
+    # Legacy container: find source file (old path, then new path)
+    local src=""
+    if [[ -f "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
+        src="${DATA_DIR}/.gitconfig"
+    elif [[ -f "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
+        src="${DATA_DIR}/git/gitconfig"
+    fi
+
+    if [[ -z "$src" ]]; then
         return 0 # Silent - expected if cai import wasn't run with git config
     fi
     if [[ ! -r "$src" ]]; then
-        log "[WARN] Source .gitconfig unreadable - skipping"
+        log "[WARN] Source git config unreadable - skipping"
         return 0
     fi
 
-    # Check destination: refuse if symlink or non-regular file exists
-    if [[ -L "$dst" ]]; then
-        log "[WARN] Destination $dst is symlink - refusing to overwrite"
-        return 0
-    fi
+    # Check destination: refuse if non-regular file exists
     if [[ -e "$dst" && ! -f "$dst" ]]; then
         log "[WARN] Destination $dst exists but is not a regular file - skipping"
         return 0
@@ -312,7 +315,7 @@ _setup_git_config() {
         log "[INFO] Git config loaded from data volume"
     else
         rm -f "$tmp_dst" 2>/dev/null || true
-        log "[WARN] Failed to copy .gitconfig to $HOME"
+        log "[WARN] Failed to copy git config to $HOME"
     fi
 }
 

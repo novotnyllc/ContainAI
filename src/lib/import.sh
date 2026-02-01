@@ -3017,7 +3017,11 @@ _import_ensure_copilot_config() {
 # ==============================================================================
 
 # Import git config from host to data volume
-# Strips credential helper and ensures safe.directory for the mounted workspace
+# Strips credential helper and signing config, ensures safe.directory for workspace
+# Stripped config:
+#   - credential.helper (host credential managers don't work in container)
+#   - user.signingkey, commit.gpgsign, tag.gpgsign, gpg.program, gpg.format
+#     (signing keys don't exist in container)
 # Arguments: $1 = context, $2 = volume
 # Returns: 0 on success (including graceful skip), 1 on failure
 _cai_import_git_config() {
@@ -3054,60 +3058,53 @@ _cai_import_git_config() {
     : > "$tmp_gitconfig"
 
     if [[ -n "$host_gitconfig" ]]; then
-        # Filter gitconfig: remove credential.helper lines (including multi-line)
-        # and empty [credential] sections
+        # Filter gitconfig: remove credential.helper and signing-related config
+        # Also remove empty [credential], [commit], [tag], [user], and [gpg] sections
         # Multi-line values use trailing backslash for continuation
         if ! awk '
-            BEGIN { in_cred=0; cred_header=""; cred_content=""; skip_continuation=0 }
-            # If we are skipping continuation lines from a multi-line helper value
-            skip_continuation {
-                # Check if this line continues (ends with backslash)
-                if (/\\[[:space:]]*$/) { next }
-                # This is the last continuation line - skip it too, then stop
-                skip_continuation = 0
-                next
-            }
-            # Match [credential] or [credential "remote"] section headers
-            /^[[:space:]]*\[credential([[:space:]]+"[^"]+")?\][[:space:]]*$/ {
-                # Flush previous credential section if it had content
-                if (cred_header != "" && cred_content != "") {
-                    printf "%s", cred_header cred_content
+            BEGIN { in_section = 0; section_name = ""; section_header = ""; section_content = ""; skip_continuation = 0 }
+
+            # Skipping continuation lines from multi-line value
+            skip_continuation { if (/\\[[:space:]]*$/) { next } skip_continuation = 0; next }
+
+            # Section headers like [section] or [section "subsection"]
+            /^[[:space:]]*\[[a-zA-Z]+/ {
+                # Flush previous section if it had content
+                if (section_header != "" && section_content != "") { printf "%s", section_header section_content }
+                # Extract section name (POSIX compatible)
+                section_name = $0; gsub(/^[[:space:]]*\[/, "", section_name); gsub(/[[:space:]].*/, "", section_name); gsub(/\].*/, "", section_name)
+                # Buffer sections that may have keys to strip
+                if (section_name == "credential" || section_name == "commit" || section_name == "tag" || section_name == "gpg" || section_name == "user") {
+                    section_header = $0 "\n"; section_content = ""; in_section = 1
+                } else {
+                    section_header = ""; section_content = ""; in_section = 0; print
                 }
-                cred_header = $0 "\n"
-                cred_content = ""
-                in_cred = 1
                 next
             }
-            # New section starts - flush credential section if not empty
-            /^[[:space:]]*\[/ {
-                if (cred_header != "" && cred_content != "") {
-                    printf "%s", cred_header cred_content
-                }
-                cred_header = ""
-                cred_content = ""
-                in_cred = 0
+
+            # Top-level dotted keys to skip
+            /^[[:space:]]*credential\.helper[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            /^[[:space:]]*user\.signingkey[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            /^[[:space:]]*commit\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            /^[[:space:]]*tag\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            /^[[:space:]]*gpg\.program[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            /^[[:space:]]*gpg\.format[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+
+            # Inside buffered section: check for keys to skip
+            in_section {
+                if (section_name == "credential" && /^[[:space:]]*helper[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "user" && /^[[:space:]]*signingkey[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "commit" && /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "tag" && /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "gpg" && /^[[:space:]]*program[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "gpg" && /^[[:space:]]*format[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                section_content = section_content $0 "\n"; next
             }
-            # Skip top-level credential.helper = ... lines (including multi-line)
-            /^[[:space:]]*credential\.helper[[:space:]]*=/ {
-                # Check if multi-line (ends with backslash)
-                if (/\\[[:space:]]*$/) { skip_continuation = 1 }
-                next
-            }
-            # Inside [credential] section: skip helper = ... lines, buffer rest
-            in_cred && /^[[:space:]]*helper[[:space:]]*=/ {
-                # Check if multi-line (ends with backslash)
-                if (/\\[[:space:]]*$/) { skip_continuation = 1 }
-                next
-            }
-            in_cred { cred_content = cred_content $0 "\n"; next }
-            # Normal lines: print immediately
+
+            # Normal lines outside buffered sections
             { print }
-            END {
-                # Flush final credential section if it had content
-                if (cred_header != "" && cred_content != "") {
-                    printf "%s", cred_header cred_content
-                }
-            }
+
+            END { if (section_header != "" && section_content != "") { printf "%s", section_header section_content } }
         ' "$host_gitconfig" >> "$tmp_gitconfig"; then
             rm -f "$tmp_gitconfig"
             _import_error "Failed to sanitize host git config"
@@ -3123,33 +3120,37 @@ _cai_import_git_config() {
         printf '\tdirectory = %s\n' "/home/agent/workspace"
     } >> "$tmp_gitconfig"
 
-    # Copy into volume using a minimal container (no git required)
+    # Copy into volume at git/gitconfig (symlinked to ~/.gitconfig in container)
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)
     if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
         -v "$volume":/target \
         -v "$tmp_gitconfig":/source/.gitconfig:ro \
         alpine sh -c '
+            # Ensure git/ directory exists
+            mkdir -p /target/git
+            chown 1000:1000 /target/git
+
             # Refuse if target exists and is symlink or non-regular file
-            if [ -L /target/.gitconfig ]; then
-                echo "ERROR: /target/.gitconfig is a symlink - refusing to write" >&2
+            if [ -L /target/git/gitconfig ]; then
+                echo "ERROR: /target/git/gitconfig is a symlink - refusing to write" >&2
                 exit 1
             fi
-            if [ -e /target/.gitconfig ] && [ ! -f /target/.gitconfig ]; then
-                echo "ERROR: /target/.gitconfig exists but is not a regular file" >&2
+            if [ -e /target/git/gitconfig ] && [ ! -f /target/git/gitconfig ]; then
+                echo "ERROR: /target/git/gitconfig exists but is not a regular file" >&2
                 exit 1
             fi
 
-            cp /source/.gitconfig /target/.gitconfig
-            chown 1000:1000 /target/.gitconfig
+            cp /source/.gitconfig /target/git/gitconfig
+            chown 1000:1000 /target/git/gitconfig
         '; then
         rm -f "$tmp_gitconfig"
-        _import_error "Failed to write .gitconfig to volume"
+        _import_error "Failed to write git config to volume"
         return 1
     fi
 
     rm -f "$tmp_gitconfig"
 
-    _import_success "Git config imported (safe.directory ensured)"
+    _import_success "Git config imported (credential.helper and signing config stripped, safe.directory ensured)"
     return 0
 }
 
@@ -3288,28 +3289,37 @@ HOOK_EOF
 }
 
 # ============================================================
-# Reload git config from .gitconfig
+# Reload git config from data volume
+# New containers: ~/.gitconfig is a symlink to /mnt/agent-data/git/gitconfig
+#   - No copy needed, changes are immediately visible through symlink
+# Legacy containers: ~/.gitconfig is a regular file copied from volume
+#   - Copy from /mnt/agent-data/.gitconfig to ~/.gitconfig (old path)
+#   - Or from /mnt/agent-data/git/gitconfig (new path) if old doesn't exist
 # ============================================================
 reload_git() {
-    local src="${DATA_DIR}/.gitconfig"
     local dst="${HOME}/.gitconfig"
 
-    if [[ -L "$src" ]]; then
-        log "[WARN] Source .gitconfig is symlink - skipping"
+    # If destination is already a symlink, nothing to do (new container)
+    if [[ -L "$dst" ]]; then
+        log "[INFO] Git config is symlinked - no reload needed"
+        GIT_UPDATED=1
         return 0
     fi
-    if [[ ! -f "$src" ]]; then
-        log "[INFO] No .gitconfig file found in data volume"
+
+    # Legacy container: find source file (try old path first, then new path)
+    local src=""
+    if [[ -f "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
+        src="${DATA_DIR}/.gitconfig"
+    elif [[ -f "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
+        src="${DATA_DIR}/git/gitconfig"
+    fi
+
+    if [[ -z "$src" ]]; then
+        log "[INFO] No git config file found in data volume"
         return 0
     fi
     if [[ ! -r "$src" ]]; then
-        log "[WARN] Source .gitconfig unreadable - skipping"
-        return 0
-    fi
-
-    # Skip if destination is symlink (security)
-    if [[ -L "$dst" ]]; then
-        log "[WARN] Destination .gitconfig is symlink - refusing to overwrite"
+        log "[WARN] Source git config unreadable - skipping"
         return 0
     fi
 
@@ -3326,7 +3336,7 @@ reload_git() {
         log "[OK] Git config reloaded from data volume"
     else
         rm -f "$tmp_dst" 2>/dev/null || true
-        log "[WARN] Failed to copy .gitconfig to \$HOME"
+        log "[WARN] Failed to copy git config to \$HOME"
     fi
 }
 

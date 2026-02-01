@@ -43,6 +43,7 @@ ensure_file "${DATA_DIR}/claude/settings.json" true
 ensure_file "${DATA_DIR}/claude/settings.local.json"
 ensure_file "${DATA_DIR}/claude/CLAUDE.md"
 ensure_file "${DATA_DIR}/config/gh/config.yml"
+ensure_file "${DATA_DIR}/git/gitconfig"
 ensure_file "${DATA_DIR}/git/gitignore_global"
 ensure_file "${DATA_DIR}/ssh/config"
 ensure_file "${DATA_DIR}/ssh/known_hosts"

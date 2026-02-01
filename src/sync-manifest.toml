@@ -121,17 +121,17 @@ flags = "f"  # file (user preferences, not secret)
 
 # =============================================================================
 # GIT
-# .gitconfig: filtered to strip credential.helper (g flag)
+# .gitconfig: filtered to strip credential.helper and signing config (g flag)
+#   - Stored in git/gitconfig, symlinked to ~/.gitconfig
+#   - Changes inside container persist across restarts
 # .gitignore_global: synced as-is (no filtering)
-# Note: git config is copied at container startup, not symlinked
 # =============================================================================
 
 [[entries]]
 source = ".gitconfig"
-target = ".gitconfig"
-container_link = ""  # Copied at container startup, not symlinked (not via manifest)
-flags = "fg"  # file, git-filter (strip credential.helper)
-# Note: Imported via _cai_import_git_config() post-sync, not rsync
+target = "git/gitconfig"
+container_link = ".gitconfig"
+flags = "fg"  # file, git-filter (strip credential.helper and signing config)
 
 [[entries]]
 source = ".gitignore_global"
