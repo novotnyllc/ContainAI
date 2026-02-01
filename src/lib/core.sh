@@ -225,4 +225,70 @@ _cai_prompt_confirm() {
     fi
 }
 
+# ==============================================================================
+# Timestamp and age parsing helpers (for gc command)
+# ==============================================================================
+
+# Parse age duration string to seconds
+# Arguments: $1 = duration string (e.g., "30d", "7d", "24h")
+# Outputs: seconds to stdout
+# Returns: 0 on success, 1 on invalid format
+_cai_parse_age_to_seconds() {
+    local age_str="$1"
+    local value unit
+
+    # Extract numeric value and unit
+    if [[ "$age_str" =~ ^([0-9]+)([dDhH])$ ]]; then
+        value="${BASH_REMATCH[1]}"
+        unit="${BASH_REMATCH[2]}"
+        unit="${unit,,}"  # lowercase
+
+        case "$unit" in
+            d) printf '%d' "$((value * 86400))" ;;
+            h) printf '%d' "$((value * 3600))" ;;
+        esac
+        return 0
+    fi
+
+    return 1
+}
+
+# Parse RFC3339 timestamp to epoch seconds using Python for cross-platform compatibility
+# Arguments: $1 = timestamp string (e.g., "2024-01-15T10:30:00.123456789Z")
+# Outputs: epoch seconds to stdout
+# Returns: 0 on success, 1 on parse error
+_cai_parse_timestamp_to_epoch() {
+    local ts="$1"
+
+    python3 -c "
+from datetime import datetime, timezone
+import sys
+
+ts = sys.argv[1]
+try:
+    # Handle Docker's timestamp format with nanoseconds
+    # Truncate nanoseconds to microseconds (Python max precision)
+    if '.' in ts:
+        base, frac = ts.rsplit('.', 1)
+        # Strip trailing Z and truncate to 6 digits
+        frac = frac.rstrip('Z')[:6].ljust(6, '0')
+        ts = base + '.' + frac + 'Z'
+
+    # Try parsing with fractional seconds
+    for fmt in ['%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ']:
+        try:
+            dt = datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
+            print(int(dt.timestamp()))
+            sys.exit(0)
+        except ValueError:
+            continue
+
+    # Fallback: fromisoformat (handles various formats)
+    dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+    print(int(dt.timestamp()))
+except Exception as e:
+    sys.exit(1)
+" "$ts" 2>/dev/null
+}
+
 return 0

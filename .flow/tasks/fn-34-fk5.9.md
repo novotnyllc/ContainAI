@@ -36,13 +36,58 @@ Pattern match: `grep -E '^(containai:|ghcr\.io/containai/)'`
 - `src/lib/core.sh` or inline: Add `_cai_parse_timestamp` helper
 
 ## Acceptance
-- [ ] Lists candidates with `--dry-run`
-- [ ] Interactive confirmation by default
-- [ ] `--force` skips confirmation
-- [ ] `--age` filters by timestamp (default 30d)
-- [ ] Includes both `exited` and `created` status containers
-- [ ] Uses FinishedAt for stopped, Created for never-ran
-- [ ] Cross-platform timestamp parsing via Python
-- [ ] `--images` prunes only `containai:*` and `ghcr.io/containai/*` images
-- [ ] Only removes images not in use by any container
-- [ ] Respects all protection rules
+- [x] Lists candidates with `--dry-run`
+- [x] Interactive confirmation by default
+- [x] `--force` skips confirmation
+- [x] `--age` filters by timestamp (default 30d)
+- [x] Includes both `exited` and `created` status containers
+- [x] Uses FinishedAt for stopped, Created for never-ran
+- [x] Cross-platform timestamp parsing via Python
+- [x] `--images` prunes only `containai:*` and `ghcr.io/containai/*` images
+- [x] Only removes images not in use by any container
+- [x] Respects all protection rules
+
+## Done summary
+# fn-34-fk5.9: Implement cai gc command
+
+## Summary
+Implemented garbage collection command for ContainAI with full functionality as specified.
+
+## Changes
+
+### src/lib/core.sh
+- Added `_cai_parse_age_to_seconds()` helper for parsing age duration strings (e.g., "30d", "7d", "24h")
+- Added `_cai_parse_timestamp_to_epoch()` helper for cross-platform RFC3339 timestamp parsing using Python
+
+### src/containai.sh
+- Added `_containai_gc_help()` help function with complete documentation
+- Added `_containai_gc_cmd()` main command handler implementing:
+  - Argument parsing: `--dry-run`, `--force`, `--age <duration>`, `--images`, `--verbose`, `--help`
+  - Container pruning with protection rules:
+    1. Only containers with `containai.managed=true` label
+    2. Never running containers
+    3. Never containers with `containai.keep=true` label
+  - Staleness calculation using:
+    - `.State.FinishedAt` for exited containers
+    - `.Created` for never-ran (created) containers
+  - Image pruning for `containai:*` and `ghcr.io/containai/*` prefixes
+  - Interactive confirmation (unless `--force`)
+  - SSH config cleanup after container removal
+- Added routing in main `containai()` function for `gc` subcommand
+- Updated main help to include `gc` command
+
+## Acceptance Criteria Met
+- [x] Lists candidates with `--dry-run`
+- [x] Interactive confirmation by default
+- [x] `--force` skips confirmation
+- [x] `--age` filters by timestamp (default 30d)
+- [x] Includes both `exited` and `created` status containers
+- [x] Uses FinishedAt for stopped, Created for never-ran
+- [x] Cross-platform timestamp parsing via Python
+- [x] `--images` prunes only `containai:*` and `ghcr.io/containai/*` images
+- [x] Only removes images not in use by any container
+- [x] Respects all protection rules
+## Evidence
+- Commits:
+- Tests:
+- PRs:

@@ -199,6 +199,7 @@ Subcommands:
   sync          (In-container) Move local configs to data volume with symlinks
   stop          Stop ContainAI containers
   status        Show container status and resource usage
+  gc            Garbage collection for stale containers and images
   ssh           Manage SSH configuration (cleanup stale configs)
   links         Verify and repair container symlinks
   config        Manage settings (list/get/set/unset with workspace scope)
@@ -440,6 +441,47 @@ Examples:
   cai status --container my-proj  Show status for specific container
   cai status --json               Output in JSON format
   cai status --workspace ~/proj   Show status for specific workspace
+EOF
+}
+
+_containai_gc_help() {
+    cat <<'EOF'
+ContainAI GC - Garbage collection for stale containers and images
+
+Usage: cai gc [options]
+
+Options:
+  --dry-run           Preview what would be removed without removing
+  --force             Skip confirmation prompt
+  --age <duration>    Minimum age for pruning (default: 30d)
+                      Format: Nd (days), Nh (hours), e.g., 7d, 24h
+  --images            Also prune unused ContainAI images
+  --verbose           Enable verbose output
+  -h, --help          Show this help message
+
+Staleness Metric:
+  For stopped containers (status=exited): uses State.FinishedAt
+  For never-ran containers (status=created): uses Created timestamp
+
+Protection Rules:
+  - Never prunes running containers
+  - Never prunes containers with containai.keep=true label
+  - Only prunes containers with containai.managed=true label
+  - Operates on current Docker context only
+
+Image Pruning (--images):
+  Prunes unused images matching these prefixes:
+  - containai:* (local builds)
+  - ghcr.io/containai/* (official registry)
+  Only removes images NOT in use by any container.
+
+Examples:
+  cai gc                     Interactive: list candidates and confirm
+  cai gc --dry-run           Preview without removing
+  cai gc --force             Skip confirmation
+  cai gc --age 7d            Prune containers older than 7 days
+  cai gc --images            Also prune unused images
+  cai gc --force --images    Remove stale containers and images
 EOF
 }
 
@@ -2098,6 +2140,306 @@ print(json.dumps(clean_none(data), indent=2))
                 printf '    CPU: %s\n' "$cpu_pct"
             fi
         fi
+    fi
+
+    return 0
+}
+
+# GC subcommand - garbage collection for stale containers and images
+_containai_gc_cmd() {
+    local dry_run=false
+    local force_flag=false
+    local prune_images=false
+    local age_str="30d"
+    local arg
+
+    # Pass 1: Check for help early
+    for arg in "$@"; do
+        case "$arg" in
+            --help | -h)
+                _containai_gc_help
+                return 0
+                ;;
+        esac
+    done
+
+    # Pass 2: Parse arguments
+    local expect_age_value=false
+    for arg in "$@"; do
+        if [[ "$expect_age_value" == "true" ]]; then
+            if [[ -z "$arg" ]] || [[ "$arg" == -* ]]; then
+                echo "[ERROR] --age requires a value (e.g., 30d, 7d, 24h)" >&2
+                return 1
+            fi
+            age_str="$arg"
+            expect_age_value=false
+            continue
+        fi
+
+        case "$arg" in
+            --dry-run)
+                dry_run=true
+                ;;
+            --force)
+                force_flag=true
+                ;;
+            --images)
+                prune_images=true
+                ;;
+            --age)
+                expect_age_value=true
+                ;;
+            --age=*)
+                age_str="${arg#--age=}"
+                if [[ -z "$age_str" ]]; then
+                    echo "[ERROR] --age requires a value" >&2
+                    return 1
+                fi
+                ;;
+            --verbose)
+                _cai_set_verbose
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $arg" >&2
+                echo "Use 'cai gc --help' for usage" >&2
+                return 1
+                ;;
+            *)
+                echo "[ERROR] Unexpected argument: $arg" >&2
+                echo "Use 'cai gc --help' for usage" >&2
+                return 1
+                ;;
+        esac
+    done
+
+    # Handle trailing --age without value
+    if [[ "$expect_age_value" == "true" ]]; then
+        echo "[ERROR] --age requires a value (e.g., 30d, 7d, 24h)" >&2
+        return 1
+    fi
+
+    # Parse age to seconds
+    local age_seconds
+    if ! age_seconds=$(_cai_parse_age_to_seconds "$age_str"); then
+        echo "[ERROR] Invalid age format: $age_str (expected Nd or Nh, e.g., 30d, 7d, 24h)" >&2
+        return 1
+    fi
+
+    # Check docker availability
+    if ! _containai_check_docker; then
+        return 1
+    fi
+
+    # Get current timestamp
+    local now_epoch
+    now_epoch=$(date +%s)
+
+    # Find GC candidate containers
+    # Protection rules:
+    # 1. Only containers with containai.managed=true label
+    # 2. Never running containers
+    # 3. Never containers with containai.keep=true label
+    local -a gc_candidates=()
+    local -a gc_ages=()
+    local -a gc_statuses=()
+
+    # Get all managed containers (exited or created status only)
+    local container_list
+    container_list=$(docker ps -a --filter "label=containai.managed=true" \
+        --format '{{.Names}}|{{.Status}}' 2>/dev/null) || container_list=""
+
+    if [[ -n "$container_list" ]]; then
+        while IFS='|' read -r name status_line; do
+            [[ -z "$name" ]] && continue
+
+            # Parse status (e.g., "Exited (0) 3 days ago" or "Created")
+            local container_status=""
+            if [[ "$status_line" =~ ^Exited ]]; then
+                container_status="exited"
+            elif [[ "$status_line" =~ ^Created ]]; then
+                container_status="created"
+            else
+                # Running or other status - skip
+                continue
+            fi
+
+            # Check protection: containai.keep=true
+            local keep_label
+            keep_label=$(docker inspect --format '{{index .Config.Labels "containai.keep"}}' -- "$name" 2>/dev/null) || keep_label=""
+            if [[ "$keep_label" == "true" ]]; then
+                _cai_info "Skipping protected container: $name (containai.keep=true)"
+                continue
+            fi
+
+            # Get timestamp based on status
+            local timestamp=""
+            if [[ "$container_status" == "exited" ]]; then
+                # Use FinishedAt for stopped containers
+                timestamp=$(docker inspect --format '{{.State.FinishedAt}}' -- "$name" 2>/dev/null) || timestamp=""
+            else
+                # Use Created for never-ran containers
+                timestamp=$(docker inspect --format '{{.Created}}' -- "$name" 2>/dev/null) || timestamp=""
+            fi
+
+            # Skip if no valid timestamp
+            if [[ -z "$timestamp" ]] || [[ "$timestamp" == "0001-01-01T00:00:00Z" ]]; then
+                _cai_info "Skipping container with invalid timestamp: $name"
+                continue
+            fi
+
+            # Parse timestamp to epoch
+            local ts_epoch
+            if ! ts_epoch=$(_cai_parse_timestamp_to_epoch "$timestamp"); then
+                _cai_info "Skipping container (timestamp parse error): $name"
+                continue
+            fi
+
+            # Calculate age
+            local age_diff=$((now_epoch - ts_epoch))
+
+            # Check if container is old enough
+            if [[ $age_diff -ge $age_seconds ]]; then
+                gc_candidates+=("$name")
+                gc_ages+=("$age_diff")
+                gc_statuses+=("$container_status")
+            fi
+        done <<< "$container_list"
+    fi
+
+    # Find GC candidate images (if --images flag)
+    local -a image_candidates=()
+    if [[ "$prune_images" == "true" ]]; then
+        # Get all ContainAI images
+        local image_list
+        image_list=$(docker images --format '{{.Repository}}:{{.Tag}}|{{.ID}}' 2>/dev/null | \
+            grep -E '^(containai:|ghcr\.io/containai/)') || image_list=""
+
+        if [[ -n "$image_list" ]]; then
+            # Get list of images in use by any container (running or stopped)
+            local used_images
+            used_images=$(docker ps -a --format '{{.Image}}' 2>/dev/null | sort -u) || used_images=""
+
+            while IFS='|' read -r image_name image_id; do
+                [[ -z "$image_name" ]] && continue
+                [[ "$image_name" == *"<none>"* ]] && continue
+
+                # Check if image is in use
+                local in_use=false
+                while IFS= read -r used_img; do
+                    if [[ "$used_img" == "$image_name" ]] || [[ "$used_img" == "$image_id" ]]; then
+                        in_use=true
+                        break
+                    fi
+                done <<< "$used_images"
+
+                if [[ "$in_use" == "false" ]]; then
+                    image_candidates+=("$image_name")
+                fi
+            done <<< "$image_list"
+        fi
+    fi
+
+    # Display results
+    if [[ ${#gc_candidates[@]} -eq 0 ]] && [[ ${#image_candidates[@]} -eq 0 ]]; then
+        echo "No stale resources found."
+        return 0
+    fi
+
+    # Helper to format age
+    _format_age() {
+        local secs="$1"
+        local days=$((secs / 86400))
+        local hours=$(( (secs % 86400) / 3600 ))
+        if [[ $days -gt 0 ]]; then
+            printf '%dd %dh' "$days" "$hours"
+        else
+            printf '%dh' "$hours"
+        fi
+    }
+
+    echo "Stale ContainAI resources (age >= $age_str):"
+    echo ""
+
+    if [[ ${#gc_candidates[@]} -gt 0 ]]; then
+        echo "Containers:"
+        local i
+        for i in "${!gc_candidates[@]}"; do
+            local age_formatted
+            age_formatted=$(_format_age "${gc_ages[$i]}")
+            printf "  %s (%s, age: %s)\n" "${gc_candidates[$i]}" "${gc_statuses[$i]}" "$age_formatted"
+        done
+        echo ""
+    fi
+
+    if [[ ${#image_candidates[@]} -gt 0 ]]; then
+        echo "Unused images:"
+        for img in "${image_candidates[@]}"; do
+            printf "  %s\n" "$img"
+        done
+        echo ""
+    fi
+
+    # Dry run mode - just show what would be removed
+    if [[ "$dry_run" == "true" ]]; then
+        echo "[DRY-RUN] Would remove ${#gc_candidates[@]} container(s) and ${#image_candidates[@]} image(s)"
+        return 0
+    fi
+
+    # Interactive confirmation (unless --force)
+    if [[ "$force_flag" != "true" ]]; then
+        if [[ ! -t 0 ]]; then
+            echo "[ERROR] Non-interactive terminal. Use --force to skip confirmation." >&2
+            return 1
+        fi
+
+        local total=$((${#gc_candidates[@]} + ${#image_candidates[@]}))
+        local confirm
+        if ! read -rp "Remove $total resource(s)? [y/N]: " confirm; then
+            echo "Cancelled."
+            return 0
+        fi
+        if [[ ! "$confirm" =~ ^[Yy] ]]; then
+            echo "Cancelled."
+            return 0
+        fi
+    fi
+
+    # Remove containers
+    local removed_containers=0
+    local failed_containers=0
+    for name in "${gc_candidates[@]}"; do
+        if docker rm -f -- "$name" >/dev/null 2>&1; then
+            _cai_info "Removed container: $name"
+            ((removed_containers++))
+            # Clean up SSH config
+            _cai_remove_ssh_host_config "$name"
+        else
+            _cai_warn "Failed to remove container: $name"
+            ((failed_containers++))
+        fi
+    done
+
+    # Remove images
+    local removed_images=0
+    local failed_images=0
+    for img in "${image_candidates[@]}"; do
+        if docker rmi -- "$img" >/dev/null 2>&1; then
+            _cai_info "Removed image: $img"
+            ((removed_images++))
+        else
+            _cai_warn "Failed to remove image: $img (may be in use)"
+            ((failed_images++))
+        fi
+    done
+
+    # Summary
+    echo ""
+    if [[ $removed_containers -gt 0 ]] || [[ $removed_images -gt 0 ]]; then
+        echo "Removed: $removed_containers container(s), $removed_images image(s)"
+    fi
+    if [[ $failed_containers -gt 0 ]] || [[ $failed_images -gt 0 ]]; then
+        echo "Failed: $failed_containers container(s), $failed_images image(s)"
+        return 1
     fi
 
     return 0
@@ -6227,6 +6569,10 @@ containai() {
         status)
             shift
             _containai_status_cmd "$@"
+            ;;
+        gc)
+            shift
+            _containai_gc_cmd "$@"
             ;;
         ssh)
             shift
