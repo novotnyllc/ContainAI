@@ -3419,7 +3419,7 @@ _cai_doctor_template_checks() {
             ;;
         missing)
             all_ok="false"
-            printf '  %-44s %s\n' "Template 'default':" "[FAIL] Missing"
+            printf '  %s\n' "[FAIL] Template 'default' missing"
             printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
             ;;
         invalid_name)
