@@ -400,18 +400,21 @@ _cai_ensure_default_templates() {
 
 # Build a template Dockerfile and return the image name
 # Uses the same Docker context as container creation for consistency
-# Args: template_name [docker_context] [dry_run]
-#   template_name  - Name of the template (e.g., "default", "my-custom")
-#   docker_context - Docker context to use (optional, uses default if empty)
-#   dry_run        - If "true", outputs TEMPLATE_BUILD_CMD instead of building
+# Args: template_name [docker_context] [dry_run] [suppress_base_warning]
+#   template_name          - Name of the template (e.g., "default", "my-custom")
+#   docker_context         - Docker context to use (optional, uses default if empty)
+#   dry_run                - If "true", outputs TEMPLATE_BUILD_CMD instead of building
+#   suppress_base_warning  - If "true", suppress base image validation warnings
 # Returns: 0 on success, 1 on failure
 # Outputs: Image name (stdout) on success: containai-template-{name}:local
 # Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<command> to stdout
 #       The command is shell-escaped and includes env var clearing prefix
+# Note: Validates that Dockerfile uses ContainAI base image; warns if not
 _cai_build_template() {
     local template_name="${1:-default}"
     local docker_context="${2:-}"
     local dry_run="${3:-false}"
+    local suppress_base_warning="${4:-false}"
 
     # Validate template name
     if ! _cai_validate_template_name "$template_name"; then
@@ -423,6 +426,13 @@ _cai_build_template() {
     local dockerfile_path
     if ! dockerfile_path=$(_cai_require_template "$template_name" "$dry_run"); then
         return 1
+    fi
+
+    # Validate layer stack (warn if not based on ContainAI, unless suppressed)
+    # This is a warning only - we proceed with build regardless of result
+    # Return code 2 (parse error) is logged but doesn't block build
+    if [[ "$dry_run" != "true" ]]; then
+        _cai_validate_template_base "$dockerfile_path" "$suppress_base_warning" || true
     fi
 
     # Template directory is the build context (parent of Dockerfile)
@@ -567,9 +577,31 @@ _cai_validate_template_base() {
         fi
 
         # Parse FROM line (first one wins - this is the base image)
-        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+([^[:space:]]+) ]]; then
-            from_line="${BASH_REMATCH[1]}"
-            break
+        # Handle: FROM image, FROM --platform=x image, FROM image AS stage
+        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            # Extract tokens after FROM
+            local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
+            from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"  # trim leading
+            # Skip --flag tokens and find the image
+            local token
+            while [[ -n "$from_tokens" ]]; do
+                # Get first token
+                token="${from_tokens%%[[:space:]]*}"
+                # Advance to next token
+                from_tokens="${from_tokens#"$token"}"
+                from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+                # Skip flags (start with --)
+                if [[ "$token" == --* ]]; then
+                    continue
+                fi
+                # Found the image - stop at AS keyword
+                if [[ "$token" == [Aa][Ss] ]]; then
+                    break
+                fi
+                from_line="$token"
+                break
+            done
+            [[ -n "$from_line" ]] && break
         fi
     done < "$dockerfile_path"
 
@@ -582,24 +614,28 @@ _cai_validate_template_base() {
     # Resolve variable substitution in FROM line
     # Handles: $VAR, ${VAR}, ${VAR:-default}
     local resolved_image="$from_line"
-    local var_pattern var_name var_default has_unresolved="false"
+    local var_name var_default has_unresolved="false" match replacement
 
     # Process ${VAR:-default} patterns first
     while [[ "$resolved_image" =~ \$\{([A-Za-z_][A-Za-z0-9_]*):-([^}]*)\} ]]; do
+        match="${BASH_REMATCH[0]}"
         var_name="${BASH_REMATCH[1]}"
         var_default="${BASH_REMATCH[2]}"
         if [[ -n "${arg_values[$var_name]:-}" ]]; then
-            resolved_image="${resolved_image/\$\{$var_name:-$var_default\}/${arg_values[$var_name]}}"
+            replacement="${arg_values[$var_name]}"
         else
-            resolved_image="${resolved_image/\$\{$var_name:-$var_default\}/$var_default}"
+            replacement="$var_default"
         fi
+        resolved_image="${resolved_image/"$match"/"$replacement"}"
     done
 
     # Process ${VAR} patterns
     while [[ "$resolved_image" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
+        match="${BASH_REMATCH[0]}"
         var_name="${BASH_REMATCH[1]}"
         if [[ -n "${arg_values[$var_name]:-}" ]]; then
-            resolved_image="${resolved_image/\$\{$var_name\}/${arg_values[$var_name]}}"
+            replacement="${arg_values[$var_name]}"
+            resolved_image="${resolved_image/"$match"/"$replacement"}"
         else
             has_unresolved="true"
             break
@@ -608,9 +644,11 @@ _cai_validate_template_base() {
 
     # Process $VAR patterns (without braces)
     while [[ "$resolved_image" =~ \$([A-Za-z_][A-Za-z0-9_]*) ]]; do
+        match="${BASH_REMATCH[0]}"
         var_name="${BASH_REMATCH[1]}"
         if [[ -n "${arg_values[$var_name]:-}" ]]; then
-            resolved_image="${resolved_image/\$$var_name/${arg_values[$var_name]}}"
+            replacement="${arg_values[$var_name]}"
+            resolved_image="${resolved_image/"$match"/"$replacement"}"
         else
             has_unresolved="true"
             break

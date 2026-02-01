@@ -708,6 +708,42 @@ else
 fi
 teardown_tmpdir
 
+test_start "_cai_validate_template_base handles --platform flag"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM --platform=linux/amd64 ghcr.io/novotnyllc/containai:latest
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to handle --platform flag"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles FROM ... AS stage"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest AS builder
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to handle AS stage"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_base handles --platform and AS together"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM --platform=linux/arm64 containai:v2 AS runtime
+EOF
+if _cai_validate_template_base "$TEST_TMPDIR/Dockerfile" "false" 2>/dev/null; then
+    test_pass
+else
+    test_fail "failed to handle --platform with AS"
+fi
+teardown_tmpdir
+
 # ==============================================================================
 # Summary
 # ==============================================================================
