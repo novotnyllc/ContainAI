@@ -148,6 +148,11 @@ setup_git_filter_fixture() {
 [core]
     editor = vim
 EOF
+
+    # Also create .gitignore_global (listed in spec's Tools to Test)
+    printf '%s\n' '# Global gitignore - GITIGNORE_MARKER' >"$fixture/.gitignore_global"
+    printf '%s\n' '*.log' >>"$fixture/.gitignore_global"
+    printf '%s\n' '.DS_Store' >>"$fixture/.gitignore_global"
 }
 
 test_git_filter_assertions() {
@@ -218,6 +223,18 @@ test_git_filter_assertions() {
         return 1
     fi
 
+    # Verify .gitignore_global synced (listed in spec's Tools to Test)
+    assert_file_exists_in_volume "git/gitignore_global" || {
+        printf '%s\n' "[DEBUG] git/gitignore_global does not exist in volume" >&2
+        return 1
+    }
+    local gitignore_content
+    gitignore_content=$(cat_from_volume "git/gitignore_global") || return 1
+    if [[ "$gitignore_content" != *"GITIGNORE_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] gitignore_global does not contain expected marker" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -230,11 +247,13 @@ setup_gh_secret_fixture() {
 
     printf '%s\n' 'github.com:' >"$fixture/.config/gh/hosts.yml"
     printf '%s\n' '  oauth_token: test-token' >>"$fixture/.config/gh/hosts.yml"
-    # Set explicit 600 for secret file
-    chmod 600 "$fixture/.config/gh/hosts.yml"
+    # Set source to non-secret mode (644) so we can verify the IMPORTER enforces 600
+    # If we set source to 600, rsync -a would preserve it and we wouldn't test
+    # that the import logic correctly applies secret permissions
+    chmod 644 "$fixture/.config/gh/hosts.yml"
 
     printf '%s\n' 'editor: vim' >"$fixture/.config/gh/config.yml"
-    # Set explicit 644 for non-secret file to avoid umask issues
+    # Non-secret file - set to 644 but we'll only verify it's not 600 in volume
     chmod 644 "$fixture/.config/gh/config.yml"
 }
 
@@ -243,15 +262,19 @@ test_gh_secret_separation_assertions() {
     assert_file_exists_in_volume "config/gh/hosts.yml" || return 1
     assert_file_exists_in_volume "config/gh/config.yml" || return 1
 
-    # hosts.yml should have 600 perms (secret)
+    # hosts.yml should have 600 perms (secret) - the IMPORTER must enforce this
+    # even though the source file is 644 (set in fixture to test enforcement)
     assert_permissions_in_volume "config/gh/hosts.yml" "600" || return 1
 
-    # config.yml should have 644 perms (not secret)
-    # We explicitly set 644 in the fixture to ensure deterministic test
+    # config.yml should NOT have secret permissions (600)
+    # We don't assert exact mode (644) because permissions may vary across platforms/filesystems
     local config_perms
-    config_perms=$(exec_in_container "$SYNC_TEST_CONTAINER" stat -c '%a' "/mnt/agent-data/config/gh/config.yml")
-    if [[ "$config_perms" != "644" ]]; then
-        printf '%s\n' "[DEBUG] config.yml has $config_perms perms but should have 644 (not a secret)" >&2
+    config_perms=$(exec_in_container "$SYNC_TEST_CONTAINER" stat -c '%a' "/mnt/agent-data/config/gh/config.yml") || {
+        printf '%s\n' "[DEBUG] Failed to get config.yml permissions" >&2
+        return 1
+    }
+    if [[ "$config_perms" == "600" ]]; then
+        printf '%s\n' "[DEBUG] config.yml has 600 perms but should not (not a secret)" >&2
         return 1
     fi
 
@@ -567,25 +590,6 @@ test_ohmyposh_sync_assertions() {
     fi
 
     return 0
-}
-
-# ==============================================================================
-# Setup composite fixtures for multi-tool tests
-# ==============================================================================
-setup_devtools_fixture() {
-    create_fixture_home >/dev/null
-    create_git_fixture
-    create_gh_fixture
-    create_tmux_fixture
-    create_vim_fixture
-    create_vscode_fixture
-    create_starship_fixture
-}
-
-setup_git_gh_fixture() {
-    create_fixture_home >/dev/null
-    create_git_fixture
-    create_gh_fixture
 }
 
 # ==============================================================================
