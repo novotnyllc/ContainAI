@@ -305,14 +305,15 @@ _cai_hash_path() {
 }
 
 # Generate container name from workspace path
-# Format: containai-{repo}-{branch}, max 63 chars
+# Format: {repo}-{branch_leaf}, max 24 chars (no prefix)
+# Branch leaf = last segment of '/'-separated branch (e.g., feature/oauth → oauth)
 # Arguments: $1 = workspace path (required)
 # Returns: container name via stdout, or 1 on error
 # Note: This is a pure function - no docker calls or collision logic.
 #       Collision handling is done in _cai_resolve_container_name.
 _containai_container_name() {
     local workspace_path="$1"
-    local repo_name branch_name repo_s branch_s name
+    local repo_name branch_name branch_leaf repo_s branch_s name
 
     if [[ -z "$workspace_path" ]]; then
         # Fallback to current directory if no workspace provided
@@ -330,17 +331,22 @@ _containai_container_name() {
     # Get branch name from git (guard against git not being installed)
     if command -v git >/dev/null 2>&1 && git -C "$workspace_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         branch_name=$(git -C "$workspace_path" rev-parse --abbrev-ref HEAD 2>/dev/null) || branch_name=""
-        # Detached HEAD: use 7-char short SHA
+        # Detached HEAD: use "detached" token (no hashes per spec)
         if [[ "$branch_name" == "HEAD" || -z "$branch_name" ]]; then
-            branch_name=$(git -C "$workspace_path" rev-parse --short=7 HEAD 2>/dev/null) || branch_name="nogit"
+            branch_name="detached"
         fi
     else
         # Non-git directory or git not installed
         branch_name="nogit"
     fi
 
-    # Sanitize repo and branch SEPARATELY to ensure both segments exist
-    # Sanitization: lowercase, / → -, remove non-alphanum except -
+    # Extract branch leaf (last segment of '/'-separated branch path)
+    # e.g., feature/oauth → oauth, bugfix/login-fix → login-fix, main → main
+    branch_leaf="${branch_name##*/}"
+    # Handle empty leaf (shouldn't happen but be safe)
+    [[ -z "$branch_leaf" ]] && branch_leaf="$branch_name"
+
+    # Sanitize repo: lowercase, remove non-alphanum except -
     repo_s="${repo_name,,}"              # lowercase
     repo_s="${repo_s//\//-}"             # / → -
     repo_s=$(printf '%s' "$repo_s" | LC_ALL=C tr -cd 'a-z0-9-')
@@ -350,8 +356,9 @@ _containai_container_name() {
     # Fallback if repo sanitizes to empty
     [[ -z "$repo_s" ]] && repo_s="repo"
 
-    branch_s="${branch_name,,}"          # lowercase
-    branch_s="${branch_s//\//-}"         # / → -
+    # Sanitize branch leaf: lowercase, remove non-alphanum except -
+    branch_s="${branch_leaf,,}"          # lowercase
+    branch_s="${branch_s//\//-}"         # / → - (shouldn't have any, but be safe)
     branch_s=$(printf '%s' "$branch_s" | LC_ALL=C tr -cd 'a-z0-9-')
     # Collapse multiple dashes and trim
     while [[ "$branch_s" == *--* ]]; do branch_s="${branch_s//--/-}"; done
@@ -359,13 +366,14 @@ _containai_container_name() {
     # Fallback if branch sanitizes to empty
     [[ -z "$branch_s" ]] && branch_s="branch"
 
-    # Truncate repo/branch SEPARATELY to guarantee both segments remain
-    # Max base: 59 chars. Prefix "containai-" = 10 chars. Separator "-" = 1 char.
-    # Available for repo+branch: 59 - 10 - 1 = 48 chars
-    local max_combined=48
+    # Truncate repo/branch to fit max 24 chars: {repo}-{branch}
+    # Separator = 1 char, so repo+branch max = 23 chars
+    local max_combined=23
     local repo_keep=${#repo_s}
     local branch_keep=${#branch_s}
     if (( repo_keep + branch_keep > max_combined )); then
+        # Prioritize repo, then truncate branch if needed
+        # Start by trimming whichever is longer, alternating
         while (( repo_keep + branch_keep > max_combined )); do
             if (( repo_keep >= branch_keep && repo_keep > 1 )); then
                 repo_keep=$((repo_keep - 1))
@@ -384,8 +392,8 @@ _containai_container_name() {
         [[ -z "$branch_s" ]] && branch_s="branch"
     fi
 
-    # Build name: containai-{repo}-{branch}
-    name="containai-${repo_s}-${branch_s}"
+    # Build name: {repo}-{branch} (no prefix, max 24 chars)
+    name="${repo_s}-${branch_s}"
 
     printf '%s' "$name"
 }
@@ -677,7 +685,8 @@ _cai_resolve_container_name() {
     candidate="$base_name"
 
     # Check if name is taken by another workspace (handle collisions)
-    # Cap suffix at 99 to ensure max 63 chars (base 59 + "-" + 2 digits = 62)
+    # Truncate base name to fit suffix while staying within 24 chars max
+    # Cap suffix at 99 as a reasonable limit for edge cases
     # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context authoritative
     while DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container "$candidate" >/dev/null 2>&1; do
         # Check if this container is for our workspace via workspace label
@@ -693,7 +702,13 @@ _cai_resolve_container_name() {
             echo "[ERROR] Too many container name collisions (max 99)" >&2
             return 1
         fi
-        candidate="${base_name}-${suffix}"
+        # Truncate base name to fit suffix within 24 chars: base + "-" + suffix
+        local suffix_len=${#suffix}
+        local max_base=$((24 - 1 - suffix_len))  # 24 - "-" - suffix digits
+        local truncated_base="${base_name:0:$max_base}"
+        # Remove trailing dash from truncation
+        truncated_base="${truncated_base%-}"
+        candidate="${truncated_base}-${suffix}"
     done
 
     printf '%s\n' "$candidate"
