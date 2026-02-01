@@ -3061,6 +3061,7 @@ _cai_import_git_config() {
     if [[ -n "$host_gitconfig" ]]; then
         # Filter gitconfig: remove credential.helper and signing-related config
         # Also remove empty [credential], [commit], [tag], [user], and [gpg] sections
+        # Git config is case-insensitive, so we use tolower() for comparisons
         # Multi-line values use trailing backslash for continuation
         if ! awk '
             BEGIN { in_section = 0; section_name = ""; section_header = ""; section_content = ""; skip_continuation = 0 }
@@ -3072,8 +3073,9 @@ _cai_import_git_config() {
             /^[[:space:]]*\[[a-zA-Z]+/ {
                 # Flush previous section if it had content
                 if (section_header != "" && section_content != "") { printf "%s", section_header section_content }
-                # Extract section name (POSIX compatible)
+                # Extract section name (POSIX compatible), lowercase for comparison
                 section_name = $0; gsub(/^[[:space:]]*\[/, "", section_name); gsub(/[[:space:]].*/, "", section_name); gsub(/\].*/, "", section_name)
+                section_name = tolower(section_name)
                 # Buffer sections that may have keys to strip
                 if (section_name == "credential" || section_name == "commit" || section_name == "tag" || section_name == "gpg" || section_name == "user") {
                     section_header = $0 "\n"; section_content = ""; in_section = 1
@@ -3083,22 +3085,24 @@ _cai_import_git_config() {
                 next
             }
 
-            # Top-level dotted keys to skip
-            /^[[:space:]]*credential\.helper[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-            /^[[:space:]]*user\.signingkey[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-            /^[[:space:]]*commit\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-            /^[[:space:]]*tag\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-            /^[[:space:]]*gpg\.program[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-            /^[[:space:]]*gpg\.format[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            # Top-level dotted keys to skip (case-insensitive via tolower)
+            { line_lower = tolower($0) }
+            line_lower ~ /^[[:space:]]*credential\.helper[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            line_lower ~ /^[[:space:]]*user\.signingkey[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            line_lower ~ /^[[:space:]]*commit\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            line_lower ~ /^[[:space:]]*tag\.gpgsign[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            line_lower ~ /^[[:space:]]*gpg\.program[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+            line_lower ~ /^[[:space:]]*gpg\.format[[:space:]]*=/ { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
 
-            # Inside buffered section: check for keys to skip
+            # Inside buffered section: check for keys to skip (case-insensitive)
             in_section {
-                if (section_name == "credential" && /^[[:space:]]*helper[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-                if (section_name == "user" && /^[[:space:]]*signingkey[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-                if (section_name == "commit" && /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-                if (section_name == "tag" && /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-                if (section_name == "gpg" && /^[[:space:]]*program[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
-                if (section_name == "gpg" && /^[[:space:]]*format[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                key_lower = tolower($0)
+                if (section_name == "credential" && key_lower ~ /^[[:space:]]*helper[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "user" && key_lower ~ /^[[:space:]]*signingkey[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "commit" && key_lower ~ /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "tag" && key_lower ~ /^[[:space:]]*gpgsign[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "gpg" && key_lower ~ /^[[:space:]]*program[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
+                if (section_name == "gpg" && key_lower ~ /^[[:space:]]*format[[:space:]]*=/) { if (/\\[[:space:]]*$/) { skip_continuation = 1 } next }
                 section_content = section_content $0 "\n"; next
             }
 
@@ -3182,7 +3186,8 @@ _cai_import_git_config() {
 # Returns: 0 on success, 1 on failure
 #
 # What gets activated:
-# - Git config is copied from /mnt/agent-data/.gitconfig to $HOME/.gitconfig
+# - Git config: New containers use symlink (no copy needed). Legacy containers
+#   copy from /mnt/agent-data/git/gitconfig or /.gitconfig to $HOME/.gitconfig
 # - Env vars: creates bashrc.d sourcing script so future shells load them
 # - Credentials remain on the volume (accessed on demand by tools)
 _cai_hot_reload_container() {

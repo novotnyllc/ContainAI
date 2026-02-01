@@ -293,10 +293,11 @@ _setup_git_config() {
     fi
 
     # Legacy container: find source file (old path, then new path)
+    # Must be non-empty (-s) to avoid clobbering with empty placeholder file
     local src=""
-    if [[ -f "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
+    if [[ -s "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
         src="${DATA_DIR}/.gitconfig"
-    elif [[ -f "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
+    elif [[ -s "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
         src="${DATA_DIR}/git/gitconfig"
     fi
 
