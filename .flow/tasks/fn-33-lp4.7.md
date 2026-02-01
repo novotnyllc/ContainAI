@@ -12,9 +12,8 @@ Doctor diagnoses template issues (missing, parse error). Fast filesystem checks 
 - [ ] Reports actionable fix: "Run 'cai doctor fix template' to recover"
 
 ## Done summary
-TBD
-
+Implemented doctor template checks with fast filesystem checks by default and optional heavy validation via --build-templates flag. Added 'cai doctor fix template' command to restore templates from repo with backup support.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: c3e5a10, 6df362f, 406ab33, 16abe8c
+- Tests: shellcheck -x src/lib/doctor.sh src/containai.sh, cai doctor, cai doctor --json, cai doctor --build-templates, cai doctor fix template
 - PRs:
