@@ -380,10 +380,12 @@ Usage: cai stop [options]
 
 Options:
   --container <name>  Stop specific existing container (must already exist)
-  --all               Stop all containers without prompting (mutually exclusive with --container)
+  --all               Stop all containers without prompting (mutually exclusive with --container and --export)
+  --export            Export data volume before stopping (mutually exclusive with --all)
   --remove            Also remove containers (not just stop them)
                       When used with --remove, SSH configs are automatically cleaned
   --force             Skip session warning prompt (proceed without confirmation)
+                      Also continue stopping if export fails when --export is used
   --verbose           Enable verbose output
   -h, --help          Show this help message
 
@@ -394,10 +396,17 @@ Session Warning:
   In non-interactive mode (piped input), the warning is skipped automatically.
   Note: Interactive selection mode and --all do not perform session detection.
 
+Export Before Stop:
+  When --export is used, the container's data volume is exported before stopping.
+  The order of operations is: export → session check → stop.
+  If export fails, the stop is aborted unless --force is used.
+
 Examples:
   cai stop                      Interactive selection to stop containers
   cai stop --container my-proj  Stop specific container
   cai stop --all                Stop all ContainAI containers
+  cai stop --export             Export data volume before stopping
+  cai stop --export --force     Export then stop, continue even if export fails
   cai stop --remove             Remove containers (cleans up SSH configs)
   cai stop --all --remove       Remove all ContainAI containers
   cai stop --force              Stop without session warning prompt
@@ -1477,6 +1486,7 @@ _containai_stop_cmd() {
     local remove_flag=false
     local all_flag=false
     local force_flag=false
+    local export_first=false
     local arg prev
     # Preserve original args for passing to _containai_stop_all
     local -a orig_args=("$@")
@@ -1532,6 +1542,9 @@ _containai_stop_cmd() {
             --force)
                 force_flag=true
                 ;;
+            --export)
+                export_first=true
+                ;;
             --verbose)
                 _cai_set_verbose
                 ;;
@@ -1550,13 +1563,19 @@ _containai_stop_cmd() {
         return 1
     fi
 
+    # Check mutual exclusivity of --export and --all
+    if [[ "$export_first" == "true" ]] && [[ "$all_flag" == "true" ]]; then
+        echo "[ERROR] --export and --all are mutually exclusive" >&2
+        return 1
+    fi
+
     # Pass 3: Validate all args based on determined mode
     # In --container or --all mode, reject unknown flags and positional args
     if [[ -n "$container_name" ]] || [[ "$all_flag" == "true" ]]; then
         prev=""
         for arg in "$@"; do
             case "$arg" in
-                --container | --all | --remove | --force | --verbose | --help | -h)
+                --container | --all | --remove | --force | --export | --verbose | --help | -h)
                     # Known flags
                     ;;
                 --container=*)
@@ -1604,6 +1623,19 @@ _containai_stop_cmd() {
         if [[ "$is_managed" != "true" ]]; then
             echo "[ERROR] Container $container_name exists but is not managed by ContainAI" >&2
             return 1
+        fi
+
+        # Export before stop: run export first (if --export), before session check
+        if [[ "$export_first" == "true" ]]; then
+            _cai_info "Exporting data volume..."
+            # Use --container flag only; export resolves context internally
+            if ! _containai_export_cmd --container "$container_name"; then
+                if [[ "$force_flag" != "true" ]]; then
+                    _cai_error "Export failed. Use --force to stop anyway."
+                    return 1
+                fi
+                _cai_warn "Export failed, continuing due to --force"
+            fi
         fi
 
         # Session warning: prompt if sessions detected (unless --force or non-interactive)
@@ -1687,6 +1719,19 @@ _containai_stop_cmd() {
                 echo "[ERROR] Container '$ws_container_name' belongs to workspace '$container_ws', not current directory." >&2
                 echo "        Use 'cai stop --container $ws_container_name' to force, or fix workspace state." >&2
                 return 1
+            fi
+
+            # Export before stop: run export first (if --export), before session check
+            if [[ "$export_first" == "true" ]]; then
+                _cai_info "Exporting data volume..."
+                # Use --container flag only; export resolves context internally
+                if ! _containai_export_cmd --container "$ws_container_name"; then
+                    if [[ "$force_flag" != "true" ]]; then
+                        _cai_error "Export failed. Use --force to stop anyway."
+                        return 1
+                    fi
+                    _cai_warn "Export failed, continuing due to --force"
+                fi
             fi
 
             # Session warning: prompt if sessions detected (unless --force or non-interactive)
