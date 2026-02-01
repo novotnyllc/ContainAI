@@ -465,7 +465,6 @@ Moves user configuration from $HOME to /mnt/agent-data and creates symlinks.
 This allows container customizations to persist across container recreations.
 
 Only processes manifest entries with non-empty container_link values.
-Entries like .gitconfig (copy-only) are not converted to symlinks.
 
 Options:
   --dry-run     Show what would happen without making changes
@@ -486,10 +485,9 @@ What gets synced:
   - Agent configs (.claude, .codex, .gemini, etc.)
   - Shell customizations (.bash_aliases, .bashrc.d)
   - Editor configs (.vimrc, .config/nvim)
-  - Git settings (.gitignore_global)
+  - Git settings (.gitconfig, .gitignore_global)
 
 What does NOT get synced:
-  - .gitconfig (copied at container startup, not symlinked)
   - SSH keys (not in manifest by default)
   - Files without container_link in manifest
 EOF

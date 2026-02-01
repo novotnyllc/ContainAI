@@ -948,10 +948,11 @@ _import_map_override_path() {
         return 0
     fi
 
-    # Special case: .gitconfig is handled by _cai_import_git_config, target is .gitconfig
+    # Special case: .gitconfig is handled by _cai_import_git_config
+    # Target is git/gitconfig (symlinked to ~/.gitconfig in container)
     # No secret flag - gitconfig is filtered but not a secret file
     if [[ "$override_path" == ".gitconfig" ]]; then
-        printf '%s:%s\n' ".gitconfig" "f"
+        printf '%s:%s\n' "git/gitconfig" "f"
         return 0
     fi
 
@@ -3126,11 +3127,23 @@ _cai_import_git_config() {
         -v "$volume":/target \
         -v "$tmp_gitconfig":/source/.gitconfig:ro \
         alpine sh -c '
-            # Ensure git/ directory exists
+            set -e
+            # Security: reject if /target/git exists and is symlink or non-directory
+            # Prevents symlink traversal attacks via crafted volumes
+            if [ -L /target/git ]; then
+                echo "ERROR: /target/git is a symlink - refusing to write" >&2
+                exit 1
+            fi
+            if [ -e /target/git ] && [ ! -d /target/git ]; then
+                echo "ERROR: /target/git exists but is not a directory" >&2
+                exit 1
+            fi
+
+            # Create git/ directory if needed
             mkdir -p /target/git
             chown 1000:1000 /target/git
 
-            # Refuse if target exists and is symlink or non-regular file
+            # Refuse if target file exists and is symlink or non-regular file
             if [ -L /target/git/gitconfig ]; then
                 echo "ERROR: /target/git/gitconfig is a symlink - refusing to write" >&2
                 exit 1

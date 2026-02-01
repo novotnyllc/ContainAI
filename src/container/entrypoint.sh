@@ -138,6 +138,11 @@ ensure_volume_structure() {
     # GitHub CLI (SYNC_MAP flags: ds - secret directory)
     ensure_dir "${DATA_DIR}/config/gh"
 
+    # Git config (symlinked to ~/.gitconfig and ~/.gitignore_global)
+    ensure_dir "${DATA_DIR}/git"
+    ensure_file "${DATA_DIR}/git/gitconfig"
+    ensure_file "${DATA_DIR}/git/gitignore_global"
+
     # OpenCode config (SYNC_MAP flags: d)
     ensure_dir "${DATA_DIR}/config/opencode"
 

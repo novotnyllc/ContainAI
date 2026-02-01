@@ -19,7 +19,7 @@
 #   s = secret (600 for files, 700 for dirs; skipped with --no-secrets)
 #   m = mirror mode (--delete to remove files not in source)
 #   x = exclude .system/ subdirectory
-#   g = git-filter (strip credential.helper from .gitconfig)
+#   g = git-filter (strip credential.helper and signing config from .gitconfig)
 #   R = remove existing path first (rm -rf before ln -sfn)
 #   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
 #   o = optional (skip if source doesn't exist; don't pre-create in Dockerfile/init)
