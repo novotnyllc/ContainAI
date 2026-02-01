@@ -42,32 +42,32 @@ claude What does this function do?
 - [x] Common workflow examples shown
 
 ## Done summary
-# fn-34-fk5.12: Document handy aliases
-
-## Summary
-
-Added "Shell Aliases" section to `docs/quickstart.md` providing convenient shell shortcuts for frequently used agents.
+Added "Shell Functions" section to `docs/quickstart.md` providing convenient shell shortcuts.
 
 ## Changes
 
-**docs/quickstart.md** - Added new section:
-- Function-based aliases for bash/zsh: `claude()`, `gemini()`, `codex()`
+**docs/quickstart.md** - Added new section with:
+- Function wrappers for `claude` and `gemini` agents (bash only)
 - Usage examples showing how to invoke agents with quoted arguments
 - Quoting requirements explanation (avoiding word splitting)
 - Alternative configuration methods (CONTAINAI_AGENT env var, cai config)
+- Note explaining why functions go in ~/.bashrc (ContainAI requires bash 4+)
+
+## Deviations from Spec
+
+The spec suggested `alias claude='cai run claude --'` syntax, but this doesn't work with the actual CLI API:
+- `cai run <agent>` is not valid syntax (no positional agent argument)
+- Agent selection uses `CONTAINAI_AGENT` env var or `cai config set agent.default`
+- Functions with env var are the correct pattern: `claude() { CONTAINAI_AGENT=claude cai -- "$@"; }`
+- Removed `codex` agent as it's not defined in `_CONTAINAI_AGENT_TAGS` (only claude/gemini supported)
+- Changed from zsh to bash-only since ContainAI requires bash 4+ (per quickstart prerequisites)
 
 ## Acceptance Criteria Met
 
-- [x] bash/zsh alias examples documented - Added function aliases for both shells
-- [x] Quoting requirements explained - Dedicated section showing good vs bad patterns
+- [x] bash alias/function examples documented - Function wrappers for supported agents
+- [x] Quoting requirements explained - Dedicated section with good/bad examples
 - [x] Common workflow examples shown - Usage examples with realistic commands
-
-## Technical Notes
-
-- Used function syntax instead of simple aliases for cleaner argument handling
-- Aliases use CONTAINAI_AGENT env var which is the documented API
-- The `--` separator passes remaining arguments to the agent
 ## Evidence
-- Commits: 202e06a6c70ced61eecd3dc5bbc8976e43c9e29c
-- Tests:
-- PRs:
+- Commits: 932c08b (fixed version after review feedback)
+- Tests: N/A (documentation-only task)
+- PRs: N/A
