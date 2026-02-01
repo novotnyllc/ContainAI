@@ -256,6 +256,161 @@ else
 fi
 
 # ==============================================================================
+# Test: _cai_get_repo_templates_dir returns valid path
+# ==============================================================================
+
+test_start "_cai_get_repo_templates_dir returns repo templates directory"
+result=$(_cai_get_repo_templates_dir)
+if [[ -d "$result" ]]; then
+    test_pass
+else
+    test_fail "directory does not exist: $result"
+fi
+
+# ==============================================================================
+# Test: _cai_get_repo_templates_dir contains expected files
+# ==============================================================================
+
+test_start "_cai_get_repo_templates_dir contains default.Dockerfile"
+repo_dir=$(_cai_get_repo_templates_dir)
+if [[ -f "$repo_dir/default.Dockerfile" ]]; then
+    test_pass
+else
+    test_fail "default.Dockerfile not found in $repo_dir"
+fi
+
+test_start "_cai_get_repo_templates_dir contains example-ml.Dockerfile"
+repo_dir=$(_cai_get_repo_templates_dir)
+if [[ -f "$repo_dir/example-ml.Dockerfile" ]]; then
+    test_pass
+else
+    test_fail "example-ml.Dockerfile not found in $repo_dir"
+fi
+
+# ==============================================================================
+# Test: _cai_install_template installs to correct location
+# ==============================================================================
+
+test_start "_cai_install_template installs default template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_install_template "default" "false" >/dev/null 2>&1; then
+    if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "template file not created"
+    fi
+else
+    test_fail "install returned failure"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_install_template skips existing template
+# ==============================================================================
+
+test_start "_cai_install_template skips existing template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/default"
+printf '%s\n' "USER CUSTOMIZED CONTENT" > "$TEST_TMPDIR/templates/default/Dockerfile"
+_cai_install_template "default" "false" >/dev/null 2>&1
+# Verify content was NOT overwritten
+if grep -q "USER CUSTOMIZED CONTENT" "$TEST_TMPDIR/templates/default/Dockerfile"; then
+    test_pass
+else
+    test_fail "existing template was overwritten"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_install_template rejects non-repo template
+# ==============================================================================
+
+test_start "_cai_install_template rejects non-repo template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_install_template "not-a-repo-template" "false" 2>/dev/null; then
+    test_fail "accepted non-repo template name"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_install_template dry-run does not create file
+# ==============================================================================
+
+test_start "_cai_install_template dry-run does not create file"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+_cai_install_template "default" "true" >/dev/null 2>&1
+if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+    test_fail "file created during dry-run"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_install_all_templates installs both templates
+# ==============================================================================
+
+test_start "_cai_install_all_templates installs all repo templates"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_install_all_templates "false" >/dev/null 2>&1; then
+    if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]] && \
+       [[ -f "$TEST_TMPDIR/templates/example-ml/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "not all templates installed"
+    fi
+else
+    test_fail "install_all returned failure"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_ensure_default_templates installs missing templates
+# ==============================================================================
+
+test_start "_cai_ensure_default_templates installs missing templates"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+_cai_ensure_default_templates "false" >/dev/null 2>&1
+if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]] && \
+   [[ -f "$TEST_TMPDIR/templates/example-ml/Dockerfile" ]]; then
+    test_pass
+else
+    test_fail "templates not installed"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_ensure_default_templates skips existing templates
+# ==============================================================================
+
+test_start "_cai_ensure_default_templates skips existing templates"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/default"
+printf '%s\n' "CUSTOM CONTENT" > "$TEST_TMPDIR/templates/default/Dockerfile"
+_cai_ensure_default_templates "false" >/dev/null 2>&1
+# Verify default was NOT overwritten
+if grep -q "CUSTOM CONTENT" "$TEST_TMPDIR/templates/default/Dockerfile"; then
+    # And example-ml should be installed
+    if [[ -f "$TEST_TMPDIR/templates/example-ml/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "example-ml template not installed"
+    fi
+else
+    test_fail "existing template was overwritten"
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Summary
 # ==============================================================================
 

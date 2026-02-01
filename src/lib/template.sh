@@ -10,6 +10,9 @@
 #   _cai_ensure_template_dir()    - Create template directory if missing
 #   _cai_template_exists()        - Check if a named template exists
 #   _cai_validate_template_name() - Validate template name (no path traversal)
+#   _cai_install_template()       - Install a single template from repo (if missing)
+#   _cai_install_all_templates()  - Install all repo templates during setup
+#   _cai_ensure_default_templates() - First-use detection: install missing defaults
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -21,6 +24,7 @@
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
 #   - Requires lib/ssh.sh for _CAI_CONFIG_DIR constant
+#   - Uses _CAI_SCRIPT_DIR from containai.sh for repo source path
 #
 # Usage: source lib/template.sh
 # ==============================================================================
@@ -148,4 +152,158 @@ _cai_template_exists() {
 
     template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
     [[ -f "$template_path" ]]
+}
+
+# ==============================================================================
+# Template Installation Functions
+# ==============================================================================
+
+# List of repo-shipped templates (name:source_file pairs)
+# These are the templates that ship with ContainAI and can be restored
+_CAI_REPO_TEMPLATES=("default:default.Dockerfile" "example-ml:example-ml.Dockerfile")
+
+# Get the repo templates source directory
+# Outputs: path to src/templates/ directory (stdout)
+# Returns: 0 on success, 1 if not found
+_cai_get_repo_templates_dir() {
+    local templates_dir
+
+    # Use _CAI_SCRIPT_DIR if available (set by containai.sh)
+    if [[ -n "${_CAI_SCRIPT_DIR:-}" ]]; then
+        templates_dir="$_CAI_SCRIPT_DIR/templates"
+    else
+        # Fallback: try to find relative to this file
+        local script_dir
+        script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        templates_dir="$(cd -- "$script_dir/.." && pwd)/templates"
+    fi
+
+    if [[ -d "$templates_dir" ]]; then
+        printf '%s' "$templates_dir"
+        return 0
+    fi
+
+    return 1
+}
+
+# Install a single template from repo to user config directory
+# Args: template_name [dry_run]
+# Returns: 0=installed/skipped, 1=error
+# Skips if template already exists (preserves user customizations)
+_cai_install_template() {
+    local template_name="${1:-}"
+    local dry_run="${2:-false}"
+    local repo_dir source_file target_dir target_file
+
+    if [[ -z "$template_name" ]]; then
+        _cai_error "Template name required"
+        return 1
+    fi
+
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    # Find the source file for this template
+    local found_source=""
+    local entry
+    for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+        local name="${entry%%:*}"
+        local src="${entry#*:}"
+        if [[ "$name" == "$template_name" ]]; then
+            found_source="$src"
+            break
+        fi
+    done
+
+    if [[ -z "$found_source" ]]; then
+        _cai_error "Template '$template_name' is not a repo-shipped template"
+        return 1
+    fi
+
+    # Get repo templates directory
+    if ! repo_dir=$(_cai_get_repo_templates_dir); then
+        _cai_error "Cannot find repo templates directory"
+        return 1
+    fi
+
+    source_file="$repo_dir/$found_source"
+    if [[ ! -f "$source_file" ]]; then
+        _cai_error "Source template not found: $source_file"
+        return 1
+    fi
+
+    target_dir="$_CAI_TEMPLATE_DIR/$template_name"
+    target_file="$target_dir/Dockerfile"
+
+    # Skip if already exists (preserve user customizations)
+    if [[ -f "$target_file" ]]; then
+        _cai_debug "Template '$template_name' already exists, skipping"
+        return 0
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would install template '$template_name' to $target_file"
+        return 0
+    fi
+
+    # Create directory and copy file
+    if ! mkdir -p "$target_dir" 2>/dev/null; then
+        _cai_error "Failed to create template directory: $target_dir"
+        return 1
+    fi
+
+    if ! cp -- "$source_file" "$target_file"; then
+        _cai_error "Failed to copy template: $source_file -> $target_file"
+        return 1
+    fi
+
+    _cai_info "Installed template '$template_name' to $target_file"
+    return 0
+}
+
+# Install all repo-shipped templates during setup
+# Args: [dry_run]
+# Returns: 0 on success, 1 on failure
+# Skips templates that already exist (preserves user customizations)
+_cai_install_all_templates() {
+    local dry_run="${1:-false}"
+    local entry name result=0
+
+    for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+        name="${entry%%:*}"
+        if ! _cai_install_template "$name" "$dry_run"; then
+            result=1
+        fi
+    done
+
+    return $result
+}
+
+# First-use detection: ensure default templates are installed
+# Called during container creation if templates are missing
+# Args: [dry_run]
+# Returns: 0 on success, 1 on failure
+# Silent on success unless templates are installed
+_cai_ensure_default_templates() {
+    local dry_run="${1:-false}"
+    local entry name installed_any="false"
+
+    for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+        name="${entry%%:*}"
+        if ! _cai_template_exists "$name"; then
+            if ! _cai_install_template "$name" "$dry_run"; then
+                _cai_warn "Failed to install missing template '$name'"
+            else
+                installed_any="true"
+            fi
+        fi
+    done
+
+    if [[ "$installed_any" == "true" ]] && [[ "$dry_run" != "true" ]]; then
+        _cai_debug "Installed missing default templates"
+    fi
+
+    return 0
 }

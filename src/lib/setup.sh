@@ -4182,6 +4182,7 @@ _cai_setup() {
     local force="false"
     local dry_run="false"
     local verbose="false"
+    local skip_templates="false"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -4197,6 +4198,10 @@ _cai_setup() {
             --verbose)
                 verbose="true"
                 _cai_set_verbose
+                shift
+                ;;
+            --skip-templates)
+                skip_templates="true"
                 shift
                 ;;
             --help | -h)
@@ -4239,6 +4244,17 @@ _cai_setup() {
         _cai_dryrun "Would create ~/.config/containai/config.toml"
         _cai_dryrun "Would create ~/.ssh/containai.d/ directory"
         _cai_dryrun "Would add Include directive to ~/.ssh/config"
+        _cai_spacing
+    fi
+
+    # Install template files (unless skipped)
+    if [[ "$skip_templates" != "true" ]]; then
+        if ! _cai_install_all_templates "$dry_run"; then
+            _cai_warn "Some templates failed to install (continuing)"
+        fi
+        _cai_spacing
+    else
+        _cai_info "Skipping template installation (--skip-templates)"
         _cai_spacing
     fi
 
@@ -4571,10 +4587,11 @@ Platform behavior:
   - macOS: Creates a lightweight Linux VM (Lima) running Docker + Sysbox
 
 Options:
-  --force       Bypass seccomp compatibility warning and proceed (WSL2 only)
-  --dry-run     Show what would be done without making changes
-  --verbose     Show detailed progress information
-  -h, --help    Show this help message
+  --force           Bypass seccomp compatibility warning and proceed (WSL2 only)
+  --dry-run         Show what would be done without making changes
+  --skip-templates  Skip installing template files to ~/.config/containai/templates/
+  --verbose         Show detailed progress information
+  -h, --help        Show this help message
 
 What It Does (Linux native):
   1. Detects distribution (Ubuntu/Debian supported for auto-install)
