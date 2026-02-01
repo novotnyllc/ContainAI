@@ -661,6 +661,7 @@ Fix Targets:
   fix container --all           Fix all containers (including SSH key auth)
   fix container <name>          Fix specific container
   fix template                  Restore default template from repo
+  fix template <name>           Restore specific template from repo
   fix template --all            Restore all repo-shipped templates
 
 Exit Codes:

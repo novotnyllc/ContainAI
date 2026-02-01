@@ -1034,7 +1034,7 @@ _cai_doctor() {
 
     # === Templates Section ===
     local template_all_ok="true"
-    if ! _cai_doctor_template_checks "$build_templates"; then
+    if ! _cai_doctor_template_checks "$build_templates" "$docker_context_for_checks"; then
         template_all_ok="false"
     fi
 
@@ -1125,8 +1125,8 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Recommended:" "Run 'cai doctor fix template' to recover"
     fi
 
-    # Exit code: 0 if isolation ready AND SSH configured, 1 if not
-    if [[ "$isolation_ready" == "true" ]] && [[ "$ssh_all_ok" == "true" ]]; then
+    # Exit code: 0 if isolation ready AND SSH configured AND templates OK, 1 if not
+    if [[ "$isolation_ready" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
         return 0
     else
         return 1
@@ -1694,6 +1694,14 @@ _cai_doctor_fix_all() {
         if ! _cai_doctor_fix_volume "$ctx" --all; then
             had_error="true"
         fi
+        printf '\n'
+    fi
+
+    # Fix all templates
+    printf '%s\n' "=== Templates ==="
+    printf '\n'
+    if ! _cai_doctor_fix_template --all; then
+        had_error="true"
     fi
 
     if [[ "$had_error" == "true" ]]; then
@@ -2121,20 +2129,19 @@ _cai_doctor_fix_template() {
         esac
     done
 
-    printf '%s\n' "ContainAI Doctor Fix - Templates"
-    printf '%s\n' "================================="
+    _cai_info "ContainAI Doctor Fix - Templates"
+    _cai_info "================================="
     printf '\n'
 
     local fixed_count=0
     local fail_count=0
-    local skip_count=0
 
     if [[ "$fix_all" == "true" ]]; then
         # Fix all repo-shipped templates
         local entry name
         for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
             name="${entry%%:*}"
-            printf '%s\n' "Template '$name':"
+            _cai_info "Template '$name':"
             if _cai_doctor_fix_single_template "$name"; then
                 ((fixed_count++)) || true
             else
@@ -2144,7 +2151,7 @@ _cai_doctor_fix_template() {
         done
     elif [[ -n "$template_name" ]]; then
         # Fix specific template
-        printf '%s\n' "Template '$template_name':"
+        _cai_info "Template '$template_name':"
         if _cai_doctor_fix_single_template "$template_name"; then
             ((fixed_count++)) || true
         else
@@ -2152,7 +2159,7 @@ _cai_doctor_fix_template() {
         fi
     else
         # Default: fix 'default' template
-        printf '%s\n' "Template 'default':"
+        _cai_info "Template 'default':"
         if _cai_doctor_fix_single_template "default"; then
             ((fixed_count++)) || true
         else
@@ -2161,9 +2168,9 @@ _cai_doctor_fix_template() {
     fi
 
     printf '\n'
-    printf '%s\n' "Summary"
-    printf '  %-50s %s\n' "Fixed:" "$fixed_count"
-    printf '  %-50s %s\n' "Failed:" "$fail_count"
+    _cai_info "Summary"
+    _cai_info "  Fixed: $fixed_count"
+    _cai_info "  Failed: $fail_count"
 
     if [[ $fail_count -gt 0 ]]; then
         return 1
@@ -2203,11 +2210,11 @@ _cai_doctor_fix_single_template() {
     # Backup existing template if present
     if [[ -f "$template_path" ]]; then
         backup_path="${template_path}.backup.$(date +%Y%m%d-%H%M%S)"
-        printf '  %-46s' "Backing up to ${backup_path##*/}:"
+        _cai_info "  Backing up to ${backup_path##*/}..."
         if cp "$template_path" "$backup_path" 2>/dev/null; then
-            printf ' %s\n' "[OK]"
+            _cai_ok "  Backup: ${backup_path}"
         else
-            printf ' %s\n' "[FAIL]"
+            _cai_error "  Backup failed"
             return 1
         fi
     fi
@@ -2216,37 +2223,37 @@ _cai_doctor_fix_single_template() {
     if [[ "$is_repo_template" == "true" ]]; then
         local repo_dir
         if ! repo_dir=$(_cai_get_repo_templates_dir 2>/dev/null); then
-            printf '  %-46s %s\n' "Restore:" "[FAIL] Cannot find repo templates"
+            _cai_error "  Cannot find repo templates directory"
             return 1
         fi
 
         local full_source="$repo_dir/$source_file"
         if [[ ! -f "$full_source" ]]; then
-            printf '  %-46s %s\n' "Restore:" "[FAIL] Source not found: $source_file"
+            _cai_error "  Source not found: $source_file"
             return 1
         fi
 
         # Create directory if needed
         if [[ ! -d "$target_dir" ]]; then
             if ! mkdir -p "$target_dir" 2>/dev/null; then
-                printf '  %-46s %s\n' "Create dir:" "[FAIL]"
+                _cai_error "  Failed to create directory: $target_dir"
                 return 1
             fi
         fi
 
-        printf '  %-46s' "Restoring from repo:"
+        _cai_info "  Restoring from repo..."
         if cp "$full_source" "$template_path" 2>/dev/null; then
-            printf ' %s\n' "[FIXED]"
+            _cai_ok "  Restored: $template_path"
             return 0
         else
-            printf ' %s\n' "[FAIL]"
+            _cai_error "  Failed to restore template"
             return 1
         fi
     else
         # User-created template - can only backup, cannot restore
-        printf '  %-46s %s\n' "Restore:" "[SKIP] User template, cannot restore from repo"
+        _cai_warn "  User template, cannot restore from repo"
         if [[ -n "${backup_path:-}" ]]; then
-            printf '  %-46s %s\n' "" "Backup saved at: $backup_path"
+            _cai_info "  Backup saved at: $backup_path"
         fi
         return 1
     fi
@@ -2651,7 +2658,7 @@ _cai_doctor_json() {
 
     # Template checks
     local template_all_ok="true"
-    _cai_doctor_template_checks_json "$build_templates" || template_all_ok="false"
+    _cai_doctor_template_checks_json "$build_templates" "$sysbox_context_name" || template_all_ok="false"
 
     printf '  "summary": {\n'
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
@@ -2663,8 +2670,8 @@ _cai_doctor_json() {
     printf '  }\n'
     printf '}\n'
 
-    # Exit code: 0 if Sysbox available AND SSH configured, 1 if not
-    if [[ "$isolation_available" == "true" ]] && [[ "$ssh_all_ok" == "true" ]]; then
+    # Exit code: 0 if Sysbox available AND SSH configured AND templates OK, 1 if not
+    if [[ "$isolation_available" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
         return 0
     else
         return 1
@@ -3401,10 +3408,12 @@ _cai_doctor_check_template_build() {
 
 # Run all template checks for doctor output (text format)
 # Args: build_templates ("true" to run heavy build checks)
+#       docker_context (optional docker context for build checks)
 # Outputs: Formatted text report to stdout
 # Returns: 0 if all checks pass, 1 if any check fails
 _cai_doctor_template_checks() {
     local build_templates="${1:-false}"
+    local docker_context="${2:-}"
     local template_exists_status template_syntax_status template_build_status
     local template_path="$_CAI_TEMPLATE_DIR/default/Dockerfile"
     local all_ok="true"
@@ -3441,15 +3450,12 @@ _cai_doctor_template_checks() {
                 local suppress_warning="${_CAI_TEMPLATE_SUPPRESS_BASE_WARNING:-false}"
                 if _cai_validate_template_base "$template_path" "true" 2>/dev/null; then
                     printf '  %-44s %s\n' "Base image:" "[OK] ContainAI base"
-                else
-                    # Check if it was an unresolved variable vs invalid base
-                    if [[ "$suppress_warning" != "true" ]]; then
-                        printf '  %-44s %s\n' "Base image:" "[WARN] Not ContainAI"
-                        printf '  %-44s %s\n' "" "(ContainAI features may not work)"
-                    else
-                        printf '  %-44s %s\n' "Base image:" "[WARN] Not ContainAI (suppressed)"
-                    fi
+                elif [[ "$suppress_warning" != "true" ]]; then
+                    # Not ContainAI base, show warning
+                    printf '  %-44s %s\n' "Base image:" "[WARN] Not ContainAI"
+                    printf '  %-44s %s\n' "" "(ContainAI features may not work)"
                 fi
+                # If suppressed, don't show anything about base image
                 ;;
             no_from)
                 all_ok="false"
@@ -3466,7 +3472,7 @@ _cai_doctor_template_checks() {
             printf '  %-44s %s\n' "Docker build:" "[SKIP] Template missing"
         else
             printf '  %-44s' "Docker build:"
-            template_build_status=$(_cai_doctor_check_template_build "default")
+            template_build_status=$(_cai_doctor_check_template_build "default" "$docker_context")
             case "$template_build_status" in
                 ok)
                     printf ' %s\n' "[OK] Build successful"
@@ -3492,10 +3498,12 @@ _cai_doctor_template_checks() {
 
 # Run template checks for doctor JSON output
 # Args: build_templates ("true" to run heavy build checks)
+#       docker_context (optional docker context for build checks)
 # Outputs: JSON object fields to stdout (no surrounding braces)
 # Returns: 0 if all checks pass, 1 otherwise
 _cai_doctor_template_checks_json() {
     local build_templates="${1:-false}"
+    local docker_context="${2:-}"
     local template_exists_status template_syntax_status template_build_status
     local template_path="$_CAI_TEMPLATE_DIR/default/Dockerfile"
     local base_valid="false"
@@ -3526,7 +3534,7 @@ _cai_doctor_template_checks_json() {
 
     # Build check (only if requested and template exists)
     if [[ "$build_templates" == "true" ]] && [[ "$template_exists_status" == "ok" ]]; then
-        template_build_status=$(_cai_doctor_check_template_build "default")
+        template_build_status=$(_cai_doctor_check_template_build "default" "$docker_context")
         if [[ "$template_build_status" != "ok" ]]; then
             all_ok="false"
         fi
