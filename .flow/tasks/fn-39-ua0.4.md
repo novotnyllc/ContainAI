@@ -20,83 +20,85 @@ Test shell customization sync: .bashrc.d sourcing (correct paths), aliases via ~
 | .inputrc | shell/inputrc | ~/.inputrc | f | |
 | .oh-my-zsh/custom | shell/ohmyzsh-custom | ~/.oh-my-zsh/custom | dR | |
 
+<!-- Updated by plan-sync: fn-39-ua0.2 used run_cai_import_from, $SYNC_TEST_CONTAINER, and pattern matching -->
+
 ### .bashrc.d Sourcing Test (INTERACTIVE SHELL)
 ```bash
 test_bashrc_d_sourced() {
     # Create test script in fixture's .bashrc.d
-    mkdir -p "$FIXTURE_HOME/.bashrc.d"
-    echo 'export BASHRC_D_TEST="sourced_from_volume"' > "$FIXTURE_HOME/.bashrc.d/test-env.sh"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.bashrc.d"
+    echo 'export BASHRC_D_TEST="sourced_from_volume"' > "$SYNC_TEST_FIXTURE_HOME/.bashrc.d/test-env.sh"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Use bash -i -c (interactive) not bash -l -c
     # Scripts are sourced from /mnt/agent-data/shell/bashrc.d
-    result=$(exec_in_container bash -i -c 'echo $BASHRC_D_TEST')
-    assert_equals "$result" "sourced_from_volume"
+    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'echo $BASHRC_D_TEST')
+    [[ "$result" == "sourced_from_volume" ]] || return 1
 
     # Verify the file is in the volume path (not ~/.bashrc.d)
-    assert_file_exists_in_volume "shell/bashrc.d/test-env.sh"
+    assert_file_exists_in_volume "shell/bashrc.d/test-env.sh" || return 1
 }
 ```
 
 ### .bashrc.d Priv Filter Test (p flag)
 ```bash
 test_bashrc_d_priv_filter() {
-    mkdir -p "$FIXTURE_HOME/.bashrc.d"
-    echo 'export PUBLIC_VAR="public"' > "$FIXTURE_HOME/.bashrc.d/public.sh"
-    echo 'export SECRET_VAR="secret"' > "$FIXTURE_HOME/.bashrc.d/secrets.priv.sh"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.bashrc.d"
+    echo 'export PUBLIC_VAR="public"' > "$SYNC_TEST_FIXTURE_HOME/.bashrc.d/public.sh"
+    echo 'export SECRET_VAR="secret"' > "$SYNC_TEST_FIXTURE_HOME/.bashrc.d/secrets.priv.sh"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # public.sh should sync
-    assert_file_exists_in_volume "shell/bashrc.d/public.sh"
+    assert_file_exists_in_volume "shell/bashrc.d/public.sh" || return 1
     # secrets.priv.sh should be excluded (p flag)
-    assert_file_not_exists_in_volume "shell/bashrc.d/secrets.priv.sh"
+    assert_path_not_exists_in_volume "shell/bashrc.d/secrets.priv.sh" || return 1
 }
 ```
 
 ### .bash_aliases Test (linked as ~/.bash_aliases_imported)
 ```bash
 test_aliases_linked_correctly() {
-    echo 'alias testcmd="echo works"' > "$FIXTURE_HOME/.bash_aliases"
+    echo 'alias testcmd="echo works"' > "$SYNC_TEST_FIXTURE_HOME/.bash_aliases"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # File syncs to shell/bash_aliases
-    assert_file_exists_in_volume "shell/bash_aliases"
+    assert_file_exists_in_volume "shell/bash_aliases" || return 1
 
     # Container has it linked as ~/.bash_aliases_imported
-    assert_symlink_target "/home/agent/.bash_aliases_imported" "/mnt/agent-data/shell/bash_aliases"
+    assert_symlink_target "/home/agent/.bash_aliases_imported" "/mnt/agent-data/shell/bash_aliases" || return 1
 
     # Alias should work in interactive shell
-    result=$(exec_in_container bash -i -c 'testcmd')
-    assert_equals "$result" "works"
+    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'testcmd')
+    [[ "$result" == "works" ]] || return 1
 }
 ```
 
 ### .inputrc Test
 ```bash
 test_inputrc_synced() {
-    echo '"\e[A": history-search-backward' > "$FIXTURE_HOME/.inputrc"
+    echo '"\e[A": history-search-backward' > "$SYNC_TEST_FIXTURE_HOME/.inputrc"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Verify file synced and readable
-    assert_file_exists_in_volume "shell/inputrc"
-    assert_symlink_target "/home/agent/.inputrc" "/mnt/agent-data/shell/inputrc"
+    assert_file_exists_in_volume "shell/inputrc" || return 1
+    assert_symlink_target "/home/agent/.inputrc" "/mnt/agent-data/shell/inputrc" || return 1
 }
 ```
 
 ### oh-my-zsh/custom Test (R flag)
 ```bash
 test_ohmyzsh_custom_with_R_flag() {
-    mkdir -p "$FIXTURE_HOME/.oh-my-zsh/custom/themes"
-    echo "ZSH_THEME=custom" > "$FIXTURE_HOME/.oh-my-zsh/custom/themes/custom.zsh-theme"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.oh-my-zsh/custom/themes"
+    echo "ZSH_THEME=custom" > "$SYNC_TEST_FIXTURE_HOME/.oh-my-zsh/custom/themes/custom.zsh-theme"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Verify synced with R flag (remove existing first)
-    assert_file_exists_in_volume "shell/ohmyzsh-custom/themes/custom.zsh-theme"
+    assert_file_exists_in_volume "shell/ohmyzsh-custom/themes/custom.zsh-theme" || return 1
 }
 ```
 

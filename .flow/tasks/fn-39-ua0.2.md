@@ -85,8 +85,8 @@ test_optional_agent_missing() {
 - [ ] Optional agent missing = no target created
 
 ## Done summary
-Added comprehensive E2E sync tests for all 10 AI agents (Claude, OpenCode, Codex, Copilot, Gemini, Aider, Continue, Cursor, Pi, Kimi) with --from import validation. Includes profile-import placeholder behavior test and optional-missing verification. Tests use per-test volume isolation and separate HOME/--from directories to avoid profile import detection.
+Added comprehensive content marker assertions to AI agent sync tests, ensuring actual content is verified (not just file existence). All 10 agents have unique markers in fixtures and corresponding verification assertions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: ba704409adfb9866cfa3c2634e81bdea8ffcc7cd, 640bd3c1747ddcb3744474da62e9b766a2a17cf2, 153be48, ff9a854, 5ab72c0
+- Tests: shellcheck -x tests/integration/sync-*.sh
 - PRs:

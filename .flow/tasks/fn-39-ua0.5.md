@@ -22,19 +22,21 @@ Test manifest flag behaviors and CLI operations: s, j, R, x, o flags, --no-secre
 
 Note: No directory entries have `s` flag in sync-manifest.toml, so 700 directory permissions are not tested here.
 
+<!-- Updated by plan-sync: fn-39-ua0.2 used run_cai_import_from, $SYNC_TEST_FIXTURE_HOME, and || return 1 pattern -->
+
 ### s Flag (Secret File Permissions)
 ```bash
 test_secret_file_permissions() {
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"token": "secret"}' > "$FIXTURE_HOME/.claude/.credentials.json"
-    mkdir -p "$FIXTURE_HOME/.codex"
-    echo '{"auth": "token"}' > "$FIXTURE_HOME/.codex/auth.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"token": "secret"}' > "$SYNC_TEST_FIXTURE_HOME/.claude/.credentials.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.codex"
+    echo '{"auth": "token"}' > "$SYNC_TEST_FIXTURE_HOME/.codex/auth.json"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Secret files should have 600 permissions
-    assert_permissions_in_volume "claude/credentials.json" "600"
-    assert_permissions_in_volume "codex/auth.json" "600"
+    assert_permissions_in_volume "claude/credentials.json" "600" || return 1
+    assert_permissions_in_volume "codex/auth.json" "600" || return 1
 }
 ```
 
@@ -43,23 +45,23 @@ test_secret_file_permissions() {
 test_json_init_non_optional() {
     # .claude/settings.json is fj (non-optional)
     # Create .claude dir but not the file
-    mkdir -p "$FIXTURE_HOME/.claude"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Should be created with {} because fj (not optional)
     content=$(cat_from_volume "claude/settings.json")
-    assert_equals "$content" "{}"
+    [[ "$content" == "{}" ]] || return 1
 }
 
 test_json_init_optional_skipped() {
     # .gemini/settings.json is fjo (optional)
     # Don't create any .gemini files
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Should NOT be created (optional entry, source missing)
-    assert_path_not_exists_in_volume "gemini/settings.json"
+    assert_path_not_exists_in_volume "gemini/settings.json" || return 1
 }
 ```
 
@@ -70,40 +72,42 @@ test_R_flag_symlink_replacement() {
     # This prevents nested symlinks when dir exists
 
     # Create fixture with .claude/plugins content
-    mkdir -p "$FIXTURE_HOME/.claude/plugins"
-    echo 'plugin' > "$FIXTURE_HOME/.claude/plugins/test.js"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude/plugins"
+    echo 'plugin' > "$SYNC_TEST_FIXTURE_HOME/.claude/plugins/test.js"
 
     # First import creates the structure
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Now create a conflicting directory at the symlink location
-    exec_in_container "$CONTAINER" rm -rf /home/agent/.claude/plugins
-    exec_in_container "$CONTAINER" mkdir -p /home/agent/.claude/plugins
-    exec_in_container "$CONTAINER" touch /home/agent/.claude/plugins/conflict.txt
+    exec_in_container "$SYNC_TEST_CONTAINER" rm -rf /home/agent/.claude/plugins
+    exec_in_container "$SYNC_TEST_CONTAINER" mkdir -p /home/agent/.claude/plugins
+    exec_in_container "$SYNC_TEST_CONTAINER" touch /home/agent/.claude/plugins/conflict.txt
 
     # Re-run container setup (which creates symlinks with R flag)
-    restart_container_for_symlinks
+    # Stop and start container to re-run entrypoint symlink creation
+    stop_test_container "$SYNC_TEST_CONTAINER"
+    start_test_container "$SYNC_TEST_CONTAINER"
 
     # Symlink should replace the directory (not nest inside)
-    link_target=$(exec_in_container "$CONTAINER" readlink /home/agent/.claude/plugins)
-    assert_equals "$link_target" "/mnt/agent-data/claude/plugins"
+    link_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink /home/agent/.claude/plugins)
+    [[ "$link_target" == "/mnt/agent-data/claude/plugins" ]] || return 1
 }
 ```
 
 ### x Flag (Exclude .system/)
 ```bash
 test_x_flag_excludes_system() {
-    mkdir -p "$FIXTURE_HOME/.codex/skills"
-    echo 'skill' > "$FIXTURE_HOME/.codex/skills/test.md"
-    mkdir -p "$FIXTURE_HOME/.codex/skills/.system"
-    echo 'system' > "$FIXTURE_HOME/.codex/skills/.system/cache.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.codex/skills"
+    echo 'skill' > "$SYNC_TEST_FIXTURE_HOME/.codex/skills/test.md"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.codex/skills/.system"
+    echo 'system' > "$SYNC_TEST_FIXTURE_HOME/.codex/skills/.system/cache.json"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # User skill should sync
-    assert_file_exists_in_volume "codex/skills/test.md"
+    assert_file_exists_in_volume "codex/skills/test.md" || return 1
     # .system/ should be excluded
-    assert_path_not_exists_in_volume "codex/skills/.system"
+    assert_path_not_exists_in_volume "codex/skills/.system" || return 1
 }
 ```
 
@@ -112,11 +116,11 @@ test_x_flag_excludes_system() {
 test_optional_missing_no_target() {
     # Don't create any Pi config (all entries are optional)
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # No Pi directory should exist
-    assert_path_not_exists_in_container "/home/agent/.pi"
-    assert_path_not_exists_in_volume "pi"
+    assert_path_not_exists_in_container "/home/agent/.pi" || return 1
+    assert_path_not_exists_in_volume "pi" || return 1
 }
 ```
 
@@ -124,29 +128,29 @@ test_optional_missing_no_target() {
 
 ```bash
 test_import_dry_run_no_changes() {
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"test": true}' > "$FIXTURE_HOME/.claude/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"test": true}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
 
-    output=$(run_import --from "$FIXTURE_HOME" --dry-run)
+    output=$(run_cai_import_from --dry-run)
 
     # Should show [DRY-RUN] markers
-    assert_contains "$output" "[DRY-RUN]"
+    [[ "$output" == *"[DRY-RUN]"* ]] || return 1
 
     # Volume should remain unchanged
-    assert_path_not_exists_in_volume "claude/settings.json"
+    assert_path_not_exists_in_volume "claude/settings.json" || return 1
 }
 
 test_import_no_secrets_skips_s_entries() {
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"token": "secret"}' > "$FIXTURE_HOME/.claude/.credentials.json"
-    echo '{}' > "$FIXTURE_HOME/.claude/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"token": "secret"}' > "$SYNC_TEST_FIXTURE_HOME/.claude/.credentials.json"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
 
-    run_import --from "$FIXTURE_HOME" --no-secrets
+    run_cai_import_from --no-secrets
 
     # Non-secret file should sync
-    assert_file_exists_in_volume "claude/settings.json"
+    assert_file_exists_in_volume "claude/settings.json" || return 1
     # Secret file should be skipped entirely
-    assert_path_not_exists_in_volume "claude/credentials.json"
+    assert_path_not_exists_in_volume "claude/credentials.json" || return 1
 }
 ```
 
@@ -154,78 +158,84 @@ test_import_no_secrets_skips_s_entries() {
 
 Note: `cai export` creates a `.tgz` archive file. The CLI uses `-o/--output` flag.
 Note: Export does NOT support `--dry-run` (not implemented in CLI).
+Note: Export helper `run_cai_export` needs to be added to sync-test-helpers.sh.
 
 ```bash
+# Helper for export (add to sync-test-helpers.sh)
+run_cai_export() {
+    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai export "$@"' _ "$SYNC_TEST_SRC_DIR" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+}
+
 test_export_basic() {
     # First import some data
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"original": true}' > "$FIXTURE_HOME/.claude/settings.json"
-    run_import --from "$FIXTURE_HOME"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"original": true}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
+    run_cai_import_from
 
     # Modify data in container volume
-    exec_in_container "$CONTAINER" bash -c 'echo "{\"modified\": true}" > /mnt/agent-data/claude/settings.json'
+    exec_in_container "$SYNC_TEST_CONTAINER" bash -c 'echo "{\"modified\": true}" > /mnt/agent-data/claude/settings.json'
 
     # Export to a .tgz archive
     EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
-    run_export --output "$EXPORT_ARCHIVE"
+    run_cai_export --output "$EXPORT_ARCHIVE"
 
     # Verify archive contains expected files
-    assert_archive_contains "$EXPORT_ARCHIVE" "claude/settings.json"
+    tar -tzf "$EXPORT_ARCHIVE" | grep -q "claude/settings.json" || return 1
 
     # Extract and verify content
     EXTRACT_DIR=$(mktemp -d)
     tar -xzf "$EXPORT_ARCHIVE" -C "$EXTRACT_DIR"
     content=$(cat "$EXTRACT_DIR/claude/settings.json")
-    assert_contains "$content" "modified"
+    [[ "$content" == *"modified"* ]] || return 1
 }
 
 test_export_with_config_excludes() {
     # Export excludes come from top-level default_excludes in config
     # Create config with exclude patterns (top-level, not [export] section)
-    mkdir -p "$FIXTURE_HOME/.config/containai"
-    cat > "$FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai"
+    cat > "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
 default_excludes = ["shell/bashrc.d/*.priv.*"]
 EOF
 
     # Import some data
-    mkdir -p "$FIXTURE_HOME/.bashrc.d"
-    echo 'public' > "$FIXTURE_HOME/.bashrc.d/public.sh"
-    run_import --from "$FIXTURE_HOME"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.bashrc.d"
+    echo 'public' > "$SYNC_TEST_FIXTURE_HOME/.bashrc.d/public.sh"
+    run_cai_import_from
 
     # Add a .priv file directly to volume (simulating container-side creation)
-    exec_in_container "$CONTAINER" bash -c 'echo "secret" > /mnt/agent-data/shell/bashrc.d/secret.priv.sh'
+    exec_in_container "$SYNC_TEST_CONTAINER" bash -c 'echo "secret" > /mnt/agent-data/shell/bashrc.d/secret.priv.sh'
 
     # Export with config that has excludes
     EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
-    run_export --output "$EXPORT_ARCHIVE" --config "$FIXTURE_HOME/.config/containai/containai.toml"
+    run_cai_export --output "$EXPORT_ARCHIVE" --config "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml"
 
     # Extract archive
     EXTRACT_DIR=$(mktemp -d)
     tar -xzf "$EXPORT_ARCHIVE" -C "$EXTRACT_DIR"
 
     # public.sh should be in archive
-    assert_file_exists "$EXTRACT_DIR/shell/bashrc.d/public.sh"
+    [[ -f "$EXTRACT_DIR/shell/bashrc.d/public.sh" ]] || return 1
     # .priv file should be excluded per config
-    assert_path_not_exists "$EXTRACT_DIR/shell/bashrc.d/secret.priv.sh"
+    [[ ! -e "$EXTRACT_DIR/shell/bashrc.d/secret.priv.sh" ]] || return 1
 }
 
 test_export_no_excludes_flag() {
     # --no-excludes skips exclude patterns
-    mkdir -p "$FIXTURE_HOME/.config/containai"
-    cat > "$FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai"
+    cat > "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
 default_excludes = ["claude/*"]
 EOF
 
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{}' > "$FIXTURE_HOME/.claude/settings.json"
-    run_import --from "$FIXTURE_HOME"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
+    run_cai_import_from
 
     # Export with --no-excludes
     EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
-    run_export --output "$EXPORT_ARCHIVE" --config "$FIXTURE_HOME/.config/containai/containai.toml" --no-excludes
+    run_cai_export --output "$EXPORT_ARCHIVE" --config "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" --no-excludes
 
     # claude/settings.json should be in archive (excludes skipped)
-    assert_archive_contains "$EXPORT_ARCHIVE" "claude/settings.json"
+    tar -tzf "$EXPORT_ARCHIVE" | grep -q "claude/settings.json" || return 1
 }
 ```
 

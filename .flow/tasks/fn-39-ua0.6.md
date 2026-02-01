@@ -19,29 +19,31 @@ Test edge cases: no-pollution for optional entries, partial configs, large direc
 | Symlink relinking | Internal absolute symlinks | Verify remapped correctly |
 | Concurrent containers | Two containers with separate volumes | Verify no conflicts |
 
+<!-- Updated by plan-sync: fn-39-ua0.2 used run_cai_import_from, $SYNC_TEST_FIXTURE_HOME, and || return 1 pattern -->
+
 ### No Pollution Test (Optional Entries)
 ```bash
 test_no_pollution_optional_agents() {
     # Create only Claude config (non-optional agent)
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{}' > "$FIXTURE_HOME/.claude/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
 
     # DON'T create Pi, Kimi, Cursor configs (optional agents)
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Claude should exist
-    assert_path_exists_in_container "/home/agent/.claude"
+    assert_path_exists_in_container "/home/agent/.claude" || return 1
 
     # Optional agents should NOT exist (no symlinks, no dirs)
-    assert_path_not_exists_in_container "/home/agent/.pi"
-    assert_path_not_exists_in_container "/home/agent/.kimi"
-    assert_path_not_exists_in_container "/home/agent/.cursor"
+    assert_path_not_exists_in_container "/home/agent/.pi" || return 1
+    assert_path_not_exists_in_container "/home/agent/.kimi" || return 1
+    assert_path_not_exists_in_container "/home/agent/.cursor" || return 1
 
     # No volume entries either
-    assert_path_not_exists_in_volume "pi"
-    assert_path_not_exists_in_volume "kimi"
-    assert_path_not_exists_in_volume "cursor"
+    assert_path_not_exists_in_volume "pi" || return 1
+    assert_path_not_exists_in_volume "kimi" || return 1
+    assert_path_not_exists_in_volume "cursor" || return 1
 }
 ```
 
@@ -49,22 +51,22 @@ test_no_pollution_optional_agents() {
 ```bash
 test_partial_config_non_optional() {
     # Create .claude dir but only settings.json
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"editor": "vim"}' > "$FIXTURE_HOME/.claude/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"editor": "vim"}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
     # Don't create .credentials.json (fs - secret, non-optional)
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # settings.json should sync with content
-    assert_file_exists_in_volume "claude/settings.json"
+    assert_file_exists_in_volume "claude/settings.json" || return 1
     content=$(cat_from_volume "claude/settings.json")
-    assert_contains "$content" "editor"
+    [[ "$content" == *"editor"* ]] || return 1
 
     # .credentials.json: missing source with s/j/d flags gets placeholder
     # In import.sh, ensure() is called for missing s/j/d sources
     # Placeholder exists with 600 perms but empty
-    assert_file_exists_in_volume "claude/credentials.json"
-    assert_permissions_in_volume "claude/credentials.json" "600"
+    assert_file_exists_in_volume "claude/credentials.json" || return 1
+    assert_permissions_in_volume "claude/credentials.json" "600" || return 1
 }
 ```
 
@@ -73,22 +75,22 @@ test_partial_config_non_optional() {
 test_partial_config_optional_agent() {
     # Create partial Pi config
     # Source: .pi/agent/settings.json -> Target: pi/settings.json
-    mkdir -p "$FIXTURE_HOME/.pi/agent"
-    echo '{}' > "$FIXTURE_HOME/.pi/agent/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.pi/agent"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.pi/agent/settings.json"
     # Don't create models.json, keybindings.json
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # settings.json syncs (source exists)
     # Note: target is "pi/settings.json" not "pi/agent/settings.json"
-    assert_file_exists_in_volume "pi/settings.json"
+    assert_file_exists_in_volume "pi/settings.json" || return 1
 
     # models.json NOT created (fjso - optional, source missing)
     # Target would be "pi/models.json"
-    assert_path_not_exists_in_volume "pi/models.json"
+    assert_path_not_exists_in_volume "pi/models.json" || return 1
 
     # keybindings.json NOT created (fjo - optional, source missing)
-    assert_path_not_exists_in_volume "pi/keybindings.json"
+    assert_path_not_exists_in_volume "pi/keybindings.json" || return 1
 }
 ```
 
@@ -96,31 +98,31 @@ test_partial_config_optional_agent() {
 ```bash
 test_large_fonts_directory() {
     # Create fonts/ with multiple files
-    mkdir -p "$FIXTURE_HOME/.local/share/fonts"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.local/share/fonts"
     for i in $(seq 1 50); do
         # Create small dummy font files
-        echo "font$i" > "$FIXTURE_HOME/.local/share/fonts/font$i.ttf"
+        echo "font$i" > "$SYNC_TEST_FIXTURE_HOME/.local/share/fonts/font$i.ttf"
     done
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Verify all fonts synced
-    count=$(count_files_in_volume "local/share/fonts")
-    assert_equals "$count" "50"
+    count=$(exec_in_container "$SYNC_TEST_CONTAINER" find /mnt/agent-data/local/share/fonts -type f -name '*.ttf' | wc -l)
+    [[ "$count" -eq 50 ]] || return 1
 }
 ```
 
 ### Unicode Content Test
 ```bash
 test_unicode_content_preserved() {
-    mkdir -p "$FIXTURE_HOME/.claude"
-    echo '{"name": "Test User", "emoji": "rocket", "chinese": "nihao"}' > "$FIXTURE_HOME/.claude/settings.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{"name": "Test User", "emoji": "rocket", "chinese": "nihao"}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     content=$(cat_from_volume "claude/settings.json")
-    assert_contains "$content" "rocket"
-    assert_contains "$content" "nihao"
+    [[ "$content" == *"rocket"* ]] || return 1
+    [[ "$content" == *"nihao"* ]] || return 1
 }
 ```
 
@@ -128,44 +130,68 @@ test_unicode_content_preserved() {
 ```bash
 test_internal_symlink_relinked() {
     # Create directory with internal absolute symlink
-    mkdir -p "$FIXTURE_HOME/.agents/shared"
-    echo 'shared config' > "$FIXTURE_HOME/.agents/shared/base.yml"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.agents/shared"
+    echo 'shared config' > "$SYNC_TEST_FIXTURE_HOME/.agents/shared/base.yml"
     # Create absolute symlink pointing to host path
-    ln -s "$FIXTURE_HOME/.agents/shared/base.yml" "$FIXTURE_HOME/.agents/link.yml"
+    ln -s "$SYNC_TEST_FIXTURE_HOME/.agents/shared/base.yml" "$SYNC_TEST_FIXTURE_HOME/.agents/link.yml"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Symlink should be relinked to container path
     # (Not original host path which wouldn't exist in container)
-    link_target=$(exec_in_container "$CONTAINER" readlink /home/agent/.agents/link.yml)
-    assert_not_contains "$link_target" "$FIXTURE_HOME"
+    link_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink /home/agent/.agents/link.yml)
+    [[ "$link_target" != *"$SYNC_TEST_FIXTURE_HOME"* ]] || return 1
 }
 ```
 
 ### Concurrent Containers (Separate Volumes)
 ```bash
+# Note: This test requires manual container/volume management since the test
+# harness uses a single container per test. Use run_agent_sync_test pattern
+# and modify for multi-container scenario.
+
 test_concurrent_containers_separate_volumes() {
     # Each container uses its own volume to avoid conflicts
     # This is the expected production pattern
 
-    CONTAINER1=$(start_test_container "test-sync-1" "vol1")
-    CONTAINER2=$(start_test_container "test-sync-2" "vol2")
+    # Create two volumes
+    local vol1 vol2
+    vol1=$(create_test_volume "concurrent-vol1")
+    vol2=$(create_test_volume "concurrent-vol2")
 
-    # Import to both containers
-    run_import_to "$CONTAINER1" --from "$FIXTURE_HOME"
-    run_import_to "$CONTAINER2" --from "$FIXTURE_HOME"
+    # Create two containers with separate volumes
+    create_test_container "concurrent-1" \
+        --volume "$vol1:/mnt/agent-data" \
+        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+    create_test_container "concurrent-2" \
+        --volume "$vol2:/mnt/agent-data" \
+        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+
+    local container1="test-concurrent-1-${SYNC_TEST_RUN_ID}"
+    local container2="test-concurrent-2-${SYNC_TEST_RUN_ID}"
+
+    # Create fixture
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
+
+    # Import to both containers (via their volumes)
+    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol1" 2>&1
+    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol2" 2>&1
+
+    # Start containers
+    start_test_container "$container1"
+    start_test_container "$container2"
 
     # Both should have configs independently
-    assert_file_exists_in_container "$CONTAINER1" "/home/agent/.claude/settings.json"
-    assert_file_exists_in_container "$CONTAINER2" "/home/agent/.claude/settings.json"
+    "${DOCKER_CMD[@]}" exec "$container1" test -f /home/agent/.claude/settings.json || return 1
+    "${DOCKER_CMD[@]}" exec "$container2" test -f /home/agent/.claude/settings.json || return 1
 
     # Modify one, verify other unchanged
-    exec_in_container "$CONTAINER1" bash -c 'echo "modified" >> /mnt/agent-data/claude/settings.json'
-    content2=$(exec_in_container "$CONTAINER2" cat /mnt/agent-data/claude/settings.json)
-    assert_not_contains "$content2" "modified"
+    "${DOCKER_CMD[@]}" exec "$container1" bash -c 'echo "modified" >> /mnt/agent-data/claude/settings.json'
+    content2=$("${DOCKER_CMD[@]}" exec "$container2" cat /mnt/agent-data/claude/settings.json)
+    [[ "$content2" != *"modified"* ]] || return 1
 
-    cleanup_container "$CONTAINER1"
-    cleanup_container "$CONTAINER2"
+    # Cleanup handled by trap
 }
 ```
 
@@ -177,6 +203,9 @@ test_concurrent_containers_separate_volumes() {
 - Pi paths: source `.pi/agent/x` -> target `pi/x` (no `agent` in target)
 - Symlink relinking handled by import.sh for internal absolute symlinks
 - Concurrent containers use separate volumes (production pattern)
+- Test infrastructure: use `$SYNC_TEST_FIXTURE_HOME`, `$SYNC_TEST_CONTAINER`, `run_cai_import_from`
+- Pattern matching: use `[[ "$var" == *"pattern"* ]] || return 1` instead of `assert_contains`
+- Multi-container: create volumes/containers manually using `create_test_volume`/`create_test_container`
 
 ## Acceptance
 - [ ] No-pollution: optional agent roots not created when missing

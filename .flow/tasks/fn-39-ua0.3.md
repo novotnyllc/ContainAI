@@ -23,11 +23,13 @@ Test sync for dev tools: Git (with g-filter), GitHub CLI (secret separation), SS
 | Starship | .config/starship.toml | f | |
 | Oh My Posh | .config/oh-my-posh/ | dR | |
 
+<!-- Updated by plan-sync: fn-39-ua0.2 used run_cai_import_from and pattern matching, not run_import and assert_contains -->
+
 ### Git g-filter Test
 ```bash
 test_git_filter() {
     # Create gitconfig with credential.helper and signing config
-    cat > "$FIXTURE_HOME/.gitconfig" <<'EOF'
+    cat > "$SYNC_TEST_FIXTURE_HOME/.gitconfig" <<'EOF'
 [user]
     name = Test User
     email = test@example.com
@@ -39,14 +41,14 @@ test_git_filter() {
     program = /usr/local/bin/gpg
 EOF
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Verify credential.helper and signing config stripped
     gitconfig=$(cat_from_volume "git/gitconfig")
-    assert_contains "$gitconfig" "name = Test User"
-    assert_not_contains "$gitconfig" "credential.helper"
-    assert_not_contains "$gitconfig" "gpgsign"
-    assert_not_contains "$gitconfig" "gpg"
+    [[ "$gitconfig" == *"name = Test User"* ]] || return 1
+    [[ "$gitconfig" != *"credential.helper"* ]] || return 1
+    [[ "$gitconfig" != *"gpgsign"* ]] || return 1
+    [[ "$gitconfig" != *"gpg"* ]] || return 1
 }
 ```
 
@@ -54,25 +56,27 @@ EOF
 ```bash
 test_gh_secret_separation() {
     # hosts.yml is secret, config.yml is not
-    mkdir -p "$FIXTURE_HOME/.config/gh"
-    echo "token: secret123" > "$FIXTURE_HOME/.config/gh/hosts.yml"
-    echo "editor: vim" > "$FIXTURE_HOME/.config/gh/config.yml"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/gh"
+    echo "token: secret123" > "$SYNC_TEST_FIXTURE_HOME/.config/gh/hosts.yml"
+    echo "editor: vim" > "$SYNC_TEST_FIXTURE_HOME/.config/gh/config.yml"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Both should sync
-    assert_file_exists_in_volume "config/gh/hosts.yml"
-    assert_file_exists_in_volume "config/gh/config.yml"
+    assert_file_exists_in_volume "config/gh/hosts.yml" || return 1
+    assert_file_exists_in_volume "config/gh/config.yml" || return 1
 
     # hosts.yml should have 600 perms
-    assert_permissions_in_volume "config/gh/hosts.yml" "600"
+    assert_permissions_in_volume "config/gh/hosts.yml" "600" || return 1
     # config.yml should NOT have 600 perms (not secret)
-    assert_permissions_not_600_in_volume "config/gh/config.yml"
+    local config_perms
+    config_perms=$(exec_in_container "$SYNC_TEST_CONTAINER" stat -c '%a' "/mnt/agent-data/config/gh/config.yml")
+    [[ "$config_perms" != "600" ]] || return 1
 
     # With --no-secrets, only hosts.yml skipped
-    run_import --from "$FIXTURE_HOME" --no-secrets
-    assert_file_not_exists_in_volume "config/gh/hosts.yml"
-    assert_file_exists_in_volume "config/gh/config.yml"
+    run_cai_import_from --no-secrets
+    assert_path_not_exists_in_volume "config/gh/hosts.yml" || return 1
+    assert_file_exists_in_volume "config/gh/config.yml" || return 1
 }
 ```
 
@@ -80,34 +84,34 @@ test_gh_secret_separation() {
 ```bash
 test_ssh_disabled_by_default() {
     # Create SSH config in fixture
-    mkdir -p "$FIXTURE_HOME/.ssh"
-    echo "Host *" > "$FIXTURE_HOME/.ssh/config"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.ssh"
+    echo "Host *" > "$SYNC_TEST_FIXTURE_HOME/.ssh/config"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # SSH should NOT be synced (disabled=true in manifest)
-    assert_path_not_exists_in_volume "ssh"
+    assert_path_not_exists_in_volume "ssh" || return 1
 }
 
 test_ssh_via_additional_paths() {
     # Create containai.toml with additional_paths
-    mkdir -p "$FIXTURE_HOME/.config/containai"
-    cat > "$FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai"
+    cat > "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" <<'EOF'
 [import]
 additional_paths = ["~/.ssh"]
 EOF
 
-    mkdir -p "$FIXTURE_HOME/.ssh"
-    echo "Host *" > "$FIXTURE_HOME/.ssh/config"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.ssh"
+    echo "Host *" > "$SYNC_TEST_FIXTURE_HOME/.ssh/config"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # SSH should now be synced
-    assert_file_exists_in_volume "ssh/config"
+    assert_file_exists_in_volume "ssh/config" || return 1
 
     # NOTE: --no-secrets does NOT exclude additional_paths
-    run_import --from "$FIXTURE_HOME" --no-secrets
-    assert_file_exists_in_volume "ssh/config"
+    run_cai_import_from --no-secrets
+    assert_file_exists_in_volume "ssh/config" || return 1
 }
 ```
 
@@ -118,23 +122,23 @@ test_vscode_server_ensures_targets() {
     # Even when source is missing, targets are ensured (empty dirs created)
     # Don't create any VS Code files in fixture
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Directories should be ensured even when source missing
     # ensure() is called for non-optional d entries
-    assert_path_exists_in_volume "vscode-server/extensions"
-    assert_path_exists_in_volume "vscode-server/data/Machine"
-    assert_path_exists_in_volume "vscode-server/data/User/mcp"
+    assert_path_exists_in_volume "vscode-server/extensions" || return 1
+    assert_path_exists_in_volume "vscode-server/data/Machine" || return 1
+    assert_path_exists_in_volume "vscode-server/data/User/mcp" || return 1
 }
 
 test_vscode_server_syncs_content() {
     # When source exists, content syncs
-    mkdir -p "$FIXTURE_HOME/.vscode-server/extensions/test-ext"
-    echo '{}' > "$FIXTURE_HOME/.vscode-server/extensions/test-ext/package.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.vscode-server/extensions/test-ext"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.vscode-server/extensions/test-ext/package.json"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
-    assert_file_exists_in_volume "vscode-server/extensions/test-ext/package.json"
+    assert_file_exists_in_volume "vscode-server/extensions/test-ext/package.json" || return 1
 }
 ```
 
@@ -151,54 +155,54 @@ Volume target paths from sync-manifest.toml:
 ```bash
 test_tmux_sync() {
     # Legacy .tmux.conf syncs to config/tmux/tmux.conf
-    echo 'set -g mouse on' > "$FIXTURE_HOME/.tmux.conf"
+    echo 'set -g mouse on' > "$SYNC_TEST_FIXTURE_HOME/.tmux.conf"
     # XDG .config/tmux syncs to config/tmux
-    mkdir -p "$FIXTURE_HOME/.config/tmux"
-    echo 'source-file ~/.tmux.conf' > "$FIXTURE_HOME/.config/tmux/tmux.conf"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/tmux"
+    echo 'source-file ~/.tmux.conf' > "$SYNC_TEST_FIXTURE_HOME/.config/tmux/tmux.conf"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # Legacy tmux.conf -> config/tmux/tmux.conf
-    assert_file_exists_in_volume "config/tmux/tmux.conf"
+    assert_file_exists_in_volume "config/tmux/tmux.conf" || return 1
     # XDG config/tmux -> config/tmux (same target, XDG wins)
     content=$(cat_from_volume "config/tmux/tmux.conf")
     # XDG should overwrite legacy since it syncs second
-    assert_contains "$content" "source-file"
+    [[ "$content" == *"source-file"* ]] || return 1
 }
 
 test_vim_sync() {
-    echo 'set number' > "$FIXTURE_HOME/.vimrc"
-    mkdir -p "$FIXTURE_HOME/.vim/colors"
-    echo 'colorscheme test' > "$FIXTURE_HOME/.vim/colors/test.vim"
-    mkdir -p "$FIXTURE_HOME/.config/nvim"
-    echo 'set termguicolors' > "$FIXTURE_HOME/.config/nvim/init.vim"
+    echo 'set number' > "$SYNC_TEST_FIXTURE_HOME/.vimrc"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.vim/colors"
+    echo 'colorscheme test' > "$SYNC_TEST_FIXTURE_HOME/.vim/colors/test.vim"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/nvim"
+    echo 'set termguicolors' > "$SYNC_TEST_FIXTURE_HOME/.config/nvim/init.vim"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
     # .vimrc -> editors/vimrc
-    assert_file_exists_in_volume "editors/vimrc"
+    assert_file_exists_in_volume "editors/vimrc" || return 1
     # .vim/ -> editors/vim/
-    assert_file_exists_in_volume "editors/vim/colors/test.vim"
+    assert_file_exists_in_volume "editors/vim/colors/test.vim" || return 1
     # .config/nvim/ -> config/nvim/
-    assert_file_exists_in_volume "config/nvim/init.vim"
+    assert_file_exists_in_volume "config/nvim/init.vim" || return 1
 }
 
 test_starship_sync() {
-    mkdir -p "$FIXTURE_HOME/.config"
-    echo 'format = "$all"' > "$FIXTURE_HOME/.config/starship.toml"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config"
+    echo 'format = "$all"' > "$SYNC_TEST_FIXTURE_HOME/.config/starship.toml"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
-    assert_file_exists_in_volume "config/starship.toml"
+    assert_file_exists_in_volume "config/starship.toml" || return 1
 }
 
 test_ohmyposh_sync() {
-    mkdir -p "$FIXTURE_HOME/.config/oh-my-posh"
-    echo '{}' > "$FIXTURE_HOME/.config/oh-my-posh/theme.json"
+    mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/oh-my-posh"
+    echo '{}' > "$SYNC_TEST_FIXTURE_HOME/.config/oh-my-posh/theme.json"
 
-    run_import --from "$FIXTURE_HOME"
+    run_cai_import_from
 
-    assert_file_exists_in_volume "config/oh-my-posh/theme.json"
+    assert_file_exists_in_volume "config/oh-my-posh/theme.json" || return 1
 }
 ```
 
