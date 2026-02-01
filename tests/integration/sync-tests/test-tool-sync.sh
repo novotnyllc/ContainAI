@@ -17,6 +17,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Make tests hermetic: clear config discovery inputs to prevent developer's
+# real config (e.g., ~/.config/containai/containai.toml) from affecting tests.
+# This prevents issues like additional_paths=["~/.ssh"] in user's config
+# breaking the ssh-disabled test.
+unset XDG_CONFIG_HOME 2>/dev/null || true
+
 # Source test helpers
 source "$SCRIPT_DIR/../sync-test-helpers.sh"
 
@@ -217,9 +223,13 @@ test_git_filter_assertions() {
         return 1
     fi
 
-    # Verify safe.directory added
-    if [[ "$gitconfig" != *"safe"* ]] || [[ "$gitconfig" != *"/home/agent/workspace"* ]]; then
-        printf '%s\n' "[DEBUG] gitconfig does not contain safe.directory" >&2
+    # Verify safe.directory added - check for actual [safe] section and the directory line
+    if [[ "$gitconfig" != *"[safe]"* ]]; then
+        printf '%s\n' "[DEBUG] gitconfig does not contain [safe] section" >&2
+        return 1
+    fi
+    if [[ "$gitconfig" != *"directory = /home/agent/workspace"* ]] && [[ "$gitconfig" != *"directory=/home/agent/workspace"* ]]; then
+        printf '%s\n' "[DEBUG] gitconfig does not contain safe.directory = /home/agent/workspace" >&2
         return 1
     fi
 
@@ -307,19 +317,20 @@ setup_ssh_fixture() {
     printf '%s\n' 'Host *' >"$fixture/.ssh/config"
     printf '%s\n' '    StrictHostKeyChecking no' >>"$fixture/.ssh/config"
     printf '%s\n' 'github.com ssh-ed25519 AAAA...' >"$fixture/.ssh/known_hosts"
-    # Create a fake key for testing (not a real key)
-    printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' >"$fixture/.ssh/id_ed25519"
-    printf '%s\n' 'test key content' >>"$fixture/.ssh/id_ed25519"
-    printf '%s\n' '-----END OPENSSH PRIVATE KEY-----' >>"$fixture/.ssh/id_ed25519"
+    # Create fake key files for testing - use non-key-looking content to avoid
+    # triggering security scanners that look for SSH key headers
+    printf '%s\n' 'TEST_PRIVATE_KEY_MARKER_START' >"$fixture/.ssh/id_ed25519"
+    printf '%s\n' 'fake test key content for testing purposes only' >>"$fixture/.ssh/id_ed25519"
+    printf '%s\n' 'TEST_PRIVATE_KEY_MARKER_END' >>"$fixture/.ssh/id_ed25519"
     printf '%s\n' 'ssh-ed25519 AAAA... test@example.com' >"$fixture/.ssh/id_ed25519.pub"
 }
 
 test_ssh_disabled_assertions() {
     # SSH should NOT be synced by default (disabled=true in manifest)
-    if assert_path_exists_in_volume "ssh" 2>/dev/null; then
+    assert_path_not_exists_in_volume "ssh" || {
         printf '%s\n' "[DEBUG] ssh directory exists but should not (disabled by default)" >&2
         return 1
-    fi
+    }
 
     return 0
 }
@@ -334,10 +345,11 @@ setup_ssh_additional_paths_fixture() {
     printf '%s\n' 'Host *' >"$fixture/.ssh/config"
     printf '%s\n' '    StrictHostKeyChecking no' >>"$fixture/.ssh/config"
     printf '%s\n' 'github.com ssh-ed25519 AAAA...' >"$fixture/.ssh/known_hosts"
-    # Create a fake key for testing (not a real key)
-    printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' >"$fixture/.ssh/id_ed25519"
-    printf '%s\n' 'test key content' >>"$fixture/.ssh/id_ed25519"
-    printf '%s\n' '-----END OPENSSH PRIVATE KEY-----' >>"$fixture/.ssh/id_ed25519"
+    # Create fake key files for testing - use non-key-looking content to avoid
+    # triggering security scanners that look for SSH key headers
+    printf '%s\n' 'TEST_PRIVATE_KEY_MARKER_START' >"$fixture/.ssh/id_ed25519"
+    printf '%s\n' 'fake test key content for testing purposes only' >>"$fixture/.ssh/id_ed25519"
+    printf '%s\n' 'TEST_PRIVATE_KEY_MARKER_END' >>"$fixture/.ssh/id_ed25519"
     printf '%s\n' 'ssh-ed25519 AAAA... test@example.com' >"$fixture/.ssh/id_ed25519.pub"
 
     # Create containai.toml with additional_paths to opt-in SSH
@@ -504,20 +516,43 @@ test_vscode_content_sync_assertions() {
 }
 
 # ==============================================================================
-# Test 9: tmux sync
+# Test 9: tmux sync - verify XDG wins over legacy
 # ==============================================================================
+# Custom setup to verify XDG precedence: use distinct content in legacy vs XDG
+setup_tmux_precedence_fixture() {
+    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
+    mkdir -p "$fixture/.config/tmux"
+    mkdir -p "$fixture/.local/share/tmux/plugins/tpm"
+
+    # Legacy content with distinct marker
+    printf '%s\n' '# LEGACY_TMUX_MARKER' >"$fixture/.tmux.conf"
+    printf '%s\n' 'set -g prefix C-b' >>"$fixture/.tmux.conf"
+
+    # XDG content with distinct marker - this should WIN when both exist
+    printf '%s\n' '# XDG_TMUX_MARKER' >"$fixture/.config/tmux/tmux.conf"
+    printf '%s\n' 'set -g prefix C-a' >>"$fixture/.config/tmux/tmux.conf"
+
+    printf '%s\n' '# TPM' >"$fixture/.local/share/tmux/plugins/tpm/tpm"
+}
+
 test_tmux_sync_assertions() {
-    # Legacy .tmux.conf syncs to config/tmux/tmux.conf
+    # tmux.conf should exist in volume
     assert_file_exists_in_volume "config/tmux/tmux.conf" || return 1
 
-    # Verify content
+    # Verify XDG wins over legacy: the XDG marker should be present
+    # (XDG config syncs AFTER legacy, so it overwrites)
     local content
     content=$(cat_from_volume "config/tmux/tmux.conf") || return 1
 
-    # Either legacy or XDG content should be present
-    # XDG overwrites legacy when both exist
-    if [[ "$content" != *"prefix"* ]]; then
-        printf '%s\n' "[DEBUG] tmux.conf does not contain expected content" >&2
+    if [[ "$content" != *"XDG_TMUX_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] tmux.conf does not contain XDG_TMUX_MARKER - XDG should win over legacy" >&2
+        printf '%s\n' "[DEBUG] Content: $content" >&2
+        return 1
+    fi
+
+    # Legacy marker should NOT be present (XDG overwrites)
+    if [[ "$content" == *"LEGACY_TMUX_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] tmux.conf contains LEGACY marker but XDG should have overwritten it" >&2
         return 1
     fi
 
@@ -623,8 +658,8 @@ main() {
     # Test 8: VS Code Server - content syncs when source exists
     run_tool_sync_test "vscode-content" create_vscode_fixture test_vscode_content_sync_assertions
 
-    # Test 9: tmux sync
-    run_tool_sync_test "tmux-sync" create_tmux_fixture test_tmux_sync_assertions
+    # Test 9: tmux sync - verify XDG wins over legacy
+    run_tool_sync_test "tmux-sync" setup_tmux_precedence_fixture test_tmux_sync_assertions
 
     # Test 10: vim/neovim sync
     run_tool_sync_test "vim-sync" create_vim_fixture test_vim_sync_assertions
