@@ -1838,22 +1838,23 @@ _containai_status_cmd() {
 
     # Resolve container name if not provided
     local selected_context=""
+    # Effective workspace for context resolution (use --workspace if provided, else PWD)
+    local effective_ws="${workspace:-$PWD}"
     if [[ -z "$container_name" ]]; then
-        # Use workspace (default to PWD)
-        local resolve_ws="${workspace:-$PWD}"
+        # Look up container from workspace state
         local ws_container_name
-        ws_container_name=$(_containai_read_workspace_key "$resolve_ws" "container_name" 2>/dev/null) || ws_container_name=""
+        ws_container_name=$(_containai_read_workspace_key "$effective_ws" "container_name" 2>/dev/null) || ws_container_name=""
         if [[ -z "$ws_container_name" ]]; then
-            echo "[ERROR] No container found for workspace: $resolve_ws" >&2
+            echo "[ERROR] No container found for workspace: $effective_ws" >&2
             echo "Use 'cai status --container <name>' to specify a container" >&2
             return 1
         fi
         container_name="$ws_container_name"
     fi
 
-    # Find container and context
+    # Find container and context (use effective workspace for config discovery)
     local find_rc
-    if ! selected_context=$(_cai_find_container_by_name "$container_name" "" "$PWD"); then
+    if ! selected_context=$(_cai_find_container_by_name "$container_name" "" "$effective_ws"); then
         find_rc=$?
         if [[ $find_rc -eq 2 ]] || [[ $find_rc -eq 3 ]]; then
             return 1  # Error already printed
@@ -1873,16 +1874,14 @@ _containai_status_cmd() {
         return 1
     fi
 
-    # Get required container info
-    local inspect_json status image started_at
-    inspect_json=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$container_name" 2>/dev/null) || {
+    # Get required container info using docker inspect --format (no Python dependency)
+    local status image started_at
+    status=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$container_name" 2>/dev/null) || {
         echo "[ERROR] Failed to inspect container: $container_name" >&2
         return 1
     }
-
-    status=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['State']['Status'])" 2>/dev/null) || status="unknown"
-    image=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['Config']['Image'])" 2>/dev/null) || image="unknown"
-    started_at=$(printf '%s' "$inspect_json" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['State']['StartedAt'])" 2>/dev/null) || started_at=""
+    image=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image="unknown"
+    started_at=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.State.StartedAt}}' -- "$container_name" 2>/dev/null) || started_at=""
 
     # Best-effort: Calculate uptime
     local uptime=""
@@ -1963,22 +1962,18 @@ if l > 0:
     fi
 
     # Best-effort: Get session info (5s timeout)
+    # Use single docker exec to get counts directly (avoids duplicate _cai_detect_sessions call)
     local ssh_count="" pty_count=""
     if [[ "$status" == "running" ]]; then
-        local session_result
-        _cai_detect_sessions "$container_name" "$selected_context" && session_result=$? || session_result=$?
-        if [[ "$session_result" -eq 0 || "$session_result" -eq 1 ]]; then
-            # Get actual counts by re-running the detection and capturing output
-            local session_output
-            if session_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" exec "$container_name" sh -c '
-                if command -v ss >/dev/null 2>&1; then
-                    ssh_count=$(ss -t state established sport = :22 2>/dev/null | tail -n +2 | wc -l)
-                    pty_count=$(ls /dev/pts/ 2>/dev/null | grep -c "^[0-9]" || echo 0)
-                    echo "$ssh_count $pty_count"
-                fi
-            ' 2>/dev/null); then
-                read -r ssh_count pty_count <<< "$session_output"
+        local session_output
+        if session_output=$(_cai_timeout 5 env DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" exec "$container_name" sh -c '
+            if command -v ss >/dev/null 2>&1; then
+                ssh_count=$(ss -t state established sport = :22 2>/dev/null | tail -n +2 | wc -l)
+                pty_count=$(ls /dev/pts/ 2>/dev/null | grep -c "^[0-9]" || echo 0)
+                echo "$ssh_count $pty_count"
             fi
+        ' 2>/dev/null); then
+            read -r ssh_count pty_count <<< "$session_output"
         fi
     fi
 
