@@ -1,15 +1,20 @@
 {
   "branch_name": "fn-37-4xi",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-28T19:11:00.398775Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-35-e0x"
   ],
   "id": "fn-37-4xi",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-01T20:04:15.368234Z",
   "spec_path": ".flow/specs/fn-37-4xi.md",
   "status": "open",
   "title": "Base Image Contract Documentation",
-  "updated_at": "2026-01-28T19:47:44.156564Z"
+  "updated_at": "2026-02-01T20:04:15.368247Z"
 }

@@ -1,16 +1,21 @@
 {
   "branch_name": "fn-35-e0x",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-28T10:14:47.337549Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-36-rb7",
     "fn-42-cli-ux-fixes-hostname-reset-wait-help"
   ],
   "id": "fn-35-e0x",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-01T19:00:02.955249Z",
   "spec_path": ".flow/specs/fn-35-e0x.md",
-  "status": "open",
+  "status": "done",
   "title": "Agent Extensibility & Pi Support",
-  "updated_at": "2026-01-30T04:13:57.457785Z"
+  "updated_at": "2026-02-01T19:50:51.915072Z"
 }

@@ -11,6 +11,6 @@
   "priority": 5,
   "spec_path": ".flow/tasks/fn-35-e0x.5.md",
   "status": "todo",
-  "title": "Create E2E test for Pi",
+  "title": "Build and verify",
   "updated_at": "2026-01-29T07:07:41.744708Z"
 }

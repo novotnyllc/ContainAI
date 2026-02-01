@@ -1,0 +1,130 @@
+{
+  "created_at": "2026-02-01T18:43:41.634672Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-35-e0x",
+      "created_at": "2026-01-28T10:14:47.337549Z",
+      "depends_on_epics": [
+        "fn-36-rb7",
+        "fn-42-cli-ux-fixes-hostname-reset-wait-help"
+      ],
+      "id": "fn-35-e0x",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-35-e0x.md",
+      "status": "open",
+      "title": "Agent Extensibility & Pi Support",
+      "updated_at": "2026-01-30T04:13:57.457785Z"
+    },
+    "spec": "# fn-35-e0x Pi & Kimi Code Sync Support\n\n## Overview\n\nAdd sync-manifest.toml entries for Pi coding agent (`@mariozechner/pi-coding-agent`) and Kimi CLI (`kimi-cli`) to enable config syncing between host and container.\n\n**Note**: Both agents are already installed in the Docker image. This epic adds only the config sync support.\n\n**Pi Agent**: `@mariozechner/pi-coding-agent` by Mario Zechner (badlogic). A coding agent CLI with read, bash, edit, write tools and session management. **NOT** Inflection AI's Pi.\n\n**Kimi CLI**: MoonshotAI's official coding assistant CLI.\n\n## Scope\n\n### In Scope\n- Add Pi entries to sync-manifest.toml\n- Add Kimi entries to sync-manifest.toml\n- Add data directories to Dockerfile.agents (mkdir -p)\n- Run generators and rebuild image\n- Verify sync works correctly\n\n### Out of Scope\n- Agent installation (already done)\n- E2E tests (simple verification suffices)\n- Documentation updates (separate epic)\n\n## Approach\n\n### Pi Config Locations (`~/.pi/agent/`)\n| File | Purpose | Flags |\n|------|---------|-------|\n| `settings.json` | User preferences | `fj` |\n| `models.json` | Provider config with API keys | `fjs` (SECRET) |\n| `keybindings.json` | Key bindings | `fj` |\n| `skills/` | Custom skills | `dR` |\n| `extensions/` | Extensions | `dR` |\n| `sessions/` | EXCLUDED - ephemeral, per-project |\n\n### Kimi Config Locations (`~/.kimi/`)\n| File | Purpose | Flags |\n|------|---------|-------|\n| `config.toml` | Main config with API keys | `fs` (SECRET) |\n| `mcp.json` | MCP server config | `fjs` (SECRET) |\n| `sessions/` | EXCLUDED - ephemeral |\n\n### Dockerfile.agents Changes\nAdd to directory creation block (lines 51-59):\n```dockerfile\n/home/agent/.pi \\\n/home/agent/.pi/agent \\\n/home/agent/.kimi\n```\n\n## Tasks\n\n### fn-35-e0x.1: Add Pi to sync-manifest.toml\nAdd entries for Pi config files. Use patterns from existing agents (Claude at lines 30-88).\n\n### fn-35-e0x.2: Add Kimi to sync-manifest.toml\nAdd entries for Kimi config files. Similar pattern to Pi.\n\n### fn-35-e0x.3: Add directories to Dockerfile.agents\nAdd mkdir -p for ~/.pi, ~/.pi/agent, ~/.kimi in the agent data directory block.\n\n### fn-35-e0x.4: Run generators and rebuild\nRun ./src/build.sh which regenerates symlinks.sh, init-dirs.sh, link-spec.json.\n\n### fn-35-e0x.5: Verify sync works\nQuick manual verification that configs sync correctly.\n\n## Quick commands\n\n```bash\n# Build with new entries\n./src/build.sh\n\n# Test in container\ncai shell\npi --version\nkimi --version\n\n# Verify symlinks exist\nls -la ~/.pi/agent/\nls -la ~/.kimi/\n\n# Verify sync (if you have Pi/Kimi config)\ncai import --dry-run | grep -E 'pi|kimi'\n```\n\n## Acceptance\n\n- [ ] Pi entries added to sync-manifest.toml\n- [ ] Kimi entries added to sync-manifest.toml\n- [ ] Directories created in Dockerfile.agents\n- [ ] Generated files updated (symlinks.sh, init-dirs.sh, link-spec.json)\n- [ ] Image builds successfully\n- [ ] Symlinks resolve correctly in container\n\n## Dependencies\n\n- **fn-36-rb7**: CLI UX Consistency (for container testing)\n\n## References\n\n- Pi Mono: https://github.com/badlogic/pi-mono\n- Kimi CLI: https://github.com/MoonshotAI/kimi-cli\n- Existing patterns: sync-manifest.toml lines 30-88 (Claude), 422-467 (Codex)\n- Dockerfile.agents: src/container/Dockerfile.agents\n"
+  },
+  "epic_id": "fn-35-e0x",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:19:05.658886Z",
+        "depends_on": [],
+        "epic": "fn-35-e0x",
+        "id": "fn-35-e0x.1",
+        "priority": 1,
+        "spec_path": ".flow/tasks/fn-35-e0x.1.md",
+        "status": "todo",
+        "title": "Research Pi agent",
+        "updated_at": "2026-01-29T06:41:38.499913Z"
+      },
+      "id": "fn-35-e0x.1",
+      "runtime": null,
+      "spec": "# fn-35-e0x.1 Research Pi agent\n\n## Description\nAdd sync-manifest.toml entries for both Pi coding agent and Kimi CLI.\n\n**Size:** M\n**Files:** `src/sync-manifest.toml`\n\n## Approach\n\nFollow existing patterns from Claude (lines 30-88) and Codex (lines 422-467).\n\n### Pi Entries (`~/.pi/agent/`)\n```toml\n# =============================================================================\n# PI (Mario Zechner's pi-coding-agent)\n# =============================================================================\n\n[[entries]]\nsource = \".pi/agent/settings.json\"\ntarget = \"pi/settings.json\"\ncontainer_link = \".pi/agent/settings.json\"\nflags = \"fj\"\n\n[[entries]]\nsource = \".pi/agent/models.json\"\ntarget = \"pi/models.json\"\ncontainer_link = \".pi/agent/models.json\"\nflags = \"fjs\"  # SECRET - contains API keys\n\n[[entries]]\nsource = \".pi/agent/keybindings.json\"\ntarget = \"pi/keybindings.json\"\ncontainer_link = \".pi/agent/keybindings.json\"\nflags = \"fj\"\n\n[[entries]]\nsource = \".pi/agent/skills\"\ntarget = \"pi/skills\"\ncontainer_link = \".pi/agent/skills\"\nflags = \"dR\"\n\n[[entries]]\nsource = \".pi/agent/extensions\"\ntarget = \"pi/extensions\"\ncontainer_link = \".pi/agent/extensions\"\nflags = \"dR\"\n```\n\n### Kimi Entries (`~/.kimi/`)\n```toml\n# =============================================================================\n# KIMI CLI (MoonshotAI)\n# =============================================================================\n\n[[entries]]\nsource = \".kimi/config.toml\"\ntarget = \"kimi/config.toml\"\ncontainer_link = \".kimi/config.toml\"\nflags = \"fs\"  # SECRET\n\n[[entries]]\nsource = \".kimi/mcp.json\"\ntarget = \"kimi/mcp.json\"\ncontainer_link = \".kimi/mcp.json\"\nflags = \"fjs\"  # SECRET\n```\n\n## Key context\n\n- Sessions directories are excluded (ephemeral, per-project)\n- Pi uses `~/.pi/agent/` not `~/.pi/`\n- `fjs` = file + json-init + secret\n- `dR` = directory + remove existing first\n## Acceptance\n- [ ] Pi entries added with correct paths (~/.pi/agent/)\n- [ ] Pi models.json marked as secret (fjs flag)\n- [ ] Kimi entries added with correct paths (~/.kimi/)\n- [ ] Kimi config.toml marked as secret (fs flag)\n- [ ] Sessions excluded for both agents\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:19:05.723932Z",
+        "depends_on": [
+          "fn-35-e0x.1"
+        ],
+        "epic": "fn-35-e0x",
+        "id": "fn-35-e0x.2",
+        "priority": 2,
+        "spec_path": ".flow/tasks/fn-35-e0x.2.md",
+        "status": "todo",
+        "title": "Add Pi to sync-manifest.toml",
+        "updated_at": "2026-01-29T06:42:03.808654Z"
+      },
+      "id": "fn-35-e0x.2",
+      "runtime": null,
+      "spec": "# fn-35-e0x.2 Add Pi to sync-manifest.toml\n\n## Description\nAdd mkdir -p for Pi and Kimi directories in Dockerfile.agents agent data directory block.\n\n**Size:** S\n**Files:** `src/container/Dockerfile.agents`\n\n## Approach\n\nAdd to the existing mkdir block at lines 51-59:\n```dockerfile\n/home/agent/.pi \\\n/home/agent/.pi/agent \\\n/home/agent/.kimi\n```\n\n## Key context\n\n- Pi uses nested structure: `~/.pi/agent/` for config\n- Kimi uses flat structure: `~/.kimi/`\n- These directories must exist before symlinks are created\n## Acceptance\n- [ ] ~/.pi directory added\n- [ ] ~/.pi/agent directory added\n- [ ] ~/.kimi directory added\n- [ ] Directories in correct location (agent data block)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:19:05.792125Z",
+        "depends_on": [
+          "fn-35-e0x.1",
+          "fn-35-e0x.2"
+        ],
+        "epic": "fn-35-e0x",
+        "id": "fn-35-e0x.3",
+        "priority": 3,
+        "spec_path": ".flow/tasks/fn-35-e0x.3.md",
+        "status": "todo",
+        "title": "Add Pi to Dockerfile.agents",
+        "updated_at": "2026-01-29T06:42:03.940697Z"
+      },
+      "id": "fn-35-e0x.3",
+      "runtime": null,
+      "spec": "# fn-35-e0x.3 Add Pi to Dockerfile.agents\n\n## Description\nRun the build script to regenerate all generated files and rebuild the Docker image.\n\n**Size:** S\n**Files:** Generated files (auto-created)\n\n## Approach\n\n```bash\n./src/build.sh\n```\n\nThis will:\n1. Regenerate `src/container/generated/symlinks.sh`\n2. Regenerate `src/container/generated/init-dirs.sh`\n3. Regenerate `src/container/generated/link-spec.json`\n4. Build the Docker image\n\n## Key context\n\n- build.sh auto-runs all generators at lines 392-407\n- No need to run individual gen-* scripts\n## Acceptance\n- [ ] Generators run successfully\n- [ ] symlinks.sh includes Pi and Kimi entries\n- [ ] init-dirs.sh includes Pi and Kimi directories\n- [ ] link-spec.json includes Pi and Kimi entries\n- [ ] Docker image builds without errors\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:19:05.855843Z",
+        "depends_on": [
+          "fn-35-e0x.3"
+        ],
+        "epic": "fn-35-e0x",
+        "id": "fn-35-e0x.4",
+        "priority": 4,
+        "spec_path": ".flow/tasks/fn-35-e0x.4.md",
+        "status": "todo",
+        "title": "Run generators and rebuild image",
+        "updated_at": "2026-01-29T06:42:04.004685Z"
+      },
+      "id": "fn-35-e0x.4",
+      "runtime": null,
+      "spec": "# fn-35-e0x.4 Run generators and rebuild image\n\n## Description\nVerify that symlinks are created correctly in the container and configs would sync properly.\n\n**Size:** S\n**Files:** None (verification only)\n\n## Approach\n\n```bash\n# Start container\ncai shell\n\n# Verify symlinks exist\nls -la ~/.pi/agent/\nls -la ~/.kimi/\n\n# Check that symlinks point to correct targets\nreadlink ~/.pi/agent/settings.json\nreadlink ~/.kimi/config.toml\n\n# Verify Pi and Kimi still work\npi --version\nkimi --version\n```\n\n## Key context\n\n- Symlinks should point to /mnt/agent-data/pi/ and /mnt/agent-data/kimi/\n- Agents should still function with symlinked configs\n## Acceptance\n- [ ] Pi symlinks resolve correctly\n- [ ] Kimi symlinks resolve correctly\n- [ ] pi --version works\n- [ ] kimi --version works\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:19:05.923212Z",
+        "depends_on": [
+          "fn-35-e0x.4"
+        ],
+        "epic": "fn-35-e0x",
+        "id": "fn-35-e0x.5",
+        "priority": 5,
+        "spec_path": ".flow/tasks/fn-35-e0x.5.md",
+        "status": "todo",
+        "title": "Create E2E test for Pi",
+        "updated_at": "2026-01-29T07:07:41.744708Z"
+      },
+      "id": "fn-35-e0x.5",
+      "runtime": null,
+      "spec": "# fn-35-e0x.5 Create E2E test for Pi\n\n## Description\nBasic smoke test: verify Pi and Kimi symlinks work after build. Comprehensive sync testing is in fn-39-ua0.\n\n**Size:** S\n**Files:** None (verification only)\n\n## Approach\n\n```bash\n# Start container\ncai shell\n\n# Verify symlinks exist and resolve\nls -la ~/.pi/agent/\nls -la ~/.kimi/\nreadlink ~/.pi/agent/settings.json\nreadlink ~/.kimi/config.toml\n\n# Verify agents work\npi --version\nkimi --version\n```\n\n## Key context\n\n- This is a smoke test, not comprehensive testing\n- Full E2E sync testing: fn-39-ua0\n## Approach\n\nTest from user perspective: build container, create mock HOME with test configs for all agents, run cai import/export, verify everything syncs correctly.\n\n### Agents & Tools to Test\n\n**AI Agents:**\n| Agent | Config Location | Key Files |\n|-------|-----------------|-----------|\n| Claude Code | ~/.claude/ | .credentials.json (s), settings.json, plugins/, skills/, hooks/ |\n| Gemini | ~/.gemini/ | google_accounts.json (s), oauth_creds.json (s), settings.json |\n| Codex | ~/.codex/ | config.toml, auth.json (s), skills/ |\n| Copilot | ~/.copilot/ | config.json, mcp-config.json, skills/ |\n| OpenCode | ~/.config/opencode/ | opencode.json, auth.json (s), agents/, commands/ |\n| Aider | ~/ | .aider.conf.yml, .aider.model.settings.yml |\n| Continue | ~/.continue/ | config.yaml, config.json |\n| Cursor | ~/.cursor/ | mcp.json, rules/, extensions/ |\n| Pi | ~/.pi/agent/ | settings.json, models.json (s), skills/, extensions/ |\n| Kimi | ~/.kimi/ | config.toml (s), mcp.json (s) |\n\n**Dev Tools:**\n| Tool | Config Location | Key Files |\n|------|-----------------|-----------|\n| Git | ~/ | .gitconfig, .gitignore_global |\n| GitHub CLI | ~/.config/gh/ | hosts.yml (s), config.yml |\n| SSH | ~/.ssh/ | config, known_hosts, id_* (s) |\n| VS Code Server | ~/.vscode-server/ | extensions/, data/Machine/, data/User/mcp/ |\n| tmux | ~/ | .tmux.conf, .config/tmux/, .local/share/tmux/ |\n| vim/neovim | ~/ | .vimrc, .vim/, .config/nvim/ |\n| Starship | ~/.config/ | starship.toml |\n| Oh My Posh | ~/.config/ | oh-my-posh/ |\n\n**Shell Customization:**\n| Item | Location | Notes |\n|------|----------|-------|\n| .bashrc.d/ | ~/.bashrc.d/ | Custom shell scripts - MUST source on login |\n| .bash_aliases | ~/ | Alias definitions |\n| .zshrc | ~/ | Zsh config |\n| .zprofile | ~/ | Zsh profile |\n| .inputrc | ~/ | Readline config |\n| .oh-my-zsh/custom | ~/ | Oh My Zsh customizations |\n\n**Other:**\n- ~/.agents/ - shared agent configuration\n- ~/.local/share/fonts/ - custom fonts\n\n### Test Categories\n\n**1. Import Tests (host \u2192 container):**\n- Each agent's config files sync correctly\n- Secret files have 600 permissions in container\n- Directories sync recursively\n- Symlinks resolve to /mnt/agent-data/\n\n**2. Export Tests (container \u2192 host):**\n- Modified configs export back to host\n- New files created in container export correctly\n- Permissions preserved on export\n\n**3. Shell Customization Tests:**\n- .bashrc.d/ scripts sourced on container login\n- Custom aliases available in container shell\n- .inputrc readline bindings work\n\n**4. Secret Handling:**\n- `--no-secrets` excludes: .credentials.json, oauth_creds.json, auth.json, hosts.yml, id_*, models.json, config.toml (Kimi)\n- Secret files get 600 permissions\n- Non-secret files keep original permissions\n\n**5. Flag Behavior:**\n- `j` (json-init): Creates `{}` for missing JSON files\n- `R` (remove): Cleans directory before sync\n- `x` (exclude): Skips .system/ subdirectories\n- `d` (directory): Recursive directory sync\n\n**6. Dry-Run Tests:**\n- `cai import --dry-run` shows what would sync\n- `cai export --dry-run` shows what would export\n- No actual changes made in dry-run\n\n**7. Edge Cases:**\n- Agent not installed on host (no config) \u2192 no empty dirs in container\n- Partial config (some files exist, others don't)\n- Concurrent container instances\n- Large files (fonts directory)\n- Broken symlinks handling\n\n### Test Structure\n\n```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\n# === Setup ===\nsetup_mock_home()      # Create temp HOME with mock configs for all agents\nbuild_test_container() # Ensure image is built with all agents\nstart_test_container() # Start container with test- prefix\n\n# === Agent Tests ===\ntest_claude_sync()\ntest_gemini_sync()\ntest_codex_sync()\ntest_copilot_sync()\ntest_opencode_sync()\ntest_aider_sync()\ntest_continue_sync()\ntest_cursor_sync()\ntest_pi_sync()\ntest_kimi_sync()\n\n# === Tool Tests ===\ntest_git_sync()\ntest_gh_sync()\ntest_ssh_sync()\ntest_vscode_sync()\ntest_tmux_sync()\ntest_vim_sync()\n\n# === Shell Tests ===\ntest_bashrc_d_sourced()  # Verify .bashrc.d scripts run on login\ntest_aliases_available() # Verify custom aliases work\ntest_inputrc_bindings()  # Verify readline config applied\n\n# === Flag Tests ===\ntest_secret_flag()\ntest_json_init_flag()\ntest_remove_flag()\ntest_exclude_flag()\ntest_no_secrets_option()\n\n# === Dry Run Tests ===\ntest_import_dry_run()\ntest_export_dry_run()\n\n# === Edge Case Tests ===\ntest_no_config_no_pollution()\ntest_partial_config()\ntest_large_directory()\n\n# === Cleanup ===\nteardown()\n```\n\n## Key context\n\n- Use temp directory as mock HOME, not user's actual config\n- Pattern: `tests/integration/test-sync-integration.sh` for existing sync tests\n- Test containers use `test-` prefix for cleanup\n- SSH tests may need special handling (disabled by default in sync-manifest)\n- VS Code Server tests only if installed in image\n## Approach\n\nTest the full sync system from user perspective: build container, create test scenarios with mock configs, run cai import/export, verify results.\n\n### Sync Operations to Test\n\n1. **Import** (`cai import`) - host \u2192 container\n2. **Export** (`cai export`) - container \u2192 host\n3. **Dry-run modes** (`--dry-run`) - verify without changes\n\n### Flag Combinations to Test\n\n| Flag | Meaning | Test Case |\n|------|---------|-----------|\n| `f` | file | Basic file sync |\n| `d` | directory | Directory sync (recursive) |\n| `s` | secret | Permissions (600), --no-secrets exclusion |\n| `j` | json-init | Create empty `{}` if missing |\n| `R` | remove existing | Clean directory before sync |\n| `x` | exclude .system/ | Skip .system/ subdirs |\n| `fj` | file + json-init | Config files |\n| `fs` | file + secret | Credential files |\n| `fjs` | file + json + secret | Secret configs |\n| `dR` | dir + remove | Skills/extensions dirs |\n\n### Test Scenarios\n\n**Basic Sync:**\n- File exists on host only \u2192 import \u2192 appears in container\n- File exists in container only \u2192 export \u2192 appears on host\n- File exists on both \u2192 verify correct direction wins\n\n**Secret Handling (`s` flag):**\n- Secret file synced with 600 permissions\n- `cai import --no-secrets` skips secret files\n- `cai export --no-secrets` skips secret files\n\n**JSON Init (`j` flag):**\n- File missing on host \u2192 container gets empty `{}`\n- File exists on host \u2192 synced as-is (not overwritten with `{}`)\n\n**Directory Sync (`d`, `dR` flags):**\n- Directory with files \u2192 all contents synced\n- `dR` flag \u2192 existing contents removed before sync\n- Nested directories work correctly\n\n**Edge Cases:**\n- Symlink resolution in container\n- File with spaces in name\n- Empty directory handling\n- Large file handling\n- Permission preservation (non-secret files)\n- Unicode in filenames/content\n\n**Agent-Specific (Pi + Kimi):**\n- Pi: settings.json, models.json (secret), skills/, extensions/\n- Kimi: config.toml (secret), mcp.json (secret)\n- No-config scenario: verify no pollution when user has no Pi/Kimi\n\n### Test Structure\n\n```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\nSCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\nsource \"${SCRIPT_DIR}/test-helpers.sh\"\n\n# Setup: Build container, create temp HOME with mock configs\nsetup_test_environment() { ... }\n\n# Teardown: Clean containers, temp dirs\nteardown_test_environment() { ... }\n\n# Test groups\ntest_basic_import() { ... }\ntest_basic_export() { ... }\ntest_secret_handling() { ... }\ntest_json_init() { ... }\ntest_directory_sync() { ... }\ntest_dry_run() { ... }\ntest_pi_sync() { ... }\ntest_kimi_sync() { ... }\ntest_edge_cases() { ... }\n\n# Run all tests\nmain() {\n    setup_test_environment\n    trap teardown_test_environment EXIT\n\n    run_test_group \"Basic Import\" test_basic_import\n    run_test_group \"Basic Export\" test_basic_export\n    run_test_group \"Secret Handling\" test_secret_handling\n    run_test_group \"JSON Init\" test_json_init\n    run_test_group \"Directory Sync\" test_directory_sync\n    run_test_group \"Dry Run\" test_dry_run\n    run_test_group \"Pi Sync\" test_pi_sync\n    run_test_group \"Kimi Sync\" test_kimi_sync\n    run_test_group \"Edge Cases\" test_edge_cases\n\n    print_summary\n}\n```\n\n## Key context\n\n- Use temp directory as mock HOME, not user's actual home\n- Pattern: `tests/integration/test-sync-integration.sh` for existing sync tests\n- Test containers use `test-` prefix for cleanup\n- Mock configs should exercise all flag types\n- Run `./src/build.sh` first to get image with Pi/Kimi entries\n## Approach\n\nFollow existing test patterns in `tests/integration/test-containai.sh`.\n\n### Test Scenarios\n\n**Pi Sync Tests:**\n1. User has `~/.pi/agent/settings.json` on host \u2192 `cai import` \u2192 verify synced to container\n2. User has `~/.pi/agent/models.json` (secret) \u2192 verify synced with correct permissions\n3. User has `~/.pi/agent/skills/` directory \u2192 verify directory synced\n4. User has `~/.pi/agent/extensions/` directory \u2192 verify directory synced\n5. User has NO Pi config \u2192 verify no empty `.pi/` created in container\n6. Verify `pi --version` works after sync\n\n**Kimi Sync Tests:**\n1. User has `~/.kimi/config.toml` on host \u2192 `cai import` \u2192 verify synced to container\n2. User has `~/.kimi/mcp.json` (secret) \u2192 verify synced with correct permissions\n3. User has NO Kimi config \u2192 verify no empty `.kimi/` created in container\n4. Verify `kimi --version` works after sync\n\n**Symlink Tests:**\n1. Verify symlinks point to `/mnt/agent-data/pi/` and `/mnt/agent-data/kimi/`\n2. Verify symlinks resolve correctly (not broken)\n3. Verify agents can read config through symlinks\n\n### Test Structure\n\n```bash\n#!/usr/bin/env bash\nset -euo pipefail\n\n# Setup: Build container, create temp test directory\n# Scenario 1: Pi config sync\n# Scenario 2: Kimi config sync\n# Scenario 3: No config (verify no pollution)\n# Scenario 4: Both configs together\n# Teardown: Clean up test containers and temp dirs\n```\n\n## Key context\n\n- Use `cai import` to sync configs from host to container\n- Test containers should use test- prefix for cleanup\n- Create mock config files in temp directory, not user's actual ~/.pi or ~/.kimi\n- Pattern: `tests/integration/test-containai.sh` Scenario 4 (agent verification)\n## Acceptance\n- [ ] Pi symlinks exist in container\n- [ ] Kimi symlinks exist in container\n- [ ] pi --version works\n- [ ] kimi --version works\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

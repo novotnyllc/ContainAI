@@ -488,6 +488,20 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         "/source/.cursor/mcp.json:/target/cursor/mcp.json:fjso"
         "/source/.cursor/rules:/target/cursor/rules:do"
         "/source/.cursor/extensions:/target/cursor/extensions:do"
+
+        # --- Pi (optional) ---
+        # Selective sync: config files, skills, extensions (exclude .system/)
+        # models.json may contain API keys/tokens
+        "/source/.pi/agent/settings.json:/target/pi/settings.json:fjo"
+        "/source/.pi/agent/models.json:/target/pi/models.json:fjso"
+        "/source/.pi/agent/keybindings.json:/target/pi/keybindings.json:fjo"
+        "/source/.pi/agent/skills:/target/pi/skills:dxo"
+        "/source/.pi/agent/extensions:/target/pi/extensions:do"
+
+        # --- Kimi (optional) ---
+        # config.toml may contain API keys
+        "/source/.kimi/config.toml:/target/kimi/config.toml:fso"
+        "/source/.kimi/mcp.json:/target/kimi/mcp.json:fjso"
     )
 fi
 
