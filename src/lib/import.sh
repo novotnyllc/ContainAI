@@ -951,6 +951,9 @@ _import_map_override_path() {
     # Special case: .gitconfig is handled by _cai_import_git_config
     # Target is git/gitconfig (symlinked to ~/.gitconfig in container)
     # No secret flag - gitconfig is filtered but not a secret file
+    # WARNING: Overrides bypass the credential.helper/signing config sanitization
+    # applied during normal import. Use overrides only when you intentionally
+    # want to include config that would normally be stripped.
     if [[ "$override_path" == ".gitconfig" ]]; then
         printf '%s:%s\n' "git/gitconfig" "f"
         return 0

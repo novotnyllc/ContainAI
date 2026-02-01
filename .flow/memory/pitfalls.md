@@ -313,3 +313,6 @@ When adding CLI flags that affect container creation, ensure validation runs in 
 
 ## 2026-02-01 manual [pitfall]
 Stale flag cleanup should fail (return 1) not succeed - returning success can mask legitimately-long operations and defeats explicit timeout behavior
+
+## 2026-02-01 manual [pitfall]
+Git config section names and keys are case-insensitive; use tolower() in awk filters to match [User], [CREDENTIAL], SigningKey, etc.

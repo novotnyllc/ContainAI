@@ -281,24 +281,61 @@ ensure_volume_structure
 # Load .env after ownership fix completes (volume readable now)
 _load_env_file
 
+# Migrate git config from old volume path to new volume path
+# Old: /mnt/agent-data/.gitconfig
+# New: /mnt/agent-data/git/gitconfig (symlinked to ~/.gitconfig)
+# This runs on every startup to handle upgrades from older container images
+_migrate_git_config() {
+    local old_path="${DATA_DIR}/.gitconfig"
+    local new_dir="${DATA_DIR}/git"
+    local new_path="${new_dir}/gitconfig"
+
+    # Only migrate if old exists with content and new is missing/empty
+    if [[ -s "$old_path" && ! -L "$old_path" ]]; then
+        # Check if new path needs content
+        if [[ ! -s "$new_path" ]]; then
+            # Ensure git directory exists
+            if [[ -L "$new_dir" ]]; then
+                log "[WARN] ${new_dir} is a symlink - cannot migrate git config"
+                return 1
+            fi
+            mkdir -p "$new_dir" 2>/dev/null || true
+
+            # Migrate: copy old to new
+            if [[ ! -L "$new_path" ]] && [[ ! -e "$new_path" || -f "$new_path" ]]; then
+                local tmp_path="${new_path}.tmp.$$"
+                if cp "$old_path" "$tmp_path" 2>/dev/null && mv "$tmp_path" "$new_path" 2>/dev/null; then
+                    log "[INFO] Migrated git config from ${old_path} to ${new_path}"
+                    # Optionally remove old file after successful migration
+                    rm -f "$old_path" 2>/dev/null || true
+                else
+                    rm -f "$tmp_path" 2>/dev/null || true
+                    log "[WARN] Failed to migrate git config to new location"
+                fi
+            fi
+        fi
+    fi
+}
+
 # Setup git config from data volume
 # New containers: ~/.gitconfig is symlinked to /mnt/agent-data/git/gitconfig (no copy needed)
-# Legacy containers: copy from /mnt/agent-data/.gitconfig to ~/.gitconfig
+# Legacy containers: copy from /mnt/agent-data/git/gitconfig to ~/.gitconfig
 _setup_git_config() {
     local dst="${HOME}/.gitconfig"
 
-    # New containers have ~/.gitconfig as symlink - nothing to do
+    # New containers have ~/.gitconfig as symlink - nothing to do for $HOME
+    # But we still need to run migration for volume paths
     if [[ -L "$dst" ]]; then
         return 0
     fi
 
-    # Legacy container: find source file (old path, then new path)
+    # Legacy container without symlink: find source file
     # Must be non-empty (-s) to avoid clobbering with empty placeholder file
     local src=""
-    if [[ -s "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
-        src="${DATA_DIR}/.gitconfig"
-    elif [[ -s "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
+    if [[ -s "${DATA_DIR}/git/gitconfig" && ! -L "${DATA_DIR}/git/gitconfig" ]]; then
         src="${DATA_DIR}/git/gitconfig"
+    elif [[ -s "${DATA_DIR}/.gitconfig" && ! -L "${DATA_DIR}/.gitconfig" ]]; then
+        src="${DATA_DIR}/.gitconfig"
     fi
 
     if [[ -z "$src" ]]; then
@@ -325,6 +362,9 @@ _setup_git_config() {
     fi
 }
 
+# Run migration first (handles volume path upgrade)
+_migrate_git_config
+# Then setup (handles legacy containers without symlink)
 _setup_git_config
 
 # Check if .claude.json exists and is 0 bytes
