@@ -3,12 +3,12 @@
   "claim_note": "",
   "claimed_at": null,
   "created_at": "2026-01-28T18:29:47.787666Z",
-  "depends_on": [],
+  "depends_on": ["fn-34-fk5.5", "fn-34-fk5.6", "fn-34-fk5.8", "fn-34-fk5.9"],
   "epic": "fn-34-fk5",
   "id": "fn-34-fk5.11",
   "priority": 2,
   "spec_path": ".flow/tasks/fn-34-fk5.11.md",
   "status": "todo",
-  "title": "Implement default agent configuration",
+  "title": "Update shell completion",
   "updated_at": "2026-02-01T15:48:53.108528Z"
 }
