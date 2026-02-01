@@ -301,3 +301,6 @@ Template/path names from user input must be validated to prevent path traversal 
 
 ## 2026-02-01 manual [pitfall]
 Shell completion tasks should depend on parameter-parsing tasks - advertising non-existent CLI flags misleads users
+
+## 2026-02-01 manual [pitfall]
+grep with pipe alternation (\|) requires -E flag for POSIX/BSD portability; use grep -E 'a|b' instead of grep 'a\|b'

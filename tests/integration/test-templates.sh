@@ -500,34 +500,37 @@ test_setup_installs_templates() {
     rm -rf "$test_home"
     mkdir -p "$test_home"
 
+    # First verify --skip-templates option exists in help (required)
+    local help_output
+    help_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai setup --help" 2>&1) || true
+    if ! printf '%s' "$help_output" | grep -q "\-\-skip-templates"; then
+        fail "Setup missing --skip-templates option in help"
+        rm -rf "$test_home"
+        return
+    fi
+    pass "Setup has --skip-templates option"
+
     # Run cai setup --dry-run in a subshell with overridden HOME
     # This shows what setup would do without making changes
     local setup_output setup_rc
     setup_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai setup --dry-run" 2>&1) && setup_rc=0 || setup_rc=$?
 
-    # Check if setup mentions template installation
-    # Look for template-related dry-run messages
-    if printf '%s' "$setup_output" | grep -qi "template\|skip.*template"; then
-        pass "Setup mentions template installation"
-
-        # Verify --skip-templates option exists in help
-        local help_output
-        help_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai setup --help" 2>&1) || true
-        if printf '%s' "$help_output" | grep -q "\-\-skip-templates"; then
-            pass "Setup has --skip-templates option"
-        else
-            fail "Setup missing --skip-templates option in help"
-        fi
+    # Check if setup mentions template installation in dry-run output
+    # Use -E for extended regex (portable across BSD/GNU grep)
+    if printf '%s' "$setup_output" | grep -qiE "template|Would install"; then
+        pass "Setup dry-run mentions template installation"
     else
-        # Setup may not emit template messages in dry-run if templates already exist
-        # or if dry-run doesn't fully simulate template installation
-        # Check if setup help mentions templates
-        local help_output
-        help_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai setup --help" 2>&1) || true
-        if printf '%s' "$help_output" | grep -q "\-\-skip-templates"; then
-            pass "Setup has --skip-templates option (dry-run may not emit template messages)"
+        # Dry-run may fail on platforms without Sysbox support
+        # but template messages should still appear if templates are wired in
+        if printf '%s' "$setup_output" | grep -qiE "skip.*template|Installed template"; then
+            pass "Setup mentions templates (may have skipped or already installed)"
         else
-            skip "Template installation via setup may not be fully wired (check fn-33-lp4.3)"
+            # Check if dry-run failed for platform-specific reasons
+            if [[ $setup_rc -ne 0 ]] && printf '%s' "$setup_output" | grep -qiE "unsupported|platform|sysbox"; then
+                skip "Setup dry-run failed on this platform (expected for non-Linux)"
+            else
+                fail "Setup dry-run did not mention templates (exit=$setup_rc)"
+            fi
         fi
     fi
 
@@ -669,8 +672,8 @@ test_doctor_template_detection() {
     local doctor_output doctor_rc
     doctor_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai doctor" 2>&1) && doctor_rc=0 || doctor_rc=$?
 
-    # Look for template-related output in doctor
-    if printf '%s' "$doctor_output" | grep -qi "Template.*missing\|Template.*not found"; then
+    # Look for template-related output in doctor (use -E for portable extended regex)
+    if printf '%s' "$doctor_output" | grep -qiE "Template.*missing|Template.*not found"; then
         pass "Doctor detects missing template"
     else
         # fn-33-lp4.7 may not be implemented yet - skip if no template section
@@ -686,12 +689,13 @@ test_doctor_template_detection() {
 }
 
 # ==============================================================================
-# Test 14: Doctor fix template recovery (requires fn-33-lp4.8)
+# Test 15: Doctor fix template recovery (requires fn-33-lp4.8)
 # ==============================================================================
 test_doctor_fix_template() {
     section "Test 15: Doctor fix template recovery"
 
     # This test verifies doctor fix template via CLI (fn-33-lp4.8)
+    # Per spec: `cai doctor fix template` recovers default, or `cai doctor fix template <name>`
     # Use fresh test home with corrupted template
     local test_home="/tmp/$TEST_RUN_ID/doctor-fix-home"
     rm -rf "$test_home"
@@ -699,15 +703,19 @@ test_doctor_fix_template() {
     printf '%s\n' "INVALID DOCKERFILE" > "$test_home/.config/containai/templates/default/Dockerfile"
 
     # Try to run doctor fix template via CLI
-    # The exact command syntax depends on fn-33-lp4.8 implementation
+    # Try with template name first (spec says: `cai doctor fix template [--all | <name>]`)
     local fix_output fix_rc
-    fix_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai doctor fix template" 2>&1) && fix_rc=0 || fix_rc=$?
+    fix_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai doctor fix template default" 2>&1) && fix_rc=0 || fix_rc=$?
 
-    # Check if doctor fix template is implemented
-    if printf '%s' "$fix_output" | grep -qi "unknown.*template\|not.*implemented\|invalid.*argument\|usage:"; then
-        skip "Doctor fix template not implemented (fn-33-lp4.8 pending)"
-        rm -rf "$test_home"
-        return
+    # Check if doctor fix template is implemented (use -E for portable extended regex)
+    if printf '%s' "$fix_output" | grep -qiE "unknown.*template|not.*implemented|invalid.*argument|usage:"; then
+        # Try without template name as fallback
+        fix_output=$(HOME="$test_home" bash -c "source '$SRC_DIR/containai.sh' && cai doctor fix template" 2>&1) && fix_rc=0 || fix_rc=$?
+        if printf '%s' "$fix_output" | grep -qiE "unknown.*template|not.*implemented|invalid.*argument|usage:"; then
+            skip "Doctor fix template not implemented (fn-33-lp4.8 pending)"
+            rm -rf "$test_home"
+            return
+        fi
     fi
 
     if [[ $fix_rc -eq 0 ]]; then
@@ -725,8 +733,8 @@ test_doctor_fix_template() {
             fail "Doctor fix did not restore valid template"
         fi
     else
-        # Check for specific error vs not implemented
-        if printf '%s' "$fix_output" | grep -qi "fix.*template\|recover"; then
+        # Check for specific error vs not implemented (use -E for portable extended regex)
+        if printf '%s' "$fix_output" | grep -qiE "fix.*template|recover"; then
             fail "Doctor fix template failed: $fix_output"
         else
             skip "Doctor fix template not implemented (fn-33-lp4.8 pending)"
