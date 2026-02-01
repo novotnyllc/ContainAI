@@ -106,7 +106,8 @@ run_agent_sync_test() {
         sync_test_fail "$test_name: import failed (exit=$import_exit)"
         printf '%s\n' "$import_output" | head -20 >&2
         find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
-        # Clean up this test's volume
+        # Clean up this test's container and volume
+        "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
         "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
         return
     fi
@@ -146,6 +147,10 @@ test_claude_sync_assertions() {
     assert_file_exists_in_volume "claude/settings.local.json" || return 1
     assert_dir_exists_in_volume "claude/plugins" || return 1
     assert_file_exists_in_volume "claude/plugins/cache/test-plugin/plugin.json" || return 1
+    assert_file_exists_in_volume "claude/commands/command.txt" || return 1
+    assert_file_exists_in_volume "claude/agents/agent.json" || return 1
+    assert_file_exists_in_volume "claude/skills/skill.json" || return 1
+    assert_file_exists_in_volume "claude/hooks/hook.sh" || return 1
     assert_file_exists_in_volume "claude/CLAUDE.md" || return 1
 
     # Verify symlinks exist in container
@@ -157,6 +162,11 @@ test_claude_sync_assertions() {
     assert_content_marker_in_volume "claude/claude.json" "CLAUDE_JSON_MARKER" || return 1
     assert_content_marker_in_volume "claude/settings.json" "SETTINGS_MARKER" || return 1
     assert_content_marker_in_volume "claude/settings.local.json" "SETTINGS_LOCAL_MARKER" || return 1
+    assert_content_marker_in_volume "claude/commands/command.txt" "COMMAND_MARKER" || return 1
+    assert_content_marker_in_volume "claude/agents/agent.json" "AGENT_MARKER" || return 1
+    assert_content_marker_in_volume "claude/skills/skill.json" "SKILL_MARKER" || return 1
+    assert_content_marker_in_volume "claude/hooks/hook.sh" "HOOK_MARKER" || return 1
+    assert_content_marker_in_volume "claude/CLAUDE.md" "CLAUDE_MD_MARKER" || return 1
 
     return 0
 }
@@ -173,6 +183,11 @@ test_opencode_sync_assertions() {
     assert_dir_exists_in_volume "config/opencode/skills" || return 1
     assert_dir_exists_in_volume "config/opencode/modes" || return 1
     assert_dir_exists_in_volume "config/opencode/plugins" || return 1
+    assert_file_exists_in_volume "config/opencode/agents/agent.json" || return 1
+    assert_file_exists_in_volume "config/opencode/commands/command.txt" || return 1
+    assert_file_exists_in_volume "config/opencode/skills/skill.json" || return 1
+    assert_file_exists_in_volume "config/opencode/modes/mode.json" || return 1
+    assert_file_exists_in_volume "config/opencode/plugins/plugin.json" || return 1
 
     # Verify auth.json at different path (~/.local/share/opencode/)
     assert_file_exists_in_volume "local/share/opencode/auth.json" || return 1
@@ -180,6 +195,12 @@ test_opencode_sync_assertions() {
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "local/share/opencode/auth.json" "OPENCODE_AUTH_MARKER" || return 1
     assert_content_marker_in_volume "config/opencode/opencode.json" "OPENCODE_CONFIG_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/instructions.md" "OPENCODE_INSTRUCTIONS_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/agents/agent.json" "OPENCODE_AGENT_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/commands/command.txt" "OPENCODE_COMMAND_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/skills/skill.json" "OPENCODE_SKILL_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/modes/mode.json" "OPENCODE_MODE_MARKER" || return 1
+    assert_content_marker_in_volume "config/opencode/plugins/plugin.json" "OPENCODE_PLUGIN_MARKER" || return 1
 
     return 0
 }
@@ -204,6 +225,7 @@ test_codex_sync_assertions() {
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "codex/auth.json" "CODEX_AUTH_MARKER" || return 1
     assert_content_marker_in_volume "codex/config.toml" "CODEX_CONFIG_MARKER" || return 1
+    assert_content_marker_in_volume "codex/skills/custom/user.json" "CODEX_CUSTOM_MARKER" || return 1
 
     return 0
 }
@@ -216,6 +238,7 @@ test_copilot_sync_assertions() {
     assert_file_exists_in_volume "copilot/config.json" || return 1
     assert_file_exists_in_volume "copilot/mcp-config.json" || return 1
     assert_dir_exists_in_volume "copilot/skills" || return 1
+    assert_file_exists_in_volume "copilot/skills/skill.json" || return 1
 
     # Verify symlinks in container
     assert_is_symlink "/home/agent/.copilot/config.json" || return 1
@@ -224,6 +247,7 @@ test_copilot_sync_assertions() {
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "copilot/config.json" "COPILOT_CONFIG_MARKER" || return 1
     assert_content_marker_in_volume "copilot/mcp-config.json" "COPILOT_MCP_MARKER" || return 1
+    assert_content_marker_in_volume "copilot/skills/skill.json" "COPILOT_SKILL_MARKER" || return 1
 
     return 0
 }
@@ -245,6 +269,8 @@ test_gemini_sync_assertions() {
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "gemini/google_accounts.json" "GEMINI_ACCOUNTS_MARKER" || return 1
     assert_content_marker_in_volume "gemini/oauth_creds.json" "GEMINI_OAUTH_MARKER" || return 1
+    assert_content_marker_in_volume "gemini/settings.json" "GEMINI_SETTINGS_MARKER" || return 1
+    assert_content_marker_in_volume "gemini/GEMINI.md" "GEMINI_MD_MARKER" || return 1
 
     return 0
 }
@@ -299,12 +325,16 @@ test_cursor_sync_assertions() {
     assert_file_exists_in_volume "cursor/mcp.json" || return 1
     assert_dir_exists_in_volume "cursor/rules" || return 1
     assert_dir_exists_in_volume "cursor/extensions" || return 1
+    assert_file_exists_in_volume "cursor/rules/rule.mdc" || return 1
+    assert_file_exists_in_volume "cursor/extensions/ext.txt" || return 1
 
     # Verify secret permissions on mcp.json (fjso)
     assert_permissions_in_volume "cursor/mcp.json" "600" || return 1
 
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "cursor/mcp.json" "CURSOR_MCP_MARKER" || return 1
+    assert_content_marker_in_volume "cursor/rules/rule.mdc" "CURSOR_RULE_MARKER" || return 1
+    assert_content_marker_in_volume "cursor/extensions/ext.txt" "CURSOR_EXTENSION_MARKER" || return 1
 
     return 0
 }
@@ -326,12 +356,17 @@ test_pi_sync_assertions() {
     # Verify custom skills synced
     assert_dir_exists_in_volume "pi/skills/custom" || return 1
     assert_dir_exists_in_volume "pi/extensions" || return 1
+    assert_file_exists_in_volume "pi/extensions/ext.txt" || return 1
 
     # Verify secret permissions on models.json (fjso)
     assert_permissions_in_volume "pi/models.json" "600" || return 1
 
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "pi/models.json" "PI_MODELS_MARKER" || return 1
+    assert_content_marker_in_volume "pi/settings.json" "PI_SETTINGS_MARKER" || return 1
+    assert_content_marker_in_volume "pi/keybindings.json" "PI_KEYBINDINGS_MARKER" || return 1
+    assert_content_marker_in_volume "pi/skills/custom/user.json" "PI_SKILL_MARKER" || return 1
+    assert_content_marker_in_volume "pi/extensions/ext.txt" "PI_EXTENSION_MARKER" || return 1
 
     return 0
 }

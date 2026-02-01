@@ -131,8 +131,12 @@ create_claude_fixture() {
     printf '%s\n' '{"credentials": "test-creds", "_marker": "CREDENTIALS_MARKER"}' >"$fixture/.claude/.credentials.json"
     printf '%s\n' '{"settings": "test", "_marker": "SETTINGS_MARKER"}' >"$fixture/.claude/settings.json"
     printf '%s\n' '{"local": true, "_marker": "SETTINGS_LOCAL_MARKER"}' >"$fixture/.claude/settings.local.json"
-    printf '%s\n' '{}' >"$fixture/.claude/plugins/cache/test-plugin/plugin.json"
-    printf '%s\n' '# Test CLAUDE.md' >"$fixture/.claude/CLAUDE.md"
+    printf '%s\n' '{"plugin": "PLUGIN_MARKER"}' >"$fixture/.claude/plugins/cache/test-plugin/plugin.json"
+    printf '%s\n' 'COMMAND_MARKER' >"$fixture/.claude/commands/command.txt"
+    printf '%s\n' '{"agent": "AGENT_MARKER"}' >"$fixture/.claude/agents/agent.json"
+    printf '%s\n' '{"skill": "SKILL_MARKER"}' >"$fixture/.claude/skills/skill.json"
+    printf '%s\n' 'HOOK_MARKER' >"$fixture/.claude/hooks/hook.sh"
+    printf '%s\n' '# Test CLAUDE.md (CLAUDE_MD_MARKER)' >"$fixture/.claude/CLAUDE.md"
 }
 
 create_codex_fixture() {
@@ -144,7 +148,7 @@ create_codex_fixture() {
     printf '%s\n' '# Codex config - CODEX_CONFIG_MARKER' >"$fixture/.codex/config.toml"
     printf '%s\n' '{"auth": "test-auth", "_marker": "CODEX_AUTH_MARKER"}' >"$fixture/.codex/auth.json"
     printf '%s\n' '{"skill": "system"}' >"$fixture/.codex/skills/.system/hidden.json"
-    printf '%s\n' '{"skill": "custom"}' >"$fixture/.codex/skills/custom/user.json"
+    printf '%s\n' '{"skill": "custom", "_marker": "CODEX_CUSTOM_MARKER"}' >"$fixture/.codex/skills/custom/user.json"
 }
 
 create_opencode_fixture() {
@@ -158,7 +162,12 @@ create_opencode_fixture() {
 
     # Use unique marker content for content verification
     printf '%s\n' '{"opencode": "config", "_marker": "OPENCODE_CONFIG_MARKER"}' >"$fixture/.config/opencode/opencode.json"
-    printf '%s\n' '# Instructions' >"$fixture/.config/opencode/instructions.md"
+    printf '%s\n' '# Instructions (OPENCODE_INSTRUCTIONS_MARKER)' >"$fixture/.config/opencode/instructions.md"
+    printf '%s\n' '{"agent": "opencode", "_marker": "OPENCODE_AGENT_MARKER"}' >"$fixture/.config/opencode/agents/agent.json"
+    printf '%s\n' 'OPENCODE_COMMAND_MARKER' >"$fixture/.config/opencode/commands/command.txt"
+    printf '%s\n' '{"skill": "opencode", "_marker": "OPENCODE_SKILL_MARKER"}' >"$fixture/.config/opencode/skills/skill.json"
+    printf '%s\n' '{"mode": "opencode", "_marker": "OPENCODE_MODE_MARKER"}' >"$fixture/.config/opencode/modes/mode.json"
+    printf '%s\n' '{"plugin": "opencode", "_marker": "OPENCODE_PLUGIN_MARKER"}' >"$fixture/.config/opencode/plugins/plugin.json"
     printf '%s\n' '{"auth": "test-auth", "_marker": "OPENCODE_AUTH_MARKER"}' >"$fixture/.local/share/opencode/auth.json"
 }
 
@@ -169,11 +178,12 @@ create_pi_fixture() {
     mkdir -p "$fixture/.pi/agent/extensions"
 
     # Use unique marker content for content verification
-    printf '%s\n' '{}' >"$fixture/.pi/agent/settings.json"
+    printf '%s\n' '{"settings": true, "_marker": "PI_SETTINGS_MARKER"}' >"$fixture/.pi/agent/settings.json"
     printf '%s\n' '{"models": "secret", "_marker": "PI_MODELS_MARKER"}' >"$fixture/.pi/agent/models.json"
-    printf '%s\n' '{}' >"$fixture/.pi/agent/keybindings.json"
+    printf '%s\n' '{"keybindings": true, "_marker": "PI_KEYBINDINGS_MARKER"}' >"$fixture/.pi/agent/keybindings.json"
     printf '%s\n' '{}' >"$fixture/.pi/agent/skills/.system/hidden.json"
-    printf '%s\n' '{}' >"$fixture/.pi/agent/skills/custom/user.json"
+    printf '%s\n' '{"skill": "custom", "_marker": "PI_SKILL_MARKER"}' >"$fixture/.pi/agent/skills/custom/user.json"
+    printf '%s\n' 'PI_EXTENSION_MARKER' >"$fixture/.pi/agent/extensions/ext.txt"
 }
 
 create_kimi_fixture() {
@@ -192,6 +202,7 @@ create_copilot_fixture() {
     # Use unique marker content for content verification
     printf '%s\n' '{"config": "test", "_marker": "COPILOT_CONFIG_MARKER"}' >"$fixture/.copilot/config.json"
     printf '%s\n' '{"mcp": "test", "_marker": "COPILOT_MCP_MARKER"}' >"$fixture/.copilot/mcp-config.json"
+    printf '%s\n' '{"skill": "custom", "_marker": "COPILOT_SKILL_MARKER"}' >"$fixture/.copilot/skills/skill.json"
 }
 
 create_gemini_fixture() {
@@ -201,8 +212,8 @@ create_gemini_fixture() {
     # Use unique marker content for content verification
     printf '%s\n' '{"accounts": "test", "_marker": "GEMINI_ACCOUNTS_MARKER"}' >"$fixture/.gemini/google_accounts.json"
     printf '%s\n' '{"oauth": "test", "_marker": "GEMINI_OAUTH_MARKER"}' >"$fixture/.gemini/oauth_creds.json"
-    printf '%s\n' '{}' >"$fixture/.gemini/settings.json"
-    printf '%s\n' '# Gemini MD' >"$fixture/.gemini/GEMINI.md"
+    printf '%s\n' '{"settings": true, "_marker": "GEMINI_SETTINGS_MARKER"}' >"$fixture/.gemini/settings.json"
+    printf '%s\n' '# Gemini MD (GEMINI_MD_MARKER)' >"$fixture/.gemini/GEMINI.md"
 }
 
 create_aider_fixture() {
@@ -229,6 +240,8 @@ create_cursor_fixture() {
 
     # Use unique marker content for content verification
     printf '%s\n' '{"_marker": "CURSOR_MCP_MARKER"}' >"$fixture/.cursor/mcp.json"
+    printf '%s\n' 'CURSOR_RULE_MARKER' >"$fixture/.cursor/rules/rule.mdc"
+    printf '%s\n' 'CURSOR_EXTENSION_MARKER' >"$fixture/.cursor/extensions/ext.txt"
 }
 
 create_gh_fixture() {
