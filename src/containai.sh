@@ -215,7 +215,9 @@ Run Options:
   --container <name>    Use or create container with specified name
                         (uses existing if found, creates new if missing;
                         mutually exclusive with --workspace/--data-volume)
-  --image-tag <tag>     Image tag (advanced/debugging, stored as label)
+  --template <name>     Template name for container build (default: "default")
+                        Templates customize the container Dockerfile
+  --image-tag <tag>     Image tag (advanced/debugging, ignored with --template)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
@@ -433,7 +435,9 @@ Options:
   --container <name>    Use or create container with specified name
                         (uses existing if found, creates new if missing;
                         mutually exclusive with --workspace/--data-volume)
-  --image-tag <tag>     Image tag (advanced/debugging, stored as label)
+  --template <name>     Template name for container build (default: "default")
+                        Templates customize the container Dockerfile
+  --image-tag <tag>     Image tag (advanced/debugging, ignored with --template)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
   --fresh               Remove and recreate container (preserves data volume)
@@ -491,6 +495,7 @@ Options:
   -w <path>             Short form of --workspace
   --container <name>    Use or create container with specified name
                         (mutually exclusive with --workspace/--data-volume)
+  --template <name>     Template name for container build (default: "default")
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --fresh               Remove and recreate container (preserves data volume)
@@ -2707,6 +2712,7 @@ _containai_shell_cmd() {
     local explicit_config=""
     local container_name=""
     local image_tag=""
+    local cli_template=""
     local cli_memory=""
     local cli_cpus=""
     local fresh_flag=false
@@ -3501,6 +3507,7 @@ _containai_exec_cmd() {
     local workspace=""
     local explicit_config=""
     local container_name=""
+    local cli_template=""
     local fresh_flag=false
     local force_flag=false
     local quiet_flag=false
@@ -3580,6 +3587,22 @@ _containai_exec_cmd() {
                 container_name="${1#--container=}"
                 if [[ -z "$container_name" ]]; then
                     echo "[ERROR] --container requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --template)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                cli_template="$2"
+                shift 2
+                ;;
+            --template=*)
+                cli_template="${1#--template=}"
+                if [[ -z "$cli_template" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
                     return 1
                 fi
                 shift
@@ -3922,6 +3945,9 @@ _containai_exec_cmd() {
         if [[ -n "$selected_context" ]]; then
             create_args+=(--docker-context "$selected_context")
         fi
+        if [[ -n "$cli_template" ]]; then
+            create_args+=(--template "$cli_template")
+        fi
         # Run 'true' as no-op to avoid starting default agent
         create_args+=(-- true)
 
@@ -3962,6 +3988,9 @@ _containai_exec_cmd() {
         fi
         if [[ -n "$selected_context" ]]; then
             create_args+=(--docker-context "$selected_context")
+        fi
+        if [[ -n "$cli_template" ]]; then
+            create_args+=(--template "$cli_template")
         fi
         # Run 'true' as no-op to avoid starting default agent
         create_args+=(-- true)
@@ -4120,6 +4149,7 @@ _containai_run_cmd() {
     local explicit_config=""
     local container_name=""
     local image_tag=""
+    local cli_template=""
     local cli_memory=""
     local cli_cpus=""
     local credentials=""
@@ -4288,6 +4318,22 @@ _containai_run_cmd() {
                 image_tag="${1#--image-tag=}"
                 if [[ -z "$image_tag" ]]; then
                     echo "[ERROR] --image-tag requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --template)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                cli_template="$2"
+                shift 2
+                ;;
+            --template=*)
+                cli_template="${1#--template=}"
+                if [[ -z "$cli_template" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
                     return 1
                 fi
                 shift
@@ -4637,6 +4683,9 @@ _containai_run_cmd() {
     if [[ -n "$image_tag" ]]; then
         start_args+=(--image-tag "$image_tag")
     fi
+    if [[ -n "$cli_template" ]]; then
+        start_args+=(--template "$cli_template")
+    fi
 
     # Set CLI resource overrides (global vars read by _containai_start_container)
     # Clear first to prevent leakage from previous invocations in same shell
@@ -4842,9 +4891,9 @@ _cai_completions() {
     local global_flags="-h --help"
 
     # Per-subcommand flags
-    local run_flags="--data-volume --config -w --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
-    local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
-    local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
+    local run_flags="--data-volume --config -w --workspace --container --template --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
+    local shell_flags="--data-volume --config --workspace --container --template --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
+    local exec_flags="--workspace -w --container --template --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --build-templates --reset-lima --workspace -w -h --help"
     local doctor_fix_subcommands="volume container template"
     local setup_flags="--dry-run --verbose --force -h --help"
@@ -4907,7 +4956,7 @@ _cai_completions() {
             fi
             return
             ;;
-        --image-tag|--memory|--cpus|--name|--from|-e|--env|--credentials)
+        --image-tag|--template|--memory|--cpus|--name|--from|-e|--env|--credentials)
             # Value expected, no completion
             return
             ;;
@@ -5179,6 +5228,7 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
+                        '--template[Template name]:template:' \
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
@@ -5208,6 +5258,7 @@ _cai() {
                         '--config[Config file path]:file:_files' \
                         '--workspace[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
+                        '--template[Template name]:template:' \
                         '--image-tag[Image tag]:tag:' \
                         '--memory[Memory limit]:size:' \
                         '--cpus[CPU limit]:count:' \
@@ -5225,6 +5276,7 @@ _cai() {
                     _arguments \
                         '(-w --workspace)'{-w,--workspace}'[Workspace path]:directory:_files -/' \
                         '--container[Container name]:container:->containers' \
+                        '--template[Template name]:template:' \
                         '--data-volume[Data volume name]:volume:->volumes' \
                         '--config[Config file path]:file:_files' \
                         '--fresh[Remove and recreate container]' \

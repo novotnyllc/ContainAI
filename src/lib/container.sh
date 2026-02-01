@@ -1290,6 +1290,7 @@ _containai_check_volume_match() {
 #   --verbose            Show container/volume names (stderr, for script-friendliness)
 #   --debug              Enable debug logging
 #   --image-tag <tag>    Image tag for container (advanced/debugging, stored as label)
+#   --template <name>    Template name for container build (default: "default")
 #   -e, --env <VAR=val>  Environment variable (repeatable, passed to command via SSH)
 #   -v, --volume <spec>  Extra volume mount (repeatable)
 #   -- <cmd>             Command to run (default: agent); e.g., -- bash runs bash
@@ -1301,6 +1302,7 @@ _containai_start_container() {
     local explicit_config=""
     local explicit_context=""  # Override context selection (use when container already exists in known context)
     local image_tag=""
+    local cli_template=""  # Template name from --template flag
     local credentials="$_CONTAINAI_DEFAULT_CREDENTIALS"
     local acknowledge_credential_risk=false
     local allow_host_credentials=false
@@ -1485,6 +1487,22 @@ _containai_start_container() {
                 fi
                 shift
                 ;;
+            --template)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                cli_template="$2"
+                shift 2
+                ;;
+            --template=*)
+                cli_template="${1#--template=}"
+                if [[ -z "$cli_template" ]]; then
+                    echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
             --mount-docker-socket)
                 mount_docker_socket=true
                 shift
@@ -1584,12 +1602,27 @@ _containai_start_container() {
         _cai_debug "Some default templates could not be installed (continuing)"
     fi
 
-    # Template name for container creation (default for now, --template in fn-33-lp4.9)
-    # When --image-tag is specified, skip template build (advanced/debugging mode)
+    # Template name for container creation
+    # Precedence: --template > default
+    # When --image-tag is specified without --template, skip template build (advanced/debugging mode)
     local template_name="default"
     local use_template="true"
-    if [[ -n "$image_tag" ]]; then
-        # Advanced mode: explicit image tag bypasses template build
+
+    # Apply --template if specified
+    if [[ -n "$cli_template" ]]; then
+        # Validate template name
+        if ! _cai_validate_template_name "$cli_template"; then
+            _cai_error "Invalid template name: $cli_template"
+            _cai_warn "Template names must be lowercase alphanumeric with dashes/underscores/dots"
+            return 1
+        fi
+        template_name="$cli_template"
+        # If both --template and --image-tag specified, warn that --image-tag is ignored
+        if [[ -n "$image_tag" ]]; then
+            _cai_warn "--image-tag is ignored when --template is specified"
+        fi
+    elif [[ -n "$image_tag" ]]; then
+        # Advanced mode: explicit image tag bypasses template build (no --template specified)
         use_template="false"
     fi
 
@@ -1740,13 +1773,34 @@ _containai_start_container() {
             echo "DOCKER_CONTEXT=default"
         fi
 
-        # Template build information (for new containers or --fresh/--restart)
-        if [[ "$use_template" == "true" && ("$dry_run_state" == "none" || "$fresh_flag" == "true" || "$restart_flag" == "true") ]]; then
+        # Template information
+        if [[ "$use_template" == "true" ]]; then
             echo "TEMPLATE_NAME=$template_name"
-            # Output the build command using _cai_build_template dry-run mode
-            _cai_build_template "$template_name" "$selected_context" "true" 2>/dev/null || {
-                echo "TEMPLATE_BUILD_ERROR=Failed to generate build command"
-            }
+
+            # Template mismatch check for existing containers
+            if [[ "$dry_run_state" != "none" ]]; then
+                local dry_run_template
+                dry_run_template=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || dry_run_template=""
+                if [[ -n "$dry_run_template" ]]; then
+                    echo "CONTAINER_TEMPLATE=$dry_run_template"
+                else
+                    echo "CONTAINER_TEMPLATE=<none - pre-existing container>"
+                fi
+
+                if [[ -z "$dry_run_template" && "$template_name" != "default" ]]; then
+                    echo "TEMPLATE_MISMATCH=pre-existing container requires --fresh"
+                elif [[ -n "$dry_run_template" && "$dry_run_template" != "$template_name" ]]; then
+                    echo "TEMPLATE_MISMATCH=container has template '$dry_run_template', use --fresh to rebuild"
+                fi
+            fi
+
+            # Template build command (for new containers or --fresh/--restart)
+            if [[ "$dry_run_state" == "none" || "$fresh_flag" == "true" || "$restart_flag" == "true" ]]; then
+                # Output the build command using _cai_build_template dry-run mode
+                _cai_build_template "$template_name" "$selected_context" "true" 2>/dev/null || {
+                    echo "TEMPLATE_BUILD_ERROR=Failed to generate build command"
+                }
+            fi
         fi
 
         # Port allocation
@@ -1903,6 +1957,34 @@ _containai_start_container() {
         container_state=$("${docker_cmd[@]}" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_state=""
     else
         container_state="none"
+    fi
+
+    # Template mismatch check for existing containers
+    # Check if --template is specified (or use_template=true) and container exists
+    if [[ "$container_state" != "none" && "$use_template" == "true" ]]; then
+        # Get container's template label (using with...end to get empty string for missing labels)
+        local container_template
+        container_template=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || container_template=""
+
+        if [[ -z "$container_template" ]]; then
+            # Missing label = pre-existing container (created before templates feature)
+            # Allow if template is "default", otherwise error
+            if [[ "$template_name" != "default" ]]; then
+                _cai_error "Container was created before templates. Use --fresh to rebuild with template."
+                _cai_warn "Container: $container_name"
+                _cai_warn "Requested template: $template_name"
+                return 1
+            fi
+            # Default template on pre-existing container - allow (fallthrough)
+        elif [[ "$container_template" != "$template_name" ]]; then
+            # Label mismatch - error with guidance
+            _cai_error "Container exists with template '$container_template'. Use --fresh to rebuild."
+            _cai_warn "Container: $container_name"
+            _cai_warn "Requested template: $template_name"
+            _cai_warn "Existing template: $container_template"
+            return 1
+        fi
+        # Template matches - continue normally
     fi
 
     # Check for SSH port conflict on stopped containers and auto-recreate if needed
