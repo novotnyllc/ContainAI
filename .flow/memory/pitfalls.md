@@ -307,3 +307,6 @@ grep with pipe alternation (\|) requires -E flag for POSIX/BSD portability; use 
 
 ## 2026-02-01 manual [pitfall]
 Template names with uppercase letters pass validation but cause Docker build failures because repository names must be lowercase
+
+## 2026-02-01 manual [pitfall]
+When adding CLI flags that affect container creation, ensure validation runs in ALL code paths (new container, existing container, fresh/restart, port-conflict auto-recreate)
