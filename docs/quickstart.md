@@ -266,6 +266,7 @@ See [Configuration Reference](configuration.md#template-section) for template co
 
 ## Next Steps
 
+- **Container lifecycle** - See [Container Lifecycle](lifecycle.md) for details on creation, stopping, and garbage collection
 - **Configure ContainAI** - See the [Technical README](../src/README.md#commands) for volume, naming, and configuration options
 - **Troubleshoot issues** - See [Troubleshooting](../src/README.md#troubleshooting) for common problems
 - **Customize your container** - See [Configuration Reference](configuration.md#template-section) for template options
