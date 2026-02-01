@@ -263,30 +263,33 @@ _cai_parse_timestamp_to_epoch() {
     python3 -c "
 from datetime import datetime, timezone
 import sys
+import re
 
 ts = sys.argv[1]
 try:
-    # Handle Docker's timestamp format with nanoseconds
-    # Truncate nanoseconds to microseconds (Python max precision)
-    if '.' in ts:
-        base, frac = ts.rsplit('.', 1)
-        # Strip trailing Z and truncate to 6 digits
-        frac = frac.rstrip('Z')[:6].ljust(6, '0')
-        ts = base + '.' + frac + 'Z'
+    # Handle Docker's timestamp format with nanoseconds and various timezone formats
+    # Docker outputs: 2024-01-15T10:30:00.123456789Z or 2024-01-15T10:30:00.123456789+00:00
 
-    # Try parsing with fractional seconds
-    for fmt in ['%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ']:
-        try:
-            dt = datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
-            print(int(dt.timestamp()))
-            sys.exit(0)
-        except ValueError:
-            continue
+    # Extract timezone suffix if present (+00:00, -05:00, Z, etc.)
+    tz_match = re.search(r'([+-]\d{2}:\d{2}|Z)$', ts)
+    tz_suffix = tz_match.group(1) if tz_match else ''
+    base_ts = ts[:tz_match.start()] if tz_match else ts
 
-    # Fallback: fromisoformat (handles various formats)
-    dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+    # If fractional seconds present, truncate to 6 digits (Python max precision)
+    if '.' in base_ts:
+        base_part, frac_part = base_ts.rsplit('.', 1)
+        frac_part = frac_part[:6].ljust(6, '0')
+        base_ts = base_part + '.' + frac_part
+
+    # Normalize timezone: Z -> +00:00 for fromisoformat compatibility
+    if tz_suffix == 'Z':
+        tz_suffix = '+00:00'
+
+    # Reconstruct and parse with fromisoformat (handles offsets correctly)
+    normalized_ts = base_ts + tz_suffix
+    dt = datetime.fromisoformat(normalized_ts)
     print(int(dt.timestamp()))
-except Exception as e:
+except Exception:
     sys.exit(1)
 " "$ts" 2>/dev/null
 }

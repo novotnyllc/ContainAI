@@ -2345,8 +2345,8 @@ _containai_gc_cmd() {
         return 0
     fi
 
-    # Helper to format age
-    _format_age() {
+    # Inline age formatting (avoids defining global function)
+    _cai_gc_format_age() {
         local secs="$1"
         local days=$((secs / 86400))
         local hours=$(( (secs % 86400) / 3600 ))
@@ -2365,7 +2365,7 @@ _containai_gc_cmd() {
         local i
         for i in "${!gc_candidates[@]}"; do
             local age_formatted
-            age_formatted=$(_format_age "${gc_ages[$i]}")
+            age_formatted=$(_cai_gc_format_age "${gc_ages[$i]}")
             printf "  %s (%s, age: %s)\n" "${gc_candidates[$i]}" "${gc_statuses[$i]}" "$age_formatted"
         done
         echo ""
@@ -2386,29 +2386,32 @@ _containai_gc_cmd() {
     fi
 
     # Interactive confirmation (unless --force)
+    # Use _cai_prompt_confirm for consistent behavior (CAI_YES support, /dev/tty fallback)
     if [[ "$force_flag" != "true" ]]; then
-        if [[ ! -t 0 ]]; then
-            echo "[ERROR] Non-interactive terminal. Use --force to skip confirmation." >&2
-            return 1
-        fi
-
         local total=$((${#gc_candidates[@]} + ${#image_candidates[@]}))
-        local confirm
-        if ! read -rp "Remove $total resource(s)? [y/N]: " confirm; then
-            echo "Cancelled."
-            return 0
-        fi
-        if [[ ! "$confirm" =~ ^[Yy] ]]; then
+        if ! _cai_prompt_confirm "Remove $total resource(s)?"; then
             echo "Cancelled."
             return 0
         fi
     fi
 
     # Remove containers
+    # Re-check state before removal to prevent race condition where container
+    # could have started between listing and deletion
     local removed_containers=0
     local failed_containers=0
     for name in "${gc_candidates[@]}"; do
-        if docker rm -f -- "$name" >/dev/null 2>&1; then
+        # Safety check: verify container is still not running before removal
+        local current_state
+        current_state=$(docker inspect --format '{{.State.Running}}' -- "$name" 2>/dev/null) || current_state=""
+        if [[ "$current_state" == "true" ]]; then
+            _cai_warn "Skipping container (now running): $name"
+            ((failed_containers++))
+            continue
+        fi
+
+        # Use docker rm without -f to avoid forcing removal of running containers
+        if docker rm -- "$name" >/dev/null 2>&1; then
             _cai_info "Removed container: $name"
             ((removed_containers++))
             # Clean up SSH config
