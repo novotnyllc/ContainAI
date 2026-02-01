@@ -20,9 +20,10 @@ After review during epic planning, this functionality was determined to be:
 2. Not needed since the epic preserves existing behavior (no breaking changes)
 
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+- Commits: N/A (out of scope)
+- Tests: N/A (out of scope)
+- PRs: N/A (out of scope)
+
 ## No Implementation Required
 
-No code changes needed - the existing implementation in `src/lib/container.sh` via `_containai_resolve_agent` handles agent resolution appropriately.
+No code changes needed - the existing implementation in `src/lib/config.sh` via `_containai_resolve_agent` handles agent resolution appropriately.
