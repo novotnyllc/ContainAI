@@ -295,3 +295,9 @@ When capturing command output to check for errors, use 'if \! output=$(cmd)' to 
 
 ## 2026-01-31 manual [pitfall]
 docker exec --user changes UID but may not set HOME; use -e HOME=/path for reliable ~ expansion in commands
+
+## 2026-02-01 manual [pitfall]
+Template/path names from user input must be validated to prevent path traversal - use patterns like _cai_validate_template_name() to reject slashes, .., and enforce safe character sets
+
+## 2026-02-01 manual [pitfall]
+Shell completion tasks should depend on parameter-parsing tasks - advertising non-existent CLI flags misleads users

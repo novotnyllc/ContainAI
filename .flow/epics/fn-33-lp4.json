@@ -1,6 +1,11 @@
 {
   "branch_name": "fn-33-lp4",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-28T10:14:44.394332Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-36-rb7",
     "fn-31-gib",
@@ -8,10 +13,10 @@
   ],
   "id": "fn-33-lp4",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-01T01:11:04.742659Z",
   "spec_path": ".flow/specs/fn-33-lp4.md",
   "status": "open",
   "title": "User Templates & Customization",
-  "updated_at": "2026-01-30T04:18:05.425060Z"
+  "updated_at": "2026-02-01T01:11:04.742670Z"
 }

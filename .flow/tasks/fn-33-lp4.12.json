@@ -9,6 +9,6 @@
   "priority": 3,
   "spec_path": ".flow/tasks/fn-33-lp4.12.md",
   "status": "todo",
-  "title": "Implement template installation during setup",
+  "title": "Add integration test",
   "updated_at": "2026-01-28T18:29:39.544186Z"
 }
