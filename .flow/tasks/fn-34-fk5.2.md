@@ -22,26 +22,25 @@ The existing `_cai_ssh_run` function in `src/lib/ssh.sh` handles SSH execution. 
 - [x] No output buffering delays
 
 ## Done summary
-# fn-34-fk5.2: stdio/stderr passthrough verification
 
-## Summary
-Verified that `_cai_ssh_run` properly implements TTY allocation and real-time output streaming.
+Code inspection verified the implementation meets all acceptance criteria:
 
-## Verification Results
+### TTY Allocation
+- `cai exec` checks `[[ -t 0 ]]` (stdin is TTY) at `src/containai.sh:4231-4234`
+- When true, passes `allocate_tty=true` to `_cai_ssh_run`
+- `_cai_ssh_run_with_retry` adds `-t` flag at `src/lib/ssh.sh:2395-2398`
 
-1. **TTY allocation** ✅ - `cai exec` detects interactive terminals via `[[ -t 0 ]]` and passes `allocate_tty=true` to `_cai_ssh_run`, which adds `-t` flag to SSH
+### Non-Interactive Mode
+- When stdin is not a TTY (piped/script), `allocate_tty=false`
+- No `-t` flag added, proper for batch/scripted usage
 
-2. **Non-interactive commands** ✅ - When stdin is not a terminal, no `-t` flag is added
+### Real-Time Streaming
+- Stdout streams directly (no redirection) - `src/lib/ssh.sh:2546`
+- Stderr captured via FIFO + tee for error classification while still displaying - lines 2529-2556
 
-3. **Real-time streaming** ✅ - Uses FIFO-based approach: stdout streams directly, stderr goes through named pipe + background tee for both display and capture
+### Buffering Behavior
+- When `allocate_tty=true`: PTY ensures line buffering for remote process stdout
+- Stderr uses FIFO which has small kernel buffers (~64KB) and `tee` processes data immediately
 
-4. **No buffering** ✅ - FIFO pattern ensures immediate output without delays
-
-## Code Locations
-- TTY detection: `src/containai.sh:4231-4234`
-- SSH -t flag: `src/lib/ssh.sh:2395-2398`
-- Streaming: `src/lib/ssh.sh:2525-2556`
 ## Evidence
-- Commits:
-- Tests:
-- PRs:
+See `.flow/evidence/fn-34-fk5.2-verification.md` for detailed code references
