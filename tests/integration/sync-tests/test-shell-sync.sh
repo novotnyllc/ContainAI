@@ -420,7 +420,42 @@ test_zprofile_synced_assertions() {
 }
 
 # ==============================================================================
-# Test 8: .oh-my-zsh/custom synced with R flag
+# Test 8: .zshenv synced correctly
+# ==============================================================================
+setup_zshenv_fixture() {
+    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
+
+    # Create .zshenv with test content
+    printf '%s\n' '# ZSHENV_TEST_MARKER' >"$fixture/.zshenv"
+    printf '%s\n' 'export ZSHENV_VAR="zshenv_value"' >>"$fixture/.zshenv"
+}
+
+test_zshenv_synced_assertions() {
+    # Verify file synced to volume
+    assert_file_exists_in_volume "shell/zshenv" || {
+        printf '%s\n' "[DEBUG] shell/zshenv not found in volume" >&2
+        return 1
+    }
+
+    # Verify symlink in container
+    assert_symlink_target "/home/agent/.zshenv" "/mnt/agent-data/shell/zshenv" || {
+        printf '%s\n' "[DEBUG] ~/.zshenv should symlink to /mnt/agent-data/shell/zshenv" >&2
+        return 1
+    }
+
+    # Verify content
+    local content
+    content=$(cat_from_volume "shell/zshenv") || return 1
+    if [[ "$content" != *"ZSHENV_TEST_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] zshenv does not contain expected marker" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
+# Test 9: .oh-my-zsh/custom synced with R flag
 # ==============================================================================
 # The R flag means "remove existing first" - important for directories that
 # may be pre-populated in the container image.
@@ -481,6 +516,22 @@ test_ohmyzsh_custom_synced_assertions() {
         return 1
     fi
 
+    # Verify plugin content marker
+    local plugin_content
+    plugin_content=$(cat_from_volume "shell/oh-my-zsh-custom/plugins/custom-plugin/custom-plugin.plugin.zsh") || return 1
+    if [[ "$plugin_content" != *"OHMYZSH_PLUGIN_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] plugin does not contain expected marker" >&2
+        return 1
+    fi
+
+    # Verify alias content marker
+    local alias_content
+    alias_content=$(cat_from_volume "shell/oh-my-zsh-custom/aliases.zsh") || return 1
+    if [[ "$alias_content" != *"OHMYZSH_ALIAS_MARKER"* ]]; then
+        printf '%s\n' "[DEBUG] aliases does not contain expected marker" >&2
+        return 1
+    fi
+
     return 0
 }
 
@@ -512,7 +563,10 @@ main() {
     # Test 7: .zprofile synced correctly
     run_shell_sync_test "zprofile-sync" setup_zprofile_fixture test_zprofile_synced_assertions
 
-    # Test 8: .oh-my-zsh/custom synced with R flag
+    # Test 8: .zshenv synced correctly
+    run_shell_sync_test "zshenv-sync" setup_zshenv_fixture test_zshenv_synced_assertions
+
+    # Test 9: .oh-my-zsh/custom synced with R flag
     run_shell_sync_test "ohmyzsh-custom" setup_ohmyzsh_custom_fixture test_ohmyzsh_custom_synced_assertions
 
     sync_test_section "Summary"
