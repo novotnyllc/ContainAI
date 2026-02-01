@@ -10,9 +10,10 @@
 #   _cai_ensure_template_dir()    - Create template directory if missing
 #   _cai_template_exists()        - Check if a named template exists
 #   _cai_validate_template_name() - Validate template name (no path traversal)
+#   _cai_require_template()       - Get template path with first-use auto-install
 #   _cai_install_template()       - Install a single template from repo (if missing)
 #   _cai_install_all_templates()  - Install all repo templates during setup
-#   _cai_ensure_default_templates() - First-use detection: install missing defaults
+#   _cai_ensure_default_templates() - Install all missing default templates
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -154,6 +155,48 @@ _cai_template_exists() {
     [[ -f "$template_path" ]]
 }
 
+# Require a template to exist, triggering first-use installation if needed
+# This is the main entry point for template access with first-use detection
+# Args: template_name [dry_run]
+# Returns: 0 if template exists or was installed, 1 on failure
+# Outputs: path to template Dockerfile (stdout, no newline) on success
+_cai_require_template() {
+    local template_name="${1:-default}"
+    local dry_run="${2:-false}"
+
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    # First-use detection: install if missing
+    if ! _cai_template_exists "$template_name"; then
+        # Check if this is a repo-shipped template that can be auto-installed
+        local entry found=""
+        for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+            local name="${entry%%:*}"
+            if [[ "$name" == "$template_name" ]]; then
+                found="true"
+                break
+            fi
+        done
+
+        if [[ "$found" == "true" ]]; then
+            _cai_info "Template '$template_name' not found, installing from repo..."
+            if ! _cai_install_template "$template_name" "$dry_run"; then
+                _cai_error "Failed to install template '$template_name'"
+                return 1
+            fi
+        else
+            _cai_error "Template '$template_name' not found at $_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+            _cai_error "Create a Dockerfile at that location or use a repo-shipped template (default, example-ml)"
+            return 1
+        fi
+    fi
+
+    printf '%s' "$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+}
+
 # ==============================================================================
 # Template Installation Functions
 # ==============================================================================
@@ -254,7 +297,9 @@ _cai_install_template() {
         return 1
     fi
 
-    if ! cp -- "$source_file" "$target_file"; then
+    # Note: No -- before source_file since source_file is repo-controlled path
+    # and template_name is validated (starts with alphanumeric, no dashes at start)
+    if ! cp "$source_file" "$target_file"; then
         _cai_error "Failed to copy template: $source_file -> $target_file"
         return 1
     fi
@@ -284,25 +329,25 @@ _cai_install_all_templates() {
 # First-use detection: ensure default templates are installed
 # Called during container creation if templates are missing
 # Args: [dry_run]
-# Returns: 0 on success, 1 on failure
-# Silent on success unless templates are installed
+# Returns: 0 on success (all templates installed or already exist)
+#          1 on failure (at least one required template could not be installed)
+# Logs warning for each failed template but continues trying others
 _cai_ensure_default_templates() {
     local dry_run="${1:-false}"
-    local entry name installed_any="false"
+    local entry name failed="false"
 
     for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
         name="${entry%%:*}"
         if ! _cai_template_exists "$name"; then
             if ! _cai_install_template "$name" "$dry_run"; then
                 _cai_warn "Failed to install missing template '$name'"
-            else
-                installed_any="true"
+                failed="true"
             fi
         fi
     done
 
-    if [[ "$installed_any" == "true" ]] && [[ "$dry_run" != "true" ]]; then
-        _cai_debug "Installed missing default templates"
+    if [[ "$failed" == "true" ]]; then
+        return 1
     fi
 
     return 0

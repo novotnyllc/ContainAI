@@ -411,6 +411,75 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
+# Test: _cai_ensure_default_templates returns non-zero on failure
+# ==============================================================================
+
+test_start "_cai_ensure_default_templates returns non-zero when templates cannot be installed"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+# Make templates dir unwritable to force failure
+mkdir -p "$TEST_TMPDIR/templates"
+chmod 000 "$TEST_TMPDIR/templates"
+if _cai_ensure_default_templates "false" 2>/dev/null; then
+    chmod 755 "$TEST_TMPDIR/templates"  # Restore for cleanup
+    test_fail "returned success when install should fail"
+else
+    chmod 755 "$TEST_TMPDIR/templates"  # Restore for cleanup
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_require_template installs missing repo template
+# ==============================================================================
+
+test_start "_cai_require_template auto-installs missing repo template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+result=$(_cai_require_template "default" "false" 2>/dev/null)
+if [[ -f "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+    if [[ "$result" == "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+        test_pass
+    else
+        test_fail "returned wrong path: $result"
+    fi
+else
+    test_fail "template not installed"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_require_template returns existing template path
+# ==============================================================================
+
+test_start "_cai_require_template returns path for existing template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/default"
+printf '%s\n' "FROM scratch" > "$TEST_TMPDIR/templates/default/Dockerfile"
+result=$(_cai_require_template "default" "false" 2>/dev/null)
+if [[ "$result" == "$TEST_TMPDIR/templates/default/Dockerfile" ]]; then
+    test_pass
+else
+    test_fail "wrong path: $result"
+fi
+teardown_tmpdir
+
+# ==============================================================================
+# Test: _cai_require_template fails for non-repo template that doesn't exist
+# ==============================================================================
+
+test_start "_cai_require_template fails for unknown template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+if _cai_require_template "unknown-custom-template" "false" 2>/dev/null; then
+    test_fail "should have failed for unknown template"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Summary
 # ==============================================================================
 
