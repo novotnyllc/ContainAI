@@ -1578,6 +1578,13 @@ _containai_start_container() {
         return 1
     fi
 
+    # First-use detection: ensure default templates are installed
+    # This enables template customization (fn-33-lp4) even if user skipped `cai setup`
+    # Templates will be built in fn-33-lp4.4 when --template is added
+    if ! _cai_ensure_default_templates "$dry_run_flag"; then
+        _cai_debug "Some default templates could not be installed (continuing)"
+    fi
+
     # Resolve image: use --image-tag if provided (advanced/debugging), else default
     local resolved_image
     if [[ -n "$image_tag" ]]; then

@@ -4,14 +4,20 @@
 # ==============================================================================
 # This file must be sourced, not executed directly.
 #
+# First-use detection:
+#   Use _cai_require_template() or _cai_template_exists_or_install() to access
+#   templates with automatic installation of missing repo-shipped templates
+#   (default, example-ml). This triggers "first-use" installation when a user
+#   hasn't run setup or deleted a template.
+#
 # Provides:
+#   _cai_require_template()        - Get template path with first-use auto-install (PRIMARY)
+#   _cai_template_exists_or_install() - Check with first-use auto-install for repo templates
 #   _cai_get_template_dir()        - Return path to templates directory
-#   _cai_get_template_path()       - Return path to template Dockerfile
+#   _cai_get_template_path()       - Return path to template Dockerfile (no auto-install)
 #   _cai_ensure_template_dir()     - Create template directory if missing
 #   _cai_template_exists()         - Check if a named template exists (no auto-install)
-#   _cai_template_exists_or_install() - Check with first-use auto-install for repo templates
 #   _cai_validate_template_name()  - Validate template name (no path traversal)
-#   _cai_require_template()        - Get template path with first-use auto-install
 #   _cai_install_template()        - Install a single template from repo (if missing)
 #   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
@@ -96,10 +102,11 @@ _cai_get_template_dir() {
     printf '%s' "$_CAI_TEMPLATE_DIR"
 }
 
-# Get path to template Dockerfile
+# Get path to template Dockerfile (simple path getter, no existence check)
 # Args: template_name (defaults to "default")
 # Outputs: path to Dockerfile (stdout, no newline)
 # Returns: 0 on success, 1 if template name is invalid
+# Note: Use _cai_require_template() for first-use auto-install behavior
 _cai_get_template_path() {
     local template_name="${1:-default}"
 
