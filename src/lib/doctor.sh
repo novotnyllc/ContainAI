@@ -1122,7 +1122,7 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Templates:" "[OK] Ready"
     else
         printf '  %-44s %s\n' "Templates:" "[ERROR] Issues found"
-        printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to reinstall templates"
+        printf '  %-44s %s\n' "Recommended:" "Run 'cai doctor fix template' to recover"
     fi
 
     # Exit code: 0 if isolation ready AND SSH configured, 1 if not
@@ -1565,13 +1565,18 @@ _cai_doctor_fix_dispatch() {
             _cai_doctor_fix_container "$effective_context" "$@"
             return $?
             ;;
+        template)
+            shift
+            _cai_doctor_fix_template "$@"
+            return $?
+            ;;
         --help | -h)
             _containai_doctor_help
             return 0
             ;;
         *)
             echo "[ERROR] Unknown fix target: $target" >&2
-            echo "Valid targets: volume, container, --all" >&2
+            echo "Valid targets: volume, container, template, --all" >&2
             echo "Use 'cai doctor --help' for usage" >&2
             return 1
             ;;
@@ -2083,6 +2088,166 @@ _cai_doctor_fix_container_single() {
         return 0
     else
         printf '    %-46s %s\n' "SSH refresh:" "[FAIL]"
+        return 1
+    fi
+}
+
+# ==============================================================================
+# Doctor Fix Template
+# ==============================================================================
+
+# Fix template issues by restoring from repo
+# Arguments: [template_name] - defaults to "default"
+#            --all - restore all repo-shipped templates
+# Returns: 0=fixed, 1=error
+_cai_doctor_fix_template() {
+    local template_name=""
+    local fix_all="false"
+    local arg
+
+    # Parse arguments
+    for arg in "$@"; do
+        case "$arg" in
+            --all)
+                fix_all="true"
+                ;;
+            -*)
+                _cai_error "Unknown option: $arg"
+                return 1
+                ;;
+            *)
+                template_name="$arg"
+                ;;
+        esac
+    done
+
+    printf '%s\n' "ContainAI Doctor Fix - Templates"
+    printf '%s\n' "================================="
+    printf '\n'
+
+    local fixed_count=0
+    local fail_count=0
+    local skip_count=0
+
+    if [[ "$fix_all" == "true" ]]; then
+        # Fix all repo-shipped templates
+        local entry name
+        for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+            name="${entry%%:*}"
+            printf '%s\n' "Template '$name':"
+            if _cai_doctor_fix_single_template "$name"; then
+                ((fixed_count++)) || true
+            else
+                ((fail_count++)) || true
+            fi
+            printf '\n'
+        done
+    elif [[ -n "$template_name" ]]; then
+        # Fix specific template
+        printf '%s\n' "Template '$template_name':"
+        if _cai_doctor_fix_single_template "$template_name"; then
+            ((fixed_count++)) || true
+        else
+            ((fail_count++)) || true
+        fi
+    else
+        # Default: fix 'default' template
+        printf '%s\n' "Template 'default':"
+        if _cai_doctor_fix_single_template "default"; then
+            ((fixed_count++)) || true
+        else
+            ((fail_count++)) || true
+        fi
+    fi
+
+    printf '\n'
+    printf '%s\n' "Summary"
+    printf '  %-50s %s\n' "Fixed:" "$fixed_count"
+    printf '  %-50s %s\n' "Failed:" "$fail_count"
+
+    if [[ $fail_count -gt 0 ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Fix a single template by restoring from repo
+# Arguments: $1 = template_name
+# Returns: 0=fixed, 1=error
+_cai_doctor_fix_single_template() {
+    local template_name="$1"
+    local template_path target_dir source_file backup_path
+    local is_repo_template="false"
+    local entry name src
+
+    # Validate template name
+    if ! _cai_validate_template_name "$template_name" 2>/dev/null; then
+        printf '  %-46s %s\n' "Validate:" "[FAIL] Invalid template name"
+        return 1
+    fi
+
+    template_path="$_CAI_TEMPLATE_DIR/$template_name/Dockerfile"
+    target_dir="$_CAI_TEMPLATE_DIR/$template_name"
+
+    # Check if this is a repo-shipped template
+    for entry in "${_CAI_REPO_TEMPLATES[@]}"; do
+        name="${entry%%:*}"
+        src="${entry#*:}"
+        if [[ "$name" == "$template_name" ]]; then
+            is_repo_template="true"
+            source_file="$src"
+            break
+        fi
+    done
+
+    # Backup existing template if present
+    if [[ -f "$template_path" ]]; then
+        backup_path="${template_path}.backup.$(date +%Y%m%d-%H%M%S)"
+        printf '  %-46s' "Backing up to ${backup_path##*/}:"
+        if cp "$template_path" "$backup_path" 2>/dev/null; then
+            printf ' %s\n' "[OK]"
+        else
+            printf ' %s\n' "[FAIL]"
+            return 1
+        fi
+    fi
+
+    # Restore from repo if it's a repo-shipped template
+    if [[ "$is_repo_template" == "true" ]]; then
+        local repo_dir
+        if ! repo_dir=$(_cai_get_repo_templates_dir 2>/dev/null); then
+            printf '  %-46s %s\n' "Restore:" "[FAIL] Cannot find repo templates"
+            return 1
+        fi
+
+        local full_source="$repo_dir/$source_file"
+        if [[ ! -f "$full_source" ]]; then
+            printf '  %-46s %s\n' "Restore:" "[FAIL] Source not found: $source_file"
+            return 1
+        fi
+
+        # Create directory if needed
+        if [[ ! -d "$target_dir" ]]; then
+            if ! mkdir -p "$target_dir" 2>/dev/null; then
+                printf '  %-46s %s\n' "Create dir:" "[FAIL]"
+                return 1
+            fi
+        fi
+
+        printf '  %-46s' "Restoring from repo:"
+        if cp "$full_source" "$template_path" 2>/dev/null; then
+            printf ' %s\n' "[FIXED]"
+            return 0
+        else
+            printf ' %s\n' "[FAIL]"
+            return 1
+        fi
+    else
+        # User-created template - can only backup, cannot restore
+        printf '  %-46s %s\n' "Restore:" "[SKIP] User template, cannot restore from repo"
+        if [[ -n "${backup_path:-}" ]]; then
+            printf '  %-46s %s\n' "" "Backup saved at: $backup_path"
+        fi
         return 1
     fi
 }
@@ -3255,7 +3420,7 @@ _cai_doctor_template_checks() {
         missing)
             all_ok="false"
             printf '  %-44s %s\n' "Template 'default':" "[FAIL] Missing"
-            printf '  %-44s %s\n' "" "Run 'cai setup' to reinstall templates"
+            printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
             ;;
         invalid_name)
             # Should never happen for "default"
@@ -3290,7 +3455,7 @@ _cai_doctor_template_checks() {
                 all_ok="false"
                 printf '  %-44s %s\n' "Dockerfile syntax:" "[FAIL] No FROM line"
                 printf '  %-44s %s\n' "" "Dockerfile must have a FROM instruction"
-                printf '  %-44s %s\n' "" "Run 'cai setup' to reinstall templates"
+                printf '  %-44s %s\n' "" "Run 'cai doctor fix template' to recover"
                 ;;
         esac
     fi

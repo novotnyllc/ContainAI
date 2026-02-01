@@ -624,7 +624,7 @@ _containai_doctor_help() {
 ContainAI Doctor - Check system capabilities and diagnostics
 
 Usage: cai doctor [options]
-       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>]]
+       cai doctor fix [--all | volume [--all|<name>] | container [--all|<name>] | template]
 
 Checks Docker availability and Sysbox isolation configuration.
 Reports requirement levels and actionable remediation guidance.
@@ -660,6 +660,8 @@ Fix Targets:
   fix container                 List containers, offer to fix
   fix container --all           Fix all containers (including SSH key auth)
   fix container <name>          Fix specific container
+  fix template                  Restore default template from repo
+  fix template --all            Restore all repo-shipped templates
 
 Exit Codes:
   0    All checks pass (Sysbox available AND SSH configured)
@@ -672,6 +674,7 @@ What 'fix' can remediate:
   - Stale SSH configs (removes orphaned container configs)
   - Wrong file permissions (fixes to 700/600 as appropriate)
   - Container SSH configuration refresh
+  - Missing/corrupted templates (restores from repo)
 
 What 'fix' cannot remediate (requires manual action):
   - Sysbox not installed (use 'cai setup')
@@ -4842,7 +4845,7 @@ _cai_completions() {
     local shell_flags="--data-volume --config --workspace --container --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
     local exec_flags="--workspace -w --container --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --build-templates --reset-lima --workspace -w -h --help"
-    local doctor_fix_subcommands="volume container"
+    local doctor_fix_subcommands="volume container template"
     local setup_flags="--dry-run --verbose --force -h --help"
     local validate_flags="--verbose --config --workspace -h --help"
     local docker_flags=""
@@ -5247,7 +5250,7 @@ _cai() {
                             ;;
                         doctor_args)
                             _arguments \
-                                '1:target:(volume container)' \
+                                '1:target:(volume container template)' \
                                 '--all[Fix all]' \
                                 '*:name:'
                             ;;
