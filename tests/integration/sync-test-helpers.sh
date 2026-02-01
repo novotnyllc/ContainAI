@@ -82,6 +82,10 @@ SYNC_TEST_REAL_HOME="${REAL_HOME:-$HOME}"
 # Fixture directory (initialized by init_fixture_home)
 SYNC_TEST_FIXTURE_HOME=""
 
+# Profile HOME directory (separate from fixture for --from tests)
+# This prevents HOME==--from which triggers profile import detection
+SYNC_TEST_PROFILE_HOME=""
+
 # Preserve Docker config
 export DOCKER_CONFIG="${DOCKER_CONFIG:-${SYNC_TEST_REAL_HOME}/.docker}"
 
@@ -90,6 +94,13 @@ export DOCKER_CONFIG="${DOCKER_CONFIG:-${SYNC_TEST_REAL_HOME}/.docker}"
 init_fixture_home() {
     SYNC_TEST_FIXTURE_HOME=$(mktemp -d "${SYNC_TEST_REAL_HOME}/.containai-sync-test-XXXXXX")
     printf '%s\n' "$SYNC_TEST_FIXTURE_HOME"
+}
+
+# Initialize separate profile home (to avoid HOME == --from collision)
+# This is needed because import.sh detects profile import when source_root == HOME
+init_profile_home() {
+    SYNC_TEST_PROFILE_HOME=$(mktemp -d "${SYNC_TEST_REAL_HOME}/.containai-profile-XXXXXX")
+    printf '%s\n' "$SYNC_TEST_PROFILE_HOME"
 }
 
 # ==============================================================================
@@ -526,26 +537,30 @@ assert_file_not_contains() {
 # ==============================================================================
 # Import Helpers
 # ==============================================================================
-# Run cai import with hermetic HOME override
+# Run cai import with hermetic HOME override (profile import mode)
 # Usage: run_cai_import [extra_args...]
 run_cai_import() {
     HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" "$@" 2>&1
 }
 
-# Run cai import with env var overrides
-# Usage: run_cai_import_env "VAR1=val1 VAR2=val2" [extra_args...]
-run_cai_import_env() {
-    local env_vars="$1"
-    shift
-    # shellcheck disable=SC2086
-    HOME="$SYNC_TEST_FIXTURE_HOME" env $env_vars bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" "$@" 2>&1
-}
-
-# Run cai import with --from and data volume
+# Run cai import with separate HOME and --from to avoid profile import detection
+# This is the correct way to test --from imports: HOME != --from source
 # Usage: run_cai_import_from [extra_args...]
 # Requires: SYNC_TEST_DATA_VOLUME and SYNC_TEST_FIXTURE_HOME to be set
 run_cai_import_from() {
-    run_cai_import --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@"
+    # Use a separate profile home dir to avoid HOME == --from collision
+    # which would trigger profile import detection and skip secrets
+    if [[ -z "$SYNC_TEST_PROFILE_HOME" ]]; then
+        init_profile_home >/dev/null
+    fi
+    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+}
+
+# Run cai import as profile import (HOME == source, no --from)
+# This tests the profile import behavior where secrets become placeholders
+# Usage: run_cai_import_profile [extra_args...]
+run_cai_import_profile() {
+    HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import --data-volume "$2" "$@"' _ "$SYNC_TEST_SRC_DIR" "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
 }
 
 # ==============================================================================
@@ -592,6 +607,9 @@ cleanup_test_volumes() {
 cleanup_fixture_home() {
     if [[ -d "$SYNC_TEST_FIXTURE_HOME" && "$SYNC_TEST_FIXTURE_HOME" == "${SYNC_TEST_REAL_HOME}/.containai-sync-test-"* ]]; then
         rm -rf "$SYNC_TEST_FIXTURE_HOME" 2>/dev/null || true
+    fi
+    if [[ -d "$SYNC_TEST_PROFILE_HOME" && "$SYNC_TEST_PROFILE_HOME" == "${SYNC_TEST_REAL_HOME}/.containai-profile-"* ]]; then
+        rm -rf "$SYNC_TEST_PROFILE_HOME" 2>/dev/null || true
     fi
 }
 

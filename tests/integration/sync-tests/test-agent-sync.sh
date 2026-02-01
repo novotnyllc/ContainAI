@@ -53,25 +53,43 @@ fi
 setup_cleanup_trap
 
 init_fixture_home >/dev/null
-SYNC_TEST_DATA_VOLUME=$(create_test_volume "agent-sync-data")
 
 sync_test_info "Fixture home: $SYNC_TEST_FIXTURE_HOME"
-sync_test_info "Data volume: $SYNC_TEST_DATA_VOLUME"
 sync_test_info "Test image: $SYNC_TEST_IMAGE_NAME"
 
+# Test counter for unique volume names
+SYNC_TEST_COUNTER=0
+
 # ==============================================================================
-# Helper to run a test with a fresh container
+# Helper to run a test with a fresh container and volume
 # ==============================================================================
+# Each test gets its own fresh volume for isolation
+# Usage: run_agent_sync_test NAME SETUP_FN TEST_FN [--profile-import]
 run_agent_sync_test() {
     local test_name="$1"
     local setup_fn="$2"
     local test_fn="$3"
+    shift 3
+    local profile_import=false
+
+    # Parse optional flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile-import) profile_import=true; shift ;;
+            *) shift ;;
+        esac
+    done
+
     local import_output import_exit=0
 
-    # Create unique container for this test
+    # Create fresh volume for this test (isolation)
+    SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
+    SYNC_TEST_DATA_VOLUME=$(create_test_volume "agent-data-${SYNC_TEST_COUNTER}")
+
+    # Create unique container for this test (use tail -f for portable keepalive)
     create_test_container "$test_name" \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" sleep infinity >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then
@@ -79,11 +97,17 @@ run_agent_sync_test() {
     fi
 
     # Run import and capture output/exit code
-    import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+    if [[ "$profile_import" == "true" ]]; then
+        import_output=$(run_cai_import_profile 2>&1) || import_exit=$?
+    else
+        import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+    fi
     if [[ $import_exit -ne 0 ]]; then
         sync_test_fail "$test_name: import failed (exit=$import_exit)"
         printf '%s\n' "$import_output" | head -20 >&2
         find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        # Clean up this test's volume
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
         return
     fi
 
@@ -102,6 +126,10 @@ run_agent_sync_test() {
 
     # Stop container
     stop_test_container "test-${test_name}-${SYNC_TEST_RUN_ID}"
+
+    # Clean up this test's volume (for isolation)
+    "${DOCKER_CMD[@]}" rm -f "test-${test_name}-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 
     # Clear fixture for next test
     find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
@@ -314,17 +342,23 @@ setup_profile_import_fixture() {
     create_claude_fixture
 }
 
+# Profile import (HOME == source, no --from) should create placeholders for secrets
+# This test verifies that credentials are NOT copied when doing profile import
 test_profile_import_placeholder_assertions() {
-    # With --from (fixture path != HOME), full content should be synced
-    # This is the expected behavior we're validating
-    local content
-    content=$(cat_from_volume "claude/credentials.json")
-    if ! printf '%s' "$content" | grep -q "test-creds"; then
-        return 1  # With --from, content should be copied
-    fi
-
-    # Verify permissions still correct (600 for secrets)
+    # Profile import should create credential file with proper permissions
+    assert_file_exists_in_volume "claude/credentials.json" || return 1
     assert_permissions_in_volume "claude/credentials.json" "600" || return 1
+
+    # But the content should NOT contain the actual secret (it's skipped in profile import)
+    # The file should be empty or minimal placeholder, NOT the fixture's test-creds
+    local content
+    content=$(cat_from_volume "claude/credentials.json" 2>/dev/null || true)
+
+    # Profile import skips .credentials.json copy, so either it's empty or placeholder
+    # It should NOT contain "test-creds" which was in the fixture
+    if printf '%s' "$content" | grep -q "test-creds"; then
+        return 1  # FAIL: Profile import should NOT copy actual credentials
+    fi
 
     return 0
 }
@@ -411,8 +445,8 @@ main() {
     # Test 10: Kimi
     run_agent_sync_test "kimi-sync" create_kimi_fixture test_kimi_sync_assertions
 
-    # Test 11: Profile-import placeholder behavior (validated via --from)
-    run_agent_sync_test "profile-import" setup_profile_import_fixture test_profile_import_placeholder_assertions
+    # Test 11: Profile-import placeholder behavior (uses --profile-import flag)
+    run_agent_sync_test "profile-import" setup_profile_import_fixture test_profile_import_placeholder_assertions --profile-import
 
     # Test 12: Optional agent missing = no target created
     run_agent_sync_test "optional-missing" setup_optional_missing_fixture test_optional_missing_assertions
