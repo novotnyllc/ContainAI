@@ -1,14 +1,6 @@
-# fn-34-fk5.18 Implement container lookup helper (from fn-18-g96)
+# fn-34-fk5.18: Implement container lookup helper (from fn-18-g96)
 
-## Description
-TBD
+**STATUS: COMPLETED / SUPERSEDED BY fn-36-rb7**
 
-## Acceptance
-- [ ] TBD
-
-## Done summary
-Superseded by fn-36-rb7.11 (container lookup helper)
-## Evidence
-- Commits:
-- Tests:
-- PRs:
+Container lookup functionality exists. The workspace state and naming
+conventions are being enhanced by fn-36-rb7.

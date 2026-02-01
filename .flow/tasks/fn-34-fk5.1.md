@@ -1,14 +1,14 @@
-# fn-34-fk5.1 Implement cai exec command
+# fn-34-fk5.1: Implement cai exec command
 
-## Description
-TBD
+**STATUS: COMPLETED PREVIOUSLY**
 
-## Acceptance
-- [ ] TBD
+The `cai exec` command was implemented in a previous iteration. It provides one-shot command execution in containers.
 
-## Done summary
-Superseded by fn-36-rb7.6 (cai exec command)
-## Evidence
-- Commits:
-- Tests:
-- PRs:
+## What Was Implemented
+- `cai exec [options] -- <command> [args...]` syntax
+- Uses `_cai_ssh_run` for execution
+- Exit code passthrough
+- stdio/stderr passthrough
+
+## Location
+- `src/containai.sh`: `_containai_exec_cmd` function

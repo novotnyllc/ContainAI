@@ -1,15 +1,5 @@
-# fn-34-fk5.14 Document handy aliases
+# fn-34-fk5.14: Document handy aliases
 
-## Description
-TBD
+**STATUS: DUPLICATE OF fn-34-fk5.12**
 
-## Acceptance
-- [ ] TBD
-
-## Done summary
-TBD
-
-## Evidence
-- Commits:
-- Tests:
-- PRs:
+Alias documentation is covered by task fn-34-fk5.12.

@@ -1,15 +1,5 @@
-# fn-34-fk5.15 Implement cai gc command (from fn-19-qni)
+# fn-34-fk5.15: Implement cai gc command (from fn-19-qni)
 
-## Description
-TBD
+**STATUS: DUPLICATE OF fn-34-fk5.9**
 
-## Acceptance
-- [ ] TBD
-
-## Done summary
-TBD
-
-## Evidence
-- Commits:
-- Tests:
-- PRs:
+The `cai gc` command is implemented in task fn-34-fk5.9.
