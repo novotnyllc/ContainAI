@@ -224,21 +224,68 @@ _cai_find_return_position() {
     return 1
 }
 
-# Insert a rule at the correct position in DOCKER-USER
+# Check if a rule exists and is positioned BEFORE the RETURN rule
+# Arguments:
+#   $@ = rule specification arguments (without chain name)
+# Returns: 0=rule exists before RETURN (valid), 1=rule missing or after RETURN
+_cai_rule_before_return() {
+    local return_pos=0
+    local rule_pos=0
+    local line_num=0
+    local line
+    local rule_pattern=""
+    local arg
+
+    # Build a pattern to match this rule in iptables -S output
+    # We need to match the key parts: -i bridge -d dest -j ACTION
+    for arg in "$@"; do
+        rule_pattern="$rule_pattern.*$arg"
+    done
+
+    # Find positions of our rule and RETURN
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        case "$line" in
+            *" -j RETURN"*)
+                return_pos=$line_num
+                ;;
+        esac
+        # Check if this line matches our rule pattern
+        if [[ "$line" =~ $_CAI_IPTABLES_COMMENT ]] && [[ "$line" =~ $rule_pattern ]]; then
+            rule_pos=$line_num
+        fi
+    done < <(iptables -S "$_CAI_IPTABLES_CHAIN" 2>/dev/null | tail -n +2)
+
+    # Rule must exist and be before RETURN (or no RETURN exists)
+    if [[ "$rule_pos" -gt 0 ]]; then
+        if [[ "$return_pos" -eq 0 ]] || [[ "$rule_pos" -lt "$return_pos" ]]; then
+            return 0  # Valid position
+        fi
+    fi
+
+    return 1  # Missing or after RETURN
+}
+
+# Ensure a rule exists in valid position (before RETURN in DOCKER-USER)
+# If rule exists after RETURN, deletes and reinserts at correct position
 # Arguments:
 #   $@ = rule specification arguments (without -I/-A and chain name)
 # Returns: 0=success, 1=failure
-# Note: Inserts before RETURN if present, otherwise appends
-# shellcheck disable=SC2086
-_cai_insert_rule_before_return() {
+_cai_ensure_rule_before_return() {
     local return_pos
 
-    # Check if rule already exists
-    if iptables -C "$_CAI_IPTABLES_CHAIN" "$@" 2>/dev/null; then
-        return 0  # Already exists
+    # Check if rule exists in valid position
+    if _cai_rule_before_return "$@"; then
+        return 0  # Already in correct position
     fi
 
-    # Find position of RETURN rule
+    # Rule either doesn't exist or is in wrong position
+    # Delete any existing copies first (idempotent cleanup)
+    while iptables -C "$_CAI_IPTABLES_CHAIN" "$@" 2>/dev/null; do
+        iptables -D "$_CAI_IPTABLES_CHAIN" "$@" 2>/dev/null || break
+    done
+
+    # Find position of RETURN rule and insert before it
     if return_pos=$(_cai_find_return_position); then
         # Insert at the position where RETURN is (pushes RETURN down)
         if ! iptables -I "$_CAI_IPTABLES_CHAIN" "$return_pos" "$@"; then
@@ -336,30 +383,26 @@ _cai_apply_network_rules() {
         _cai_debug "Gateway allow rule already exists"
     fi
 
-    # Step 2: Block specific cloud metadata endpoints (insert before RETURN)
+    # Step 2: Block specific cloud metadata endpoints (ensure before RETURN)
+    # Uses _cai_ensure_rule_before_return which handles:
+    # - Rules that don't exist (inserts them)
+    # - Rules in wrong position after RETURN (deletes and reinserts)
+    # - Rules already in correct position (no-op)
     for endpoint in $_CAI_METADATA_ENDPOINTS; do
-        if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! _cai_insert_rule_before_return -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
-                _cai_error "Failed to add metadata block rule for $endpoint"
-                return 1
-            fi
-            _cai_step "Added metadata block rule: $endpoint"
-        else
-            _cai_debug "Metadata block rule already exists: $endpoint"
+        if ! _cai_ensure_rule_before_return -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+            _cai_error "Failed to add metadata block rule for $endpoint"
+            return 1
         fi
+        _cai_step "Ensured metadata block rule: $endpoint"
     done
 
-    # Step 3: Block private IP ranges (insert before RETURN)
+    # Step 3: Block private IP ranges (ensure before RETURN)
     for range in $_CAI_PRIVATE_RANGES; do
-        if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! _cai_insert_rule_before_return -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
-                _cai_error "Failed to add private range block rule for $range"
-                return 1
-            fi
-            _cai_step "Added private range block rule: $range"
-        else
-            _cai_debug "Private range block rule already exists: $range"
+        if ! _cai_ensure_rule_before_return -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+            _cai_error "Failed to add private range block rule for $range"
+            return 1
         fi
+        _cai_step "Ensured private range block rule: $range"
     done
 
     _cai_ok "Network security rules applied successfully"
