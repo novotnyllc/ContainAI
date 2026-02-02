@@ -85,9 +85,10 @@ _CAI_IPTABLES_CHAIN="DOCKER-USER"
 # A nested container is when ContainAI is running inside another container
 # (e.g., running cai inside a cai sandbox, or inside any Docker container)
 # Returns: 0=nested, 1=not nested (host environment)
-# Note: This is a more specific check than _cai_is_container() which just
-#       checks if we're in any container. This check is for network rule
-#       purposes where we need to know if we're targeting docker0 vs cai0.
+# Note: Currently equivalent to _cai_is_container(). Used as an intentional
+#       abstraction for network rule purposes where we need to know if we're
+#       targeting docker0 (nested) vs cai0 (host). This allows future
+#       refinement of nested detection without changing callers.
 _cai_is_nested_container() {
     _cai_is_container
 }
@@ -96,7 +97,12 @@ _cai_is_nested_container() {
 # Sysbox containers virtualize the kernel and may not support full iptables
 # runc containers with NET_ADMIN capability have full iptables support
 # Returns: 0=supported, 1=not supported
-# Outputs: Sets _CAI_NESTED_IPTABLES_STATUS with details
+# Outputs: Sets _CAI_NESTED_IPTABLES_STATUS with details:
+#   - "host" = running on host (not nested), iptables should work
+#   - "nested_supported" = nested container with iptables capability
+#   - "sysbox_limited" = Sysbox container (outer isolation, skip inner rules)
+#   - "no_iptables" = iptables not installed
+#   - "no_net_admin" = iptables exists but permission denied (missing CAP_NET_ADMIN)
 _cai_nested_iptables_supported() {
     _CAI_NESTED_IPTABLES_STATUS=""
 
@@ -112,6 +118,12 @@ _cai_nested_iptables_supported() {
         _CAI_NESTED_IPTABLES_STATUS="sysbox_limited"
         # Sysbox provides network isolation at the outer level
         # Inner iptables rules are typically not needed/functional
+        return 1
+    fi
+
+    # Check if iptables is installed first (before checking permissions)
+    if ! _cai_iptables_available; then
+        _CAI_NESTED_IPTABLES_STATUS="no_iptables"
         return 1
     fi
 
@@ -162,7 +174,8 @@ _cai_get_network_config() {
         if [[ -z "$gateway_ip" ]]; then
             # Fallback: try to detect from bridge interface using ip command
             # This works even if Docker daemon isn't fully ready but bridge exists
-            gateway_ip=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2}' | cut -d'/' -f1) || gateway_ip=""
+            # Use 'exit' in awk to take only the first match (in case of multiple IPs)
+            gateway_ip=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]; exit}') || gateway_ip=""
         fi
         if [[ -z "$gateway_ip" ]]; then
             # Last resort: try common docker0 default
@@ -175,8 +188,9 @@ _cai_get_network_config() {
         subnet=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null) || subnet=""
         if [[ -z "$subnet" ]]; then
             # Fallback: try to derive from bridge interface
+            # Use 'exit' in awk to take only the first match (in case of multiple IPs)
             local cidr_addr
-            cidr_addr=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2}') || cidr_addr=""
+            cidr_addr=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2; exit}') || cidr_addr=""
             if [[ -n "$cidr_addr" ]]; then
                 # Extract CIDR suffix and construct subnet
                 local detected_cidr="${cidr_addr##*/}"
@@ -417,6 +431,11 @@ _cai_apply_network_rules() {
                     _cai_info "  Inner iptables rules are not needed in Sysbox containers"
                     return 0
                     ;;
+                no_iptables)
+                    _cai_error "Cannot apply network rules: iptables is not installed in container"
+                    _cai_error "  Install iptables package or use an image with iptables included"
+                    return 1
+                    ;;
                 no_net_admin)
                     _cai_error "Cannot apply network rules: missing CAP_NET_ADMIN capability"
                     _cai_error "  Add --cap-add=NET_ADMIN when starting the container"
@@ -555,6 +574,10 @@ _cai_remove_network_rules() {
             case "${_CAI_NESTED_IPTABLES_STATUS:-}" in
                 sysbox_limited)
                     _cai_info "Skipping rule removal: Sysbox container (no rules applied)"
+                    return 0
+                    ;;
+                no_iptables)
+                    _cai_info "Skipping rule removal: iptables not installed in container"
                     return 0
                     ;;
                 no_net_admin)
@@ -781,6 +804,11 @@ _cai_network_doctor_status() {
                 sysbox_limited)
                     _CAI_NETWORK_DOCTOR_DETAIL="Sysbox container (network isolation at outer level)"
                     printf '%s' "skipped"
+                    return 0
+                    ;;
+                no_iptables)
+                    _CAI_NETWORK_DOCTOR_DETAIL="Nested container missing iptables"
+                    printf '%s' "error"
                     return 0
                     ;;
                 no_net_admin)
