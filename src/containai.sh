@@ -3634,7 +3634,9 @@ _containai_acp_proxy() {
 
     # Must be a regular file and executable
     if [[ ! -f "$proxy_bin" || ! -x "$proxy_bin" ]]; then
-        printf '%s\n' "ACP proxy binary not found at $proxy_bin. Run 'cai update' to install." >&2
+        printf '%s\n' "ACP proxy binary not found at $proxy_bin." >&2
+        printf '%s\n' "Build with: cd src/acp-proxy && dotnet publish -c Release -r linux-x64 --self-contained" >&2
+        printf '%s\n' "Then copy to: cp bin/Release/net10.0/linux-x64/publish/acp-proxy ../bin/" >&2
         return 1
     fi
 

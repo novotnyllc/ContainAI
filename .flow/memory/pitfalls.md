@@ -376,3 +376,6 @@ sort -V is unavailable on macOS; use git tag --sort=v:refname for semver tag sor
 
 ## 2026-02-02 manual [pitfall]
 git checkout -B can discard local commits without warning; prefer checkout + pull --ff-only for safe updates
+
+## 2026-02-02 manual [pitfall]
+When waiting for async responses via TaskCompletionSource, register the TCS BEFORE sending the request to avoid race conditions where response arrives before waiter is registered
