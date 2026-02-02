@@ -456,8 +456,8 @@ public static class Program
                     // Check if this is a response to a pending request
                     if (message.Id != null && (message.Result != null || message.Error != null))
                     {
-                        var idStr = message.Id.ToString();
-                        if (session.TryCompleteResponse(idStr, message))
+                        var idStr = NormalizeJsonRpcId(message.Id);
+                        if (idStr != null && session.TryCompleteResponse(idStr, message))
                         {
                             // Response was consumed by a waiter
                             continue;
@@ -788,6 +788,32 @@ public static class Program
 
         // Not a workspace path
         return arg;
+    }
+
+    /// <summary>
+    /// Normalizes a JSON-RPC ID to a string for use as dictionary key.
+    /// JSON-RPC allows IDs to be strings or numbers. JsonNode.ToString() returns
+    /// JSON-encoded values (strings with quotes), so we need to extract the raw value.
+    /// </summary>
+    private static string? NormalizeJsonRpcId(JsonNode? id)
+    {
+        if (id == null)
+            return null;
+
+        // Try to get as string value (most common)
+        if (id is JsonValue jsonValue)
+        {
+            if (jsonValue.TryGetValue<string>(out var strId))
+                return strId;
+            if (jsonValue.TryGetValue<long>(out var longId))
+                return longId.ToString();
+            if (jsonValue.TryGetValue<int>(out var intId))
+                return intId.ToString();
+        }
+
+        // Fallback: use the raw JSON representation without quotes
+        // This handles edge cases like decimal numbers
+        return id.ToJsonString();
     }
 }
 

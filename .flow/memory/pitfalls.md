@@ -379,3 +379,6 @@ git checkout -B can discard local commits without warning; prefer checkout + pul
 
 ## 2026-02-02 manual [pitfall]
 When waiting for async responses via TaskCompletionSource, register the TCS BEFORE sending the request to avoid race conditions where response arrives before waiter is registered
+
+## 2026-02-02 manual [pitfall]
+JsonNode.ToString() returns JSON-encoded strings (with quotes); use TryGetValue<string>() to get raw string values for dictionary keys
