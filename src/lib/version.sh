@@ -389,10 +389,13 @@ _cai_update_code() {
             latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' | sort -V | tail -1)
 
             if [[ -z "$latest_tag" ]]; then
-                # Gracefully handle no tags - warn and stay on current branch (per spec)
-                _cai_warn "No release tags found, staying on current commit"
+                # Gracefully handle no tags - warn and switch to main (per spec)
+                _cai_warn "No release tags found, switching to main branch"
                 _cai_info "Consider using nightly channel: CONTAINAI_CHANNEL=nightly cai update"
-                _cai_ok "No update performed (no tags available)"
+                if ! (cd -- "$install_dir" && git checkout -B main origin/main 2>/dev/null); then
+                    _cai_warn "Failed to switch to main branch"
+                fi
+                _cai_ok "Switched to main (no tags available)"
                 return 0
             fi
 
@@ -455,7 +458,7 @@ Updates the ContainAI CLI code based on channel configuration.
 
 Channel Selection (precedence highest to lowest):
   1. CAI_BRANCH env var - explicit branch override (power users)
-  2. CAI_CHANNEL env var - channel override
+  2. CONTAINAI_CHANNEL env var - channel override
   3. [image].channel in config file
   4. Default: stable
 
