@@ -515,11 +515,13 @@ case "$BUILD_LAYER" in
         build_layer "base" "Dockerfile.base"
 
         # sdks layer: pass BASE_IMAGE build-arg
-        # When using --push, images aren't loaded locally, so always pass the arg
-        # to chain layers correctly. For local builds, check if image exists.
+        # When using --push, images go to registry and are available for subsequent
+        # builds via the registry. For local builds (--load or default), check if
+        # local image exists. Note: --output with non-registry types (local, tar)
+        # doesn't make images available for chaining, so we don't treat it specially.
         all_sdks_args=(--build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL")
-        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
-            printf '[INFO] Using built base image: %s\n' "${IMAGE_BASE}:latest"
+        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+            printf '[INFO] Using pushed base image: %s\n' "${IMAGE_BASE}:latest"
             all_sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
         elif local_image_exists "${IMAGE_BASE}:latest"; then
             printf '[INFO] Using local base image: %s\n' "${IMAGE_BASE}:latest"
@@ -531,8 +533,8 @@ case "$BUILD_LAYER" in
 
         # agents layer: pass SDKS_IMAGE build-arg
         all_agents_args=()
-        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
-            printf '[INFO] Using built sdks image: %s\n' "${IMAGE_SDKS}:latest"
+        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+            printf '[INFO] Using pushed sdks image: %s\n' "${IMAGE_SDKS}:latest"
             all_agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
         elif local_image_exists "${IMAGE_SDKS}:latest"; then
             printf '[INFO] Using local sdks image: %s\n' "${IMAGE_SDKS}:latest"
@@ -563,8 +565,8 @@ case "$BUILD_LAYER" in
         fi
         # Pass AGENTS_IMAGE build-arg for final image
         final_args=()
-        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
-            printf '[INFO] Using built agents image: %s\n' "${IMAGE_AGENTS}:latest"
+        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+            printf '[INFO] Using pushed agents image: %s\n' "${IMAGE_AGENTS}:latest"
             final_args+=(--build-arg AGENTS_IMAGE="${IMAGE_AGENTS}:latest")
         elif local_image_exists "${IMAGE_AGENTS}:latest"; then
             printf '[INFO] Using local agents image: %s\n' "${IMAGE_AGENTS}:latest"
