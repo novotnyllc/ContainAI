@@ -202,7 +202,7 @@ disabled = true  # Excluded from _IMPORT_SYNC_MAP
 Disabled entries:
 - Still generate container symlinks and init directories
 - Are not synced during normal `cai import`
-- Can be included via `[import].additional_paths` in `containai.toml`
+- Can be included via `[import].additional_paths` in `config.toml`
 
 SSH is a common example - disabled by default for security, but users can opt-in.
 
@@ -219,7 +219,7 @@ The `_IMPORT_SYNC_MAP` array must match the manifest for comparable entries. The
 - `.gitconfig` (handled specially by `_cai_import_git_config()`)
 
 **Flags not compared:**
-- `R` (remove existing) - only affects Dockerfile symlinks
+- `R` (remove existing) - affects container link creation/repair, not host import
 - `g` (git filter) - handled by special gitconfig logic
 
 ### Entry Format
@@ -491,8 +491,8 @@ flags = "fjso"  # file, json-init, SECRET, optional
 ### View Existing Agent Patterns
 
 ```bash
-# View agent sections in manifest
-grep -A5 'CLAUDE\|CODEX\|GEMINI\|PI\b\|COPILOT\|KIMI' src/sync-manifest.toml
+# View agent sections in manifest (using rg for POSIX portability)
+rg -A5 'CLAUDE|CODEX|GEMINI|PI$|COPILOT|KIMI' src/sync-manifest.toml
 
 # View Dockerfile.agents patterns
 cat src/container/Dockerfile.agents
@@ -516,4 +516,4 @@ cat src/container/Dockerfile.agents
 
 - [Testing Guide](testing.md) - Test tier details and CI workflow
 - [Sync Architecture](sync-architecture.md) - Deep dive into sync mechanics
-- [Configuration](configuration.md) - `containai.toml` options including `additional_paths`
+- [Configuration](configuration.md) - `config.toml` options including `additional_paths`
