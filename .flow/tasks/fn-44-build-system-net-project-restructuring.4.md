@@ -79,8 +79,49 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 - [ ] CI logs show which path was taken (sysbox available / fallback)
 
 ## Done summary
-TBD
+# fn-44.4: Enable sysbox in GitHub Actions for E2E tests
 
+## Implementation Summary
+
+Added E2E test job to `.github/workflows/docker.yml` that:
+
+1. **Multi-arch matrix**: Tests on both amd64 (ubuntu-22.04) and arm64 (ubuntu-24.04-arm)
+
+2. **Sysbox installation attempt**: Downloads and installs sysbox with proper fallback handling
+
+3. **Graceful fallback**: If sysbox fails (expected on GH-hosted runners), logs clear skip message with:
+   - Reason for skip
+   - Self-hosted runner requirements
+   - Link to docs/testing.md for manual testing
+
+4. **Docker configuration**: Creates containai-docker context and configures sysbox runtime
+
+5. **E2E test execution**: Runs test-dind.sh when sysbox is available
+
+6. **Artifact collection**: Uploads test logs on failure for debugging
+
+## Key Design Decisions
+
+- **Task 5 dependency**: Tarball/install.sh --local approach deferred to Task 5. Current implementation uses repo checkout.
+- **Proof step**: Uses containai-docker context (not default Docker context) per spec
+- **Self-hosted ready**: Comments document self-hosted runner requirements (ubuntu 22.04+, kernel 5.5+, sysbox pre-installed)
+
+## Files Changed
+
+- `.github/workflows/docker.yml`: Added e2e-test job with matrix strategy
+
+## Acceptance Criteria Status
+
+- [x] Proof step checks sysbox on containai-docker context
+- [x] Proof step captures success/failure cleanly (SYSBOX_AVAILABLE output)
+- [x] install.sh --yes works in non-interactive CI (already implemented)
+- [x] If sysbox works: E2E tests run
+- [x] If sysbox fails: Clear skip message, fallback documented
+- [x] Self-hosted runner configuration ready
+- [x] E2E tests on both amd64 and arm64
+- [x] Test artifacts collected on failure
+- [x] CI logs show which path taken
+- [~] Tarball artifact flow - Deferred to Task 5
 ## Evidence
 - Commits:
 - Tests:
