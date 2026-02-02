@@ -107,6 +107,7 @@ EOF
 # =============================================================================
 # SSHD INSTALLATION AND HARDENING
 # Key-only authentication, no root login, no password auth
+# No forwarding/tunneling (prevents SSH bypass of network restrictions)
 # =============================================================================
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
@@ -123,12 +124,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     mkdir -p /etc/ssh/sshd_config.d && \
     printf '%s\n' \
         '# ContainAI security hardening' \
+        '' \
+        '# Authentication hardening' \
         'PermitRootLogin no' \
         'PasswordAuthentication no' \
         'PubkeyAuthentication yes' \
         'ChallengeResponseAuthentication no' \
         'KbdInteractiveAuthentication no' \
         'UsePAM no' \
+        '' \
+        '# Network hardening - disable forwarding and tunneling' \
+        '# Prevents SSH from being used to bypass network restrictions' \
+        'AllowTcpForwarding no' \
+        'AllowStreamLocalForwarding no' \
+        'GatewayPorts no' \
+        'PermitTunnel no' \
         > /etc/ssh/sshd_config.d/99-containai-security.conf && \
     # Remove baked-in host keys - will be generated on first boot
     rm -f /etc/ssh/ssh_host_* && \
