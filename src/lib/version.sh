@@ -5,8 +5,9 @@
 # This file must be sourced, not executed directly.
 #
 # Provides:
-#   _cai_version()      - Show current version
-#   _cai_update()       - Update ContainAI installation
+#   _cai_version()       - Show current version
+#   _cai_update_code()   - Update ContainAI CLI code (channel-aware git checkout)
+#   _cai_resolve_update_mode() - Determine update mode (branch/nightly/stable)
 #
 # Dependencies:
 #   - Requires lib/core.sh to be sourced first for logging functions
@@ -177,10 +178,16 @@ _cai_resolve_update_mode() {
 
     # 1. Check for explicit branch override (takes full precedence)
     if [[ -n "${CAI_BRANCH:-}" ]]; then
-        _CAI_UPDATE_MODE="branch"
-        _CAI_UPDATE_TARGET="$CAI_BRANCH"
-        _CAI_UPDATE_DISPLAY="branch: $CAI_BRANCH (CAI_BRANCH override)"
-        return 0
+        # Validate branch name (reject option-like values)
+        if [[ "$CAI_BRANCH" == -* ]]; then
+            _cai_warn "Invalid CAI_BRANCH value: '$CAI_BRANCH' (looks like an option)"
+            _cai_warn "Falling back to channel-based update"
+        else
+            _CAI_UPDATE_MODE="branch"
+            _CAI_UPDATE_TARGET="$CAI_BRANCH"
+            _CAI_UPDATE_DISPLAY="branch: $CAI_BRANCH (CAI_BRANCH override)"
+            return 0
+        fi
     fi
 
     # 2. Resolve channel using config system
@@ -336,8 +343,9 @@ _cai_update_code() {
             fi
 
             # Perform the update
+            # Use checkout -B to handle both existing and new local branches
             _cai_info "Updating to latest on branch $update_branch..."
-            if ! (cd -- "$install_dir" && git checkout "$update_branch" 2>/dev/null && git pull origin "$update_branch" 2>/dev/null); then
+            if ! (cd -- "$install_dir" && git checkout -B "$update_branch" "origin/$update_branch" 2>/dev/null); then
                 _cai_error "Failed to update branch $update_branch"
                 return 1
             fi
@@ -367,8 +375,9 @@ _cai_update_code() {
             fi
 
             # Perform the update
+            # Use checkout -B to handle both existing and detached states
             _cai_info "Updating to latest nightly..."
-            if ! (cd -- "$install_dir" && git checkout main 2>/dev/null && git pull origin main 2>/dev/null); then
+            if ! (cd -- "$install_dir" && git checkout -B main origin/main 2>/dev/null); then
                 _cai_error "Failed to update to latest nightly"
                 return 1
             fi
@@ -380,9 +389,11 @@ _cai_update_code() {
             latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' | sort -V | tail -1)
 
             if [[ -z "$latest_tag" ]]; then
-                _cai_warn "No release tags found"
-                _cai_info "Consider using nightly channel: CAI_CHANNEL=nightly cai update"
-                return 1
+                # Gracefully handle no tags - warn and stay on current branch (per spec)
+                _cai_warn "No release tags found, staying on current commit"
+                _cai_info "Consider using nightly channel: CONTAINAI_CHANNEL=nightly cai update"
+                _cai_ok "No update performed (no tags available)"
+                return 0
             fi
 
             # Check if already on latest tag

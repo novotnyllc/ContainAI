@@ -79,7 +79,17 @@ BIN_DIR="${CAI_BIN_DIR:-$HOME/.local/bin}"
 # CAI_BRANCH is explicit branch override (takes precedence over channel)
 BRANCH="${CAI_BRANCH:-}"
 # CAI_CHANNEL controls release channel (stable/nightly)
+# Validate channel value and warn on invalid
 CHANNEL="${CAI_CHANNEL:-stable}"
+case "$CHANNEL" in
+    stable|nightly)
+        # Valid channel
+        ;;
+    *)
+        warn "Invalid CAI_CHANNEL='$CHANNEL', using stable"
+        CHANNEL="stable"
+        ;;
+esac
 
 # Path to bash 4+ (set by bootstrap_bash if needed)
 BASH4_PATH=""

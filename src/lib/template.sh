@@ -881,9 +881,10 @@ _cai_template_needs_upgrade() {
         return 2
     fi
 
-    # Check if FROM uses $BASE_IMAGE or ${BASE_IMAGE} (including ${BASE_IMAGE:-...})
-    # Match: $BASE_IMAGE, ${BASE_IMAGE}, ${BASE_IMAGE:-default}, ${BASE_IMAGE:+value}
-    if [[ "$from_line" =~ \$BASE_IMAGE ]] || [[ "$from_line" =~ \$\{BASE_IMAGE[}:-] ]]; then
+    # Check if FROM uses $BASE_IMAGE or ${BASE_IMAGE} (including ${BASE_IMAGE:-...}, ${BASE_IMAGE:+...})
+    # Match exact variable name with word boundary to avoid matching BASE_IMAGE_VERSION etc.
+    # Patterns: $BASE_IMAGE (end or non-alnum), ${BASE_IMAGE}, ${BASE_IMAGE:-...}, ${BASE_IMAGE:+...}
+    if [[ "$from_line" =~ \$BASE_IMAGE([^A-Za-z0-9_]|$) ]] || [[ "$from_line" =~ \$\{BASE_IMAGE[}:+-] ]]; then
         from_uses_base_image="true"
     fi
 

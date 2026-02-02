@@ -1973,8 +1973,9 @@ _cai_update() {
                 else
                     _cai_update_code && code_rc=0 || code_rc=$?
                     if [[ $code_rc -ne 0 ]]; then
-                        _cai_warn "CLI code update had issues (exit: $code_rc)"
-                        # Don't fail overall update for code update issues
+                        _cai_warn "CLI code update failed (exit: $code_rc)"
+                        # Propagate network/checkout failures to overall status (per spec)
+                        overall_status=$code_rc
                     fi
                 fi
             else
