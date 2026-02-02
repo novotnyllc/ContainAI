@@ -133,11 +133,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         'KbdInteractiveAuthentication no' \
         'UsePAM no' \
         '' \
-        '# Network hardening - disable forwarding and tunneling' \
+        '# Network hardening - disable all forwarding and tunneling' \
         '# Prevents SSH from being used to bypass network restrictions' \
-        'AllowTcpForwarding no' \
-        'AllowStreamLocalForwarding no' \
-        'GatewayPorts no' \
+        '# DisableForwarding covers: TCP, streamlocal, X11, agent forwarding' \
+        'DisableForwarding yes' \
         'PermitTunnel no' \
         > /etc/ssh/sshd_config.d/99-containai-security.conf && \
     # Remove baked-in host keys - will be generated on first boot
