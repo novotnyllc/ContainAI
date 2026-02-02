@@ -32,6 +32,7 @@
 #   _CAI_CONTAINER_MEMORY     - Memory limit (from [container] section, e.g., "4g")
 #   _CAI_CONTAINER_CPUS       - CPU limit (from [container] section, e.g., 2)
 #   _CAI_TEMPLATE_SUPPRESS_BASE_WARNING - Suppress template base image warning ("true" or empty)
+#   _CAI_IMAGE_CHANNEL        - Release channel ("stable" or "nightly", from [image] section)
 #
 # Usage: source lib/config.sh
 # ==============================================================================
@@ -72,6 +73,7 @@ _CAI_SSH_LOCAL_FORWARDS=()
 _CAI_CONTAINER_MEMORY=""
 _CAI_CONTAINER_CPUS=""
 _CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+_CAI_IMAGE_CHANNEL=""
 
 # ==============================================================================
 # Volume name validation
@@ -246,6 +248,7 @@ _containai_parse_config() {
     _CAI_CONTAINER_MEMORY=""
     _CAI_CONTAINER_CPUS=""
     _CAI_TEMPLATE_SUPPRESS_BASE_WARNING=""
+    _CAI_IMAGE_CHANNEL=""
 
     # Check if config file exists
     if [[ ! -f "$config_file" ]]; then
@@ -538,6 +541,20 @@ if isinstance(template, dict):
         print('true')
 ")
     _CAI_TEMPLATE_SUPPRESS_BASE_WARNING="$template_suppress_warning"
+
+    # Extract [image] section for channel configuration
+    # Store raw value - validation happens in _cai_config_channel() so warnings are emitted
+    local image_channel
+    image_channel=$(printf '%s' "$config_json" | python3 -c "
+import json, sys
+config = json.load(sys.stdin)
+image = config.get('image', {})
+if isinstance(image, dict):
+    val = image.get('channel', '')
+    if isinstance(val, str) and val:
+        print(val)
+")
+    _CAI_IMAGE_CHANNEL="$image_channel"
 
     # Extract excludes with cumulative merge (pass JSON via stdin):
     # default_excludes + workspace.<key>.excludes (deduped)
@@ -902,6 +919,70 @@ _containai_resolve_credentials() {
 
     # 5. Default
     printf '%s' "none"
+}
+
+# ==============================================================================
+# Channel resolution
+# ==============================================================================
+
+# Resolve the effective release channel with precedence
+# Arguments: none (uses globals and environment)
+# Outputs: channel name ("stable" or "nightly") to stdout
+# Precedence:
+#   1. _CAI_CHANNEL_OVERRIDE (set by --channel CLI flag)
+#   2. CONTAINAI_CHANNEL env var
+#   3. _CAI_IMAGE_CHANNEL (from config file [image].channel)
+#   4. Default: stable
+# Note: Invalid channel values log warning and fall back to stable
+_cai_config_channel() {
+    # Check CLI flag first (set by main.sh arg parsing)
+    if [[ -n "${_CAI_CHANNEL_OVERRIDE:-}" ]]; then
+        # Validate CLI value
+        case "$_CAI_CHANNEL_OVERRIDE" in
+            stable|nightly)
+                printf '%s' "$_CAI_CHANNEL_OVERRIDE"
+                return
+                ;;
+            *)
+                _cai_warn "Invalid channel '$_CAI_CHANNEL_OVERRIDE', using stable"
+                printf '%s' "stable"
+                return
+                ;;
+        esac
+    fi
+
+    # Check environment
+    if [[ -n "${CONTAINAI_CHANNEL:-}" ]]; then
+        case "$CONTAINAI_CHANNEL" in
+            stable|nightly)
+                printf '%s' "$CONTAINAI_CHANNEL"
+                return
+                ;;
+            *)
+                _cai_warn "Invalid channel '$CONTAINAI_CHANNEL', using stable"
+                printf '%s' "stable"
+                return
+                ;;
+        esac
+    fi
+
+    # Use parsed config global (validate and warn if invalid)
+    if [[ -n "${_CAI_IMAGE_CHANNEL:-}" ]]; then
+        case "$_CAI_IMAGE_CHANNEL" in
+            stable|nightly)
+                printf '%s' "$_CAI_IMAGE_CHANNEL"
+                return
+                ;;
+            *)
+                _cai_warn "Invalid channel '$_CAI_IMAGE_CHANNEL' in config, using stable"
+                printf '%s' "stable"
+                return
+                ;;
+        esac
+    fi
+
+    # Default
+    printf '%s' "stable"
 }
 
 # ==============================================================================

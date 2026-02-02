@@ -3696,6 +3696,17 @@ _cai_doctor_template_checks() {
                     printf '  %-44s %s\n' "" "(ContainAI features may not work)"
                 fi
                 # If suppressed, don't show anything about base image
+
+                # Check if template uses hardcoded base image (warn about channel selection)
+                if command -v _cai_template_needs_upgrade >/dev/null 2>&1; then
+                    local upgrade_info
+                    if upgrade_info=$(_cai_template_needs_upgrade "$template_path" 2>/dev/null); then
+                        printf '  %-44s %s\n' "Channel support:" "[WARN] Hardcoded base image"
+                        printf '  %-44s %s\n' "" "Run 'cai template upgrade' to enable channel selection"
+                    else
+                        printf '  %-44s %s\n' "Channel support:" "[OK] Uses ARG BASE_IMAGE"
+                    fi
+                fi
                 ;;
             no_from)
                 all_ok="false"
@@ -3756,6 +3767,7 @@ _cai_doctor_template_checks_json() {
     fi
 
     # Syntax check (only if exists)
+    local channel_support="false"
     if [[ "$template_exists_status" == "ok" ]]; then
         template_syntax_status=$(_cai_doctor_check_template_syntax "default")
         if [[ "$template_syntax_status" != "ok" ]]; then
@@ -3766,6 +3778,12 @@ _cai_doctor_template_checks_json() {
         if [[ "$template_syntax_status" == "ok" ]]; then
             if _cai_validate_template_base "$template_path" "true" 2>/dev/null; then
                 base_valid="true"
+            fi
+            # Check if template uses ARG BASE_IMAGE pattern (channel support)
+            if command -v _cai_template_needs_upgrade >/dev/null 2>&1; then
+                if ! _cai_template_needs_upgrade "$template_path" >/dev/null 2>&1; then
+                    channel_support="true"
+                fi
             fi
         fi
     else
@@ -3789,6 +3807,7 @@ _cai_doctor_template_checks_json() {
     printf '      "path": "%s",\n' "$(_cai_json_escape "$template_path")"
     printf '      "syntax_valid": %s,\n' "$([[ "$template_syntax_status" == "ok" ]] && printf 'true' || printf 'false')"
     printf '      "base_valid": %s,\n' "$base_valid"
+    printf '      "channel_support": %s,\n' "$channel_support"
     if [[ "$build_templates" == "true" ]]; then
         printf '      "build_ok": %s,\n' "$([[ "$template_build_status" == "ok" ]] && printf 'true' || printf 'false')"
         printf '      "build_checked": true\n'

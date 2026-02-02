@@ -569,8 +569,12 @@ _cai_build_template() {
         fi
     fi
 
-    # Construct the build command
-    local -a build_args=("${docker_cmd[@]}" build -t "$image_tag" "$template_dir")
+    # Get the channel-aware base image for --build-arg
+    local base_image
+    base_image=$(_cai_base_image)
+
+    # Construct the build command with BASE_IMAGE arg for channel support
+    local -a build_args=("${docker_cmd[@]}" build --build-arg "BASE_IMAGE=$base_image" -t "$image_tag" "$template_dir")
 
     # Handle dry-run mode
     if [[ "$dry_run" == "true" ]]; then
@@ -828,4 +832,258 @@ EOF
 EOF
     fi
     return 1
+}
+
+# ==============================================================================
+# Template Upgrade Functions
+# ==============================================================================
+
+# Check if a template uses a hardcoded base image (no ARG substitution)
+# Args: dockerfile_path
+# Returns: 0 if hardcoded (needs upgrade), 1 if uses ARG, 2 if parse error
+# Outputs: diagnostic info to stdout on return 0
+_cai_template_needs_upgrade() {
+    local dockerfile_path="${1:-}"
+
+    if [[ -z "$dockerfile_path" ]] || [[ ! -f "$dockerfile_path" ]]; then
+        return 2
+    fi
+
+    # Check if Dockerfile has ARG BASE_IMAGE pattern before FROM
+    local has_arg_base_image="false"
+    local from_line=""
+    local line
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Remove leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        # Check for ARG BASE_IMAGE
+        if [[ "$line" =~ ^[Aa][Rr][Gg][[:space:]]+BASE_IMAGE ]]; then
+            has_arg_base_image="true"
+        fi
+
+        # Get FROM line
+        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            from_line="$line"
+            break
+        fi
+    done < "$dockerfile_path"
+
+    if [[ -z "$from_line" ]]; then
+        return 2
+    fi
+
+    # If has ARG BASE_IMAGE, template is already upgraded
+    if [[ "$has_arg_base_image" == "true" ]]; then
+        return 1
+    fi
+
+    # Check if FROM uses a variable ($BASE_IMAGE or ${BASE_IMAGE})
+    # This is an edge case - user manually added variable but forgot ARG
+    # We can't safely upgrade this (would create self-referential ARG)
+    if [[ "$from_line" =~ \$BASE_IMAGE ]] || [[ "$from_line" =~ \$\{BASE_IMAGE\} ]]; then
+        # Treat as already upgraded (return 1) - manual fix needed
+        # The build will handle this via Docker's --build-arg
+        return 1
+    fi
+
+    # Hardcoded image - needs upgrade
+    printf '%s' "$from_line"
+    return 0
+}
+
+# Upgrade a template Dockerfile to use ARG BASE_IMAGE pattern
+# Args: dockerfile_path [dry_run]
+# Returns: 0=upgraded, 1=already upgraded/no change, 2=error
+# Outputs: Status message to stderr
+_cai_template_upgrade_file() {
+    local dockerfile_path="${1:-}"
+    local dry_run="${2:-false}"
+
+    if [[ -z "$dockerfile_path" ]] || [[ ! -f "$dockerfile_path" ]]; then
+        _cai_error "Dockerfile not found: $dockerfile_path"
+        return 2
+    fi
+
+    # Check if needs upgrade
+    local needs_upgrade_info
+    if ! needs_upgrade_info=$(_cai_template_needs_upgrade "$dockerfile_path"); then
+        _cai_info "Template already uses ARG BASE_IMAGE pattern: $dockerfile_path"
+        return 1
+    fi
+
+    _cai_info "Upgrading template: $dockerfile_path"
+    _cai_info "Current: $needs_upgrade_info"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would add ARG BASE_IMAGE before FROM line"
+        return 0
+    fi
+
+    # Read the file and transform
+    local content new_content in_from_block="false"
+    content=$(cat "$dockerfile_path") || return 2
+
+    # Process line by line, inserting ARG before first FROM
+    local inserted="false"
+    new_content=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Check for FROM line (first one only)
+        if [[ "$inserted" == "false" ]] && [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            # Extract the image from FROM line
+            local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
+            from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"  # trim leading
+
+            # Skip flags (--platform, etc.) to find the image
+            local token image=""
+            while [[ -n "$from_tokens" ]]; do
+                token="${from_tokens%%[[:space:]]*}"
+                from_tokens="${from_tokens#"$token"}"
+                from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+
+                if [[ "$token" == --* ]]; then
+                    continue
+                fi
+                if [[ "$token" == [Aa][Ss] ]]; then
+                    break
+                fi
+                image="$token"
+                break
+            done
+
+            # Default to ContainAI latest if image extraction fails or is a variable
+            if [[ -z "$image" ]] || [[ "$image" == \$* ]]; then
+                image="ghcr.io/novotnyllc/containai:latest"
+            fi
+
+            # Insert ARG line
+            new_content+="ARG BASE_IMAGE=${image}"$'\n'
+
+            # Rewrite FROM to use variable
+            # Handle: FROM image, FROM --platform=x image, FROM image AS stage
+            local new_from="FROM"
+
+            # Re-parse to handle flags properly
+            from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
+            from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+
+            local found_image="false" as_clause=""
+            while [[ -n "$from_tokens" ]]; do
+                token="${from_tokens%%[[:space:]]*}"
+                from_tokens="${from_tokens#"$token"}"
+                from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+
+                if [[ "$token" == --* ]]; then
+                    new_from+=" $token"
+                    continue
+                fi
+                if [[ "$found_image" == "false" ]]; then
+                    new_from+=' ${BASE_IMAGE}'
+                    found_image="true"
+                    continue
+                fi
+                # After image - likely "AS stage" clause
+                as_clause+=" $token"
+            done
+
+            if [[ -n "$as_clause" ]]; then
+                new_from+="$as_clause"
+            fi
+
+            new_content+="$new_from"$'\n'
+            inserted="true"
+        else
+            new_content+="$line"$'\n'
+        fi
+    done <<< "$content"
+
+    # Write back
+    printf '%s' "$new_content" > "$dockerfile_path" || {
+        _cai_error "Failed to write upgraded template"
+        return 2
+    }
+
+    _cai_ok "Template upgraded successfully"
+    return 0
+}
+
+# Upgrade all templates in the templates directory
+# Args: [dry_run] [template_name]
+# If template_name is provided, only upgrade that template
+# Returns: 0=all upgraded, 1=some failed/skipped, 2=error
+_cai_template_upgrade() {
+    local dry_run="${1:-false}"
+    local template_name="${2:-}"
+    local templates_dir="$_CAI_TEMPLATE_DIR"
+    local upgraded=0 skipped=0 failed=0
+
+    if [[ -n "$template_name" ]]; then
+        # Upgrade specific template
+        if ! _cai_validate_template_name "$template_name"; then
+            _cai_error "Invalid template name: $template_name"
+            return 2
+        fi
+
+        local template_path="$templates_dir/$template_name/Dockerfile"
+        if [[ ! -f "$template_path" ]]; then
+            _cai_error "Template not found: $template_name"
+            return 2
+        fi
+
+        local rc
+        _cai_template_upgrade_file "$template_path" "$dry_run"
+        rc=$?
+        case $rc in
+            0) return 0 ;;
+            1) return 1 ;;  # Already upgraded
+            *) return 2 ;;
+        esac
+    fi
+
+    # Upgrade all templates
+    if [[ ! -d "$templates_dir" ]]; then
+        _cai_warn "No templates directory found: $templates_dir"
+        return 1
+    fi
+
+    local template_dirs
+    template_dirs=$(find "$templates_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null) || {
+        _cai_warn "No templates found"
+        return 1
+    }
+
+    local dir name dockerfile rc
+    for dir in $template_dirs; do
+        name=$(basename "$dir")
+        dockerfile="$dir/Dockerfile"
+
+        if [[ ! -f "$dockerfile" ]]; then
+            _cai_debug "Skipping $name - no Dockerfile"
+            continue
+        fi
+
+        _cai_template_upgrade_file "$dockerfile" "$dry_run"
+        rc=$?
+        case $rc in
+            0) ((upgraded++)) ;;
+            1) ((skipped++)) ;;
+            *) ((failed++)) ;;
+        esac
+    done
+
+    _cai_info "Upgrade summary: $upgraded upgraded, $skipped already current, $failed failed"
+
+    if [[ $failed -gt 0 ]]; then
+        return 2
+    elif [[ $upgraded -eq 0 ]]; then
+        return 1
+    fi
+    return 0
 }

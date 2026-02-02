@@ -15,7 +15,9 @@
 #      ~/.config/containai/templates/default/Dockerfile
 #
 # Base image - ContainAI with all agents and SDKs
-FROM ghcr.io/novotnyllc/containai:latest
+# Use --build-arg BASE_IMAGE to override (e.g., for nightly channel)
+ARG BASE_IMAGE=ghcr.io/novotnyllc/containai:latest
+FROM ${BASE_IMAGE}
 
 # =============================================================================
 # INSTALL ADDITIONAL TOOLS

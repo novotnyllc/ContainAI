@@ -233,6 +233,8 @@ Run Options:
                         mutually exclusive with --workspace/--data-volume)
   --template <name>     Template name for container build (default: "default")
                         Templates customize the container Dockerfile
+  --channel <channel>   Release channel: stable or nightly (default: stable)
+                        Sets base image for template build
   --image-tag <tag>     Image tag (advanced/debugging, ignored with --template)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -542,6 +544,8 @@ Options:
                         mutually exclusive with --workspace/--data-volume)
   --template <name>     Template name for container build (default: "default")
                         Templates customize the container Dockerfile
+  --channel <channel>   Release channel: stable or nightly (default: stable)
+                        Sets base image for template build
   --image-tag <tag>     Image tag (advanced/debugging, ignored with --template)
   --memory <size>       Memory limit (e.g., "4g", "8g") - overrides config
   --cpus <count>        CPU limit (e.g., 2, 4) - overrides config
@@ -601,6 +605,8 @@ Options:
   --container <name>    Use or create container with specified name
                         (mutually exclusive with --workspace/--data-volume)
   --template <name>     Template name for container build (default: "default")
+  --channel <channel>   Release channel: stable or nightly (default: stable)
+                        Sets base image for template build
   --data-volume <vol>   Data volume name (overrides config)
   --config <path>       Config file path (overrides auto-discovery)
   --fresh               Remove and recreate container (preserves data volume)
@@ -723,6 +729,33 @@ Examples:
 
 Note: This command is safe to run - it only removes configs for containers
 that have been deleted. Active container configs are preserved.
+EOF
+}
+
+_containai_template_help() {
+    cat <<'EOF'
+ContainAI Template - Manage container templates
+
+Usage: cai template <subcommand> [options]
+
+Subcommands:
+  upgrade [name]        Upgrade template(s) to use ARG BASE_IMAGE pattern
+                        This enables channel selection (--channel stable|nightly)
+
+Options:
+  --dry-run             Show what would change without modifying files
+  -h, --help            Show this help message
+
+What 'upgrade' does:
+  - Scans template Dockerfiles for hardcoded FROM lines
+  - Adds ARG BASE_IMAGE=<current-image> before FROM
+  - Rewrites FROM to use ${BASE_IMAGE}
+  - Preserves all other template content
+
+Examples:
+  cai template upgrade              Upgrade all templates
+  cai template upgrade default      Upgrade only the 'default' template
+  cai template upgrade --dry-run    Preview changes without modifying
 EOF
 }
 
@@ -2623,6 +2656,72 @@ _containai_ssh_cleanup_cmd() {
 }
 
 # ==============================================================================
+# Template subcommand handlers
+# ==============================================================================
+
+# Template subcommand handler - manage container templates
+_containai_template_cmd() {
+    local subcommand="${1:-}"
+
+    # Handle empty or help first
+    if [[ -z "$subcommand" ]]; then
+        _containai_template_help
+        return 0
+    fi
+
+    case "$subcommand" in
+        upgrade)
+            shift
+            _containai_template_upgrade_cmd "$@"
+            ;;
+        help | -h | --help)
+            _containai_template_help
+            return 0
+            ;;
+        *)
+            echo "[ERROR] Unknown template subcommand: $subcommand" >&2
+            echo "Use 'cai template --help' for usage" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Template upgrade subcommand - upgrade templates to use ARG BASE_IMAGE pattern
+_containai_template_upgrade_cmd() {
+    local dry_run="false"
+    local template_name=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run)
+                dry_run="true"
+                shift
+                ;;
+            -h | --help)
+                _containai_template_help
+                return 0
+                ;;
+            -*)
+                echo "[ERROR] Unknown option: $1" >&2
+                return 1
+                ;;
+            *)
+                if [[ -n "$template_name" ]]; then
+                    echo "[ERROR] Only one template name allowed" >&2
+                    return 1
+                fi
+                template_name="$1"
+                shift
+                ;;
+        esac
+    done
+
+    # Call the upgrade function
+    _cai_template_upgrade "$dry_run" "$template_name"
+}
+
+# ==============================================================================
 # Config subcommand handlers
 # ==============================================================================
 
@@ -3522,6 +3621,8 @@ _containai_shell_cmd() {
     local verbose_flag=false
     local debug_flag=false
     local dry_run_flag=false
+    # Reset channel override (global for registry.sh)
+    _CAI_CHANNEL_OVERRIDE=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -3657,6 +3758,22 @@ _containai_shell_cmd() {
                 cli_template="${1#--template=}"
                 if [[ -z "$cli_template" ]]; then
                     echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --channel)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
+                    return 1
+                fi
+                _CAI_CHANNEL_OVERRIDE="$2"
+                shift 2
+                ;;
+            --channel=*)
+                _CAI_CHANNEL_OVERRIDE="${1#--channel=}"
+                if [[ -z "$_CAI_CHANNEL_OVERRIDE" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
                     return 1
                 fi
                 shift
@@ -4377,6 +4494,8 @@ _containai_exec_cmd() {
     local verbose_flag=false
     local debug_flag=false
     local -a exec_cmd=()
+    # Reset channel override (global for registry.sh)
+    _CAI_CHANNEL_OVERRIDE=""
 
     # Parse arguments - stop at first non-option or after --
     while [[ $# -gt 0 ]]; do
@@ -4466,6 +4585,22 @@ _containai_exec_cmd() {
                 cli_template="${1#--template=}"
                 if [[ -z "$cli_template" ]]; then
                     echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --channel)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
+                    return 1
+                fi
+                _CAI_CHANNEL_OVERRIDE="$2"
+                shift 2
+                ;;
+            --channel=*)
+                _CAI_CHANNEL_OVERRIDE="${1#--channel=}"
+                if [[ -z "$_CAI_CHANNEL_OVERRIDE" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
                     return 1
                 fi
                 shift
@@ -5065,6 +5200,8 @@ _containai_run_cmd() {
     local please_root_my_host=""
     local -a env_vars=()
     local -a agent_args=()
+    # Reset channel override (global for registry.sh)
+    _CAI_CHANNEL_OVERRIDE=""
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -5229,6 +5366,22 @@ _containai_run_cmd() {
                 cli_template="${1#--template=}"
                 if [[ -z "$cli_template" ]]; then
                     echo "[ERROR] --template requires a value" >&2
+                    return 1
+                fi
+                shift
+                ;;
+            --channel)
+                if [[ -z "${2-}" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
+                    return 1
+                fi
+                _CAI_CHANNEL_OVERRIDE="$2"
+                shift 2
+                ;;
+            --channel=*)
+                _CAI_CHANNEL_OVERRIDE="${1#--channel=}"
+                if [[ -z "$_CAI_CHANNEL_OVERRIDE" ]]; then
+                    echo "[ERROR] --channel requires a value" >&2
                     return 1
                 fi
                 shift
@@ -5791,15 +5944,15 @@ _cai_completions() {
     }
 
     # Subcommands
-    local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config update refresh uninstall completion help version"
+    local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config template update refresh uninstall completion help version"
 
     # Global flags (--refresh is an alias for the refresh subcommand)
     local global_flags="-h --help --refresh"
 
     # Per-subcommand flags
-    local run_flags="--data-volume --config -w --workspace --container --template --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
-    local shell_flags="--data-volume --config --workspace --container --template --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
-    local exec_flags="--workspace -w --container --template --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
+    local run_flags="--data-volume --config -w --workspace --container --template --channel --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
+    local shell_flags="--data-volume --config --workspace --container --template --channel --image-tag --memory --cpus --fresh --restart --reset --force --dry-run -q --quiet --verbose --debug -D -h --help"
+    local exec_flags="--workspace -w --container --template --channel --data-volume --config --fresh --force -q --quiet --verbose --debug -D -h --help"
     local doctor_flags="--json --build-templates --reset-lima --workspace -w -h --help"
     local doctor_fix_subcommands="volume container template"
     local setup_flags="--dry-run --verbose --force -h --help"
@@ -5813,6 +5966,8 @@ _cai_completions() {
     local gc_flags="--dry-run --force --age --images --verbose -h --help"
     local ssh_subcommands="cleanup"
     local ssh_cleanup_flags="--dry-run --verbose -h --help"
+    local template_subcommands="upgrade"
+    local template_flags="--dry-run -h --help"
     local links_subcommands="check fix"
     local links_flags="--workspace --name --config --quiet -q --verbose --dry-run -h --help"
     local config_subcommands="list get set unset"
@@ -5882,6 +6037,11 @@ _cai_completions() {
                 templates=""
             fi
             COMPREPLY=($(compgen -W "$templates" -- "$cur"))
+            return
+            ;;
+        --channel)
+            # Channel name completion
+            COMPREPLY=($(compgen -W "stable nightly" -- "$cur"))
             return
             ;;
         --image-tag|--memory|--cpus|--name|--from|-e|--env|--credentials)
@@ -6029,6 +6189,29 @@ _cai_completions() {
                 COMPREPLY=($(compgen -W "$config_flags" -- "$cur"))
             else
                 COMPREPLY=($(compgen -W "$config_subcommands -h --help" -- "$cur"))
+            fi
+            ;;
+        template)
+            # Check for upgrade subcommand
+            local template_sub=""
+            for ((i=subcmd_idx+1; i < cword; i++)); do
+                if [[ "${words[i]}" == "upgrade" ]]; then
+                    template_sub="upgrade"
+                    break
+                fi
+            done
+            if [[ "$template_sub" == "upgrade" ]]; then
+                # Complete with template names or flags
+                local templates templates_dir
+                templates_dir="${HOME}/.config/containai/templates"
+                if [[ -d "$templates_dir" ]]; then
+                    templates=$(find "$templates_dir" -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | tr '\n' ' ') || templates=""
+                else
+                    templates=""
+                fi
+                COMPREPLY=($(compgen -W "$templates $template_flags" -- "$cur"))
+            else
+                COMPREPLY=($(compgen -W "$template_subcommands -h --help" -- "$cur"))
             fi
             ;;
         update)
@@ -6573,6 +6756,9 @@ containai() {
     _CAI_VERBOSE=""
     _CAI_QUIET=""
 
+    # Reset channel override to prevent leaking between invocations
+    _CAI_CHANNEL_OVERRIDE=""
+
     # Run rate-limited update check before command dispatch
     # Skip in CI environments to avoid noise/delays in automated pipelines
     # Per spec: CI=true (explicit), GITHUB_ACTIONS (presence), JENKINS_URL (presence)
@@ -6656,6 +6842,10 @@ containai() {
         config)
             shift
             _containai_config_cmd "$@"
+            ;;
+        template)
+            shift
+            _containai_template_cmd "$@"
             ;;
         sandbox)
             shift

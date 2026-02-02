@@ -61,30 +61,25 @@ _CAI_DEFAULT_IMAGE="ghcr.io/novotnyllc/containai"
 # ==============================================================================
 
 # Get base image based on channel configuration
-# Uses _CAI_IMAGE_CHANNEL if set (from config.sh), CONTAINAI_CHANNEL env, or defaults to stable
+# Uses _cai_config_channel() for precedence resolution and validation
 # Outputs: Full image reference (e.g., ghcr.io/novotnyllc/containai:latest)
 _cai_base_image() {
     local channel
 
-    # Check CLI override first (set by arg parsing)
-    if [[ -n "${_CAI_CHANNEL_OVERRIDE:-}" ]]; then
-        channel="$_CAI_CHANNEL_OVERRIDE"
-    # Check environment variable
-    elif [[ -n "${CONTAINAI_CHANNEL:-}" ]]; then
-        channel="$CONTAINAI_CHANNEL"
-    # Use parsed config global
-    elif [[ -n "${_CAI_IMAGE_CHANNEL:-}" ]]; then
-        channel="$_CAI_IMAGE_CHANNEL"
+    # Use _cai_config_channel() for precedence and validation (emits warnings for invalid values)
+    if command -v _cai_config_channel >/dev/null 2>&1; then
+        channel=$(_cai_config_channel)
     else
-        channel="stable"
+        # Fallback if config.sh not loaded: simple precedence without warnings
+        channel="${_CAI_CHANNEL_OVERRIDE:-${CONTAINAI_CHANNEL:-${_CAI_IMAGE_CHANNEL:-stable}}}"
     fi
 
-    # Normalize channel and get image tag
+    # Map channel to image tag
     case "$channel" in
         nightly)
             printf '%s' "$_CAI_DEFAULT_IMAGE:nightly"
             ;;
-        stable|*)
+        *)
             printf '%s' "$_CAI_DEFAULT_IMAGE:latest"
             ;;
     esac
