@@ -2546,6 +2546,20 @@ _containai_start_container() {
                 # Use the built template image for container creation
                 resolved_image="$template_image"
                 _cai_debug "Using template image: $resolved_image"
+
+                # Check for newer base image (non-blocking, runs in background)
+                # This runs after template is ready per fn-32-2mq.6 spec
+                if command -v _cai_check_image_freshness >/dev/null 2>&1; then
+                    local base_image
+                    if command -v _cai_base_image >/dev/null 2>&1; then
+                        base_image=$(_cai_base_image)
+                    else
+                        base_image="ghcr.io/novotnyllc/containai:latest"
+                    fi
+                    # Run in background subshell to avoid blocking startup
+                    # Output to stderr is preserved (subshell inherits file descriptors)
+                    ( _cai_check_image_freshness "$base_image" "$selected_context" ) &
+                fi
             fi
 
             # Build container creation args - always detached with tini init + sleep infinity

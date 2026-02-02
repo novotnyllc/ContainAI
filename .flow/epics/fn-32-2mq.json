@@ -1,6 +1,11 @@
 {
   "branch_name": "fn-32-2mq",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-28T10:14:43.707913Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-36-rb7",
     "fn-31-gib",
@@ -9,10 +14,10 @@
   ],
   "id": "fn-32-2mq",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-02T05:52:13.185839Z",
   "spec_path": ".flow/specs/fn-32-2mq.md",
   "status": "open",
   "title": "Release Pipeline & Image Management",
-  "updated_at": "2026-01-28T19:47:44.087270Z"
+  "updated_at": "2026-02-02T05:52:13.185860Z"
 }

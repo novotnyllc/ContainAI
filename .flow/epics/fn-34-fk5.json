@@ -17,7 +17,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-02-01T15:57:33.067339Z",
   "spec_path": ".flow/specs/fn-34-fk5.md",
-  "status": "open",
+  "status": "done",
   "title": "One-Shot Execution & Container Lifecycle",
-  "updated_at": "2026-02-01T15:57:33.067349Z"
+  "updated_at": "2026-02-02T05:17:35.349209Z"
 }

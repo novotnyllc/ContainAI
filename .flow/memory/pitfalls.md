@@ -361,3 +361,12 @@ Integration tests must verify required tools exist in container before using the
 
 ## 2026-02-02 manual [pitfall]
 Security tests should not treat 'cannot verify' as 'verified pass' - skip with warning requires explicit opt-out env var
+
+## 2026-02-02 manual [pitfall]
+Use BRE-compatible grep patterns (grep -q '^[0-9][0-9]*$') instead of ERE (grep -qE '^[0-9]+$') for maximum portability across GNU/BSD grep implementations
+
+## 2026-02-02 manual [pitfall]
+Use env vars instead of shell interpolation when passing strings to Python - quotes/backslashes in values break shell-embedded Python snippets
+
+## 2026-02-02 manual [pitfall]
+Codex impl-review may cache file content; verify fixes are in working tree before re-running review

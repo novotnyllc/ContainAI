@@ -6,6 +6,7 @@
 #
 # Provides:
 #   _cai_info()     - Info message (stderr, only when verbose)
+#   _cai_notice()   - Notice message (stderr, always - informational but important)
 #   _cai_warn()     - Warning message (stderr, always)
 #   _cai_error()    - Error message (stderr, always)
 #   _cai_debug()    - Debug message (stderr, only when CONTAINAI_DEBUG=1)
@@ -18,6 +19,7 @@
 #
 # Output format:
 #   [INFO] message   - Informational (stderr, verbose only)
+#   [NOTICE] message - Notice (stderr, always, informational but important)
 #   [OK] message     - Success/completion (stderr, verbose only)
 #   -> message       - Step progress (stderr, verbose only)
 #   [WARN] message   - Warning (stderr, always)
@@ -91,6 +93,12 @@ _cai_info() {
 _cai_ok() {
     _cai_is_verbose || return 0
     printf '%s\n' "[OK] $*" >&2
+}
+
+# Notice message (stderr, always visible - informational but important)
+# Use for user-relevant notices that shouldn't be gated by --verbose
+_cai_notice() {
+    printf '%s\n' "[NOTICE] $*" >&2
 }
 
 # Warning message (stderr)

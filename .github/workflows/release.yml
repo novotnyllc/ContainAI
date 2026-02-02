@@ -1,0 +1,89 @@
+name: Create GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag exists
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/${GITHUB_REF_NAME}" >/dev/null; then
+            echo "::error::Tag ${GITHUB_REF_NAME} not found in repository"
+            exit 1
+          fi
+
+      - name: Wait for Docker image
+        id: wait_image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Extract version from tag (strip leading 'v')
+          version="${GITHUB_REF_NAME#v}"
+          repo_name="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+
+          echo "Waiting for Docker image with tag ${version}..."
+
+          # Determine if owner is org or user
+          owner_type=$(gh api "/repos/${GITHUB_REPOSITORY}" --jq '.owner.type' 2>/dev/null || echo "unknown")
+          if [ "$owner_type" = "Organization" ]; then
+            api_base="/orgs/${GITHUB_REPOSITORY_OWNER}"
+          else
+            api_base="/users/${GITHUB_REPOSITORY_OWNER}"
+          fi
+
+          max_attempts=60
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            # Check if the version tag exists in GHCR (with pagination)
+            if gh api "${api_base}/packages/container/${repo_name}/versions" --paginate \
+                --jq '.[].metadata.container.tags[]' 2>/dev/null | grep -Fxq "$version"; then
+              echo "Docker image with tag ${version} is available"
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            attempt=$((attempt + 1))
+            echo "Attempt ${attempt}/${max_attempts}: Image not yet available, waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::Docker image not found after ${max_attempts} attempts (10 min)."
+          echo "found=false" >> "$GITHUB_OUTPUT"
+          exit 1
+
+      - name: Check if release exists
+        id: check_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check_release.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "ContainAI ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --verify-tag \
+            --latest

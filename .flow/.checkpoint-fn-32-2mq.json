@@ -1,0 +1,180 @@
+{
+  "created_at": "2026-02-02T05:18:18.629259Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-32-2mq",
+      "created_at": "2026-01-28T10:14:43.707913Z",
+      "depends_on_epics": [
+        "fn-36-rb7",
+        "fn-31-gib",
+        "fn-34-fk5",
+        "fn-42-cli-ux-fixes-hostname-reset-wait-help"
+      ],
+      "id": "fn-32-2mq",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-32-2mq.md",
+      "status": "open",
+      "title": "Release Pipeline & Image Management",
+      "updated_at": "2026-01-28T19:47:44.087270Z"
+    },
+    "spec": "# fn-32-2mq Release Pipeline & Image Management\n\n## Overview\n\nDefine and implement the complete release story for ContainAI. This includes automated versioning, image tagging, release channels (stable/nightly), and improved user experience around image management.\n\n**Key Goals:**\n1. Automated version bumping and tagging via GitHub Actions\n2. Stable/Nightly release channels\n3. Smart image pulling (show size, date, prompt user)\n4. Image freshness checks with `cai --refresh` suggestion\n\n## Scope\n\n### In Scope\n- GitHub Action for version increment, tagging, and branching\n- Stable vs Nightly build channels\n- Image pull UX improvements:\n  - Prompt to pull when no local image\n  - Show image size and date before pulling\n  - Check for newer images and suggest `cai --refresh`\n- Enhance docker.yml workflow for full automation\n- VERSION file management\n\n### Out of Scope\n- Multi-registry support (only GHCR for now)\n- Signed images/SBOM (future enhancement)\n- Automatic rollback mechanisms\n\n## Approach\n\n### Version Strategy\n\nUse semantic versioning (MAJOR.MINOR.PATCH):\n- **MAJOR**: Breaking changes to CLI or config format\n- **MINOR**: New features, new agent support\n- **PATCH**: Bug fixes, security patches\n\nVersion sources:\n- `VERSION` file in repo root (single source of truth)\n- Git tags for releases (v0.1.0, v0.2.0, etc.)\n\n### Release Channels\n\n**Stable Channel:**\n- Built from tagged releases (v*)\n- Images tagged: `latest`, `v0.1.0`, `v0.1`, `v0`\n- Used by default in `cai` commands\n- Tested and documented\n\n**Nightly Channel:**\n- Built from main branch nightly\n- Images tagged: `nightly`, `nightly-YYYYMMDD`\n- Opt-in via config or `--channel nightly`\n- May have breaking changes\n\n### GitHub Actions Workflow\n\n```yaml\n# New workflow: release.yml\nname: Release\n\non:\n  push:\n    tags: ['v*']\n  workflow_dispatch:\n    inputs:\n      bump_type:\n        description: 'Version bump type'\n        required: true\n        default: 'patch'\n        type: choice\n        options: [major, minor, patch]\n\njobs:\n  version:\n    # Bump VERSION file, create tag, push\n\n  build:\n    # Build and push images to GHCR\n\n  release:\n    # Create GitHub Release with notes\n```\n\n### Image Pull UX\n\n**No Local Image:**\n```\n$ cai shell\n[INFO] No local ContainAI image found.\n       Image: ghcr.io/novotnyllc/containai:latest\n       Size: 2.1 GB (compressed)\n       Published: 2026-01-15\n\nPull image? [Y/n]:\n```\n\n**Newer Image Available:**\n```\n$ cai shell\n[INFO] A newer ContainAI image is available.\n       Local: v0.1.0 (2026-01-10)\n       Remote: v0.2.0 (2026-01-15)\n\n       Run 'cai --refresh' to update.\n\nStarting container with current image...\n```\n\nNote: The freshness check is INFO level, not a warning. It shouldn't block the user.\n\n### Image Metadata\n\nQuery image metadata via Docker Registry API:\n- Image size (compressed)\n- Created date\n- Version label\n- Digest for comparison\n\n## Tasks\n\n### fn-32-2mq.1: Create release GitHub Action\nNew `release.yml` workflow that:\n- Accepts manual trigger with version bump type\n- Bumps VERSION file\n- Creates and pushes git tag\n- Triggers image build\n\n### fn-32-2mq.2: Implement version bump script\nShell script or action to:\n- Read current VERSION\n- Increment based on bump type\n- Write new VERSION\n- Commit change\n\n### fn-32-2mq.3: Add nightly build workflow\nNew `nightly.yml` or cron in existing workflow:\n- Build from main branch\n- Tag images as `nightly`, `nightly-YYYYMMDD`\n- Run at 2am UTC daily\n\n### fn-32-2mq.4: Create GitHub Release automatically\nAfter successful build from tag:\n- Create GitHub Release\n- Auto-generate release notes from commits\n- Attach checksums if applicable\n\n### fn-32-2mq.5: Implement image pull prompt\nWhen no local image:\n- Query registry for image metadata\n- Display size and date\n- Prompt user before pulling\n- Pull and retry command\n\n### fn-32-2mq.6: Implement image freshness check\nOn container start:\n- Compare local image digest with remote\n- If newer available, show INFO message\n- Suggest `cai --refresh` command\n- Don't block or warn\n\n### fn-32-2mq.7: Implement cai --refresh command\nNew flag or subcommand:\n- Pull latest image for configured channel\n- Optionally recreate running containers\n- Show what changed (version diff)\n\n### fn-32-2mq.8: Add channel configuration\nConfig option for release channel:\n```toml\n[image]\nchannel = \"stable\"  # or \"nightly\"\n```\n\n## Quick commands\n\n```bash\n# Current workflow test\n./src/build.sh --image-prefix containai\n\n# Check VERSION file\ncat VERSION\n\n# List remote tags\ngh api /orgs/novotnyllc/packages/container/containai/versions --jq '.[].metadata.container.tags[]'\n\n# Manual version bump (future)\n./scripts/bump-version.sh patch\n```\n\n## Acceptance\n\n- [ ] GitHub Action bumps VERSION file correctly\n- [ ] Git tags created automatically (v0.1.0 format)\n- [ ] GitHub Releases created with notes\n- [ ] Nightly builds run and tag correctly\n- [ ] `cai shell` prompts to pull when no local image\n- [ ] Image size and date shown before pull\n- [ ] Freshness check shows INFO when newer available\n- [ ] `cai --refresh` pulls latest and optionally recreates containers\n- [ ] Channel configurable via config file\n\n## Dependencies\n\n- **fn-36-rb7**: CLI UX consistency (provides `--refresh` semantics)\n- **fn-31-gib**: Import reliability (test suite helps validate releases)\n- **fn-33-lp4**: User templates (image build flow)\n- **fn-34-fk5**: One-shot execution (container lifecycle)\n- Existing: `.github/workflows/docker.yml`\n\n## References\n\n- Current docker.yml: `.github/workflows/docker.yml`\n- VERSION file: `VERSION`\n- Docker Registry API: https://docs.docker.com/registry/spec/api/\n- GitHub Packages API: https://docs.github.com/en/rest/packages\n- Semantic Versioning: https://semver.org/\n"
+  },
+  "epic_id": "fn-32-2mq",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:34.721570Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.1",
+        "priority": 1,
+        "spec_path": ".flow/tasks/fn-32-2mq.1.md",
+        "status": "todo",
+        "title": "Create release GitHub Action",
+        "updated_at": "2026-01-28T10:18:34.721580Z"
+      },
+      "id": "fn-32-2mq.1",
+      "runtime": null,
+      "spec": "# fn-32-2mq.1 Create release GitHub Action\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:34.787877Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.2",
+        "priority": 2,
+        "spec_path": ".flow/tasks/fn-32-2mq.2.md",
+        "status": "todo",
+        "title": "Implement version bump script",
+        "updated_at": "2026-01-28T10:18:34.787887Z"
+      },
+      "id": "fn-32-2mq.2",
+      "runtime": null,
+      "spec": "# fn-32-2mq.2 Implement version bump script\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:34.857628Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.3",
+        "priority": 3,
+        "spec_path": ".flow/tasks/fn-32-2mq.3.md",
+        "status": "todo",
+        "title": "Add nightly build workflow",
+        "updated_at": "2026-01-28T10:18:34.857639Z"
+      },
+      "id": "fn-32-2mq.3",
+      "runtime": null,
+      "spec": "# fn-32-2mq.3 Add nightly build workflow\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:34.926840Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.4",
+        "priority": 4,
+        "spec_path": ".flow/tasks/fn-32-2mq.4.md",
+        "status": "todo",
+        "title": "Create GitHub Release automatically",
+        "updated_at": "2026-01-28T10:18:34.926851Z"
+      },
+      "id": "fn-32-2mq.4",
+      "runtime": null,
+      "spec": "# fn-32-2mq.4 Create GitHub Release automatically\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:34.992894Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.5",
+        "priority": 5,
+        "spec_path": ".flow/tasks/fn-32-2mq.5.md",
+        "status": "todo",
+        "title": "Implement image pull prompt",
+        "updated_at": "2026-01-28T10:18:34.992905Z"
+      },
+      "id": "fn-32-2mq.5",
+      "runtime": null,
+      "spec": "# fn-32-2mq.5 Implement image pull prompt\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:35.057372Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.6",
+        "priority": 6,
+        "spec_path": ".flow/tasks/fn-32-2mq.6.md",
+        "status": "todo",
+        "title": "Implement image freshness check",
+        "updated_at": "2026-01-28T10:18:35.057382Z"
+      },
+      "id": "fn-32-2mq.6",
+      "runtime": null,
+      "spec": "# fn-32-2mq.6 Implement image freshness check\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:35.122787Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.7",
+        "priority": 7,
+        "spec_path": ".flow/tasks/fn-32-2mq.7.md",
+        "status": "todo",
+        "title": "Implement cai --refresh command",
+        "updated_at": "2026-01-28T10:18:35.122797Z"
+      },
+      "id": "fn-32-2mq.7",
+      "runtime": null,
+      "spec": "# fn-32-2mq.7 Implement cai --refresh command\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T10:18:35.188826Z",
+        "depends_on": [],
+        "epic": "fn-32-2mq",
+        "id": "fn-32-2mq.8",
+        "priority": 8,
+        "spec_path": ".flow/tasks/fn-32-2mq.8.md",
+        "status": "todo",
+        "title": "Add channel configuration",
+        "updated_at": "2026-01-28T10:18:35.188838Z"
+      },
+      "id": "fn-32-2mq.8",
+      "runtime": null,
+      "spec": "# fn-32-2mq.8 Add channel configuration\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

@@ -21,6 +21,7 @@
 #   _cai_install_template()        - Install a single template from repo (if missing)
 #   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
+#   _cai_ensure_base_image()       - Check/pull base image with user prompt
 #   _cai_build_template()          - Build template Dockerfile using Docker context
 #   _cai_get_template_image_name() - Get image name for a template (no build)
 #   _cai_validate_template_base()  - Validate Dockerfile FROM uses ContainAI base
@@ -35,6 +36,7 @@
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
 #   - Requires lib/ssh.sh for _CAI_CONFIG_DIR constant
+#   - Requires lib/registry.sh for _cai_base_image() and registry helpers
 #   - Uses _CAI_SCRIPT_DIR from containai.sh for repo source path
 #
 # Usage: source lib/template.sh
@@ -397,6 +399,115 @@ _cai_ensure_default_templates() {
 }
 
 # ==============================================================================
+# Base Image Management
+# ==============================================================================
+
+# Ensure ContainAI base image is available locally, prompting user if needed
+# Args: $1 = docker_context (optional)
+# Returns: 0 if image is available (or pulled), 1 if user declined or error
+# Note: Uses _cai_base_image() from registry.sh to get channel-aware base image
+# Note: In non-interactive mode without CAI_YES, exits with error
+_cai_ensure_base_image() {
+    local docker_context="${1:-}"
+    local base_image
+
+    # Get the base image for current channel
+    if command -v _cai_base_image >/dev/null 2>&1; then
+        base_image=$(_cai_base_image)
+    else
+        # Fallback if registry.sh not loaded
+        base_image="ghcr.io/novotnyllc/containai:latest"
+    fi
+
+    # Build docker command
+    local -a docker_cmd=(docker)
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Check if image exists locally
+    # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context flag authoritative
+    if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" image inspect "$base_image" >/dev/null 2>&1; then
+        # Image exists locally - freshness check is done in container.sh after template build
+        _cai_debug "Base image '$base_image' found locally"
+        return 0
+    fi
+
+    # Image not present - need to prompt user
+    _cai_notice "No local ContainAI base image found."
+
+    # Try to get metadata from registry (for size/date display)
+    local metadata size_str created_str
+    if command -v _cai_ghcr_image_metadata >/dev/null 2>&1; then
+        if metadata=$(_cai_ghcr_image_metadata "$base_image" 2>/dev/null); then
+            local size_bytes created_raw
+            size_bytes=$(printf '%s' "$metadata" | python3 -c "import sys,json; print(json.load(sys.stdin).get('size',0))" 2>/dev/null) || size_bytes=0
+            created_raw=$(printf '%s' "$metadata" | python3 -c "import sys,json; print(json.load(sys.stdin).get('created',''))" 2>/dev/null) || created_raw=""
+            if [[ "$size_bytes" -gt 0 ]] && command -v _cai_format_size >/dev/null 2>&1; then
+                size_str=$(_cai_format_size "$size_bytes")
+            fi
+            # Format created date (extract YYYY-MM-DD from ISO format)
+            if [[ -n "$created_raw" ]]; then
+                created_str="${created_raw:0:10}"  # First 10 chars: YYYY-MM-DD
+            fi
+        fi
+    fi
+
+    # Display image info
+    printf '%s\n' "         Image: $base_image" >&2
+    if [[ -n "${size_str:-}" ]]; then
+        printf '%s\n' "         Size: $size_str (compressed)" >&2
+    fi
+    if [[ -n "${created_str:-}" ]]; then
+        printf '%s\n' "         Published: $created_str" >&2
+    fi
+    printf '\n' >&2
+
+    # Build the manual pull command (include context if set)
+    local pull_cmd
+    if [[ -n "$docker_context" ]]; then
+        pull_cmd="docker --context $docker_context pull $base_image"
+    else
+        pull_cmd="docker pull $base_image"
+    fi
+
+    # Check if we can prompt for confirmation
+    # CAI_YES=1 means auto-confirm
+    if [[ "${CAI_YES:-}" == "1" ]]; then
+        _cai_info "Pulling base image (CAI_YES=1)..."
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" pull "$base_image"; then
+            _cai_error "Failed to pull base image: $base_image"
+            return 1
+        fi
+        return 0
+    fi
+
+    # Check for non-interactive mode
+    if [[ ! -t 0 ]] && { [[ ! -e /dev/tty ]] || ! : < /dev/tty 2>/dev/null; }; then
+        _cai_error "Non-interactive mode: cannot prompt for base image pull"
+        _cai_error "Set CAI_YES=1 to auto-confirm, or pull the image manually:"
+        _cai_error "  $pull_cmd"
+        return 1
+    fi
+
+    # Prompt user for confirmation (default yes)
+    if _cai_prompt_confirm "Pull image?" "true"; then
+        _cai_info "Pulling base image..."
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" pull "$base_image"; then
+            _cai_error "Failed to pull base image: $base_image"
+            return 1
+        fi
+        _cai_ok "Base image pulled successfully"
+        return 0
+    else
+        _cai_error "Base image required for template build"
+        _cai_error "Pull the image manually and try again:"
+        _cai_error "  $pull_cmd"
+        return 1
+    fi
+}
+
+# ==============================================================================
 # Template Build Functions
 # ==============================================================================
 
@@ -412,6 +523,7 @@ _cai_ensure_default_templates() {
 # Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<command> to stdout
 #       The command is shell-escaped and includes env var clearing prefix
 # Note: Validates that Dockerfile uses ContainAI base image; warns if not
+# Note: Prompts to pull base image if not present locally
 _cai_build_template() {
     local template_name="${1:-default}"
     local docker_context="${2:-}"
@@ -448,6 +560,13 @@ _cai_build_template() {
     local -a docker_cmd=(docker)
     if [[ -n "$docker_context" ]]; then
         docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Check if base image needs to be pulled (not in dry-run mode)
+    if [[ "$dry_run" != "true" ]]; then
+        if ! _cai_ensure_base_image "$docker_context"; then
+            return 1
+        fi
     fi
 
     # Construct the build command

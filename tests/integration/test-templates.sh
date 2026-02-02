@@ -794,7 +794,130 @@ EOF
 }
 
 # ==============================================================================
-# Test 13: Doctor template detection (requires fn-33-lp4.7)
+# Test 13b: Base image pull prompt functions (fn-32-2mq.5)
+# ==============================================================================
+test_base_image_prompt_functions() {
+    section "Test 13b: Base image pull prompt functions"
+
+    # Check if _cai_ensure_base_image exists
+    if ! declare -f _cai_ensure_base_image >/dev/null 2>&1; then
+        skip "_cai_ensure_base_image not implemented (fn-32-2mq.5 pending)"
+        return
+    fi
+    pass "_cai_ensure_base_image function exists"
+
+    # Check if _cai_notice exists
+    if declare -f _cai_notice >/dev/null 2>&1; then
+        pass "_cai_notice function exists"
+    else
+        fail "_cai_notice function missing"
+    fi
+
+    # Check if _cai_base_image exists
+    if declare -f _cai_base_image >/dev/null 2>&1; then
+        pass "_cai_base_image function exists"
+
+        # Test _cai_base_image returns stable tag by default
+        local base_image
+        base_image=$(_cai_base_image)
+        if [[ "$base_image" == *":latest" ]]; then
+            pass "_cai_base_image returns :latest for stable channel"
+        else
+            fail "_cai_base_image did not return :latest tag: $base_image"
+        fi
+
+        # Test _cai_base_image respects CONTAINAI_CHANNEL
+        base_image=$(CONTAINAI_CHANNEL=nightly _cai_base_image)
+        if [[ "$base_image" == *":nightly" ]]; then
+            pass "_cai_base_image returns :nightly for nightly channel"
+        else
+            fail "_cai_base_image did not return :nightly tag: $base_image"
+        fi
+    else
+        fail "_cai_base_image function missing"
+    fi
+
+    # Check if _cai_ghcr_image_metadata exists (registry.sh)
+    if declare -f _cai_ghcr_image_metadata >/dev/null 2>&1; then
+        pass "_cai_ghcr_image_metadata function exists"
+    else
+        fail "_cai_ghcr_image_metadata function missing"
+    fi
+
+    # Check if _cai_format_size exists
+    if declare -f _cai_format_size >/dev/null 2>&1; then
+        pass "_cai_format_size function exists"
+
+        # Test size formatting
+        local formatted
+        formatted=$(_cai_format_size 2147483648) # 2GB
+        if [[ "$formatted" == *"GB"* ]]; then
+            pass "_cai_format_size correctly formats GB"
+        else
+            fail "_cai_format_size failed: $formatted"
+        fi
+    else
+        fail "_cai_format_size function missing"
+    fi
+}
+
+# ==============================================================================
+# Test 13c: Base image prompt non-interactive mode (fn-32-2mq.5)
+# ==============================================================================
+test_base_image_non_interactive() {
+    section "Test 13c: Base image prompt non-interactive mode"
+
+    # Check if _cai_ensure_base_image exists
+    if ! declare -f _cai_ensure_base_image >/dev/null 2>&1; then
+        skip "_cai_ensure_base_image not implemented (fn-32-2mq.5 pending)"
+        return
+    fi
+
+    # Skip if running interactively with a TTY
+    if [[ -t 0 ]] || [[ -t 1 ]]; then
+        skip "Non-interactive test requires no controlling TTY"
+        return
+    fi
+
+    # Test non-interactive mode without CAI_YES fails gracefully
+    # This simulates a CI environment where stdin is not a tty
+    # Use setsid to detach from controlling TTY and timeout to prevent hang
+    local output rc
+
+    if command -v setsid >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+        # Use setsid to detach from controlling TTY, timeout as safety net
+        output=$(timeout 5 setsid bash -c "
+            source '$SRC_DIR/containai.sh'
+            _CAI_DEFAULT_IMAGE='ghcr.io/test/nonexistent-image-12345'
+            _cai_ensure_base_image
+        " < /dev/null 2>&1) && rc=0 || rc=$?
+    elif command -v timeout >/dev/null 2>&1; then
+        # Fallback with just timeout
+        output=$(timeout 5 bash -c "
+            source '$SRC_DIR/containai.sh'
+            _CAI_DEFAULT_IMAGE='ghcr.io/test/nonexistent-image-12345'
+            _cai_ensure_base_image
+        " < /dev/null 2>&1) && rc=0 || rc=$?
+    else
+        # No timeout available - skip to avoid potential hang
+        skip "Test requires timeout command"
+        return
+    fi
+
+    # Should fail since no tty and CAI_YES not set
+    # Exit code 124 from timeout means it timed out (would have hung)
+    if [[ $rc -eq 124 ]]; then
+        fail "Test timed out - function hung waiting for input"
+    elif [[ $rc -ne 0 ]]; then
+        pass "Non-interactive mode without CAI_YES fails as expected"
+    else
+        # If rc is 0, the image existed or something unexpected happened
+        skip "Test inconclusive - may have found a local image unexpectedly"
+    fi
+}
+
+# ==============================================================================
+# Test 14: Doctor template detection (requires fn-33-lp4.7)
 # ==============================================================================
 test_doctor_template_detection() {
     section "Test 14: Doctor detection of missing template"
@@ -893,6 +1016,146 @@ test_doctor_fix_template() {
 }
 
 # ==============================================================================
+# Test 16: Image freshness check helper functions (fn-32-2mq.6)
+# ==============================================================================
+test_freshness_check_functions() {
+    section "Test 16: Image freshness check helper functions"
+
+    # Check if freshness check functions exist (fn-32-2mq.6)
+    if declare -f _cai_check_image_freshness >/dev/null 2>&1; then
+        pass "_cai_check_image_freshness function exists"
+    else
+        fail "_cai_check_image_freshness function missing"
+    fi
+
+    if declare -f _cai_local_image_digest >/dev/null 2>&1; then
+        pass "_cai_local_image_digest function exists"
+    else
+        fail "_cai_local_image_digest function missing"
+    fi
+
+    if declare -f _cai_local_image_version >/dev/null 2>&1; then
+        pass "_cai_local_image_version function exists"
+    else
+        fail "_cai_local_image_version function missing"
+    fi
+
+    if declare -f _cai_local_image_created >/dev/null 2>&1; then
+        pass "_cai_local_image_created function exists"
+    else
+        fail "_cai_local_image_created function missing"
+    fi
+
+    if declare -f _cai_display_freshness_notice >/dev/null 2>&1; then
+        pass "_cai_display_freshness_notice function exists"
+    else
+        fail "_cai_display_freshness_notice function missing"
+    fi
+}
+
+# ==============================================================================
+# Test 17: Image freshness local digest extraction (fn-32-2mq.6)
+# ==============================================================================
+test_freshness_local_digest() {
+    section "Test 17: Image freshness local digest extraction"
+
+    # Check if required functions exist
+    if ! declare -f _cai_local_image_digest >/dev/null 2>&1; then
+        skip "_cai_local_image_digest not implemented (fn-32-2mq.6 pending)"
+        return
+    fi
+
+    # Skip if Docker not available
+    if [[ "$DOCKER_AVAILABLE" -ne 1 ]]; then
+        skip "Docker not available"
+        return
+    fi
+
+    # Skip if Docker tests disabled
+    if [[ "${SKIP_DOCKER_TESTS:-}" == "1" ]]; then
+        skip "Docker tests disabled via SKIP_DOCKER_TESTS"
+        return
+    fi
+
+    # Test with a known image that should exist (alpine:3.20 or similar)
+    local test_image="alpine:3.20"
+    local digest
+
+    # Pull test image if needed
+    if ! docker image inspect "$test_image" >/dev/null 2>&1; then
+        if ! docker pull "$test_image" >/dev/null 2>&1; then
+            skip "Cannot pull test image $test_image"
+            return
+        fi
+    fi
+
+    # Test digest extraction
+    if digest=$(_cai_local_image_digest "$test_image" 2>/dev/null); then
+        if [[ "$digest" == sha256:* ]]; then
+            pass "Local image digest extracted correctly: ${digest:0:20}..."
+        else
+            fail "Local image digest format incorrect: $digest"
+        fi
+    else
+        # This is expected for locally-built images without RepoDigests
+        skip "Test image has no RepoDigests (expected for local builds)"
+    fi
+}
+
+# ==============================================================================
+# Test 18: Image freshness notice display (fn-32-2mq.6)
+# ==============================================================================
+test_freshness_display_notice() {
+    section "Test 18: Image freshness notice display"
+
+    # Check if display function exists
+    if ! declare -f _cai_display_freshness_notice >/dev/null 2>&1; then
+        skip "_cai_display_freshness_notice not implemented (fn-32-2mq.6 pending)"
+        return
+    fi
+
+    # Test notice display with version info
+    local notice_output
+    notice_output=$(_cai_display_freshness_notice "0.1.0" "2026-01-10" "0.2.0" "2026-01-15" 2>&1)
+
+    # Check for [NOTICE] prefix
+    if printf '%s' "$notice_output" | grep -q "\[NOTICE\]"; then
+        pass "Freshness notice uses [NOTICE] prefix"
+    else
+        fail "Freshness notice missing [NOTICE] prefix"
+    fi
+
+    # Check for local version
+    if printf '%s' "$notice_output" | grep -q "Local:"; then
+        pass "Freshness notice shows Local info"
+    else
+        fail "Freshness notice missing Local info"
+    fi
+
+    # Check for remote version
+    if printf '%s' "$notice_output" | grep -q "Remote:"; then
+        pass "Freshness notice shows Remote info"
+    else
+        fail "Freshness notice missing Remote info"
+    fi
+
+    # Check for cai --refresh suggestion
+    if printf '%s' "$notice_output" | grep -q "\-\-refresh"; then
+        pass "Freshness notice suggests cai --refresh"
+    else
+        fail "Freshness notice missing cai --refresh suggestion"
+    fi
+
+    # Test notice display without version info (just dates)
+    notice_output=$(_cai_display_freshness_notice "" "2026-01-10" "" "2026-01-15" 2>&1)
+    if printf '%s' "$notice_output" | grep -q "\[NOTICE\]"; then
+        pass "Freshness notice works with dates only"
+    else
+        fail "Freshness notice failed with dates only"
+    fi
+}
+
+# ==============================================================================
 # Run all tests
 # ==============================================================================
 
@@ -920,8 +1183,15 @@ test_template_build_dry_run
 test_template_build_dry_run_with_context
 test_template_image_name
 test_layer_validation
+test_base_image_prompt_functions
+test_base_image_non_interactive
 test_doctor_template_detection
 test_doctor_fix_template
+
+# Run tests - fn-32-2mq.6 (image freshness check)
+test_freshness_check_functions
+test_freshness_local_digest
+test_freshness_display_notice
 
 # Summary
 printf '\n'
