@@ -947,53 +947,53 @@ _cai_doctor() {
     printf '\n'
 
     # === Network Security Section ===
-    # Only check on Linux/WSL2 hosts (not macOS, not inside containers where outer rules apply)
+    # Check on all platforms (Linux, WSL2, macOS/Lima)
+    # macOS: rules exist inside Lima VM, checked via limactl shell
+    # Inside containers: outer rules apply, skip inner check
     local network_security_ok="true"
-    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
-        if [[ "$in_container" == "false" ]]; then
-            printf '%s\n' "Network Security"
+    if [[ "$in_container" == "false" ]]; then
+        printf '%s\n' "Network Security"
 
-            # Call function directly (not via command substitution) to preserve globals
-            _cai_network_doctor_status
-            local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
-            local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
-            case "$network_status" in
-                ok)
-                    printf '  %-44s %s\n' "iptables rules:" "[OK]"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-                skipped)
-                    # Skipped is OK (e.g., Sysbox outer isolation, permission denied)
-                    printf '  %-44s %s\n' "iptables rules:" "[SKIP]"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-                bridge_missing)
-                    # Bridge not present - can't apply rules yet, warn but don't fail
-                    # containai-docker service may not be running
-                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Bridge not present"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-                rules_missing)
-                    # Bridge exists but rules missing - this is a real problem
-                    network_security_ok="false"
-                    printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-                partial)
-                    network_security_ok="false"
-                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Incomplete"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-                error)
-                    # Error status (e.g., iptables not installed) - fail the check
-                    network_security_ok="false"
-                    printf '  %-44s %s\n' "iptables rules:" "[ERROR]"
-                    printf '  %-44s %s\n' "" "$network_detail"
-                    ;;
-            esac
+        # Call function directly (not via command substitution) to preserve globals
+        _cai_network_doctor_status
+        local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+        local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+        case "$network_status" in
+            ok)
+                printf '  %-44s %s\n' "iptables rules:" "[OK]"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+            skipped)
+                # Skipped is OK (e.g., Sysbox outer isolation, permission denied)
+                printf '  %-44s %s\n' "iptables rules:" "[SKIP]"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+            bridge_missing)
+                # Bridge not present - can't apply rules yet, warn but don't fail
+                # containai-docker service may not be running
+                printf '  %-44s %s\n' "iptables rules:" "[WARN] Bridge not present"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+            rules_missing)
+                # Bridge exists but rules missing - this is a real problem
+                network_security_ok="false"
+                printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+            partial)
+                network_security_ok="false"
+                printf '  %-44s %s\n' "iptables rules:" "[WARN] Incomplete"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+            error)
+                # Error status (e.g., iptables not installed) - fail the check
+                network_security_ok="false"
+                printf '  %-44s %s\n' "iptables rules:" "[ERROR]"
+                printf '  %-44s %s\n' "" "$network_detail"
+                ;;
+        esac
 
-            printf '\n'
-        fi
+        printf '\n'
     fi
 
     # === SSH Section ===
@@ -1181,33 +1181,35 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure SSH"
     fi
 
-    # Network Security summary (Linux/WSL2 hosts only)
-    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
-        if [[ "$in_container" == "false" ]]; then
-            local network_summary_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
-            case "$network_summary_status" in
-                ok)
-                    printf '  %-44s %s\n' "Network Security:" "[OK] Rules configured"
-                    ;;
-                skipped)
-                    printf '  %-44s %s\n' "Network Security:" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
-                    ;;
-                bridge_missing)
-                    # Bridge not present - warn but don't fail (service may not be running)
-                    printf '  %-44s %s\n' "Network Security:" "[WARN] Bridge not present"
+    # Network Security summary (all platforms except inside containers)
+    if [[ "$in_container" == "false" ]]; then
+        local network_summary_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+        case "$network_summary_status" in
+            ok)
+                printf '  %-44s %s\n' "Network Security:" "[OK] Rules configured"
+                ;;
+            skipped)
+                printf '  %-44s %s\n' "Network Security:" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                ;;
+            bridge_missing)
+                # Bridge not present - warn but don't fail (service may not be running)
+                printf '  %-44s %s\n' "Network Security:" "[WARN] Bridge not present"
+                if [[ "$platform" == "macos" ]]; then
+                    printf '  %-44s %s\n' "Recommended:" "Start Lima VM or Docker Desktop"
+                else
                     printf '  %-44s %s\n' "Recommended:" "Start containai-docker service"
-                    ;;
-                rules_missing | error)
-                    # Rules missing or error - this is a real problem
-                    printf '  %-44s %s\n' "Network Security:" "[ERROR] Not configured"
-                    printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
-                    ;;
-                partial)
-                    printf '  %-44s %s\n' "Network Security:" "[ERROR] Incomplete"
-                    printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to fix network rules"
-                    ;;
-            esac
-        fi
+                fi
+                ;;
+            rules_missing | error)
+                # Rules missing or error - this is a real problem
+                printf '  %-44s %s\n' "Network Security:" "[ERROR] Not configured"
+                printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
+                ;;
+            partial)
+                printf '  %-44s %s\n' "Network Security:" "[ERROR] Incomplete"
+                printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to fix network rules"
+                ;;
+        esac
     fi
 
     # Template summary
@@ -1541,67 +1543,68 @@ _cai_doctor_fix() {
     printf '\n'
 
     # === Network Security Rules Fix ===
+    # All platforms: Linux, WSL2, macOS/Lima
+    # macOS: rules exist inside Lima VM, managed via limactl shell
     printf '%s\n' "Network Security"
-    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
-        if _cai_is_container; then
-            printf '  %-50s %s\n' "iptables rules" "[SKIP] running in container"
+    if _cai_is_container; then
+        printf '  %-50s %s\n' "iptables rules" "[SKIP] running in container"
+        ((skip_count++))
+    else
+        # Check if iptables is available first
+        if ! _cai_iptables_available; then
+            if [[ "$platform" == "macos" ]]; then
+                printf '  %-50s %s\n' "iptables rules" "[SKIP] Lima VM not running"
+            else
+                printf '  %-50s %s\n' "iptables rules" "[SKIP] iptables not installed"
+            fi
+            ((skip_count++))
+        elif ! _cai_iptables_can_run; then
+            printf '  %-50s %s\n' "iptables rules" "[SKIP] insufficient permissions"
             ((skip_count++))
         else
-            # Check if iptables is available first
-            if ! _cai_iptables_available; then
-                printf '  %-50s %s\n' "iptables rules" "[SKIP] iptables not installed"
-                ((skip_count++))
-            elif ! _cai_iptables_can_run; then
-                printf '  %-50s %s\n' "iptables rules" "[SKIP] insufficient permissions"
-                ((skip_count++))
-            else
-                # Call function directly to preserve globals
-                _cai_network_doctor_status
-                local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
-                local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
-                case "$network_status" in
-                    ok)
-                        printf '  %-50s %s\n' "iptables rules" "[OK]"
-                        ;;
-                    skipped)
-                        printf '  %-50s %s\n' "iptables rules" "[SKIP] $network_detail"
-                        ((skip_count++))
-                        ;;
-                    bridge_missing)
-                        # Bridge not present - can't apply rules yet
-                        printf '  %-50s %s\n' "iptables rules" "[SKIP] bridge not present yet"
-                        ((skip_count++))
-                        ;;
-                    rules_missing | partial | error)
-                        # Rules missing on existing bridge, or partial/error - try to fix
-                        printf '  %-50s' "Applying iptables rules"
-                        if _cai_apply_network_rules "false" >/dev/null 2>&1; then
-                            # Re-check status to verify rules were actually applied
-                            _cai_network_doctor_status
-                            # Refresh network_detail after re-check
-                            network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
-                            if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
-                                printf '%s\n' "[FIXED]"
-                                ((fixed_count++))
-                            elif [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "bridge_missing" ]]; then
-                                # Bridge disappeared - skip
-                                printf '%s\n' "[SKIP] bridge not present"
-                                ((skip_count++))
-                            else
-                                printf '%s\n' "[WARN] $network_detail"
-                                ((skip_count++))
-                            fi
+            # Call function directly to preserve globals
+            _cai_network_doctor_status
+            local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+            local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+            case "$network_status" in
+                ok)
+                    printf '  %-50s %s\n' "iptables rules" "[OK]"
+                    ;;
+                skipped)
+                    printf '  %-50s %s\n' "iptables rules" "[SKIP] $network_detail"
+                    ((skip_count++))
+                    ;;
+                bridge_missing)
+                    # Bridge not present - can't apply rules yet
+                    printf '  %-50s %s\n' "iptables rules" "[SKIP] bridge not present yet"
+                    ((skip_count++))
+                    ;;
+                rules_missing | partial | error)
+                    # Rules missing on existing bridge, or partial/error - try to fix
+                    printf '  %-50s' "Applying iptables rules"
+                    if _cai_apply_network_rules "false" >/dev/null 2>&1; then
+                        # Re-check status to verify rules were actually applied
+                        _cai_network_doctor_status
+                        # Refresh network_detail after re-check
+                        network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                        if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
+                            printf '%s\n' "[FIXED]"
+                            ((fixed_count++))
+                        elif [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "bridge_missing" ]]; then
+                            # Bridge disappeared - skip
+                            printf '%s\n' "[SKIP] bridge not present"
+                            ((skip_count++))
                         else
-                            printf '%s\n' "[FAIL]"
-                            ((fail_count++))
+                            printf '%s\n' "[WARN] $network_detail"
+                            ((skip_count++))
                         fi
-                        ;;
-                esac
-            fi
+                    else
+                        printf '%s\n' "[FAIL]"
+                        ((fail_count++))
+                    fi
+                    ;;
+            esac
         fi
-    else
-        printf '  %-50s %s\n' "iptables rules" "[SKIP] not supported on $platform"
-        ((skip_count++))
     fi
 
     printf '\n'
@@ -2827,33 +2830,32 @@ _cai_doctor_json() {
     printf '    "all_ok": %s\n' "$ssh_all_ok"
     printf '  },\n'
 
-    # Network security section (Linux/WSL2 hosts only)
+    # Network security section (all platforms except inside containers)
+    # macOS: rules exist inside Lima VM, checked via limactl shell
     local network_security_ok_json="true"
     local network_status_json=""
     local network_detail_json=""
     local network_applicable="false"
 
-    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
-        if [[ "$in_container" == "false" ]]; then
-            network_applicable="true"
-            # Call function directly to preserve globals (not via command substitution)
-            _cai_network_doctor_status
-            network_status_json="${_CAI_NETWORK_DOCTOR_STATUS:-}"
-            network_detail_json="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
-            case "$network_status_json" in
-                ok | skipped | bridge_missing)
-                    # ok/skipped are fine; bridge_missing is a warning (service not running)
-                    network_security_ok_json="true"
-                    ;;
-                rules_missing | partial | error)
-                    # Rules missing on existing bridge, partial rules, or error - real problems
-                    network_security_ok_json="false"
-                    ;;
-                *)
-                    network_security_ok_json="true"
-                    ;;
-            esac
-        fi
+    if [[ "$in_container" == "false" ]]; then
+        network_applicable="true"
+        # Call function directly to preserve globals (not via command substitution)
+        _cai_network_doctor_status
+        network_status_json="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+        network_detail_json="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+        case "$network_status_json" in
+            ok | skipped | bridge_missing)
+                # ok/skipped are fine; bridge_missing is a warning (service not running)
+                network_security_ok_json="true"
+                ;;
+            rules_missing | partial | error)
+                # Rules missing on existing bridge, partial rules, or error - real problems
+                network_security_ok_json="false"
+                ;;
+            *)
+                network_security_ok_json="true"
+                ;;
+        esac
     fi
 
     printf '  "network_security": {\n'
