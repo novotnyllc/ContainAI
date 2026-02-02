@@ -2658,11 +2658,12 @@ _cai_setup_wsl2() {
     fi
 
     # Step 14: Apply network security rules (non-fatal on failure)
+    # Note: iptables requires root; _cai_apply_network_rules uses sudo internally
     _cai_spacing
     _cai_step "Applying network security rules"
     if ! _cai_apply_network_rules "$dry_run"; then
         _cai_warn "Network security rules failed to apply - check output above"
-        _cai_warn "  You can apply rules manually later with: sudo cai network apply"
+        _cai_warn "  Re-run setup to retry, or apply manually after starting Docker"
     fi
 
 _cai_spacing
@@ -3359,12 +3360,16 @@ _cai_spacing
     _cai_step "Applying network security rules inside Lima VM"
     if [[ "$dry_run" == "true" ]]; then
         _cai_dryrun " Would apply network security rules inside Lima VM"
-        _cai_dryrun "   limactl shell $_CAI_LIMA_VM_NAME -- sudo /path/to/network-rules"
+        _cai_dryrun "   Bridge: docker0, Gateway: 172.17.0.1"
+        _cai_dryrun "   Metadata blocked: 169.254.169.254, 169.254.170.2, 100.100.100.200"
+        _cai_dryrun "   Private ranges blocked: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16"
     else
         # Apply rules inside the Lima VM
         # Note: The bridge may not exist yet (created when first container starts)
         # We use inline script to apply the rules
-        if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo bash -c '
+        local lima_rc=0
+        limactl shell "$_CAI_LIMA_VM_NAME" -- sudo bash -c '
+            set -e
             # Network security rules for Lima VM (defense-in-depth)
             # Cloud metadata endpoints to block
             METADATA_ENDPOINTS="169.254.169.254 169.254.170.2 100.100.100.200"
@@ -3382,7 +3387,7 @@ _cai_spacing
             # Check if DOCKER-USER chain exists
             if ! iptables -n -L "$CHAIN" >/dev/null 2>&1; then
                 echo "[INFO] DOCKER-USER chain not found (Docker not running containers yet)"
-                echo "[INFO] Rules will be applied when containers are started"
+                echo "[INFO] Rules will be applied when cai run is executed"
                 exit 0
             fi
 
@@ -3401,29 +3406,58 @@ _cai_spacing
 
             echo "[INFO] Applying network rules for bridge: $BRIDGE (gateway: $GATEWAY_IP)"
 
-            # Allow gateway first
+            # Find position of first RETURN rule in DOCKER-USER chain
+            find_return_position() {
+                local line_num=0
+                while IFS= read -r line; do
+                    line_num=$((line_num + 1))
+                    case "$line" in
+                        *" -j RETURN"*)
+                            echo "$line_num"
+                            return 0
+                            ;;
+                    esac
+                done < <(iptables -S "$CHAIN" 2>/dev/null | tail -n +2)
+                return 1
+            }
+
+            # Insert rule before RETURN (or append if no RETURN)
+            insert_rule_before_return() {
+                local return_pos
+                if return_pos=$(find_return_position); then
+                    iptables -I "$CHAIN" "$return_pos" "$@"
+                else
+                    iptables -A "$CHAIN" "$@"
+                fi
+            }
+
+            # Allow gateway first (insert at top)
             if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$GATEWAY_IP" -j ACCEPT -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
-                iptables -I "$CHAIN" -i "$BRIDGE" -d "$GATEWAY_IP" -j ACCEPT -m comment --comment "$IPTABLES_COMMENT" || true
+                iptables -I "$CHAIN" -i "$BRIDGE" -d "$GATEWAY_IP" -j ACCEPT -m comment --comment "$IPTABLES_COMMENT"
+                echo "[OK] Added gateway allow rule: $GATEWAY_IP"
             fi
 
-            # Block metadata endpoints
+            # Block metadata endpoints (insert before RETURN)
             for endpoint in $METADATA_ENDPOINTS; do
                 if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
-                    iptables -A "$CHAIN" -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT" || true
+                    insert_rule_before_return -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT"
+                    echo "[OK] Added metadata block rule: $endpoint"
                 fi
             done
 
-            # Block private ranges
+            # Block private ranges (insert before RETURN)
             for range in $PRIVATE_RANGES; do
                 if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
-                    iptables -A "$CHAIN" -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT" || true
+                    insert_rule_before_return -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT"
+                    echo "[OK] Added private range block rule: $range"
                 fi
             done
 
             echo "[OK] Network security rules applied"
-        ' 2>/dev/null; then
-            _cai_warn "Network security rules failed in Lima VM - check output above"
-            _cai_warn "  You can apply rules manually later via: limactl shell $_CAI_LIMA_VM_NAME"
+        ' && lima_rc=0 || lima_rc=$?
+        if [[ $lima_rc -ne 0 ]]; then
+            _cai_warn "Network security rules failed in Lima VM (exit code: $lima_rc)"
+            _cai_warn "  You can apply rules manually via: limactl shell $_CAI_LIMA_VM_NAME"
         fi
     fi
 
@@ -4006,11 +4040,12 @@ _cai_spacing
     fi
 
     # Step 12: Apply network security rules (non-fatal on failure)
+    # Note: iptables requires root; _cai_iptables uses sudo when needed
     _cai_spacing
     _cai_step "Applying network security rules"
     if ! _cai_apply_network_rules "$dry_run"; then
         _cai_warn "Network security rules failed to apply - check output above"
-        _cai_warn "  You can apply rules manually later with: sudo cai network apply"
+        _cai_warn "  Re-run setup to retry, or apply manually after starting Docker"
     fi
 
 _cai_spacing
@@ -4421,6 +4456,7 @@ _cai_setup_nested() {
         _cai_dryrun " Would verify Docker daemon via default context"
         _cai_dryrun " Would verify DockerRootDir is /var/lib/docker"
         _cai_dryrun " Would verify default runtime is sysbox-runc"
+        _cai_dryrun " Would apply network security rules (or skip in Sysbox)"
         return 0
     fi
 

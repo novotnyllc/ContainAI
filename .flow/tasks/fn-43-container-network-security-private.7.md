@@ -24,15 +24,14 @@ The network.sh module already handles:
 - [x] shellcheck passes
 
 ## Done summary
-Integrated network security rules with `cai setup` for all platforms:
-- Linux: Calls `_cai_apply_network_rules()` as step 12 after Docker is verified
-- WSL2: Calls `_cai_apply_network_rules()` as step 14 after Docker is verified
-- macOS/Lima: Runs inline script via `limactl shell` to apply rules inside the VM
-- Nested containers: Calls `_cai_apply_network_rules()` which gracefully skips for Sysbox containers (outer provides isolation)
+Integrated network security rules with cai setup for all platforms:
+- Linux: Calls _cai_apply_network_rules() after Docker is verified (step 12)
+- WSL2: Calls _cai_apply_network_rules() after Docker is verified (step 14)
+- macOS/Lima: Runs inline script via limactl shell to apply rules in VM (step 8)
+- Nested containers: Calls _cai_apply_network_rules() which skips gracefully for Sysbox containers
 
-All integrations are non-fatal (warnings only) to avoid blocking setup if rules fail to apply. Dry-run mode is fully supported.
-
+All integrations are non-fatal warnings and support dry-run mode.
 ## Evidence
-- Commits: (pending)
+- Commits: 3946d9d41784325b63a5aab60a32ac5d4ba55520
 - Tests: shellcheck -x src/lib/setup.sh, bash -n src/lib/setup.sh
 - PRs:
