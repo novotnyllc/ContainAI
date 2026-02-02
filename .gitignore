@@ -34,6 +34,8 @@ x86/
 [Aa][Rr][Mm]64/
 bld/
 [Bb]in/
+# But allow src/bin/.gitkeep for ACP proxy directory structure
+!src/bin/.gitkeep
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/
@@ -490,10 +492,8 @@ $RECYCLE.BIN/
 !.flow/bin/
 .flow/tmp/
 
-# ACP proxy native binaries (built from src/acp-proxy/)
-# Directory structure preserved via .gitkeep (which must be negated below)
+# ACP proxy native binary (built from src/acp-proxy/)
 src/bin/acp-proxy
-!src/bin/.gitkeep
 
 # Docker buildx local state (machine-specific)
 .docker/buildx/
