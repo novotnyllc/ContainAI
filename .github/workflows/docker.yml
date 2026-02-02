@@ -250,6 +250,16 @@ jobs:
         with:
           fetch-depth: 0  # CRITICAL for NBGV
 
+      - name: Set up .NET for NBGV
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install and run NBGV
+        run: |
+          dotnet tool restore
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -282,16 +292,6 @@ jobs:
           # Set IMAGE_NAME to use the built image
           export IMAGE_NAME="containai:latest"
           ./tests/integration/test-sync-integration.sh
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Restore and install tools
-        run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
       - name: Run .NET unit tests (if test projects exist)
         run: |
