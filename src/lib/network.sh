@@ -900,7 +900,8 @@ _cai_network_doctor_status() {
         else
             _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
         fi
-        _CAI_NETWORK_DOCTOR_STATUS="missing"
+        # Bridge missing is distinct from rules missing - can't apply rules yet
+        _CAI_NETWORK_DOCTOR_STATUS="bridge_missing"
         return 0
     fi
 
@@ -915,8 +916,9 @@ _cai_network_doctor_status() {
                 _CAI_NETWORK_DOCTOR_STATUS="partial"
                 ;;
             none | no_chain)
+                # Bridge exists but rules are missing - this is a real problem
                 _CAI_NETWORK_DOCTOR_DETAIL="No rules on $bridge_name${env_label} (run cai setup)"
-                _CAI_NETWORK_DOCTOR_STATUS="missing"
+                _CAI_NETWORK_DOCTOR_STATUS="rules_missing"
                 ;;
             *)
                 _CAI_NETWORK_DOCTOR_DETAIL="Unknown status on $bridge_name${env_label}"

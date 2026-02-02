@@ -967,10 +967,16 @@ _cai_doctor() {
                     printf '  %-44s %s\n' "iptables rules:" "[SKIP]"
                     printf '  %-44s %s\n' "" "$network_detail"
                     ;;
-                missing)
-                    # Missing bridge or rules - warn but don't fail exit code
-                    # User may not have run setup yet, or containai-docker isn't running
-                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Not configured"
+                bridge_missing)
+                    # Bridge not present - can't apply rules yet, warn but don't fail
+                    # containai-docker service may not be running
+                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Bridge not present"
+                    printf '  %-44s %s\n' "" "$network_detail"
+                    ;;
+                rules_missing)
+                    # Bridge exists but rules missing - this is a real problem
+                    network_security_ok="false"
+                    printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
                     printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 partial)
@@ -979,9 +985,9 @@ _cai_doctor() {
                     printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 error)
-                    # Error status - treat as warning, not failure for exit code
-                    # (unprivileged users can't check iptables)
-                    printf '  %-44s %s\n' "iptables rules:" "[WARN]"
+                    # Error status (e.g., iptables not installed) - fail the check
+                    network_security_ok="false"
+                    printf '  %-44s %s\n' "iptables rules:" "[ERROR]"
                     printf '  %-44s %s\n' "" "$network_detail"
                     ;;
             esac
@@ -1186,9 +1192,14 @@ _cai_doctor() {
                 skipped)
                     printf '  %-44s %s\n' "Network Security:" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
                     ;;
-                missing | error)
-                    # Warn but don't require action for exit code
-                    printf '  %-44s %s\n' "Network Security:" "[WARN] Not configured"
+                bridge_missing)
+                    # Bridge not present - warn but don't fail (service may not be running)
+                    printf '  %-44s %s\n' "Network Security:" "[WARN] Bridge not present"
+                    printf '  %-44s %s\n' "Recommended:" "Start containai-docker service"
+                    ;;
+                rules_missing | error)
+                    # Rules missing or error - this is a real problem
+                    printf '  %-44s %s\n' "Network Security:" "[ERROR] Not configured"
                     printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
                     ;;
                 partial)
@@ -1556,36 +1567,26 @@ _cai_doctor_fix() {
                         printf '  %-50s %s\n' "iptables rules" "[SKIP] $network_detail"
                         ((skip_count++))
                         ;;
-                    missing)
-                        # Bridge may not exist yet - check and handle gracefully
-                        printf '  %-50s' "Applying iptables rules"
-                        if _cai_apply_network_rules "false" >/dev/null 2>&1; then
-                            # Re-check status to verify rules were actually applied
-                            _cai_network_doctor_status
-                            if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
-                                printf '%s\n' "[FIXED]"
-                                ((fixed_count++))
-                            elif [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "missing" ]]; then
-                                # Bridge doesn't exist - rules will apply when bridge is created
-                                printf '%s\n' "[SKIP] bridge not present yet"
-                                ((skip_count++))
-                            else
-                                printf '%s\n' "[WARN] rules applied but status: ${_CAI_NETWORK_DOCTOR_STATUS:-unknown}"
-                                ((skip_count++))
-                            fi
-                        else
-                            printf '%s\n' "[FAIL]"
-                            ((fail_count++))
-                        fi
+                    bridge_missing)
+                        # Bridge not present - can't apply rules yet
+                        printf '  %-50s %s\n' "iptables rules" "[SKIP] bridge not present yet"
+                        ((skip_count++))
                         ;;
-                    partial | error)
+                    rules_missing | partial | error)
+                        # Rules missing on existing bridge, or partial/error - try to fix
                         printf '  %-50s' "Applying iptables rules"
                         if _cai_apply_network_rules "false" >/dev/null 2>&1; then
                             # Re-check status to verify rules were actually applied
                             _cai_network_doctor_status
+                            # Refresh network_detail after re-check
+                            network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
                             if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
                                 printf '%s\n' "[FIXED]"
                                 ((fixed_count++))
+                            elif [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "bridge_missing" ]]; then
+                                # Bridge disappeared - skip
+                                printf '%s\n' "[SKIP] bridge not present"
+                                ((skip_count++))
                             else
                                 printf '%s\n' "[WARN] $network_detail"
                                 ((skip_count++))
@@ -2840,13 +2841,12 @@ _cai_doctor_json() {
             network_status_json="${_CAI_NETWORK_DOCTOR_STATUS:-}"
             network_detail_json="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
             case "$network_status_json" in
-                ok | skipped | missing | error)
-                    # ok/skipped are fine; missing/error are warnings (not failures)
-                    # to keep doctor non-privileged-friendly
+                ok | skipped | bridge_missing)
+                    # ok/skipped are fine; bridge_missing is a warning (service not running)
                     network_security_ok_json="true"
                     ;;
-                partial)
-                    # Partial rules is a real problem that needs fixing
+                rules_missing | partial | error)
+                    # Rules missing on existing bridge, partial rules, or error - real problems
                     network_security_ok_json="false"
                     ;;
                 *)
