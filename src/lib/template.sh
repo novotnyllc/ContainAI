@@ -917,6 +917,7 @@ _cai_template_needs_upgrade() {
 # Rewrite a FROM line to use ${BASE_IMAGE}
 # Args: from_line
 # Outputs: Rewritten FROM line
+# Note: Handles flags like --platform=value or --platform value
 _cai_rewrite_from_line() {
     local line="$1"
     local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
@@ -924,14 +925,27 @@ _cai_rewrite_from_line() {
 
     local new_from="FROM"
     local token found_image="false" as_clause=""
+    local expect_flag_value="false"
 
     while [[ -n "$from_tokens" ]]; do
         token="${from_tokens%%[[:space:]]*}"
         from_tokens="${from_tokens#"$token"}"
         from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
 
+        # Handle flags that take a following argument (e.g., --platform linux/amd64)
+        if [[ "$expect_flag_value" == "true" ]]; then
+            new_from+=" $token"
+            expect_flag_value="false"
+            continue
+        fi
+
         if [[ "$token" == --* ]]; then
             new_from+=" $token"
+            # Check if this is a flag that takes a separate value (no = sign)
+            # Known flags: --platform
+            if [[ "$token" == "--platform" ]]; then
+                expect_flag_value="true"
+            fi
             continue
         fi
         if [[ "$found_image" == "false" ]]; then

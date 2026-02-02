@@ -72,6 +72,18 @@ success() { printf '%b[OK]%b %s\n' "$GREEN" "$NC" "$1"; }
 warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$1" >&2; }
 error() { printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$1" >&2; }
 
+# Get latest release tag (v*) using semver ordering
+# Prefers sort -V when available; falls back to git's version sort
+get_latest_release_tag() {
+    local latest_tag=""
+    if sort -V </dev/null >/dev/null 2>&1; then
+        latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
+    else
+        latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
+    fi
+    printf '%s' "$latest_tag"
+}
+
 # Configuration with defaults
 REPO_URL="https://github.com/novotnyllc/containai.git"
 INSTALL_DIR="${CAI_INSTALL_DIR:-$HOME/.local/share/containai}"
@@ -566,9 +578,8 @@ install_containai() {
                     ;;
                 stable)
                     # Stable: checkout latest semver tag
-                    # Use git's built-in version sorting (works on macOS which lacks sort -V)
                     local latest_tag
-                    latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
+                    latest_tag=$(get_latest_release_tag)
                     if [[ -n "$latest_tag" ]]; then
                         git checkout "$latest_tag"
                     else
@@ -608,10 +619,9 @@ install_containai() {
                     ;;
                 stable)
                     # Stable: fetch tags and checkout latest
-                    # Use git's built-in version sorting (works on macOS which lacks sort -V)
                     git fetch --tags origin
                     local latest_tag
-                    latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
+                    latest_tag=$(get_latest_release_tag)
                     if [[ -n "$latest_tag" ]]; then
                         git checkout "$latest_tag"
                     else

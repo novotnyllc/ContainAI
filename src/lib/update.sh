@@ -1930,7 +1930,8 @@ _cai_update() {
     local config_file
     config_file=$(_containai_find_config "$PWD" 2>/dev/null) || config_file=""
     if [[ -n "$config_file" ]]; then
-        _containai_parse_config "$config_file" "$PWD" "" 2>/dev/null || true
+        # Don't suppress stderr - config parse warnings are important for channel selection
+        _containai_parse_config "$config_file" "$PWD" "" || true
     else
         # Clear channel from any previous parse to avoid stale values
         _CAI_IMAGE_CHANNEL=""

@@ -226,18 +226,41 @@ _cai_resolve_update_mode() {
     return 0
 }
 
-# Check if current HEAD has local commits ahead of or diverged from remote
-# Arguments: $1 = install_dir, $2 = remote_ref (e.g., "origin/main")
+# Get latest release tag (v*) using semver ordering
+# Arguments: $1 = install_dir
+# Outputs: latest tag or empty string
+# Note: Prefers sort -V when available; falls back to git's version sort
+_cai_latest_release_tag() {
+    local install_dir="${1:-}"
+    local latest_tag=""
+
+    if [[ -z "$install_dir" ]]; then
+        return 1
+    fi
+
+    if sort -V </dev/null >/dev/null 2>&1; then
+        latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' | sort -V | tail -1)
+    else
+        latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' --sort=v:refname | tail -1)
+    fi
+
+    printf '%s' "$latest_tag"
+    return 0
+}
+
+# Check if local ref has commits ahead of or diverged from remote
+# Arguments: $1 = install_dir, $2 = remote_ref (e.g., "origin/main"), $3 = local_ref (optional, default HEAD)
 # Returns: 0 if safe to update (not ahead/diverged), 1 if local commits would be lost
 # Outputs: warning message to stderr if returning 1
 _cai_check_local_commits() {
     local install_dir="$1"
     local remote_ref="$2"
+    local local_ref="${3:-HEAD}"
 
     # Get counts of commits ahead/behind
     local counts
-    counts=$(cd -- "$install_dir" && git rev-list --left-right --count "HEAD...$remote_ref" 2>/dev/null) || {
-        # If rev-list fails (detached HEAD not on branch), it's safe to proceed
+    counts=$(cd -- "$install_dir" && git rev-list --left-right --count "${local_ref}...$remote_ref" 2>/dev/null) || {
+        # If rev-list fails (local ref missing), it's safe to proceed
         return 0
     }
 
@@ -249,7 +272,7 @@ _cai_check_local_commits() {
         _cai_warn "Local installation has $ahead commit(s) not in remote"
         _cai_warn "Updating would discard these local changes"
         _cai_warn ""
-        _cai_warn "To see local commits: cd $install_dir && git log --oneline $remote_ref..HEAD"
+        _cai_warn "To see local commits: cd $install_dir && git log --oneline $remote_ref..$local_ref"
         _cai_warn "To force update anyway: git -C $install_dir checkout -B <branch> $remote_ref"
         return 1
     fi
@@ -381,7 +404,7 @@ _cai_update_code() {
             fi
 
             # Check for local commits that would be lost
-            if ! _cai_check_local_commits "$install_dir" "origin/$update_branch"; then
+            if ! _cai_check_local_commits "$install_dir" "origin/$update_branch" "refs/heads/$update_branch"; then
                 _cai_error "Refusing to update: local commits would be lost"
                 return 1
             fi
@@ -419,7 +442,7 @@ _cai_update_code() {
             fi
 
             # Check for local commits that would be lost
-            if ! _cai_check_local_commits "$install_dir" "origin/main"; then
+            if ! _cai_check_local_commits "$install_dir" "origin/main" "refs/heads/main"; then
                 _cai_error "Refusing to update: local commits would be lost"
                 return 1
             fi
@@ -435,21 +458,40 @@ _cai_update_code() {
 
         stable)
             # Stable channel - checkout latest semver tag
-            # Use git's built-in version sorting (works on macOS which lacks sort -V)
             local latest_tag
-            latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' --sort=v:refname | tail -1)
+            latest_tag=$(_cai_latest_release_tag "$install_dir")
 
             if [[ -z "$latest_tag" ]]; then
-                # Gracefully handle no tags - warn and switch to main (per spec)
-                _cai_warn "No release tags found, switching to main branch"
+                # No tags available - warn user
+                _cai_warn "No release tags found"
                 _cai_info "Consider using nightly channel: CAI_CHANNEL=nightly cai update"
-                if (cd -- "$install_dir" && git checkout -B main origin/main 2>/dev/null); then
-                    _cai_ok "Switched to main (no tags available)"
+
+                if [[ "$check_only" == "true" ]]; then
+                    _cai_info "No stable releases available to update to"
                     return 0
-                else
-                    _cai_error "Failed to switch to main branch"
+                fi
+
+                # Check for local commits before switching to main
+                if ! _cai_check_local_commits "$install_dir" "origin/main" "HEAD"; then
+                    _cai_error "Refusing to switch to main: local commits would be lost"
                     return 1
                 fi
+
+                # Use checkout + pull --ff-only instead of checkout -B to avoid discarding commits
+                _cai_info "Switching to main branch (no tags available)..."
+                if ! (cd -- "$install_dir" && git checkout main 2>/dev/null); then
+                    # main branch might not exist locally yet
+                    if ! (cd -- "$install_dir" && git checkout -b main origin/main 2>/dev/null); then
+                        _cai_error "Failed to switch to main branch"
+                        return 1
+                    fi
+                fi
+                # Pull with --ff-only to avoid creating merge commits or losing history
+                if ! (cd -- "$install_dir" && git pull --ff-only origin main 2>/dev/null); then
+                    _cai_warn "Could not fast-forward main; you may need to resolve manually"
+                fi
+                _cai_ok "Switched to main (no tags available)"
+                return 0
             fi
 
             # Check if already on latest tag
@@ -488,7 +530,7 @@ _cai_update_code() {
     # Show what changed (before -> after for all modes)
     case "$_CAI_UPDATE_MODE" in
         branch)
-            _cai_ok "Updated branch $CAI_BRANCH: $before_ref -> $after_ref"
+            _cai_ok "Updated branch $_CAI_UPDATE_TARGET: $before_ref -> $after_ref"
             ;;
         nightly)
             _cai_ok "Updated nightly: $before_ref -> $after_ref (version: $new_version)"

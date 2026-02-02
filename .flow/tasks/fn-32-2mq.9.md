@@ -133,6 +133,41 @@ Features:
 - Proper precedence chain: CAI_BRANCH > CAI_CHANNEL env > config > stable default
 - Invalid channel values fall back to stable with warning
 - Shows before/after version or commit changes
+- Network failure handling with clear error messages
+
+Implementation files:
+- `install.sh:79-92` - channel/branch detection and validation
+- `install.sh:509-654` - checkout logic with precedence
+- `src/lib/version.sh:173-227` - `_cai_resolve_update_mode()` for update precedence
+- `src/lib/version.sh:237-460` - `_cai_update_code()` with channel-aware updates
+- `src/lib/config.sh:937-986` - `_cai_config_channel()` for config system integration
+
+All acceptance criteria verified:
+- install.sh reads both CAI_BRANCH and CAI_CHANNEL
+- CAI_BRANCH takes precedence (branch wins)
+- Channel logic for stable/nightly
+- Install messaging shows channel/branch
+- cai update reads channel from config system
+- Tag selection uses sort -V with fallback
+- Handles no tags gracefully
+- Network failure exits with error
+- Warns on dirty working tree
+- Shows what changed (before/after)
+- Backward compatible with CAI_BRANCH usage
+## Summary
+
+Added channel-aware code distribution to install.sh and cai update:
+
+- **CAI_BRANCH** takes precedence for explicit branch override (power users)
+- **CAI_CHANNEL=nightly** tracks main branch
+- **CAI_CHANNEL=stable** (default) checks out latest v* tag using `sort -V`
+
+Features:
+- Graceful handling when no tags exist (warns and stays on main)
+- Dirty tree warnings before checkout
+- Proper precedence chain: CAI_BRANCH > CAI_CHANNEL env > config > stable default
+- Invalid channel values fall back to stable with warning
+- Shows before/after version or commit changes
 
 Implementation files:
 - `install.sh:79-92` - channel/branch detection and validation
@@ -141,6 +176,6 @@ Implementation files:
 - `src/lib/version.sh:237-460` - `_cai_update_code()` with channel-aware updates
 - `src/lib/config.sh:937-986` - `_cai_config_channel()` for config system integration
 ## Evidence
-- Commits: c632b94 fix(version): invalid CAI_CHANNEL falls back to stable, not config, 66b436a fix(update): address review feedback for channel support, a0739cb fix(channel): fix stable mode no-tags behavior and docs consistency, d5a59ba fix(channel): address code review feedback, 4bdd92f feat(channel): add channel support to install.sh and cai update
-- Tests: Manual verification: install.sh reads CAI_BRANCH and CAI_CHANNEL, Manual verification: version.sh _cai_update_code() uses _cai_resolve_update_mode(), Manual verification: _cai_config_channel() provides channel from config system
+- Commits:
+- Tests:
 - PRs:
