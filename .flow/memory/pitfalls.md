@@ -346,3 +346,6 @@ When checking capability/permission, verify the tool exists first - iptables per
 
 ## 2026-02-02 manual [pitfall]
 When wrapping privileged commands with sudo, try direct first then sudo -n (non-interactive) - handles CAP_NET_ADMIN containers without sudo and hosts with passwordless sudo
+
+## 2026-02-02 manual [pitfall]
+When function sets global variables as side-effects, call directly instead of via $() command substitution which runs in subshell and loses the global variable changes

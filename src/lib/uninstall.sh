@@ -10,10 +10,12 @@
 #   _cai_uninstall_docker_context()   - Remove Docker context
 #   _cai_uninstall_containers()       - Remove containai containers
 #   _cai_uninstall_volumes()          - Remove container volumes
+#   _cai_uninstall_network_rules()    - Remove network security iptables rules
 #
 # What gets removed (system-level installation):
 #   - containai-docker.service - systemd unit file
 #   - Docker context: containai-docker, containai-secure (legacy)
+#   - Network security iptables rules (DOCKER-USER chain)
 #   - With --containers: containers with containai.managed=true label
 #   - With --volumes: associated container volumes
 #
@@ -29,6 +31,7 @@
 #   - Requires lib/core.sh for logging functions
 #   - Requires lib/docker.sh for Docker availability checks
 #   - Requires lib/container.sh for container listing
+#   - Requires lib/network.sh for network rule removal
 #
 # Usage: source lib/uninstall.sh
 # ==============================================================================
@@ -432,6 +435,41 @@ _cai_uninstall_volumes_from_array() {
 }
 
 # ==============================================================================
+# Network Rules Removal
+# ==============================================================================
+
+# Remove network security iptables rules
+# Arguments: $1 = dry_run ("true" to simulate)
+# Returns: 0=success or nothing to do, 1=failure
+# Note: Calls _cai_remove_network_rules from network.sh
+#       Handles cases where iptables is unavailable or permissions denied
+_cai_uninstall_network_rules() {
+    local dry_run="${1:-false}"
+
+    # Check if the remove function exists (network.sh loaded)
+    if ! command -v _cai_remove_network_rules >/dev/null 2>&1; then
+        _cai_debug "Network rules function not available - skipping"
+        return 0
+    fi
+
+    _cai_step "Removing network security rules"
+
+    # _cai_remove_network_rules handles all the complexity:
+    # - Nested container detection
+    # - Sysbox skip
+    # - iptables availability check
+    # - Permission checks
+    # - Dry-run support
+    if ! _cai_remove_network_rules "$dry_run"; then
+        # Non-fatal - log and continue
+        _cai_warn "Failed to remove network security rules (continuing uninstall)"
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # Main Uninstall Function
 # ==============================================================================
 
@@ -501,6 +539,7 @@ _cai_uninstall() {
     $_emit "The following will be REMOVED:"
     $_emit "  - containai-docker.service (systemd unit)"
     $_emit "  - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)"
+    $_emit "  - Network security iptables rules (if present)"
     if [[ "$remove_containers" == "true" ]]; then
         $_emit "  - All ContainAI containers (--containers)"
         if [[ "$remove_volumes" == "true" ]]; then
@@ -563,12 +602,17 @@ _cai_uninstall() {
         fi
     fi
 
-    # Step 2: Remove Docker context
+    # Step 2: Remove network security rules
+    # Do this while Docker is still running (bridge exists)
+    # Non-fatal: if rules don't exist or can't be removed, continue
+    _cai_uninstall_network_rules "$dry_run" || true
+
+    # Step 3: Remove Docker context
     if ! _cai_uninstall_docker_context "$dry_run"; then
         overall_status=1
     fi
 
-    # Step 3: Remove systemd service
+    # Step 4: Remove systemd service
     if ! _cai_uninstall_systemd_service "$dry_run"; then
         overall_status=1
     fi
@@ -610,6 +654,7 @@ Options:
 What Gets Removed:
   - containai-docker.service (systemd unit)
   - Docker contexts: containai-docker, containai-secure, docker-containai (legacy)
+  - Network security iptables rules (DOCKER-USER chain)
 
 What Gets Removed with --containers:
   - All containers with containai.managed=true label

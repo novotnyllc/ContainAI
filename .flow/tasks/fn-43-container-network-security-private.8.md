@@ -7,9 +7,8 @@ TBD
 - [ ] TBD
 
 ## Done summary
-TBD
-
+Added network security verification to cai doctor, including text output, JSON output, and fix capability via doctor fix command.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 759ed3b112d9a44e956dc744fa16546efa01a4ed
+- Tests: shellcheck -x src/lib/doctor.sh, shellcheck -x src/lib/network.sh, cai doctor, cai doctor --json, cai doctor fix --all
 - PRs:
