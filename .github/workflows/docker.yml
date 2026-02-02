@@ -405,6 +405,14 @@ jobs:
             echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
           fi
 
+      # Fail if tarball was downloaded but install failed - this is a regression
+      - name: Verify install success
+        if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
+        run: |
+          echo "::error::Tarball artifact was downloaded but install.sh --local --yes failed"
+          echo "This indicates a regression in the install path."
+          exit 1
+
       - name: Check kernel version
         id: kernel
         run: |
@@ -718,6 +726,14 @@ jobs:
           else
             echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
           fi
+
+      # Fail if tarball was downloaded but install failed - this is a regression
+      - name: Verify install success
+        if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
+        run: |
+          echo "::error::Tarball artifact was downloaded but install.sh --local --yes failed"
+          echo "This indicates a regression in the install path."
+          exit 1
 
       - name: Verify sysbox is pre-installed
         id: verify
