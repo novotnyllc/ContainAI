@@ -2863,8 +2863,12 @@ _cai_doctor_json() {
                 # ok/skipped are fine; bridge_missing is a warning (service not running)
                 network_security_ok_json="true"
                 ;;
-            rules_missing | partial | error)
-                # Rules missing on existing bridge, partial rules, or error - real problems
+            rules_missing)
+                # Rules missing - warning only (can be added with 'cai setup')
+                network_security_ok_json="true"
+                ;;
+            partial | error)
+                # Partial rules or error - real problems
                 network_security_ok_json="false"
                 ;;
             *)
