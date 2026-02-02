@@ -1,10 +1,10 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # ==============================================================================
 # Mock ACP Server for testing - NDJSON protocol
 # ==============================================================================
 # Minimal ACP-compatible server that:
 # - Responds to initialize with protocol version
-# - Creates sessions with sequential IDs
+# - Creates sessions with sequential IDs (echoes received cwd for validation)
 # - Echoes prompts back as session/update notifications
 # - Supports session/end
 #
@@ -20,6 +20,11 @@ session_counter=0
 # Log to stderr only (stdout is for protocol)
 log() {
     printf '[mock-acp-server] %s\n' "$*" >&2
+}
+
+# JSON-escape a string (handles quotes, backslashes, newlines, etc.)
+json_escape() {
+    printf '%s' "$1" | jq -Rs .
 }
 
 # Write NDJSON response to stdout
@@ -40,51 +45,65 @@ while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
     # Parse JSON using jq
-    local_method=$(printf '%s' "$line" | jq -r '.method // empty')
-    local_id=$(printf '%s' "$line" | jq -r '.id // empty')
+    method=$(printf '%s' "$line" | jq -r '.method // empty')
+    msg_id=$(printf '%s' "$line" | jq -r '.id // empty')
 
-    log "Received: method=$local_method id=$local_id"
+    log "Received: method=$method id=$msg_id"
 
     # Check for forced error
-    if [[ "${MOCK_ACP_ERROR:-}" == "$local_method" ]]; then
-        log "Forcing error for method: $local_method"
-        respond "{\"jsonrpc\":\"2.0\",\"id\":\"$local_id\",\"error\":{\"code\":-32000,\"message\":\"Forced error for testing\"}}"
+    if [[ "${MOCK_ACP_ERROR:-}" == "$method" ]]; then
+        log "Forcing error for method: $method"
+        respond "{\"jsonrpc\":\"2.0\",\"id\":\"$msg_id\",\"error\":{\"code\":-32000,\"message\":\"Forced error for testing\"}}"
         continue
     fi
 
     maybe_delay
 
-    case "$local_method" in
+    case "$method" in
         initialize)
-            local_version=$(printf '%s' "$line" | jq -r '.params.protocolVersion // "2025-01-01"')
-            respond "{\"jsonrpc\":\"2.0\",\"id\":\"$local_id\",\"result\":{\"protocolVersion\":\"$local_version\",\"capabilities\":{},\"serverInfo\":{\"name\":\"mock-acp-server\",\"version\":\"0.1.0\"}}}"
+            version=$(printf '%s' "$line" | jq -r '.params.protocolVersion // "2025-01-01"')
+            respond "{\"jsonrpc\":\"2.0\",\"id\":\"$msg_id\",\"result\":{\"protocolVersion\":\"$version\",\"capabilities\":{},\"serverInfo\":{\"name\":\"mock-acp-server\",\"version\":\"0.1.0\"}}}"
             ;;
         session/new)
             ((session_counter++)) || true
-            local_cwd=$(printf '%s' "$line" | jq -r '.params.cwd // empty')
-            local_session_id="mock-session-$session_counter"
-            log "Creating session: $local_session_id (cwd=$local_cwd)"
-            respond "{\"jsonrpc\":\"2.0\",\"id\":\"$local_id\",\"result\":{\"sessionId\":\"$local_session_id\"}}"
+            # Extract received params for validation (cwd, mcpServers)
+            received_cwd=$(printf '%s' "$line" | jq -r '.params.cwd // empty')
+            received_mcp=$(printf '%s' "$line" | jq -c '.params.mcpServers // null')
+            session_id="mock-session-$session_counter"
+            log "Creating session: $session_id (cwd=$received_cwd)"
+            # Echo back the received cwd and mcpServers in the response for test validation
+            # Use jq to build a valid JSON response
+            response=$(jq -nc \
+                --arg id "$msg_id" \
+                --arg sid "$session_id" \
+                --arg cwd "$received_cwd" \
+                --argjson mcp "$received_mcp" \
+                '{jsonrpc:"2.0",id:$id,result:{sessionId:$sid,receivedCwd:$cwd,receivedMcpServers:$mcp}}')
+            respond "$response"
             ;;
         session/prompt)
-            local_session_id=$(printf '%s' "$line" | jq -r '.params.sessionId // empty')
-            local_message=$(printf '%s' "$line" | jq -r '.params.message // empty')
-            log "Prompt for session $local_session_id: $local_message"
-            # Send session/update notification (no id)
-            respond "{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":{\"sessionId\":\"$local_session_id\",\"message\":\"Echo: $local_message\"}}"
+            session_id=$(printf '%s' "$line" | jq -r '.params.sessionId // empty')
+            message=$(printf '%s' "$line" | jq -r '.params.message // empty')
+            log "Prompt for session $session_id: $message"
+            # Use jq to properly escape message in output
+            notification=$(jq -nc \
+                --arg sid "$session_id" \
+                --arg msg "Echo: $message" \
+                '{jsonrpc:"2.0",method:"session/update",params:{sessionId:$sid,message:$msg}}')
+            respond "$notification"
             ;;
         session/end)
-            local_session_id=$(printf '%s' "$line" | jq -r '.params.sessionId // empty')
-            log "Ending session: $local_session_id"
+            session_id=$(printf '%s' "$line" | jq -r '.params.sessionId // empty')
+            log "Ending session: $session_id"
             # session/end may or may not have an id (can be notification)
-            if [[ -n "$local_id" ]]; then
-                respond "{\"jsonrpc\":\"2.0\",\"id\":\"$local_id\",\"result\":{}}"
+            if [[ -n "$msg_id" ]]; then
+                respond "{\"jsonrpc\":\"2.0\",\"id\":\"$msg_id\",\"result\":{}}"
             fi
             ;;
         *)
-            log "Unknown method: $local_method"
-            if [[ -n "$local_id" ]]; then
-                respond "{\"jsonrpc\":\"2.0\",\"id\":\"$local_id\",\"error\":{\"code\":-32601,\"message\":\"Method not found: $local_method\"}}"
+            log "Unknown method: $method"
+            if [[ -n "$msg_id" ]]; then
+                respond "{\"jsonrpc\":\"2.0\",\"id\":\"$msg_id\",\"error\":{\"code\":-32601,\"message\":\"Method not found: $method\"}}"
             fi
             ;;
     esac
