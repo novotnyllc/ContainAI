@@ -302,8 +302,13 @@ IMAGE_MAIN="${IMAGE_PREFIX}"
 
 if [[ "$USE_BUILDX" -eq 1 ]]; then
     HAS_OUTPUT=0
+    HAS_REGISTRY_OUTPUT=0
     if [[ " ${DOCKER_ARGS[*]-} " =~ [[:space:]]--output([[:space:]]|=) ]]; then
         HAS_OUTPUT=1
+        # Check if output type is registry (supports --output=type=registry and --output type=registry)
+        if [[ " ${DOCKER_ARGS[*]-} " =~ type=registry ]]; then
+            HAS_REGISTRY_OUTPUT=1
+        fi
     fi
 
     if ! command -v docker >/dev/null 2>&1; then
@@ -515,12 +520,11 @@ case "$BUILD_LAYER" in
         build_layer "base" "Dockerfile.base"
 
         # sdks layer: pass BASE_IMAGE build-arg
-        # When using --push, images go to registry and are available for subsequent
-        # builds via the registry. For local builds (--load or default), check if
-        # local image exists. Note: --output with non-registry types (local, tar)
-        # doesn't make images available for chaining, so we don't treat it specially.
+        # When using --push or --output=type=registry, images go to registry and are
+        # available for subsequent builds. For local builds (--load or default), check
+        # if local image exists. Non-registry outputs (local, tar) can't be chained.
         all_sdks_args=(--build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL")
-        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_REGISTRY_OUTPUT" -eq 1 ]]; then
             printf '[INFO] Using pushed base image: %s\n' "${IMAGE_BASE}:latest"
             all_sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
         elif local_image_exists "${IMAGE_BASE}:latest"; then
@@ -533,7 +537,7 @@ case "$BUILD_LAYER" in
 
         # agents layer: pass SDKS_IMAGE build-arg
         all_agents_args=()
-        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_REGISTRY_OUTPUT" -eq 1 ]]; then
             printf '[INFO] Using pushed sdks image: %s\n' "${IMAGE_SDKS}:latest"
             all_agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
         elif local_image_exists "${IMAGE_SDKS}:latest"; then
@@ -565,7 +569,7 @@ case "$BUILD_LAYER" in
         fi
         # Pass AGENTS_IMAGE build-arg for final image
         final_args=()
-        if [[ "$BUILDX_PUSH" -eq 1 ]]; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_REGISTRY_OUTPUT" -eq 1 ]]; then
             printf '[INFO] Using pushed agents image: %s\n' "${IMAGE_AGENTS}:latest"
             final_args+=(--build-arg AGENTS_IMAGE="${IMAGE_AGENTS}:latest")
         elif local_image_exists "${IMAGE_AGENTS}:latest"; then
