@@ -17,7 +17,7 @@
   "plan_review_status": "ship",
   "plan_reviewed_at": "2026-02-02T05:52:13.185839Z",
   "spec_path": ".flow/specs/fn-32-2mq.md",
-  "status": "open",
+  "status": "done",
   "title": "Release Pipeline & Image Management",
-  "updated_at": "2026-02-02T05:52:13.185860Z"
+  "updated_at": "2026-02-02T10:52:12.239548Z"
 }

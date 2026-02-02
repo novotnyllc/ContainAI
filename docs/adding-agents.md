@@ -13,6 +13,156 @@ Adding an agent involves six steps:
 5. **Generators** - Run generators and consistency check
 6. **Test** - Verify in container
 
+## Conventions
+
+This section documents the patterns and practices for agent configuration. Follow these conventions to ensure consistency with existing agents.
+
+### Flag Usage Guidelines
+
+Choose flags based on the entry's purpose:
+
+| Scenario | Flags | Rationale |
+|----------|-------|-----------|
+| JSON config file | `fj` | Creates `{}` if file doesn't exist |
+| JSON config with API keys | `fjs` | Adds secret permissions (600) |
+| Plain config file | `f` | No special initialization |
+| Credential file (OAuth, API key) | `fs` | Secret flag for restrictive permissions |
+| Config directory | `d` | Basic directory sync |
+| Skills/plugins directory | `dR` | `R` removes stale content before linking |
+| Skills with `.system/` subdir | `dxR` | `x` excludes agent-managed `.system/` |
+| Non-primary agent entry | add `o` | Skips sync if host path doesn't exist |
+
+### Path Pattern Conventions
+
+The three path fields serve distinct purposes:
+
+```toml
+[[entries]]
+source = ".agent/config.json"         # 1. Host path (relative to $HOME)
+target = "agent/config.json"          # 2. Volume path (relative to /mnt/agent-data)
+container_link = ".agent/config.json" # 3. Container symlink (relative to ~)
+```
+
+**Guidelines:**
+
+- **source**: Always includes the leading dot (e.g., `.claude/settings.json`)
+- **target**: Drops the leading dot for visibility in volume (e.g., `claude/settings.json`)
+- **container_link**: Matches `source` exactly in most cases (the symlink recreates the expected path)
+
+**Exceptions:**
+
+- **No symlink needed**: Set `container_link = ""` when the file is accessed via a parent directory symlink
+- **Renamed symlink**: Use a different name when the container should have a distinct file (e.g., `.bash_aliases_imported` vs `.bash_aliases`)
+
+### Optional Sync (`o` flag)
+
+Use the `o` flag to distinguish primary agents from optional ones:
+
+**Primary agents** (Claude, Codex, OpenCode):
+- Omit the `o` flag
+- Configs are always synced from host
+- Directories are pre-created in the container image
+- These are agents ContainAI explicitly supports
+
+**Optional agents** (Gemini, Pi, Copilot, Kimi, Aider, Continue, Cursor):
+- Include the `o` flag on all entries
+- Configs only sync if the user has them on the host
+- No empty directories created for unused agents
+- Prevents clutter for agents users haven't configured
+
+```toml
+# Primary agent - no 'o' flag
+[[entries]]
+source = ".claude/settings.json"
+target = "claude/settings.json"
+container_link = ".claude/settings.json"
+flags = "fj"
+
+# Optional agent - has 'o' flag
+[[entries]]
+source = ".gemini/settings.json"
+target = "gemini/settings.json"
+container_link = ".gemini/settings.json"
+flags = "fjo"  # 'o' makes this optional
+```
+
+### Credential Handling (`s` flag)
+
+The `s` flag marks files containing sensitive data:
+
+**When to use `s`:**
+- OAuth tokens (e.g., `.claude/.credentials.json`, `.codex/auth.json`)
+- API keys in config files (e.g., `.claude.json`, `.kimi/config.toml`)
+- Account files (e.g., `.gemini/google_accounts.json`, `.gemini/oauth_creds.json`)
+
+**What `s` does:**
+- Files get 600 permissions (owner read/write only)
+- Directories get 700 permissions
+- Entries are skipped with `cai import --no-secrets`
+
+**When NOT to use `s`:**
+- User preference files (settings, keybindings)
+- Skills and plugins directories
+- Public config like `.gitconfig` (even though it's filtered)
+
+```toml
+# Credential file - use 's'
+[[entries]]
+source = ".codex/auth.json"
+target = "codex/auth.json"
+container_link = ".codex/auth.json"
+flags = "fs"  # file + secret
+
+# Settings file - no 's' needed
+[[entries]]
+source = ".codex/config.toml"
+target = "codex/config.toml"
+container_link = ".codex/config.toml"
+flags = "f"  # file only
+```
+
+### _IMPORT_SYNC_MAP Alignment
+
+The manifest and import map must stay in sync. This is enforced by CI.
+
+**Workflow:**
+
+1. Add entries to `src/sync-manifest.toml`
+2. Add matching entries to `_IMPORT_SYNC_MAP` in `src/lib/import.sh`
+3. Run `./scripts/check-manifest-consistency.sh` to verify
+4. Fix any reported mismatches before committing
+
+**Entry format in _IMPORT_SYNC_MAP:**
+
+```bash
+"/source/.agent/config.json:/target/agent/config.json:fjs"
+#   ^source path              ^target path             ^flags
+```
+
+**What's excluded from comparison:**
+- Entries with `disabled = true` (opt-in via `additional_paths`)
+- Entries with `G` flag (glob patterns discovered at runtime)
+- `[[container_symlinks]]` section (container-only, not imported)
+- `.gitconfig` (handled by special `_cai_import_git_config()` function)
+
+**Flags not compared:**
+- `R` (remove existing) - only affects container link creation
+- `g` (git filter) - handled by special gitconfig logic
+
+### Directory Flags
+
+Special flags for directory entries:
+
+| Flag | Use Case | Example |
+|------|----------|---------|
+| `d` | Basic directory | `.config/opencode/agents` |
+| `dR` | Pre-populated directory | `.claude/skills` (may have defaults) |
+| `dxR` | Has `.system/` subdir | `.codex/skills` (agent manages `.system/`) |
+| `dm` | Mirror sync | When deletions should propagate |
+| `dp` | Privacy filter | `.bashrc.d` (excludes `*.priv.*` files) |
+
+The `R` flag is important for directories that may be pre-populated in the container image. Without it, the symlink creation can fail if the directory already exists.
+
 ## Step 1: Research the Agent
 
 Before adding a new agent, understand:

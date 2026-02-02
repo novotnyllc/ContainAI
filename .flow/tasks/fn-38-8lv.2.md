@@ -22,8 +22,16 @@ Key areas to document:
 - [ ] No BRE grep patterns used (use rg or grep -E per AGENTS.md)
 
 ## Done summary
-TBD
+Added comprehensive Conventions section to docs/adding-agents.md covering:
 
+1. **Flag Usage Guidelines** - Table mapping scenarios to recommended flags with rationale
+2. **Path Pattern Conventions** - Explains source/target/container_link field purposes
+3. **Optional Sync (o flag)** - When to use for primary vs optional agents
+4. **Credential Handling (s flag)** - When and how to mark files as secrets
+5. **_IMPORT_SYNC_MAP Alignment** - Workflow for keeping manifest and import map in sync
+6. **Directory Flags** - Special flags for directory entries (d, dR, dxR, dm, dp)
+
+Section placed after Overview for visibility before step-by-step instructions.
 ## Evidence
 - Commits:
 - Tests:
