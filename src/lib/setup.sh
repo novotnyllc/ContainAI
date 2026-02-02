@@ -2657,6 +2657,14 @@ _cai_setup_wsl2() {
         _cai_warn "Isolated Docker verification had issues - check output above"
     fi
 
+    # Step 14: Apply network security rules (non-fatal on failure)
+    _cai_spacing
+    _cai_step "Applying network security rules"
+    if ! _cai_apply_network_rules "$dry_run"; then
+        _cai_warn "Network security rules failed to apply - check output above"
+        _cai_warn "  You can apply rules manually later with: sudo cai network apply"
+    fi
+
 _cai_spacing
     _cai_ok "Secure Engine setup complete"
     _cai_info "To use the Secure Engine:"
@@ -3344,6 +3352,81 @@ _cai_spacing
         fi
     fi
 
+    # Step 8: Apply network security rules inside Lima VM (non-fatal on failure)
+    # Note: Lima VMs are already isolated, but we apply rules for defense-in-depth
+    # The bridge (docker0) may not exist until containers are started
+    _cai_spacing
+    _cai_step "Applying network security rules inside Lima VM"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun " Would apply network security rules inside Lima VM"
+        _cai_dryrun "   limactl shell $_CAI_LIMA_VM_NAME -- sudo /path/to/network-rules"
+    else
+        # Apply rules inside the Lima VM
+        # Note: The bridge may not exist yet (created when first container starts)
+        # We use inline script to apply the rules
+        if ! limactl shell "$_CAI_LIMA_VM_NAME" -- sudo bash -c '
+            # Network security rules for Lima VM (defense-in-depth)
+            # Cloud metadata endpoints to block
+            METADATA_ENDPOINTS="169.254.169.254 169.254.170.2 100.100.100.200"
+            # Private IP ranges to block
+            PRIVATE_RANGES="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
+            IPTABLES_COMMENT="containai-network-security"
+            CHAIN="DOCKER-USER"
+
+            # Check if iptables is available
+            if ! command -v iptables >/dev/null 2>&1; then
+                echo "[WARN] iptables not available in Lima VM"
+                exit 0
+            fi
+
+            # Check if DOCKER-USER chain exists
+            if ! iptables -n -L "$CHAIN" >/dev/null 2>&1; then
+                echo "[INFO] DOCKER-USER chain not found (Docker not running containers yet)"
+                echo "[INFO] Rules will be applied when containers are started"
+                exit 0
+            fi
+
+            # Detect bridge (docker0 in Lima)
+            BRIDGE="docker0"
+            if ! ip link show "$BRIDGE" >/dev/null 2>&1; then
+                echo "[INFO] Bridge $BRIDGE not found yet (will be created on first container)"
+                exit 0
+            fi
+
+            # Get gateway IP
+            GATEWAY_IP=$(ip -4 addr show dev "$BRIDGE" 2>/dev/null | awk "/inet / {split(\$2,a,\"/\"); print a[1]; exit}")
+            if [ -z "$GATEWAY_IP" ]; then
+                GATEWAY_IP="172.17.0.1"
+            fi
+
+            echo "[INFO] Applying network rules for bridge: $BRIDGE (gateway: $GATEWAY_IP)"
+
+            # Allow gateway first
+            if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$GATEWAY_IP" -j ACCEPT -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
+                iptables -I "$CHAIN" -i "$BRIDGE" -d "$GATEWAY_IP" -j ACCEPT -m comment --comment "$IPTABLES_COMMENT" || true
+            fi
+
+            # Block metadata endpoints
+            for endpoint in $METADATA_ENDPOINTS; do
+                if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
+                    iptables -A "$CHAIN" -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT" || true
+                fi
+            done
+
+            # Block private ranges
+            for range in $PRIVATE_RANGES; do
+                if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
+                    iptables -A "$CHAIN" -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT" || true
+                fi
+            done
+
+            echo "[OK] Network security rules applied"
+        ' 2>/dev/null; then
+            _cai_warn "Network security rules failed in Lima VM - check output above"
+            _cai_warn "  You can apply rules manually later via: limactl shell $_CAI_LIMA_VM_NAME"
+        fi
+    fi
+
 _cai_spacing
     _cai_ok "Secure Engine setup complete (macOS/Lima)"
     _cai_info "To use the Secure Engine:"
@@ -3920,6 +4003,14 @@ _cai_spacing
     if ! _cai_verify_isolated_docker "$dry_run" "$verbose"; then
         # Verification failure is a warning, not fatal
         _cai_warn "Isolated Docker verification had issues - check output above"
+    fi
+
+    # Step 12: Apply network security rules (non-fatal on failure)
+    _cai_spacing
+    _cai_step "Applying network security rules"
+    if ! _cai_apply_network_rules "$dry_run"; then
+        _cai_warn "Network security rules failed to apply - check output above"
+        _cai_warn "  You can apply rules manually later with: sudo cai network apply"
     fi
 
 _cai_spacing
@@ -4564,6 +4655,16 @@ EOF
         _cai_error "Default runtime: ${default_runtime:-unknown} (expected sysbox-runc)"
         _cai_error "  Check /etc/docker/daemon.json and restart docker.service"
         return 1
+    fi
+
+    # Apply network security rules (non-fatal on failure)
+    # Note: In Sysbox containers, _cai_apply_network_rules() skips gracefully
+    # because outer Sysbox provides network isolation
+    _cai_spacing
+    _cai_step "Applying network security rules"
+    if ! _cai_apply_network_rules "$dry_run"; then
+        _cai_warn "Network security rules failed to apply - check output above"
+        _cai_warn "  This may be expected in Sysbox containers (outer isolation)"
     fi
 
 _cai_spacing

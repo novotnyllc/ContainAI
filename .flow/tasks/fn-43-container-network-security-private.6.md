@@ -25,9 +25,8 @@ Enhance `src/lib/network.sh` to properly handle nested container environments (r
 - [x] shellcheck passes
 
 ## Done summary
-TBD
-
+Enhanced src/lib/network.sh with nested container detection and dynamic bridge handling. Added _cai_is_nested_container() and _cai_nested_iptables_supported() functions to detect nested environments and check iptables capability. Sysbox containers gracefully skip network rules (outer isolation), runc containers verify CAP_NET_ADMIN capability, and error messages provide environment-specific guidance. Fixed IP parsing to handle multiple addresses correctly.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 428430fb10f4bcfc0df1b94ba6d08e6c9acb1be0, 32108ab5f69083ecc350dd3de993cc0de260c8c8
+- Tests: shellcheck -x src/lib/network.sh, bash -n src/lib/network.sh
 - PRs:
