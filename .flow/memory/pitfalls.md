@@ -388,3 +388,6 @@ buildx --output can be type=registry (like --push) or type=local/tar (no chainin
 
 ## 2026-02-02 manual [pitfall]
 GitHub Actions env vars set via GITHUB_ENV are only available in SUBSEQUENT steps - ensure setup steps run before steps that use the exported variables
+
+## 2026-02-02 manual [pitfall]
+CI install tests that swallow failures (warning instead of exit 1) mask regressions - always fail if a tested path fails

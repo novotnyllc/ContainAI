@@ -78,8 +78,7 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 **Note:** Tarball artifact flow is implemented but will gracefully fall back to repo checkout until Task 5 creates the artifacts. Once Task 5 lands, the tarball path becomes primary.
 
 ## Done summary
-# fn-44.4: Enable sysbox in GitHub Actions for E2E tests
-
+Added E2E test jobs to GitHub Actions with sysbox support. GH-hosted job attempts sysbox installation with graceful fallback. Self-hosted job runs on runners with pre-installed sysbox. Both jobs support multi-arch (amd64/arm64) matrix, tarball artifact install testing with checkout fallback, and artifact collection on failure.
 ## Implementation Summary
 
 Added E2E test job to `.github/workflows/docker.yml` that:
@@ -123,6 +122,6 @@ Added E2E test job to `.github/workflows/docker.yml` that:
 - [x] CI logs show which path taken
 - [~] Tarball artifact flow - Deferred to Task 5
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 4e51ff2, 96bdcb1, 98d6d21, c109c4a, c1404a2
+- Tests: shellcheck -x src/*.sh src/lib/*.sh, ./scripts/check-manifest-consistency.sh, dotnet build --configuration Release, dotnet test --configuration Release
 - PRs:
