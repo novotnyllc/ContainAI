@@ -1949,4 +1949,248 @@ _cai_update() {
     return $overall_status
 }
 
+# ==============================================================================
+# Image Refresh Command
+# ==============================================================================
+
+# Show help for the refresh command
+_cai_refresh_help() {
+    cat <<'EOF'
+ContainAI Refresh - Pull latest base image and optionally rebuild template
+
+Usage: cai --refresh [options]
+       cai refresh [options]
+
+Pulls the latest ContainAI base image for your configured channel (stable or
+nightly) and optionally rebuilds your template image.
+
+Options:
+  --rebuild           Rebuild the default template image after pulling base
+  --verbose           Show verbose output
+  -h, --help          Show this help message
+
+What Gets Refreshed:
+
+  Base Image:
+    - Pulls the latest base image based on channel configuration
+    - stable channel: ghcr.io/novotnyllc/containai:latest
+    - nightly channel: ghcr.io/novotnyllc/containai:nightly
+    - Shows before/after version on successful pull
+
+  Template Image (with --rebuild):
+    - Rebuilds the default template (~/.config/containai/templates/default/)
+    - Uses the freshly pulled base image
+    - Template builds produce: containai-template-default:local
+
+  Registry Cache:
+    - Clears cached metadata for the refreshed image
+    - Ensures freshness check sees the new local image
+
+Notes:
+  - The command uses the same Docker context as container creation
+  - Network failures exit with error (refresh is explicit action)
+  - Without --rebuild, reminds you if a template exists
+  - If template has hardcoded FROM, suggests 'cai template upgrade'
+
+Examples:
+  cai --refresh                    Pull latest base image
+  cai --refresh --rebuild          Pull and rebuild template
+  cai refresh --verbose            Verbose output during refresh
+EOF
+}
+
+# Clear registry cache for a specific image
+# Args: $1 = full image reference (e.g., ghcr.io/novotnyllc/containai:latest)
+# Returns: 0 always (non-fatal)
+_cai_refresh_clear_cache() {
+    local full_image="$1"
+    local image tag
+
+    # Parse image reference
+    local ref="${full_image#ghcr.io/}"
+    if [[ "$ref" == "$full_image" ]]; then
+        # Not a ghcr.io image - nothing to clear
+        return 0
+    fi
+
+    # Split into image and tag
+    if [[ "$ref" == *:* ]]; then
+        image="${ref%:*}"
+        tag="${ref##*:}"
+    else
+        image="$ref"
+        tag="latest"
+    fi
+
+    # Sanitize for cache filenames (matching registry.sh logic)
+    local safe_image="${image//\//-}"
+    local safe_tag="${tag//[^A-Za-z0-9_.-]/-}"
+
+    # Remove both regular and meta-prefixed cache files
+    local cache_dir="${XDG_CONFIG_HOME:-$HOME/.config}/containai/cache/registry"
+    if [[ -d "$cache_dir" ]]; then
+        rm -f "$cache_dir/${safe_image}-${safe_tag}.json" 2>/dev/null || true
+        rm -f "$cache_dir/meta-${safe_image}-${safe_tag}.json" 2>/dev/null || true
+    fi
+
+    return 0
+}
+
+# Check if template has hardcoded FROM (not using ARG pattern)
+# Args: $1 = dockerfile_path
+# Returns: 0 if hardcoded (needs upgrade), 1 if using ARG pattern or not found
+_cai_refresh_template_has_hardcoded_base() {
+    local dockerfile_path="${1:-}"
+
+    if [[ ! -f "$dockerfile_path" ]]; then
+        return 1
+    fi
+
+    # Check if Dockerfile has ARG BASE_IMAGE pattern (channel-aware)
+    # If it does, it's not hardcoded
+    if grep -qE '^[[:space:]]*ARG[[:space:]]+BASE_IMAGE=' "$dockerfile_path" 2>/dev/null; then
+        return 1  # Has ARG pattern - not hardcoded
+    fi
+
+    # Check if FROM line contains ghcr.io/novotnyllc/containai directly
+    # (without variable substitution)
+    if grep -qE '^[[:space:]]*FROM[[:space:]]+(--[a-z]+=\S+[[:space:]]+)?ghcr\.io/novotnyllc/containai' "$dockerfile_path" 2>/dev/null; then
+        return 0  # Hardcoded FROM
+    fi
+
+    # No ContainAI base found at all - not our concern
+    return 1
+}
+
+# Main refresh command handler
+# Args: parsed from command line
+# Returns: 0=success, 1=failure
+_cai_refresh() {
+    local rebuild_flag="false"
+    local verbose="false"
+    local config_context_override=""
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --rebuild)
+                rebuild_flag="true"
+                shift
+                ;;
+            --verbose)
+                verbose="true"
+                _cai_set_verbose
+                shift
+                ;;
+            --help | -h)
+                _cai_refresh_help
+                return 0
+                ;;
+            *)
+                _cai_error "Unknown option: $1"
+                _cai_error "Use 'cai --refresh --help' for usage"
+                return 1
+                ;;
+        esac
+    done
+
+    # Get channel-aware base image
+    local base_image
+    base_image=$(_cai_base_image)
+
+    # Determine channel for display
+    local channel="stable"
+    if [[ "$base_image" == *":nightly"* ]]; then
+        channel="nightly"
+    fi
+
+    # Select Docker context (same logic as container creation)
+    # Try to resolve context from config if available
+    config_context_override=$(_containai_resolve_secure_engine_context "$PWD" "" 2>/dev/null) || config_context_override=""
+
+    local selected_context
+    if ! selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" "" "$verbose"); then
+        _cai_error "No Docker context available. Run 'cai doctor' for setup instructions."
+        return 1
+    fi
+
+    _cai_info "Refreshing ContainAI base image..."
+    _cai_info "       Channel: $channel"
+    _cai_info "       Pulling: $base_image"
+
+    # Get local version before pull (for before/after display)
+    local local_version_before=""
+    local_version_before=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version_before=""
+
+    # Build docker command with context
+    local -a docker_cmd=(docker --context "$selected_context")
+
+    # Pull the base image (explicit action, fail loudly on network error)
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" pull "$base_image"; then
+        _cai_error "Failed to pull base image: $base_image"
+        _cai_error "Check network connectivity and try again."
+        return 1
+    fi
+
+    # Get local version after pull
+    local local_version_after=""
+    local_version_after=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version_after=""
+
+    # Show before/after version
+    if [[ -n "$local_version_before" ]] && [[ -n "$local_version_after" ]]; then
+        if [[ "$local_version_before" == "$local_version_after" ]]; then
+            _cai_ok "Already at latest: $local_version_after"
+        else
+            _cai_ok "Updated from $local_version_before to $local_version_after"
+        fi
+    elif [[ -n "$local_version_after" ]]; then
+        _cai_ok "Pulled version: $local_version_after"
+    else
+        _cai_ok "Base image pulled successfully"
+    fi
+
+    # Clear registry cache for this image
+    _cai_refresh_clear_cache "$base_image"
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "Registry cache cleared for $base_image"
+    fi
+
+    # Handle --rebuild flag
+    local template_dir="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+    local default_template_path="$template_dir/default/Dockerfile"
+
+    if [[ "$rebuild_flag" == "true" ]]; then
+        # Check if default template exists
+        if [[ ! -f "$default_template_path" ]]; then
+            _cai_info "No default template found at $default_template_path"
+            _cai_info "Skipping template rebuild."
+        else
+            # Check for hardcoded FROM (suggest upgrade)
+            if _cai_refresh_template_has_hardcoded_base "$default_template_path"; then
+                _cai_warn "Template uses hardcoded FROM line."
+                _cai_warn "Run 'cai template upgrade' to enable channel selection."
+            fi
+
+            # Rebuild default template
+            _cai_info ""
+            _cai_info "Rebuilding default template..."
+            local template_image
+            if template_image=$(_cai_build_template "default" "$selected_context" "false" "true"); then
+                _cai_ok "Template rebuilt: $template_image"
+            else
+                _cai_error "Failed to rebuild template"
+                return 1
+            fi
+        fi
+    else
+        # Without --rebuild, remind user if template exists
+        if [[ -f "$default_template_path" ]]; then
+            _cai_info ""
+            _cai_info "Template image may need rebuild. Run 'cai --refresh --rebuild' to update."
+        fi
+    fi
+
+    return 0
+}
+
 return 0

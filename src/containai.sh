@@ -218,6 +218,7 @@ Subcommands:
   completion    Generate shell completion scripts (bash, zsh)
   version       Show current version
   update        Update ContainAI installation
+  --refresh     Pull latest base image and optionally rebuild template
   uninstall     Clean removal of system-level components
   help          Show this help message
 
@@ -5789,7 +5790,7 @@ _cai_completions() {
     }
 
     # Subcommands
-    local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config update uninstall completion help version"
+    local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config update refresh uninstall completion help version"
 
     # Global flags
     local global_flags="-h --help"
@@ -5816,6 +5817,7 @@ _cai_completions() {
     local config_subcommands="list get set unset"
     local config_flags="-g --global --workspace --verbose -h --help"
     local update_flags="--dry-run --stop-containers --force --lima-recreate --verbose -h --help"
+    local refresh_flags="--rebuild --verbose -h --help"
     local uninstall_flags="--dry-run --containers --volumes --force --verbose -h --help"
     local completion_shells="bash zsh"
 
@@ -6024,6 +6026,9 @@ _cai_completions() {
         update)
             COMPREPLY=($(compgen -W "$update_flags" -- "$cur"))
             ;;
+        refresh)
+            COMPREPLY=($(compgen -W "$refresh_flags" -- "$cur"))
+            ;;
         uninstall)
             COMPREPLY=($(compgen -W "$uninstall_flags" -- "$cur"))
             ;;
@@ -6137,6 +6142,7 @@ _cai() {
         'links:Verify and repair symlinks'
         'config:Manage settings'
         'update:Update ContainAI installation'
+        'refresh:Pull latest base image and optionally rebuild template'
         'uninstall:Remove ContainAI'
         'completion:Generate shell completion'
         'help:Show help message'
@@ -6470,6 +6476,12 @@ _cai() {
                         '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;
+                refresh)
+                    _arguments \
+                        '--rebuild[Rebuild default template after pulling]' \
+                        '--verbose[Verbose output]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
                 uninstall)
                     _arguments \
                         '--dry-run[Show what would happen]' \
@@ -6550,10 +6562,11 @@ containai() {
     # Run rate-limited update check before command dispatch
     # Skip in CI environments to avoid noise/delays in automated pipelines
     # Per spec: CI=true (explicit), GITHUB_ACTIONS (presence), JENKINS_URL (presence)
-    # Skip for help/version/completion to avoid latency on informational commands
+    # Skip for help/version/completion/refresh to avoid latency on informational commands
+    # Skip for --refresh since it's doing an explicit update action
     if [[ "${CI:-}" != "true" ]] && [[ -z "${GITHUB_ACTIONS:-}" ]] && [[ -z "${JENKINS_URL:-}" ]]; then
         case "$subcommand" in
-            help|-h|--help|version|--version|-v|completion) ;;
+            help|-h|--help|version|--version|-v|completion|refresh|--refresh) ;;
             *) _cai_update_check ;;
         esac
     fi
@@ -6637,6 +6650,14 @@ containai() {
         update)
             shift
             _cai_update "$@"
+            ;;
+        refresh)
+            shift
+            _cai_refresh "$@"
+            ;;
+        --refresh)
+            shift
+            _cai_refresh "$@"
             ;;
         uninstall)
             shift
