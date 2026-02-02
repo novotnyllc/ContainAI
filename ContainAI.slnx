@@ -1,5 +1,9 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/acp-proxy/acp-proxy.csproj" />
+    <Project Path="src/ContainAI.Acp/ContainAI.Acp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj" />
   </Folder>
 </Solution>

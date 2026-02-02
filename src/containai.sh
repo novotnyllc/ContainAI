@@ -254,10 +254,10 @@ Container Lifecycle:
   Agent sessions attach via docker exec. Container stays running between sessions.
   Same workspace path always maps to same container (deterministic naming via hash).
 
-Editor Integration:
-  --acp <agent>         Start ACP proxy for editor integration
+Subcommands:
+  acp proxy <agent>     Start ACP proxy for editor integration
                         Agents: claude, gemini
-                        Example: cai --acp claude
+                        Example: cai acp proxy claude
 
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
@@ -3612,28 +3612,38 @@ _containai_docker_cmd() {
 # ACP Proxy Entry Point
 # ==============================================================================
 
+# ACP subcommand handler - dispatches to ACP proxy subcommands
+# Arguments: subcommand and args (e.g., "proxy claude")
+# Returns: exit code from proxy binary
+_containai_acp_cmd() {
+    local subcmd="${1:-}"
+
+    if [[ -z "$subcmd" ]]; then
+        printf '%s\n' "Usage: cai acp proxy <agent>" >&2
+        printf '%s\n' "       cai acp proxy claude" >&2
+        return 1
+    fi
+
+    case "$subcmd" in
+        proxy)
+            shift
+            _containai_acp_proxy "$@"
+            ;;
+        *)
+            printf '%s\n' "Unknown acp subcommand: $subcmd" >&2
+            printf '%s\n' "Usage: cai acp proxy <agent>" >&2
+            return 1
+            ;;
+    esac
+}
+
 # ACP proxy wrapper - launches native binary for ACP protocol handling
-# Arguments: $1 = agent name (default: claude)
+# Arguments: $@ = arguments passed to acp-proxy proxy command
 # Environment:
 #   CAI_ACP_TEST_MODE=1      Allow any agent name (for testing)
 #   CAI_ACP_DIRECT_SPAWN=1   Bypass containers, spawn agent directly (for testing)
 # Returns: exit code from proxy binary
 _containai_acp_proxy() {
-    local agent="${1:-claude}"
-
-    # Validate agent (or allow test mode)
-    if [[ "${CAI_ACP_TEST_MODE:-}" == "1" ]]; then
-        : # Allow any agent in test mode
-    else
-        case "$agent" in
-            claude|gemini) ;;
-            *)
-                printf '%s\n' "Unsupported agent: $agent" >&2
-                return 1
-                ;;
-        esac
-    fi
-
     # Binary location: src/bin/acp-proxy (avoids conflict with src/acp-proxy/ source dir)
     local proxy_bin="${_CAI_SCRIPT_DIR}/bin/acp-proxy"
 
@@ -3644,7 +3654,9 @@ _containai_acp_proxy() {
         return 1
     fi
 
-    exec "$proxy_bin" "$agent"
+    # Pass all arguments directly to the binary's proxy subcommand
+    # The binary handles agent validation and --help
+    exec "$proxy_bin" proxy "$@"
 }
 
 # Shell subcommand handler - connects to container via SSH
@@ -6795,8 +6807,15 @@ _containai_completion_cmd() {
 containai() {
     local subcommand="${1:-}"
 
-    # CRITICAL: --acp must be detected BEFORE update checks to avoid stdout pollution
+    # CRITICAL: acp subcommand must be detected BEFORE update checks to avoid stdout pollution
     # ACP protocol requires stdout purity - no diagnostic output allowed
+    if [[ "${subcommand:-}" == "acp" ]]; then
+        shift
+        _containai_acp_cmd "$@"
+        return $?
+    fi
+
+    # Legacy --acp support (deprecated, use 'cai acp proxy <agent>')
     if [[ "${subcommand:-}" == "--acp" ]]; then
         shift
         _containai_acp_proxy "$@"

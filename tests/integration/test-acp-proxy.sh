@@ -144,7 +144,7 @@ run_proxy() {
     # This gives the proxy time to process and write output
     # The subshell sends input, sleeps briefly, then closes stdin
     PROXY_EXIT_CODE=0
-    (printf '%s\n' "$input"; sleep 0.1) | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" mock-acp-server 2>/dev/null > "$tmpfile" || PROXY_EXIT_CODE=$?
+    (printf '%s\n' "$input"; sleep 0.1) | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy mock-acp-server 2>/dev/null > "$tmpfile" || PROXY_EXIT_CODE=$?
 
     PROXY_OUTPUT=$(< "$tmpfile")
 
@@ -182,7 +182,7 @@ start_interactive_proxy() {
 
     # Start proxy with FIFOs, capture stderr for mock server logs
     (
-        "$PROXY_BIN" mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>"$PROXY_ERR_FILE"
+        "$PROXY_BIN" proxy mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>"$PROXY_ERR_FILE"
     ) &
     PROXY_PID=$!
 
@@ -352,7 +352,7 @@ test_stdout_purity() {
         export CONTAINAI_VERBOSE=1
         export CAI_NO_UPDATE_CHECK=1
         (printf '%s\n' '{"jsonrpc":"2.0","id":"purity-test","method":"initialize","params":{"protocolVersion":"2025-01-01"}}'; sleep 0.1) \
-            | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" mock-acp-server 2>/dev/null > "$tmpfile"
+            | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy mock-acp-server 2>/dev/null > "$tmpfile"
     )
 
     # Count total lines in output

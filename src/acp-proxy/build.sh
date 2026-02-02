@@ -11,7 +11,10 @@ set -euo pipefail
 #   --help          Show this help
 #
 # Requirements:
-#   - .NET 10 SDK (dotnet --version)
+#   - .NET 10 SDK (dotnet --version) OR Docker for fallback
+#
+# Version:
+#   Uses NBGV for versioning. Detects local SDK or falls back to Docker.
 #
 # Examples:
 #   ./build.sh                    # Build release
@@ -20,6 +23,7 @@ set -euo pipefail
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CONFIG="Release"
 INSTALL=0
 
@@ -61,25 +65,84 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ==============================================================================
+# Version detection via NBGV
+# ==============================================================================
+
+get_version_with_local_sdk() {
+    cd "$REPO_ROOT"
+    dotnet tool restore >/dev/null 2>&1 || true
+    dotnet nbgv get-version --variable SemVer2 2>/dev/null
+}
+
+get_version_with_docker() {
+    docker run --rm -v "$REPO_ROOT:/src" -w /src \
+        mcr.microsoft.com/dotnet/sdk:10.0 \
+        sh -c "dotnet tool restore >/dev/null 2>&1 && dotnet nbgv get-version --variable SemVer2 2>/dev/null"
+}
+
+# Try to get version from NBGV
+VERSION=""
+if command -v dotnet >/dev/null 2>&1; then
+    printf '[INFO] Detecting version via local .NET SDK...\n'
+    if VERSION=$(get_version_with_local_sdk); then
+        printf '[INFO] Version: %s\n' "$VERSION"
+    else
+        printf '[WARN] NBGV failed with local SDK\n' >&2
+        VERSION=""
+    fi
+fi
+
+# Fallback to Docker if no local SDK or NBGV failed
+if [[ -z "$VERSION" ]] && command -v docker >/dev/null 2>&1; then
+    printf '[INFO] Falling back to Docker SDK image for version detection...\n'
+    if VERSION=$(get_version_with_docker); then
+        printf '[INFO] Version: %s\n' "$VERSION"
+    else
+        printf '[WARN] NBGV failed with Docker SDK\n' >&2
+        VERSION=""
+    fi
+fi
+
+# Use fallback version if NBGV failed
+if [[ -z "$VERSION" ]]; then
+    VERSION="0.0.0-local"
+    printf '[WARN] Using fallback version: %s\n' "$VERSION"
+fi
+
+# Export for downstream use
+export NBGV_SemVer2="$VERSION"
+
+# ==============================================================================
+# Build
+# ==============================================================================
+
 # Check for dotnet
 if ! command -v dotnet >/dev/null 2>&1; then
     printf '[ERROR] .NET SDK not found. Install from https://dot.net\n' >&2
     exit 1
 fi
 
-# Build
-printf '[INFO] Building acp-proxy (%s, %s)...\n' "$CONFIG" "$RID"
+# Build with version
+printf '[INFO] Building acp-proxy (%s, %s, v%s)...\n' "$CONFIG" "$RID" "$VERSION"
 cd "$SCRIPT_DIR"
-dotnet publish -c "$CONFIG" -r "$RID" --self-contained true
+dotnet publish -c "$CONFIG" -r "$RID" --self-contained true -p:Version="$VERSION"
 
 # Install if requested
 if [[ "$INSTALL" -eq 1 ]]; then
     local_bin="$SCRIPT_DIR/../bin"
     mkdir -p "$local_bin"
 
-    src_binary="$SCRIPT_DIR/bin/$CONFIG/net10.0/$RID/publish/acp-proxy"
+    src_binary="$REPO_ROOT/artifacts/publish/acp-proxy/release_$RID/acp-proxy"
     if [[ ! -f "$src_binary" ]]; then
-        printf '[ERROR] Binary not found at %s\n' "$src_binary" >&2
+        # Try legacy path structure
+        src_binary="$SCRIPT_DIR/bin/$CONFIG/net10.0/$RID/publish/acp-proxy"
+    fi
+
+    if [[ ! -f "$src_binary" ]]; then
+        printf '[ERROR] Binary not found. Checked:\n' >&2
+        printf '  - %s\n' "$REPO_ROOT/artifacts/publish/acp-proxy/release_$RID/acp-proxy" >&2
+        printf '  - %s\n' "$SCRIPT_DIR/bin/$CONFIG/net10.0/$RID/publish/acp-proxy" >&2
         exit 1
     fi
 

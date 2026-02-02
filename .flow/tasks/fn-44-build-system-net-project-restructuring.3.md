@@ -125,8 +125,60 @@ Refactor the monolithic Program.cs (1029 lines) into a proper library/CLI struct
 - [ ] Code follows project conventions (no single 1000+ line files)
 
 ## Done summary
-TBD
+## Summary
 
+Refactored the monolithic acp-proxy Program.cs (1029 lines) into a proper library/CLI structure:
+
+### New Library: ContainAI.Acp
+
+Created `src/ContainAI.Acp/` with modular structure:
+- **Protocol/** - JSON-RPC 2.0 message types with System.Text.Json source generators for AOT
+  - `JsonRpcTypes.cs` - JsonRpcMessage, JsonRpcError, AcpJsonContext (source generator)
+  - `JsonRpcHelpers.cs` - Helper methods for ID normalization and response creation
+- **PathTranslation/** - Host/container path mapping
+  - `PathTranslator.cs` - Translates paths and MCP server configs between host and container
+  - `WorkspaceResolver.cs` - Resolves workspace root using git or .containai config (uses CliWrap)
+- **Sessions/** - Session management
+  - `AcpSession.cs` - Session state with request/response correlation
+  - `AgentSpawner.cs` - Process spawning for agent processes
+  - `OutputWriter.cs` - Thread-safe NDJSON output to stdout
+- **AcpProxy.cs** - Main proxy orchestrator class
+
+### Updated CLI: acp-proxy
+
+- Uses System.CommandLine 2.0.2 for argument parsing
+- New subcommand pattern: `acp-proxy proxy <agent>` (default: claude)
+- Thin CLI wrapper referencing ContainAI.Acp library
+- AOT-compatible (5MB native binary)
+
+### Shell Script Updates
+
+- Added `cai acp proxy <agent>` subcommand pattern
+- Retained backward compatibility with `cai --acp <agent>` (deprecated)
+- Updated help text to show new invocation pattern
+
+### Test Project: tests/ContainAI.Acp.Tests/
+
+Created xUnit v3 test project with .NET 10 MTP:
+- PathTranslatorTests - 10 tests for path translation
+- JsonRpcHelpersTests - 9 tests for JSON-RPC helpers
+- JsonRpcMessageTests - 12 tests for message serialization
+- AcpSessionTests - 7 tests for session management
+
+### Build Script Updates
+
+- Added NBGV version detection with Docker fallback
+- Updated binary paths for new artifacts output structure
+
+### Key Changes
+
+1. Library is AOT-compatible (no reflection, uses source generators)
+2. Uses System.Text.Json exclusively (no Newtonsoft)
+3. Uses Process for agent spawning (simpler than CliWrap for this use case)
+4. CliWrap used only in WorkspaceResolver for git commands
+5. All 42 unit tests pass
+6. All 15 integration tests pass
+7. AOT publish succeeds without warnings
 ## Evidence
 - Commits:
 - Tests:

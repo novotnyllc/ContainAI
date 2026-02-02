@@ -4,7 +4,7 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>acp-proxy</AssemblyName>
     <RootNamespace>ContainAI.AcpProxy</RootNamespace>
-    <Description>ACP terminating proxy for ContainAI</Description>
+    <Description>ACP terminating proxy CLI for ContainAI</Description>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -24,12 +24,11 @@
   <ItemGroup>
     <!-- CLI parsing (AOT-compatible) -->
     <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
 
-    <!-- JSON-RPC implementation (AOT-compatible with SystemTextJsonFormatter) -->
-    <PackageReference Include="StreamJsonRpc" />
-
-    <!-- Process execution (AOT-compatible) -->
-    <PackageReference Include="CliWrap" />
+  <ItemGroup>
+    <!-- Reference the ACP library -->
+    <ProjectReference Include="../ContainAI.Acp/ContainAI.Acp.csproj" />
   </ItemGroup>
 
 </Project>

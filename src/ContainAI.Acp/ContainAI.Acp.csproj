@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ContainAI.Acp</RootNamespace>
+    <Description>ACP protocol library for ContainAI</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>ContainAI.Acp</PackageId>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- AOT compatibility - no dynamic code -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <TrimmerDefaultAction>link</TrimmerDefaultAction>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Process execution (AOT-compatible) - used by WorkspaceResolver -->
+    <PackageReference Include="CliWrap" />
+  </ItemGroup>
+
+</Project>
