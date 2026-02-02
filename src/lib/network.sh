@@ -146,9 +146,10 @@ _cai_nested_iptables_supported() {
 # Outputs: bridge_name gateway_ip subnet to stdout (space-separated)
 # Returns: 0=success, 1=failure
 # Note: Returns different values depending on environment:
-#   - Host (standard): cai0, 172.30.0.1, 172.30.0.0/16
+#   - Host Linux/WSL (standard): cai0, 172.30.0.1, 172.30.0.0/16
+#   - macOS/Lima: docker0 inside VM (detected dynamically)
 #   - Nested container: docker0 or detected bridge, detected gateway, detected subnet
-# Sets: _CAI_NETWORK_CONFIG_ENV with environment type ("host" or "nested")
+# Sets: _CAI_NETWORK_CONFIG_ENV with environment type ("host", "lima", or "nested")
 _cai_get_network_config() {
     local bridge_name gateway_ip subnet cidr_suffix
 
@@ -207,9 +208,55 @@ _cai_get_network_config() {
             subnet="172.17.0.0/16"
             _cai_debug "Using default subnet for nested container: $subnet"
         fi
+    elif _cai_is_macos; then
+        _CAI_NETWORK_CONFIG_ENV="lima"
+        # macOS/Lima - detect bridge configuration inside the Lima VM
+        # The Lima VM runs Docker with default bridge (docker0)
+        local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
+
+        # Try to get bridge name from Docker inside Lima
+        bridge_name=$(limactl shell "$vm_name" -- docker network inspect bridge -f '{{.Options.com.docker.network.bridge.name}}' 2>/dev/null) || bridge_name=""
+        if [[ -z "$bridge_name" ]]; then
+            # Default Docker bridge name
+            bridge_name="docker0"
+        fi
+
+        # Get gateway from Docker network inspect inside Lima
+        gateway_ip=$(limactl shell "$vm_name" -- docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null) || gateway_ip=""
+        if [[ -z "$gateway_ip" ]]; then
+            # Fallback: try to detect from bridge interface using ip command in VM
+            gateway_ip=$(limactl shell "$vm_name" -- ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {split($2,a,"/"); print a[1]; exit}') || gateway_ip=""
+        fi
+        if [[ -z "$gateway_ip" ]]; then
+            # Last resort: common docker0 default
+            gateway_ip="172.17.0.1"
+            _cai_debug "Using default gateway IP for Lima VM: $gateway_ip"
+        fi
+
+        # Get subnet from Docker network inspect inside Lima
+        subnet=$(limactl shell "$vm_name" -- docker network inspect bridge -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null) || subnet=""
+        if [[ -z "$subnet" ]]; then
+            # Fallback: try to derive from bridge interface in VM
+            local cidr_addr
+            cidr_addr=$(limactl shell "$vm_name" -- ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2; exit}') || cidr_addr=""
+            if [[ -n "$cidr_addr" ]]; then
+                local detected_cidr="${cidr_addr##*/}"
+                local detected_ip="${cidr_addr%%/*}"
+                case "$detected_cidr" in
+                    16) subnet="${detected_ip%.*.*}.0.0/16" ;;
+                    24) subnet="${detected_ip%.*}.0/24" ;;
+                    *)  subnet="${detected_ip%.*.*}.0.0/16" ;;
+                esac
+            fi
+        fi
+        if [[ -z "$subnet" ]]; then
+            # Last resort: common Docker default
+            subnet="172.17.0.0/16"
+            _cai_debug "Using default subnet for Lima VM: $subnet"
+        fi
     else
         _CAI_NETWORK_CONFIG_ENV="host"
-        # Standard host - use ContainAI bridge constants
+        # Standard host (Linux/WSL) - use ContainAI bridge constants
         bridge_name="${_CAI_CONTAINAI_DOCKER_BRIDGE:-cai0}"
 
         # Parse gateway IP and CIDR suffix from bridge address constant
@@ -249,12 +296,19 @@ _cai_get_network_config() {
 
     # Validate we have required values
     if [[ -z "$bridge_name" ]] || [[ -z "$gateway_ip" ]] || [[ -z "$subnet" ]]; then
-        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-            _cai_error "Failed to detect network configuration in nested container"
-            _cai_error "  Is inner Docker running? Try: systemctl start docker"
-        else
-            _cai_error "Failed to detect network configuration"
-        fi
+        case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+            nested)
+                _cai_error "Failed to detect network configuration in nested container"
+                _cai_error "  Is inner Docker running? Try: systemctl start docker"
+                ;;
+            lima)
+                _cai_error "Failed to detect network configuration in Lima VM"
+                _cai_error "  Is Docker running in the VM? Try: limactl shell ${_CAI_LIMA_VM_NAME:-containai-docker} -- sudo systemctl start docker"
+                ;;
+            *)
+                _cai_error "Failed to detect network configuration"
+                ;;
+        esac
         return 1
     fi
 
@@ -268,18 +322,51 @@ _cai_get_network_config() {
 
 # Check if iptables command is available
 # Returns: 0=available, 1=not available
+# Note: On macOS, checks inside the Lima VM via limactl shell
 _cai_iptables_available() {
-    command -v iptables >/dev/null 2>&1
+    if _cai_is_macos; then
+        # On macOS, iptables runs inside Lima VM
+        # Check if Lima VM exists and is running
+        if ! command -v limactl >/dev/null 2>&1; then
+            return 1
+        fi
+        local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
+        # Use machine-parseable format to check VM status
+        # Match specific VM name and Running status to avoid false positives
+        local vm_status
+        vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | awk -F'\t' -v name="$vm_name" '$1 == name {print $2}') || vm_status=""
+        if [[ "$vm_status" != "Running" ]]; then
+            return 1
+        fi
+        # Check if iptables is available inside the VM
+        limactl shell "$vm_name" -- command -v iptables >/dev/null 2>&1
+    else
+        command -v iptables >/dev/null 2>&1
+    fi
 }
 
 # Run iptables with appropriate privileges
-# Order of attempts:
+# Platform-aware execution:
+# - macOS: Runs inside Lima VM via limactl shell with non-interactive sudo
+# - Linux/WSL: Runs directly with privilege escalation
+# Order of attempts (Linux/WSL):
 # 1. If root (EUID == 0): direct iptables
 # 2. If not root: try direct first (works with CAP_NET_ADMIN in containers)
 # 3. If direct fails with EPERM and sudo available: try sudo -n (non-interactive)
 # Arguments: same as iptables
 # Returns: iptables exit code
 _cai_iptables() {
+    # macOS: Execute inside Lima VM
+    if _cai_is_macos; then
+        local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
+        # Construct iptables command for Lima shell
+        # Use sudo -n (non-interactive) to avoid blocking on password prompt
+        # Lima VMs typically have passwordless sudo for the default user
+        limactl shell "$vm_name" -- sudo -n iptables "$@"
+        return $?
+    fi
+
+    # Linux/WSL: Direct execution with privilege handling
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
         iptables "$@"
         return $?
@@ -311,10 +398,11 @@ _cai_iptables() {
 
 # Check if we have permissions to run iptables
 # Returns: 0=have permissions, 1=no permissions
+# Note: On macOS, checks inside the Lima VM
 _cai_iptables_can_run() {
     # Try a read-only command - use -S which just lists rules
     # Avoid -L with rule numbers since empty chains fail
-    # Use sudo if not root
+    # _cai_iptables handles platform differences (macOS uses limactl shell)
     _cai_iptables -S >/dev/null 2>&1
 }
 
@@ -503,16 +591,21 @@ _cai_apply_network_rules() {
     subnet="${config#* }"
 
     local env_label
-    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-        env_label="nested container"
-    else
-        env_label="host"
-    fi
+    case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+        nested) env_label="nested container" ;;
+        lima)   env_label="Lima VM" ;;
+        *)      env_label="host" ;;
+    esac
     _cai_info "Applying network security rules for bridge: $bridge_name ($env_label)"
 
     # Check iptables availability
     if ! _cai_iptables_available; then
-        _cai_error "iptables is not installed"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+            _cai_error "iptables is not available in Lima VM"
+            _cai_error "  Is the Lima VM running? Try: limactl start ${_CAI_LIMA_VM_NAME:-containai-docker}"
+        else
+            _cai_error "iptables is not installed"
+        fi
         return 1
     fi
 
@@ -537,13 +630,33 @@ _cai_apply_network_rules() {
     fi
 
     # Check if bridge interface exists
-    if ! ip link show "$bridge_name" >/dev/null 2>&1; then
-        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-            _cai_warn "Bridge $bridge_name does not exist yet in nested container"
-            _cai_warn "  Ensure inner Docker is running: systemctl start docker"
-        else
-            _cai_warn "Bridge $bridge_name does not exist yet (will be created by Docker)"
+    # On macOS/Lima, check inside the VM
+    local bridge_exists=false
+    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+        local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
+        if limactl shell "$vm_name" -- ip link show "$bridge_name" >/dev/null 2>&1; then
+            bridge_exists=true
         fi
+    else
+        if ip link show "$bridge_name" >/dev/null 2>&1; then
+            bridge_exists=true
+        fi
+    fi
+
+    if [[ "$bridge_exists" != "true" ]]; then
+        case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+            nested)
+                _cai_warn "Bridge $bridge_name does not exist yet in nested container"
+                _cai_warn "  Ensure inner Docker is running: systemctl start docker"
+                ;;
+            lima)
+                _cai_warn "Bridge $bridge_name does not exist yet in Lima VM"
+                _cai_warn "  Bridge will be created when first container starts"
+                ;;
+            *)
+                _cai_warn "Bridge $bridge_name does not exist yet (will be created by Docker)"
+                ;;
+        esac
         _cai_warn "Rules will be applied when bridge is available"
         # Don't fail - bridge may not exist until first container starts
         return 0
@@ -643,16 +756,20 @@ _cai_remove_network_rules() {
     subnet="${config#* }"
 
     local env_label
-    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-        env_label="nested container"
-    else
-        env_label="host"
-    fi
+    case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+        nested) env_label="nested container" ;;
+        lima)   env_label="Lima VM" ;;
+        *)      env_label="host" ;;
+    esac
     _cai_info "Removing network security rules from bridge: $bridge_name ($env_label)"
 
     # Check iptables availability
     if ! _cai_iptables_available; then
-        _cai_warn "iptables is not installed, no rules to remove"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+            _cai_warn "iptables is not available in Lima VM, no rules to remove"
+        else
+            _cai_warn "iptables is not installed, no rules to remove"
+        fi
         return 0
     fi
 
@@ -741,7 +858,11 @@ _cai_check_network_rules() {
     if ! _cai_iptables_available; then
         _CAI_NETWORK_RULES_STATUS="no_iptables"
         if [[ "$verbose" == "true" ]]; then
-            _cai_warn "iptables is not installed"
+            if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+                _cai_warn "Lima VM not running or iptables not available"
+            else
+                _cai_warn "iptables is not installed"
+            fi
         fi
         return 1
     fi
@@ -880,15 +1001,19 @@ _cai_network_doctor_status() {
     fi
 
     bridge_name="${config%% *}"
-    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-        env_label=" (nested)"
-    else
-        env_label=""
-    fi
+    case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+        nested) env_label=" (nested)" ;;
+        lima)   env_label=" (Lima VM)" ;;
+        *)      env_label="" ;;
+    esac
 
     # Check iptables
     if ! _cai_iptables_available; then
-        _CAI_NETWORK_DOCTOR_DETAIL="iptables not installed"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+            _CAI_NETWORK_DOCTOR_DETAIL="Lima VM not running or iptables not available"
+        else
+            _CAI_NETWORK_DOCTOR_DETAIL="iptables not installed"
+        fi
         _CAI_NETWORK_DOCTOR_STATUS="error"
         return 0
     fi
@@ -900,12 +1025,31 @@ _cai_network_doctor_status() {
     fi
 
     # Check if bridge exists
-    if ! ip link show "$bridge_name" >/dev/null 2>&1; then
-        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
-            _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (inner Docker not running?)"
-        else
-            _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
+    # On macOS/Lima, check inside the VM
+    local bridge_exists=false
+    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
+        local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
+        if limactl shell "$vm_name" -- ip link show "$bridge_name" >/dev/null 2>&1; then
+            bridge_exists=true
         fi
+    else
+        if ip link show "$bridge_name" >/dev/null 2>&1; then
+            bridge_exists=true
+        fi
+    fi
+
+    if [[ "$bridge_exists" != "true" ]]; then
+        case "${_CAI_NETWORK_CONFIG_ENV:-}" in
+            nested)
+                _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (inner Docker not running?)"
+                ;;
+            lima)
+                _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present in Lima VM (Docker not running?)"
+                ;;
+            *)
+                _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
+                ;;
+        esac
         # Bridge missing is distinct from rules missing - can't apply rules yet
         _CAI_NETWORK_DOCTOR_STATUS="bridge_missing"
         return 0

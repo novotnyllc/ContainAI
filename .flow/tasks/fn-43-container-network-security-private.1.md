@@ -74,9 +74,8 @@ _cai_remove_network_rules() {
 - [ ] Gateway allowed
 - [ ] Rules removable for uninstall
 ## Done summary
-TBD
-
+Task already completed by tasks fn-43-container-network-security-private.5 and fn-43-container-network-security-private.6. The src/lib/network.sh file implements all acceptance criteria: dynamic bridge/gateway/subnet detection via _cai_get_network_config(), host mode (cai0), nested mode (docker0), private range blocking, metadata blocking, gateway allow rules, and rule removal for uninstall.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f34dd75a7f2fa1613fcc40a457d3ca50f58ca53f, 428430fb10f4bcfc0df1b94ba6d08e6c9acb1be0, 32108ab5f69083ecc350dd3de993cc0de260c8c8
+- Tests: shellcheck -x src/lib/network.sh
 - PRs:

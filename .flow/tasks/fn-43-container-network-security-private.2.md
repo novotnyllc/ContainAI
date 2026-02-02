@@ -59,9 +59,47 @@ fi
 - [ ] Correct bridge/gateway used per platform
 - [ ] iptables accessible on all platforms
 ## Done summary
-TBD
+# Task fn-43-container-network-security-private.2: Platform Support Summary
 
+## Implementation
+
+Made `network.sh` functions platform-aware to support:
+
+### 1. macOS/Lima Support
+- `_cai_iptables()` now detects macOS and executes iptables inside Lima VM via `limactl shell`
+- `_cai_iptables_available()` checks if Lima VM is running and iptables is available inside it
+- `_cai_get_network_config()` detects Lima environment and queries docker0 bridge inside VM
+- Added "lima" as a new `_CAI_NETWORK_CONFIG_ENV` value
+
+### 2. Bridge Existence Checks
+- Updated bridge existence checks to run inside Lima VM when on macOS
+- Proper error messages for each platform
+
+### 3. Setup.sh Refactoring
+- Replaced 140+ lines of inline Lima iptables script with shared `_cai_apply_network_rules()` call
+- Now uses the same code path as Linux/WSL for consistency
+
+### 4. Doctor Status
+- `_cai_network_doctor_status()` now handles Lima environment
+- Shows appropriate messages for Lima VM state
+
+## Files Modified
+- `src/lib/network.sh` - Platform-aware iptables functions
+- `src/lib/setup.sh` - Simplified Lima setup to use shared function
+
+## Platform Matrix (per spec)
+
+| Platform        | Bridge  | Where rules apply      | Implementation |
+|-----------------|---------|------------------------|----------------|
+| Linux host      | cai0    | Host iptables          | ✓ Direct       |
+| Lima/macOS      | docker0 | Inside Lima VM         | ✓ limactl shell |
+| WSL2            | cai0    | Inside WSL             | ✓ Direct       |
+| Nested (in cai) | docker0 | Inside outer container | ✓ Docker detect |
+
+## Verification
+- `shellcheck -x src/lib/network.sh` passes
+- `shellcheck -x src/lib/setup.sh` passes
 ## Evidence
 - Commits:
-- Tests:
+- Tests: {'type': 'shellcheck', 'target': 'src/lib/network.sh', 'result': 'pass'}, {'type': 'shellcheck', 'target': 'src/lib/setup.sh', 'result': 'pass'}
 - PRs:
