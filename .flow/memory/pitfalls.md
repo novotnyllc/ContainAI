@@ -385,3 +385,6 @@ JsonNode.ToString() returns JSON-encoded strings (with quotes); use TryGetValue<
 
 ## 2026-02-02 manual [pitfall]
 buildx --output can be type=registry (like --push) or type=local/tar (no chaining); detect type explicitly
+
+## 2026-02-02 manual [pitfall]
+GitHub Actions env vars set via GITHUB_ENV are only available in SUBSEQUENT steps - ensure setup steps run before steps that use the exported variables

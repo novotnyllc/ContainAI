@@ -133,7 +133,40 @@ Set up modern .NET project infrastructure with:
    - Add `dotnet test` step for unit tests
 
 8. **Updated acp-proxy.csproj**: Removed hardcoded version, uses CPM for package versions, added PackageReferences for System.CommandLine, StreamJsonRpc, CliWrap
+
+9. **Bug Fix**: Moved .NET setup and NBGV steps before Docker build in test job to ensure `NBGV_SemVer2` env var is available when needed.
+## Summary
+
+Set up modern .NET project infrastructure with:
+
+1. **Central Package Management (CPM)**: Created `Directory.Packages.props` with centralized versions for:
+   - Nerdbank.GitVersioning (GlobalPackageReference)
+   - Microsoft.SourceLink.GitHub (GlobalPackageReference)
+   - System.CommandLine, StreamJsonRpc, CliWrap (AOT-compatible libraries)
+   - xunit.v3 (no legacy runner packages needed with .NET 10 MTP)
+
+2. **NBGV Versioning**: Created `version.json` with:
+   - Main branch: `0.2-dev` prerelease suffix
+   - Release branch pattern: `rel/v0.x` for stable releases
+   - Path filters to exclude docs/workflows from version height
+
+3. **ArtifactsOutput**: Enabled in `Directory.Build.props` - build output now goes to `artifacts/` directory
+
+4. **slnx Migration**: Converted `ContainAI.sln` to `ContainAI.slnx` format and removed old .sln file
+
+5. **global.json**: Configured .NET 10 SDK and Microsoft Testing Platform as default test runner
+
+6. **.NET Local Tool Manifest**: Created `.config/dotnet-tools.json` with nbgv tool
+
+7. **GitHub Actions Updates**: Updated `docker.yml` to:
+   - Use `fetch-depth: 0` for NBGV (both build and test jobs)
+   - Use `setup-dotnet` with `global-json-file: global.json`
+   - Install and run NBGV as .NET tool (not GitHub Action)
+   - Export NBGV env vars (`NBGV_SemVer2`, etc.) to `GITHUB_ENV`
+   - Add `dotnet test` step for unit tests
+
+8. **Updated acp-proxy.csproj**: Removed hardcoded version, uses CPM for package versions, added PackageReferences for System.CommandLine, StreamJsonRpc, CliWrap
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 5a1f3aa feat(build): Add .NET project infrastructure (CPM, NBGV, slnx), 297d8ac fix(dependencies): Update package versions and remove obsolete reference, 21cc935 fix(build): Address review feedback for .NET infrastructure, de62f53 fix(build): Add Microsoft.SourceLink.GitHub to CPM, aa3ac90 fix(ci): Move NBGV setup before test image build in test job
+- Tests: dotnet build and dotnet test verified locally
 - PRs:
