@@ -58,7 +58,8 @@ Create release packaging system: build multi-arch .NET binaries, package into fl
 5. **PR artifact flow**:
    - PR builds upload tarball to GitHub Actions artifacts
    - Test job downloads, extracts, runs `./install.sh --local`
-   - Task 4 (sysbox E2E) uses these same artifacts
+   - Task 4 E2E jobs (`e2e-test` + `e2e-test-selfhosted`) consume these same artifacts
+   <!-- Updated by plan-sync: fn-44.4 created two E2E jobs, not one -->
 
 6. **Release flow** (integrates with NBGV branching):
    - Release branches: `rel/v0.2` format (create from main)
@@ -91,7 +92,8 @@ Create release packaging system: build multi-arch .NET binaries, package into fl
 - [ ] install.sh published as standalone release asset too
 - [ ] PR builds upload tarball to Actions artifacts
 - [ ] PR test job extracts tarball and runs ./install.sh --local
-- [ ] Task 4 E2E tests use these same PR artifacts
+- [ ] Task 4 E2E jobs (`e2e-test` + `e2e-test-selfhosted`) consume these same PR artifacts
+<!-- Updated by plan-sync: fn-44.4 created two E2E jobs with tarball artifact download -->
 - [ ] Release workflow triggers on push to `rel/v*` branches
 - [ ] Release workflow publishes all assets to GitHub Releases
 - [ ] `curl ... | bash` install works for end users
