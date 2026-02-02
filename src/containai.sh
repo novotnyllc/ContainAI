@@ -3603,6 +3603,44 @@ _containai_docker_cmd() {
     DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
 }
 
+# ==============================================================================
+# ACP Proxy Entry Point
+# ==============================================================================
+
+# ACP proxy wrapper - launches native binary for ACP protocol handling
+# Arguments: $1 = agent name (default: claude)
+# Environment:
+#   CAI_ACP_TEST_MODE=1      Allow any agent name (for testing)
+#   CAI_ACP_DIRECT_SPAWN=1   Bypass containers, spawn agent directly (for testing)
+# Returns: exit code from proxy binary
+_containai_acp_proxy() {
+    local agent="${1:-claude}"
+
+    # Validate agent (or allow test mode)
+    if [[ "${CAI_ACP_TEST_MODE:-}" == "1" ]]; then
+        : # Allow any agent in test mode
+    else
+        case "$agent" in
+            claude|gemini) ;;
+            *)
+                printf '%s\n' "Unsupported agent: $agent" >&2
+                return 1
+                ;;
+        esac
+    fi
+
+    # Binary location: src/bin/acp-proxy (avoids conflict with src/acp-proxy/ source dir)
+    local proxy_bin="${_CAI_SCRIPT_DIR}/bin/acp-proxy"
+
+    # Must be a regular file and executable
+    if [[ ! -f "$proxy_bin" || ! -x "$proxy_bin" ]]; then
+        printf '%s\n' "ACP proxy binary not found at $proxy_bin. Run 'cai update' to install." >&2
+        return 1
+    fi
+
+    exec "$proxy_bin" "$agent"
+}
+
 # Shell subcommand handler - connects to container via SSH
 # Uses SSH instead of docker exec for real terminal experience
 _containai_shell_cmd() {
@@ -6750,6 +6788,14 @@ _containai_completion_cmd() {
 
 containai() {
     local subcommand="${1:-}"
+
+    # CRITICAL: --acp must be detected BEFORE update checks to avoid stdout pollution
+    # ACP protocol requires stdout purity - no diagnostic output allowed
+    if [[ "${subcommand:-}" == "--acp" ]]; then
+        shift
+        _containai_acp_proxy "$@"
+        return $?
+    fi
 
     # Reset verbose/quiet state at start of each invocation
     # This prevents state leaking between commands in sourced/dev mode

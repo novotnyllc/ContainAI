@@ -537,6 +537,11 @@ _cai_update_check_get_latest_version() {
 # Returns: 0 always (never blocks command execution)
 # Side effects: May print yellow warning if update available
 _cai_update_check() {
+    # Skip if explicitly disabled (used by ACP proxy for stdout purity)
+    if [[ "${CAI_NO_UPDATE_CHECK:-}" == "1" ]]; then
+        return 0
+    fi
+
     # Platform guard: skip on macOS (uses Lima VM)
     if _cai_is_macos; then
         return 0
