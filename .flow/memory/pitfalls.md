@@ -337,3 +337,6 @@ When testing import functions that read from $HOME (like _cai_import_git_config)
 
 ## 2026-02-02 manual [pitfall]
 Container restart doesn't trigger link-repair; use link-repair.sh --fix explicitly or update .containai-imported-at timestamp
+
+## 2026-02-02 manual [pitfall]
+DOCKER-USER chain ends with RETURN - appended rules never execute; must insert before RETURN position

@@ -9,6 +9,8 @@
 #   _cai_apply_network_rules()    - Apply iptables rules to block private ranges/metadata
 #   _cai_remove_network_rules()   - Remove iptables rules (for uninstall)
 #   _cai_check_network_rules()    - Check if rules are present (for doctor)
+#   _cai_is_nested_container()    - Check if running in a nested container environment
+#   _cai_nested_iptables_supported() - Check if iptables works in nested environment
 #
 # Network Policy:
 #   Allow:
@@ -25,10 +27,15 @@
 #   - DOCKER-USER is processed before Docker's own FORWARD rules
 #   - Rules are inserted with proper ordering: gateway ACCEPT first, then DROPs
 #   - Comment markers enable clean identification and removal
+#   - In nested containers (running inside a ContainAI sandbox):
+#     * Uses docker0 bridge instead of cai0
+#     * Dynamically detects gateway and subnet from inner Docker
+#     * Sysbox containers may have limited iptables access
+#     * runc containers with NET_ADMIN have full iptables support
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
-#   - Requires lib/platform.sh for _cai_is_container()
+#   - Requires lib/platform.sh for _cai_is_container(), _cai_is_sysbox_container()
 #   - Requires lib/docker.sh for bridge constants
 #
 # Usage: source lib/network.sh
@@ -71,6 +78,55 @@ _CAI_IPTABLES_COMMENT="containai-network-security"
 _CAI_IPTABLES_CHAIN="DOCKER-USER"
 
 # ==============================================================================
+# Nested Container Detection
+# ==============================================================================
+
+# Check if running in a nested container environment
+# A nested container is when ContainAI is running inside another container
+# (e.g., running cai inside a cai sandbox, or inside any Docker container)
+# Returns: 0=nested, 1=not nested (host environment)
+# Note: This is a more specific check than _cai_is_container() which just
+#       checks if we're in any container. This check is for network rule
+#       purposes where we need to know if we're targeting docker0 vs cai0.
+_cai_is_nested_container() {
+    _cai_is_container
+}
+
+# Check if iptables is functional in a nested container environment
+# Sysbox containers virtualize the kernel and may not support full iptables
+# runc containers with NET_ADMIN capability have full iptables support
+# Returns: 0=supported, 1=not supported
+# Outputs: Sets _CAI_NESTED_IPTABLES_STATUS with details
+_cai_nested_iptables_supported() {
+    _CAI_NESTED_IPTABLES_STATUS=""
+
+    # If not in a container, iptables should work normally (with root/sudo)
+    if ! _cai_is_container; then
+        _CAI_NESTED_IPTABLES_STATUS="host"
+        return 0
+    fi
+
+    # Check if we're in a Sysbox container
+    # Sysbox virtualizes the network namespace and iptables may not work
+    if _cai_is_sysbox_container; then
+        _CAI_NESTED_IPTABLES_STATUS="sysbox_limited"
+        # Sysbox provides network isolation at the outer level
+        # Inner iptables rules are typically not needed/functional
+        return 1
+    fi
+
+    # In a regular container (runc), check if we have NET_ADMIN capability
+    # NET_ADMIN is required for iptables manipulation
+    if ! _cai_iptables_can_run; then
+        _CAI_NESTED_IPTABLES_STATUS="no_net_admin"
+        return 1
+    fi
+
+    _CAI_NESTED_IPTABLES_STATUS="nested_supported"
+    return 0
+}
+
+# ==============================================================================
 # Network Configuration Detection
 # ==============================================================================
 
@@ -80,31 +136,65 @@ _CAI_IPTABLES_CHAIN="DOCKER-USER"
 # Note: Returns different values depending on environment:
 #   - Host (standard): cai0, 172.30.0.1, 172.30.0.0/16
 #   - Nested container: docker0 or detected bridge, detected gateway, detected subnet
+# Sets: _CAI_NETWORK_CONFIG_ENV with environment type ("host" or "nested")
 _cai_get_network_config() {
     local bridge_name gateway_ip subnet cidr_suffix
 
-    if _cai_is_container; then
+    if _cai_is_nested_container; then
+        _CAI_NETWORK_CONFIG_ENV="nested"
         # Nested container - detect inner Docker bridge configuration
         # Inner Docker uses docker0 or a custom bridge
+        #
+        # Detection strategy:
+        # 1. Try docker network inspect (most accurate when Docker is running)
+        # 2. Fall back to ip command (works even if Docker isn't running yet)
+        # 3. Use sensible defaults (docker0, 172.17.0.0/16)
+
+        # Try to get bridge name from Docker
         bridge_name=$(docker network inspect bridge -f '{{.Options.com.docker.network.bridge.name}}' 2>/dev/null) || bridge_name=""
         if [[ -z "$bridge_name" ]]; then
+            # Default inner Docker bridge name
             bridge_name="docker0"
         fi
 
         # Get gateway from Docker network inspect
         gateway_ip=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null) || gateway_ip=""
         if [[ -z "$gateway_ip" ]]; then
-            # Fallback: try to detect from bridge interface
+            # Fallback: try to detect from bridge interface using ip command
+            # This works even if Docker daemon isn't fully ready but bridge exists
             gateway_ip=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2}' | cut -d'/' -f1) || gateway_ip=""
+        fi
+        if [[ -z "$gateway_ip" ]]; then
+            # Last resort: try common docker0 default
+            # Docker typically uses 172.17.0.1 as gateway
+            gateway_ip="172.17.0.1"
+            _cai_debug "Using default gateway IP for nested container: $gateway_ip"
         fi
 
         # Get subnet from Docker network inspect
         subnet=$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null) || subnet=""
         if [[ -z "$subnet" ]]; then
-            # Fallback: common Docker default
+            # Fallback: try to derive from bridge interface
+            local cidr_addr
+            cidr_addr=$(ip -4 addr show dev "$bridge_name" 2>/dev/null | awk '/inet / {print $2}') || cidr_addr=""
+            if [[ -n "$cidr_addr" ]]; then
+                # Extract CIDR suffix and construct subnet
+                local detected_cidr="${cidr_addr##*/}"
+                local detected_ip="${cidr_addr%%/*}"
+                case "$detected_cidr" in
+                    16) subnet="${detected_ip%.*.*}.0.0/16" ;;
+                    24) subnet="${detected_ip%.*}.0/24" ;;
+                    *)  subnet="${detected_ip%.*.*}.0.0/16" ;;
+                esac
+            fi
+        fi
+        if [[ -z "$subnet" ]]; then
+            # Last resort: common Docker default
             subnet="172.17.0.0/16"
+            _cai_debug "Using default subnet for nested container: $subnet"
         fi
     else
+        _CAI_NETWORK_CONFIG_ENV="host"
         # Standard host - use ContainAI bridge constants
         bridge_name="${_CAI_CONTAINAI_DOCKER_BRIDGE:-cai0}"
 
@@ -145,7 +235,12 @@ _cai_get_network_config() {
 
     # Validate we have required values
     if [[ -z "$bridge_name" ]] || [[ -z "$gateway_ip" ]] || [[ -z "$subnet" ]]; then
-        _cai_error "Failed to detect network configuration"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+            _cai_error "Failed to detect network configuration in nested container"
+            _cai_error "  Is inner Docker running? Try: systemctl start docker"
+        else
+            _cai_error "Failed to detect network configuration"
+        fi
         return 1
     fi
 
@@ -306,10 +401,33 @@ _cai_ensure_rule_before_return() {
 #   $1 = dry_run flag ("true" for dry-run mode, default "false")
 # Returns: 0=success, 1=failure
 # Note: Requires root/sudo privileges unless running in a privileged container
+#       In nested Sysbox containers, iptables may not be fully functional
+#       In nested runc containers, requires CAP_NET_ADMIN capability
 _cai_apply_network_rules() {
     local dry_run="${1:-false}"
     local bridge_name gateway_ip subnet
     local config endpoint range
+
+    # Check if iptables is supported in nested environment
+    if _cai_is_nested_container; then
+        if ! _cai_nested_iptables_supported; then
+            case "${_CAI_NESTED_IPTABLES_STATUS:-}" in
+                sysbox_limited)
+                    _cai_warn "Skipping network rules: Sysbox container provides network isolation at outer level"
+                    _cai_info "  Inner iptables rules are not needed in Sysbox containers"
+                    return 0
+                    ;;
+                no_net_admin)
+                    _cai_error "Cannot apply network rules: missing CAP_NET_ADMIN capability"
+                    _cai_error "  Add --cap-add=NET_ADMIN when starting the container"
+                    return 1
+                    ;;
+                *)
+                    _cai_warn "Nested container iptables support unknown, attempting anyway"
+                    ;;
+            esac
+        fi
+    fi
 
     # Get network configuration
     if ! config=$(_cai_get_network_config); then
@@ -322,7 +440,13 @@ _cai_apply_network_rules() {
     gateway_ip="${config%% *}"
     subnet="${config#* }"
 
-    _cai_info "Applying network security rules for bridge: $bridge_name"
+    local env_label
+    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+        env_label="nested container"
+    else
+        env_label="host"
+    fi
+    _cai_info "Applying network security rules for bridge: $bridge_name ($env_label)"
 
     # Check iptables availability
     if ! _cai_iptables_available; then
@@ -331,7 +455,7 @@ _cai_apply_network_rules() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun "Would apply network security rules to bridge $bridge_name"
+        _cai_dryrun "Would apply network security rules to bridge $bridge_name ($env_label)"
         _cai_dryrun "  Chain: $_CAI_IPTABLES_CHAIN"
         _cai_dryrun "  Gateway allowed: $gateway_ip"
         _cai_dryrun "  Metadata blocked: $_CAI_METADATA_ENDPOINTS"
@@ -352,7 +476,12 @@ _cai_apply_network_rules() {
 
     # Check if bridge interface exists
     if ! ip link show "$bridge_name" >/dev/null 2>&1; then
-        _cai_warn "Bridge $bridge_name does not exist yet (will be created by Docker)"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+            _cai_warn "Bridge $bridge_name does not exist yet in nested container"
+            _cai_warn "  Ensure inner Docker is running: systemctl start docker"
+        else
+            _cai_warn "Bridge $bridge_name does not exist yet (will be created by Docker)"
+        fi
         _cai_warn "Rules will be applied when bridge is available"
         # Don't fail - bridge may not exist until first container starts
         return 0
@@ -413,11 +542,28 @@ _cai_apply_network_rules() {
 # Arguments:
 #   $1 = dry_run flag ("true" for dry-run mode, default "false")
 # Returns: 0=success, 1=failure
+# Note: In Sysbox containers where rules were skipped, this is a no-op
 _cai_remove_network_rules() {
     local dry_run="${1:-false}"
     local bridge_name gateway_ip subnet
     local config endpoint range
     local had_rules=false
+
+    # Check if iptables is supported in nested environment
+    if _cai_is_nested_container; then
+        if ! _cai_nested_iptables_supported; then
+            case "${_CAI_NESTED_IPTABLES_STATUS:-}" in
+                sysbox_limited)
+                    _cai_info "Skipping rule removal: Sysbox container (no rules applied)"
+                    return 0
+                    ;;
+                no_net_admin)
+                    _cai_error "Cannot remove network rules: missing CAP_NET_ADMIN capability"
+                    return 1
+                    ;;
+            esac
+        fi
+    fi
 
     # Get network configuration
     if ! config=$(_cai_get_network_config); then
@@ -430,7 +576,13 @@ _cai_remove_network_rules() {
     gateway_ip="${config%% *}"
     subnet="${config#* }"
 
-    _cai_info "Removing network security rules from bridge: $bridge_name"
+    local env_label
+    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+        env_label="nested container"
+    else
+        env_label="host"
+    fi
+    _cai_info "Removing network security rules from bridge: $bridge_name ($env_label)"
 
     # Check iptables availability
     if ! _cai_iptables_available; then
@@ -439,7 +591,7 @@ _cai_remove_network_rules() {
     fi
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun "Would remove network security rules from bridge $bridge_name"
+        _cai_dryrun "Would remove network security rules from bridge $bridge_name ($env_label)"
         return 0
     fi
 
@@ -615,12 +767,30 @@ _cai_check_network_rules() {
 }
 
 # Get a summary of network security status for doctor output
-# Returns: status string ("ok", "missing", "partial", "error") via stdout
+# Returns: status string ("ok", "missing", "partial", "error", "skipped") via stdout
 # Outputs: Sets _CAI_NETWORK_DOCTOR_DETAIL with human-readable detail
 _cai_network_doctor_status() {
-    local config bridge_name
+    local config bridge_name env_label
 
     _CAI_NETWORK_DOCTOR_DETAIL=""
+
+    # Check nested container iptables support first
+    if _cai_is_nested_container; then
+        if ! _cai_nested_iptables_supported; then
+            case "${_CAI_NESTED_IPTABLES_STATUS:-}" in
+                sysbox_limited)
+                    _CAI_NETWORK_DOCTOR_DETAIL="Sysbox container (network isolation at outer level)"
+                    printf '%s' "skipped"
+                    return 0
+                    ;;
+                no_net_admin)
+                    _CAI_NETWORK_DOCTOR_DETAIL="Nested container missing CAP_NET_ADMIN"
+                    printf '%s' "error"
+                    return 0
+                    ;;
+            esac
+        fi
+    fi
 
     # Get network configuration
     if ! config=$(_cai_get_network_config 2>/dev/null); then
@@ -630,6 +800,11 @@ _cai_network_doctor_status() {
     fi
 
     bridge_name="${config%% *}"
+    if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+        env_label=" (nested)"
+    else
+        env_label=""
+    fi
 
     # Check iptables
     if ! _cai_iptables_available; then
@@ -646,27 +821,31 @@ _cai_network_doctor_status() {
 
     # Check if bridge exists
     if ! ip link show "$bridge_name" >/dev/null 2>&1; then
-        _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
+        if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "nested" ]]; then
+            _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (inner Docker not running?)"
+        else
+            _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
+        fi
         printf '%s' "missing"
         return 0
     fi
 
     # Check rules
     if _cai_check_network_rules "false"; then
-        _CAI_NETWORK_DOCTOR_DETAIL="All rules present on $bridge_name"
+        _CAI_NETWORK_DOCTOR_DETAIL="All rules present on $bridge_name${env_label}"
         printf '%s' "ok"
     else
         case "${_CAI_NETWORK_RULES_STATUS:-}" in
             partial)
-                _CAI_NETWORK_DOCTOR_DETAIL="Some rules missing on $bridge_name (run cai setup to fix)"
+                _CAI_NETWORK_DOCTOR_DETAIL="Some rules missing on $bridge_name${env_label} (run cai setup to fix)"
                 printf '%s' "partial"
                 ;;
             none | no_chain)
-                _CAI_NETWORK_DOCTOR_DETAIL="No rules on $bridge_name (run cai setup)"
+                _CAI_NETWORK_DOCTOR_DETAIL="No rules on $bridge_name${env_label} (run cai setup)"
                 printf '%s' "missing"
                 ;;
             *)
-                _CAI_NETWORK_DOCTOR_DETAIL="Unknown status on $bridge_name"
+                _CAI_NETWORK_DOCTOR_DETAIL="Unknown status on $bridge_name${env_label}"
                 printf '%s' "error"
                 ;;
         esac
