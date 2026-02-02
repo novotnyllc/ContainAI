@@ -254,6 +254,11 @@ Container Lifecycle:
   Agent sessions attach via docker exec. Container stays running between sessions.
   Same workspace path always maps to same container (deterministic naming via hash).
 
+Editor Integration:
+  --acp <agent>         Start ACP proxy for editor integration
+                        Agents: claude, gemini
+                        Example: cai --acp claude
+
 Global Options:
   -h, --help            Show help (use with subcommand for subcommand help)
 
