@@ -2097,14 +2097,12 @@ _cai_refresh() {
         esac
     done
 
-    # Get channel-aware base image
-    local base_image
-    base_image=$(_cai_base_image)
-
-    # Determine channel for display
-    local channel="stable"
-    if [[ "$base_image" == *":nightly"* ]]; then
-        channel="nightly"
+    # Parse config first to get channel setting (before computing base_image)
+    # This ensures _CAI_IMAGE_CHANNEL is set from user config
+    local config_file
+    config_file=$(_containai_find_config "$PWD" 2>/dev/null) || config_file=""
+    if [[ -n "$config_file" ]]; then
+        _containai_parse_config "$config_file" "$PWD" "" 2>/dev/null || true
     fi
 
     # Select Docker context (same logic as container creation)
@@ -2117,9 +2115,19 @@ _cai_refresh() {
         return 1
     fi
 
-    _cai_notice "Refreshing ContainAI base image..."
-    printf '%s\n' "         Channel: $channel" >&2
-    printf '%s\n' "         Pulling: $base_image" >&2
+    # Get channel-aware base image (after config parsing so _CAI_IMAGE_CHANNEL is set)
+    local base_image
+    base_image=$(_cai_base_image)
+
+    # Determine channel for display
+    local channel="stable"
+    if [[ "$base_image" == *":nightly"* ]]; then
+        channel="nightly"
+    fi
+
+    printf '%s\n' "[INFO] Refreshing ContainAI base image..." >&2
+    printf '%s\n' "       Channel: $channel" >&2
+    printf '%s\n' "       Pulling: $base_image" >&2
 
     # Get local version before pull (for before/after display)
     local local_version_before=""
@@ -2165,8 +2173,8 @@ _cai_refresh() {
     if [[ "$rebuild_flag" == "true" ]]; then
         # Check if default template exists
         if [[ ! -f "$default_template_path" ]]; then
-            _cai_notice "No default template found at $default_template_path"
-            printf '%s\n' "         Skipping template rebuild." >&2
+            printf '%s\n' "[INFO] No default template found at $default_template_path" >&2
+            printf '%s\n' "       Skipping template rebuild." >&2
         else
             # Check for hardcoded FROM (suggest upgrade)
             if _cai_refresh_template_has_hardcoded_base "$default_template_path"; then
@@ -2176,7 +2184,7 @@ _cai_refresh() {
 
             # Rebuild default template (don't suppress base-image validation warnings)
             printf '\n' >&2
-            _cai_notice "Rebuilding default template..."
+            printf '%s\n' "[INFO] Rebuilding default template..." >&2
             local template_image
             if template_image=$(_cai_build_template "default" "$selected_context" "false" "false"); then
                 printf '%s\n' "[OK] Template rebuilt: $template_image" >&2
@@ -2189,7 +2197,7 @@ _cai_refresh() {
         # Without --rebuild, remind user if template exists (always visible)
         if [[ -f "$default_template_path" ]]; then
             printf '\n' >&2
-            _cai_notice "Template image may need rebuild. Run 'cai --refresh --rebuild' to update."
+            printf '%s\n' "[INFO] Template image may need rebuild. Run 'cai --refresh --rebuild' to update." >&2
         fi
     fi
 

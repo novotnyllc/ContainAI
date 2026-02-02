@@ -5793,8 +5793,8 @@ _cai_completions() {
     # Subcommands
     local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config update refresh uninstall completion help version"
 
-    # Global flags
-    local global_flags="-h --help"
+    # Global flags (--refresh is an alias for the refresh subcommand)
+    local global_flags="-h --help --refresh"
 
     # Per-subcommand flags
     local run_flags="--data-volume --config -w --workspace --container --template --image-tag --memory --cpus --fresh --restart --reset --force --detached -d --quiet -q --verbose --debug -D --dry-run -e --env --credentials --acknowledge-credential-risk --mount-docker-socket --please-root-my-host --allow-host-credentials --i-understand-this-exposes-host-credentials --allow-host-docker-socket --i-understand-this-grants-root-access -h --help"
@@ -5823,10 +5823,17 @@ _cai_completions() {
     local completion_shells="bash zsh"
 
     # Find the subcommand (first non-flag argument after cai/containai)
+    # Also detect --refresh as an alias for refresh subcommand
     local subcmd=""
     local subcmd_idx=0
     local i
     for ((i=1; i < cword; i++)); do
+        # Check for --refresh alias first
+        if [[ "${words[i]}" == "--refresh" ]]; then
+            subcmd="refresh"
+            subcmd_idx=$i
+            break
+        fi
         if [[ "${words[i]}" != -* ]]; then
             subcmd="${words[i]}"
             subcmd_idx=$i
@@ -6152,6 +6159,7 @@ _cai() {
 
     _arguments -C \
         '(-h --help)'{-h,--help}'[Show help]' \
+        '--refresh[Pull latest base image (alias for refresh subcommand)]' \
         '1: :->command' \
         '*:: :->args'
 
@@ -6161,7 +6169,12 @@ _cai() {
             ;;
         args)
             # After _arguments -C with '*:: :->args', $line[1] contains the subcommand
-            case $line[1] in
+            # Handle --refresh as alias for refresh
+            local effective_subcmd="$line[1]"
+            if [[ "$effective_subcmd" == "--refresh" ]]; then
+                effective_subcmd="refresh"
+            fi
+            case $effective_subcmd in
                 run)
                     _arguments \
                         '--data-volume[Data volume name]:volume:->volumes' \
