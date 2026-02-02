@@ -382,3 +382,6 @@ When waiting for async responses via TaskCompletionSource, register the TCS BEFO
 
 ## 2026-02-02 manual [pitfall]
 JsonNode.ToString() returns JSON-encoded strings (with quotes); use TryGetValue<string>() to get raw string values for dictionary keys
+
+## 2026-02-02 manual [pitfall]
+buildx --output can be type=registry (like --push) or type=local/tar (no chaining); detect type explicitly
