@@ -456,26 +456,29 @@ _cai_uninstall_network_rules() {
         return 0
     fi
 
-    # Pre-check iptables availability to avoid unnecessary warnings
-    # If iptables isn't installed, rules were never applied
-    if ! command -v iptables >/dev/null 2>&1; then
-        _cai_debug "iptables not installed - no rules to remove"
+    # Pre-check iptables availability using platform-aware function
+    # On macOS, this checks inside the Lima VM; on Linux, on the host
+    # If iptables isn't available, rules were never applied
+    if ! _cai_iptables_available; then
+        _cai_debug "iptables not available - no rules to remove"
         return 0
     fi
 
     _cai_step "Removing network security rules"
 
     # Prime sudo credentials if needed (interactive) for iptables access
-    # _cai_iptables uses sudo -n (non-interactive) which fails without cached creds
-    # This ensures we can remove rules when running as non-root user
-    if [[ "$dry_run" != "true" ]] && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-        if [[ -t 0 ]] && command -v sudo >/dev/null 2>&1; then
-            # Check if sudo credentials are already cached (non-interactive probe)
-            if ! sudo -n true 2>/dev/null; then
-                # Credentials not cached - prompt user with visible password request
-                _cai_info "Sudo required to remove iptables rules"
-                if ! sudo -v; then
-                    _cai_warn "Could not obtain sudo credentials for iptables access"
+    # Only needed on Linux/WSL where host sudo is used
+    # On macOS, _cai_iptables uses limactl shell with sudo inside the VM
+    if [[ "$dry_run" != "true" ]] && ! _cai_is_macos; then
+        if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+            if [[ -t 0 ]] && command -v sudo >/dev/null 2>&1; then
+                # Check if sudo credentials are already cached (non-interactive probe)
+                if ! sudo -n true 2>/dev/null; then
+                    # Credentials not cached - prompt user with visible password request
+                    _cai_info "Sudo required to remove iptables rules"
+                    if ! sudo -v; then
+                        _cai_warn "Could not obtain sudo credentials for iptables access"
+                    fi
                 fi
             fi
         fi

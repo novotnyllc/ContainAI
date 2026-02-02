@@ -1200,10 +1200,25 @@ _cai_doctor() {
                     printf '  %-44s %s\n' "Recommended:" "Start containai-docker service"
                 fi
                 ;;
-            rules_missing | error)
-                # Rules missing or error - this is a real problem
+            rules_missing)
+                # Rules missing - need to run setup
                 printf '  %-44s %s\n' "Network Security:" "[ERROR] Not configured"
                 printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
+                ;;
+            error)
+                # Error can mean different things - check detail for appropriate recommendation
+                local detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                printf '  %-44s %s\n' "Network Security:" "[ERROR] ${detail:-Check failed}"
+                # Provide platform-appropriate recommendation based on the error detail
+                if [[ "$detail" == *"Lima VM not running"* ]]; then
+                    printf '  %-44s %s\n' "Recommended:" "Start Lima VM: limactl start containai-docker"
+                elif [[ "$detail" == *"iptables not installed"* ]]; then
+                    printf '  %-44s %s\n' "Recommended:" "Install iptables package"
+                elif [[ "$detail" == *"CAP_NET_ADMIN"* ]]; then
+                    printf '  %-44s %s\n' "Recommended:" "Run container with --cap-add=NET_ADMIN"
+                else
+                    printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
+                fi
                 ;;
             partial)
                 printf '  %-44s %s\n' "Network Security:" "[ERROR] Incomplete"
