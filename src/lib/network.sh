@@ -355,14 +355,8 @@ _cai_rule_before_return() {
     local rule_pos=0
     local line_num=0
     local line
-    local rule_pattern=""
     local arg
-
-    # Build a pattern to match this rule in iptables -S output
-    # We need to match the key parts: -i bridge -d dest -j ACTION
-    for arg in "$@"; do
-        rule_pattern="$rule_pattern.*$arg"
-    done
+    local match
 
     # Find positions of our rule and RETURN
     while IFS= read -r line; do
@@ -372,9 +366,20 @@ _cai_rule_before_return() {
                 return_pos=$line_num
                 ;;
         esac
-        # Check if this line matches our rule pattern
-        if [[ "$line" =~ $_CAI_IPTABLES_COMMENT ]] && [[ "$line" =~ $rule_pattern ]]; then
-            rule_pos=$line_num
+        # Check if this line matches our rule using exact string matching
+        # Line must contain our comment AND all specified arguments
+        if [[ "$line" == *"$_CAI_IPTABLES_COMMENT"* ]]; then
+            match=true
+            for arg in "$@"; do
+                # Use exact substring match (not regex) to avoid metachar issues
+                if [[ "$line" != *"$arg"* ]]; then
+                    match=false
+                    break
+                fi
+            done
+            if [[ "$match" == "true" ]]; then
+                rule_pos=$line_num
+            fi
         fi
     done < <(_cai_iptables -S "$_CAI_IPTABLES_CHAIN" 2>/dev/null | tail -n +2)
 

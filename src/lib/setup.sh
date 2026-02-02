@@ -3421,8 +3421,51 @@ _cai_spacing
                 return 1
             }
 
-            # Insert rule before RETURN (or append if no RETURN)
-            insert_rule_before_return() {
+            # Check if rule exists and is positioned before RETURN
+            # Returns 0 if rule is in valid position, 1 otherwise
+            rule_before_return() {
+                local rule_args="$*"
+                local return_pos=0 rule_pos=0 line_num=0
+                while IFS= read -r line; do
+                    line_num=$((line_num + 1))
+                    case "$line" in
+                        *" -j RETURN"*) return_pos=$line_num ;;
+                    esac
+                    # Check if line contains our comment and matches args
+                    if echo "$line" | grep -q "$IPTABLES_COMMENT"; then
+                        # Simple substring check for key args
+                        local match=true
+                        for arg in $rule_args; do
+                            if ! echo "$line" | grep -qF "$arg"; then
+                                match=false
+                                break
+                            fi
+                        done
+                        if [ "$match" = "true" ]; then
+                            rule_pos=$line_num
+                        fi
+                    fi
+                done < <(iptables -S "$CHAIN" 2>/dev/null | tail -n +2)
+                # Rule must exist and be before RETURN (or no RETURN)
+                if [ "$rule_pos" -gt 0 ]; then
+                    if [ "$return_pos" -eq 0 ] || [ "$rule_pos" -lt "$return_pos" ]; then
+                        return 0
+                    fi
+                fi
+                return 1
+            }
+
+            # Ensure rule exists before RETURN (delete and reinsert if needed)
+            ensure_rule_before_return() {
+                # Check if already in valid position
+                if rule_before_return "$@"; then
+                    return 0
+                fi
+                # Delete existing copies (may be after RETURN from prior bug)
+                while iptables -C "$CHAIN" "$@" 2>/dev/null; do
+                    iptables -D "$CHAIN" "$@" 2>/dev/null || break
+                done
+                # Insert before RETURN
                 local return_pos
                 if return_pos=$(find_return_position); then
                     iptables -I "$CHAIN" "$return_pos" "$@"
@@ -3437,20 +3480,16 @@ _cai_spacing
                 echo "[OK] Added gateway allow rule: $GATEWAY_IP"
             fi
 
-            # Block metadata endpoints (insert before RETURN)
+            # Block metadata endpoints (ensure before RETURN - handles upgrades)
             for endpoint in $METADATA_ENDPOINTS; do
-                if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
-                    insert_rule_before_return -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT"
-                    echo "[OK] Added metadata block rule: $endpoint"
-                fi
+                ensure_rule_before_return -i "$BRIDGE" -d "$endpoint" -j DROP -m comment --comment "$IPTABLES_COMMENT"
+                echo "[OK] Ensured metadata block rule: $endpoint"
             done
 
-            # Block private ranges (insert before RETURN)
+            # Block private ranges (ensure before RETURN - handles upgrades)
             for range in $PRIVATE_RANGES; do
-                if ! iptables -C "$CHAIN" -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT" 2>/dev/null; then
-                    insert_rule_before_return -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT"
-                    echo "[OK] Added private range block rule: $range"
-                fi
+                ensure_rule_before_return -i "$BRIDGE" -d "$range" -j DROP -m comment --comment "$IPTABLES_COMMENT"
+                echo "[OK] Ensured private range block rule: $range"
             done
 
             echo "[OK] Network security rules applied"
