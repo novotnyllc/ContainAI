@@ -1,0 +1,20 @@
+{
+  "branch_name": "fn-45-comprehensive-documentation-overhaul",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-02-02T15:57:50.633911Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [
+    "fn-46-cli-ux-audit-and-simplification"
+  ],
+  "id": "fn-45-comprehensive-documentation-overhaul",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-45-comprehensive-documentation-overhaul.md",
+  "status": "open",
+  "title": "Comprehensive Documentation Overhaul",
+  "updated_at": "2026-02-02T16:59:29.259310Z"
+}

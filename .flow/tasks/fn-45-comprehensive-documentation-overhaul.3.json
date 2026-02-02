@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T15:58:23.613294Z",
+  "depends_on": [
+    "fn-45-comprehensive-documentation-overhaul.1"
+  ],
+  "epic": "fn-45-comprehensive-documentation-overhaul",
+  "id": "fn-45-comprehensive-documentation-overhaul.3",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.3.md",
+  "status": "todo",
+  "title": "Create persona-based landing pages",
+  "updated_at": "2026-02-02T15:59:21.478878Z"
+}

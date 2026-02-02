@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T15:58:16.024785Z",
+  "depends_on": [],
+  "epic": "fn-45-comprehensive-documentation-overhaul",
+  "id": "fn-45-comprehensive-documentation-overhaul.1",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.1.md",
+  "status": "todo",
+  "title": "README value proposition overhaul",
+  "updated_at": "2026-02-02T15:58:47.265252Z"
+}

@@ -1,0 +1,18 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T16:55:35.948713Z",
+  "depends_on": [
+    "fn-46-cli-ux-audit-and-simplification.1",
+    "fn-46-cli-ux-audit-and-simplification.2",
+    "fn-46-cli-ux-audit-and-simplification.3"
+  ],
+  "epic": "fn-46-cli-ux-audit-and-simplification",
+  "id": "fn-46-cli-ux-audit-and-simplification.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-46-cli-ux-audit-and-simplification.4.md",
+  "status": "todo",
+  "title": "Produce prioritized recommendations document",
+  "updated_at": "2026-02-02T16:56:29.318735Z"
+}

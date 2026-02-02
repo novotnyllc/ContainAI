@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-46-cli-ux-audit-and-simplification",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-02-02T16:55:03.938120Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-46-cli-ux-audit-and-simplification",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-46-cli-ux-audit-and-simplification.md",
+  "status": "open",
+  "title": "CLI UX Audit and Simplification Recommendations",
+  "updated_at": "2026-02-02T16:55:29.111214Z"
+}

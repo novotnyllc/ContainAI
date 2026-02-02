@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T15:58:23.855867Z",
+  "depends_on": [
+    "fn-45-comprehensive-documentation-overhaul.2"
+  ],
+  "epic": "fn-45-comprehensive-documentation-overhaul",
+  "id": "fn-45-comprehensive-documentation-overhaul.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.6.md",
+  "status": "todo",
+  "title": "Document recent CLI and security changes",
+  "updated_at": "2026-02-02T16:00:01.242242Z"
+}
