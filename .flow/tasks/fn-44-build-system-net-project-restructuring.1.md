@@ -67,9 +67,42 @@ Fix the Docker build to use correct default image prefix (ghcr.io), consistent l
 - [ ] Existing tests pass (`tests/integration/test-secure-engine.sh`)
 
 ## Done summary
-TBD
+## Summary
 
+Fixed Docker build image prefix and local fallback for ContainAI build system.
+
+### Changes Made
+
+**1. Default Image Prefix (src/build.sh)**
+- Changed default `IMAGE_PREFIX` from `containai` to `ghcr.io/novotnyllc/containai`
+- Updated help text to show new default prefix
+
+**2. Layer Naming (src/build.sh)**
+- Renamed `IMAGE_FULL` variable to `IMAGE_AGENTS`
+- Updated `--layer` flag validation to accept `agents` instead of `full`
+- Updated help text to show `--layer base|sdks|agents|all`
+- Updated build order text from "full" to "agents"
+- Added helpful error message when `--layer full` is used: "Layer 'full' has been renamed to 'agents'. Use: --layer agents"
+
+**3. Conditional Build-arg Passing (src/build.sh)**
+- Added `local_image_exists()` helper function to check if image exists in current Docker context
+- `--layer sdks`: Only passes `--build-arg BASE_IMAGE=...` when local base image exists
+- `--layer agents`: Only passes `--build-arg SDKS_IMAGE=...` when local sdks image exists
+- `--layer all`: Conditionally passes all build-args (BASE_IMAGE, SDKS_IMAGE, AGENTS_IMAGE) based on local image availability
+- Shows `[INFO]` messages indicating which path was taken (local/Dockerfile default)
+
+**4. Digest Comparison for cai refresh (src/lib/update.sh)**
+- Modified `_cai_refresh()` to compare local and remote digests before pulling
+- Uses `_cai_local_image_digest()` to get local image digest
+- Uses `_cai_ghcr_manifest_digest()` to get remote registry digest
+- Skips pull and shows "Already up-to-date" when digests match
+- Shows verbose debug info with `--verbose` flag
+- Falls back to pull if digest comparison fails (network issues, auth issues)
+
+### Files Modified
+- `src/build.sh` - Build script with all layer and image prefix changes
+- `src/lib/update.sh` - Refresh function with digest comparison logic
 ## Evidence
 - Commits:
-- Tests:
+- Tests: shellcheck -x src/build.sh, shellcheck -x src/lib/update.sh, bash -n src/build.sh, bash -n src/lib/update.sh, ./src/build.sh --help (verified output), ./src/build.sh --layer full (verified error message)
 - PRs:

@@ -2235,37 +2235,98 @@ _cai_refresh() {
 
     printf '%s\n' "[INFO] Refreshing ContainAI base image..." >&2
     printf '%s\n' "       Channel: $channel" >&2
-    printf '%s\n' "       Pulling: $base_image" >&2
-
-    # Get local version before pull (for before/after display)
-    local local_version_before=""
-    local_version_before=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version_before=""
+    printf '%s\n' "       Image: $base_image" >&2
 
     # Build docker command with context
     local -a docker_cmd=(docker --context "$selected_context")
 
-    # Pull the base image (explicit action, fail loudly on network error)
-    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" pull "$base_image"; then
-        _cai_error "Failed to pull base image: $base_image"
-        _cai_error "Check network connectivity and try again."
-        return 1
+    # Get local digest for comparison
+    local local_digest=""
+    local local_version=""
+    local_digest=$(_cai_local_image_digest "$base_image" "$selected_context" 2>/dev/null) || local_digest=""
+    local_version=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version=""
+
+    # If we have a local image, check remote digest before pulling
+    local need_pull=1
+    if [[ -n "$local_digest" ]]; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Local image digest: ${local_digest:0:19}..."
+        fi
+
+        # Extract image name and tag for registry API
+        local image_name image_tag
+        image_name="${base_image%:*}"           # ghcr.io/novotnyllc/containai
+        image_name="${image_name#ghcr.io/}"     # novotnyllc/containai
+        image_tag="${base_image##*:}"           # latest or nightly
+
+        # Get auth token for GHCR
+        local token=""
+        token=$(_cai_ghcr_token "$image_name" 2>/dev/null) || token=""
+
+        if [[ -n "$token" ]]; then
+            # Get remote manifest digest
+            local remote_digest=""
+            remote_digest=$(_cai_ghcr_manifest_digest "$image_name" "$image_tag" "$token" 2>/dev/null) || remote_digest=""
+
+            if [[ -n "$remote_digest" ]]; then
+                if [[ "$verbose" == "true" ]]; then
+                    _cai_info "Remote image digest: ${remote_digest:0:19}..."
+                fi
+
+                if [[ "$local_digest" == "$remote_digest" ]]; then
+                    need_pull=0
+                    printf '%s\n' "[OK] Already up-to-date: $base_image" >&2
+                    if [[ -n "$local_version" ]]; then
+                        printf '%s\n' "     Version: $local_version" >&2
+                    fi
+                else
+                    if [[ "$verbose" == "true" ]]; then
+                        _cai_info "Digests differ, will pull update"
+                    fi
+                fi
+            else
+                if [[ "$verbose" == "true" ]]; then
+                    _cai_info "Could not fetch remote digest, will pull to check"
+                fi
+            fi
+        else
+            if [[ "$verbose" == "true" ]]; then
+                _cai_info "Could not get registry token, will pull to check"
+            fi
+        fi
+    else
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "No local image found, will pull"
+        fi
     fi
 
-    # Get local version after pull
-    local local_version_after=""
-    local_version_after=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version_after=""
+    # Pull if needed
+    if [[ "$need_pull" -eq 1 ]]; then
+        printf '%s\n' "       Pulling: $base_image" >&2
 
-    # Show before/after version (always visible, not verbose-gated)
-    if [[ -n "$local_version_before" ]] && [[ -n "$local_version_after" ]]; then
-        if [[ "$local_version_before" == "$local_version_after" ]]; then
-            printf '%s\n' "[OK] Already at latest: $local_version_after" >&2
-        else
-            printf '%s\n' "[OK] Updated from $local_version_before to $local_version_after" >&2
+        # Pull the base image (explicit action, fail loudly on network error)
+        if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" pull "$base_image"; then
+            _cai_error "Failed to pull base image: $base_image"
+            _cai_error "Check network connectivity and try again."
+            return 1
         fi
-    elif [[ -n "$local_version_after" ]]; then
-        printf '%s\n' "[OK] Pulled version: $local_version_after" >&2
-    else
-        printf '%s\n' "[OK] Base image pulled successfully" >&2
+
+        # Get new version after pull
+        local new_version=""
+        new_version=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || new_version=""
+
+        # Show before/after version (always visible, not verbose-gated)
+        if [[ -n "$local_version" ]] && [[ -n "$new_version" ]]; then
+            if [[ "$local_version" == "$new_version" ]]; then
+                printf '%s\n' "[OK] Already at latest: $new_version" >&2
+            else
+                printf '%s\n' "[OK] Updated from $local_version to $new_version" >&2
+            fi
+        elif [[ -n "$new_version" ]]; then
+            printf '%s\n' "[OK] Pulled version: $new_version" >&2
+        else
+            printf '%s\n' "[OK] Base image pulled successfully" >&2
+        fi
     fi
 
     # Clear registry cache for this image

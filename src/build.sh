@@ -6,8 +6,8 @@ set -euo pipefail
 # ==============================================================================
 # Usage: ./build.sh [options] [docker buildx options]
 #   --dotnet-channel CHANNEL  .NET SDK channel (default: 10.0)
-#   --layer LAYER             Build only specific layer (base|sdks|full|all)
-#   --image-prefix PREFIX     Image name prefix (default: containai)
+#   --layer LAYER             Build only specific layer (base|sdks|agents|all)
+#   --image-prefix PREFIX     Image name prefix (default: ghcr.io/novotnyllc/containai)
 #   --platforms PLATFORMS     Build with buildx for platforms (e.g., linux/amd64,linux/arm64)
 #   --builder NAME            Use a specific buildx builder
 #   --build-setup             Configure buildx builder + binfmt if required
@@ -18,7 +18,7 @@ set -euo pipefail
 #
 # Defaults: buildx is preferred; platform defaults to linux/<host-arch>
 #
-# Build order: base -> sdks -> full -> containai (alias)
+# Build order: base -> sdks -> agents -> containai (alias)
 #
 # Examples:
 #   ./build.sh                          # Build all layers
@@ -36,7 +36,7 @@ DATE_TAG="$(date +%Y-%m-%d)"
 # Defaults
 DOTNET_CHANNEL="10.0"
 BUILD_LAYER="all"
-IMAGE_PREFIX="containai"
+IMAGE_PREFIX="ghcr.io/novotnyllc/containai"
 PLATFORMS=""
 BUILDX_BUILDER=""
 BUILDX_PUSH=0
@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --layer)
             if [[ -z "${2-}" ]]; then
-                echo "ERROR: --layer requires a value (base|sdks|full|all)" >&2
+                echo "ERROR: --layer requires a value (base|sdks|agents|all)" >&2
                 exit 1
             fi
             BUILD_LAYER="$2"
@@ -297,7 +297,7 @@ buildx_check_platforms() {
 IMAGE_PREFIX="$(normalize_image_prefix "$IMAGE_PREFIX")" || exit 1
 IMAGE_BASE="${IMAGE_PREFIX}/base"
 IMAGE_SDKS="${IMAGE_PREFIX}/sdks"
-IMAGE_FULL="${IMAGE_PREFIX}/full"
+IMAGE_AGENTS="${IMAGE_PREFIX}/agents"
 IMAGE_MAIN="${IMAGE_PREFIX}"
 
 if [[ "$USE_BUILDX" -eq 1 ]]; then
@@ -370,6 +370,13 @@ fi
 # Generate OCI label values
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+
+# Helper to check if a local image exists in current Docker context
+# Returns 0 if exists, 1 otherwise
+local_image_exists() {
+    local image="$1"
+    "${DOCKER_CMD[@]}" image inspect "$image" >/dev/null 2>&1
+}
 
 # ==============================================================================
 # Run manifest-driven generators for full/all layer builds
@@ -473,27 +480,59 @@ case "$BUILD_LAYER" in
         build_layer "base" "Dockerfile.base"
         ;;
     sdks)
-        build_layer "sdks" "Dockerfile.sdks" \
-            --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
-            --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
+        sdks_args=(--build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL")
+        if local_image_exists "${IMAGE_BASE}:latest"; then
+            printf '[INFO] Using local base image: %s\n' "${IMAGE_BASE}:latest"
+            sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
+        else
+            printf '[INFO] No local base image found, using Dockerfile default\n'
+        fi
+        build_layer "sdks" "Dockerfile.sdks" "${sdks_args[@]}"
+        ;;
+    agents)
+        generate_container_files || exit 1
+        agents_args=()
+        if local_image_exists "${IMAGE_SDKS}:latest"; then
+            printf '[INFO] Using local sdks image: %s\n' "${IMAGE_SDKS}:latest"
+            agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
+        else
+            printf '[INFO] No local sdks image found, using Dockerfile default\n'
+        fi
+        build_layer "agents" "Dockerfile.agents" ${agents_args[@]+"${agents_args[@]}"}
         ;;
     full)
-        generate_container_files || exit 1
-        build_layer "full" "Dockerfile.agents" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
+        echo "ERROR: Layer 'full' has been renamed to 'agents'. Use: --layer agents" >&2
+        exit 1
         ;;
     all)
         echo "Building all ContainAI layers..."
         echo "  .NET channel: $DOTNET_CHANNEL"
 
-        # Generate container files from manifest before full layer
+        # Generate container files from manifest before agents layer
         generate_container_files || exit 1
 
         # Build in dependency order
         build_layer "base" "Dockerfile.base"
-        build_layer "sdks" "Dockerfile.sdks" \
-            --build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL" \
-            --build-arg BASE_IMAGE="${IMAGE_BASE}:latest"
-        build_layer "full" "Dockerfile.agents" --build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest"
+
+        # sdks layer: conditionally pass BASE_IMAGE if local base exists
+        all_sdks_args=(--build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL")
+        if local_image_exists "${IMAGE_BASE}:latest"; then
+            printf '[INFO] Using local base image: %s\n' "${IMAGE_BASE}:latest"
+            all_sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
+        else
+            printf '[INFO] No local base image found, using Dockerfile default\n'
+        fi
+        build_layer "sdks" "Dockerfile.sdks" "${all_sdks_args[@]}"
+
+        # agents layer: conditionally pass SDKS_IMAGE if local sdks exists
+        all_agents_args=()
+        if local_image_exists "${IMAGE_SDKS}:latest"; then
+            printf '[INFO] Using local sdks image: %s\n' "${IMAGE_SDKS}:latest"
+            all_agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
+        else
+            printf '[INFO] No local sdks image found, using Dockerfile default\n'
+        fi
+        build_layer "agents" "Dockerfile.agents" ${all_agents_args[@]+"${all_agents_args[@]}"}
 
         # Build final alias image
         echo ""
@@ -514,19 +553,27 @@ case "$BUILD_LAYER" in
                 final_cmd+=(--load)
             fi
         fi
+        # Conditionally pass AGENTS_IMAGE if local agents exists
+        final_args=()
+        if local_image_exists "${IMAGE_AGENTS}:latest"; then
+            printf '[INFO] Using local agents image: %s\n' "${IMAGE_AGENTS}:latest"
+            final_args+=(--build-arg AGENTS_IMAGE="${IMAGE_AGENTS}:latest")
+        else
+            printf '[INFO] No local agents image found, using Dockerfile default\n'
+        fi
         "${final_cmd[@]}" \
             -t "${IMAGE_MAIN}:latest" \
             -t "${IMAGE_MAIN}:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
-            --build-arg AGENTS_IMAGE="${IMAGE_FULL}:latest" \
+            ${final_args[@]+"${final_args[@]}"} \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/container/Dockerfile" \
             "$SCRIPT_DIR"
         echo "  Tagged: ${IMAGE_MAIN}:latest, ${IMAGE_MAIN}:${DATE_TAG}"
         ;;
     *)
-        echo "ERROR: Unknown layer '$BUILD_LAYER'. Use: base, sdks, full, or all" >&2
+        echo "ERROR: Unknown layer '$BUILD_LAYER'. Use: base, sdks, agents, or all" >&2
         exit 1
         ;;
 esac
