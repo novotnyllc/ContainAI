@@ -345,9 +345,12 @@ jobs:
   # module loading which may not work due to virtualization constraints.
   # This job gracefully skips if sysbox installation fails.
   #
-  # Design decision: This task (fn-44.4) depends only on fn-44.1 (build fixes).
-  # The tarball artifact flow (download + ./install.sh --local --yes) is
-  # fn-44.5's responsibility. This job uses repo checkout until fn-44.5 lands.
+  # TODO(fn-44.5): Once Task 5 lands with tarball artifacts:
+  #   1. Replace checkout with: actions/download-artifact@v4 (containai-tarball-${{ matrix.arch }})
+  #   2. Extract tarball: tar xzf containai-*.tar.gz
+  #   3. Install: cd containai-*/ && ./install.sh --local --yes
+  #   4. Gate sysbox verification on install success
+  # Current approach uses repo checkout until tarball artifacts are available.
   # ============================================================================
   e2e-test:
     needs: build
@@ -619,7 +622,7 @@ jobs:
   # - Ubuntu 22.04+ with kernel 5.5+
   # - Sysbox pre-installed: https://github.com/nestybox/sysbox
   # - Docker configured with sysbox runtime
-  # - Runner labels: self-hosted, linux, sysbox
+  # - Runner labels: self-hosted, linux, sysbox, <arch>
   #
   # This job only runs on the main repo (not forks) to avoid indefinite queuing
   # when no self-hosted runners are available. Forks can set the repo variable
@@ -630,10 +633,13 @@ jobs:
     # Only run on main repo or when explicitly enabled via repo variable
     # This prevents forks from hanging indefinitely waiting for self-hosted runners
     if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
-    runs-on: [self-hosted, linux, sysbox]
+    runs-on: [self-hosted, linux, sysbox, '${{ matrix.arch }}']
     timeout-minutes: 30
-    # Continue workflow even if self-hosted job fails
-    continue-on-error: true
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
 
     steps:
       - name: Checkout repository
@@ -697,12 +703,11 @@ jobs:
 
       - name: Build test image
         run: |
-          echo "Building containai image for E2E testing..."
-          ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+          echo "Building containai image for E2E testing (${{ matrix.arch }})..."
           ./src/build.sh \
             --image-prefix containai \
             --version "$NBGV_SemVer2" \
-            --platforms "linux/$ARCH" \
+            --platforms "linux/${{ matrix.arch }}" \
             --load
 
       - name: Run E2E tests (DinD)
@@ -710,7 +715,7 @@ jobs:
           CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           echo "============================================="
-          echo "Running Docker-in-Docker E2E tests"
+          echo "Running Docker-in-Docker E2E tests (${{ matrix.arch }})"
           echo "============================================="
           ./tests/integration/test-dind.sh
 
@@ -725,7 +730,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-test-logs-selfhosted-${{ github.run_id }}
+          name: e2e-test-logs-selfhosted-${{ matrix.arch }}-${{ github.run_id }}
           path: |
             ~/.containai-test-*
             /tmp/sysbox-logs/

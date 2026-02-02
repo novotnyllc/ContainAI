@@ -66,17 +66,17 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 - Must check sysbox on the right context or use `cai doctor` which knows the context
 
 ## Acceptance
-- [ ] E2E test job downloads PR artifact tarball (not repo-root install)
-- [ ] E2E test job extracts tarball and runs `./install.sh --local`
-- [ ] Proof step checks sysbox on `containai-docker` context (not default)
-- [ ] Proof step captures success/failure cleanly
-- [ ] `install.sh --yes` works in non-interactive CI context
-- [ ] If sysbox works on GH-hosted: E2E tests run
-- [ ] If sysbox fails on GH-hosted: Clear skip message, fallback documented
-- [ ] Self-hosted runner configuration ready if needed
-- [ ] E2E tests run on both amd64 and arm64 (on available runners)
-- [ ] Test artifacts collected on failure
-- [ ] CI logs show which path was taken (sysbox available / fallback)
+- [ ] E2E test job downloads PR artifact tarball (not repo-root install) **[BLOCKED: requires Task 5 tarball artifacts]**
+- [ ] E2E test job extracts tarball and runs `./install.sh --local` **[BLOCKED: requires Task 5 tarball artifacts]**
+- [x] Proof step checks sysbox on `containai-docker` context (not default)
+- [x] Proof step captures success/failure cleanly
+- [x] `install.sh --yes` works in non-interactive CI context
+- [x] If sysbox works on GH-hosted: E2E tests run
+- [x] If sysbox fails on GH-hosted: Clear skip message, fallback documented
+- [x] Self-hosted runner configuration ready if needed
+- [x] E2E tests run on both amd64 and arm64 (on available runners)
+- [x] Test artifacts collected on failure
+- [x] CI logs show which path was taken (sysbox available / fallback)
 
 ## Done summary
 # fn-44.4: Enable sysbox in GitHub Actions for E2E tests
@@ -102,8 +102,9 @@ Added E2E test job to `.github/workflows/docker.yml` that:
 
 ## Key Design Decisions
 
-- **Task 5 dependency**: Tarball/install.sh --local approach deferred to Task 5. Current implementation uses repo checkout.
+- **Task 5 dependency**: Tarball/install.sh --local approach blocked by Task 5 (tarball artifacts don't exist yet). Current implementation uses repo checkout. TODO comment added in workflow.
 - **Proof step**: Uses containai-docker context (not default Docker context) per spec
+- **Self-hosted architecture matrix**: Self-hosted job runs on both amd64 and arm64 runners (labels: self-hosted, linux, sysbox, <arch>)
 - **Self-hosted ready**: Comments document self-hosted runner requirements (ubuntu 22.04+, kernel 5.5+, sysbox pre-installed)
 
 ## Files Changed
