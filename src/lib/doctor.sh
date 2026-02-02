@@ -946,6 +946,45 @@ _cai_doctor() {
 
     printf '\n'
 
+    # === Network Security Section ===
+    # Only check on Linux/WSL2 hosts (not macOS, not inside containers where outer rules apply)
+    local network_security_ok="true"
+    local network_status=""
+    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
+        if [[ "$in_container" == "false" ]]; then
+            printf '%s\n' "Network Security"
+
+            network_status=$(_cai_network_doctor_status)
+            case "$network_status" in
+                ok)
+                    printf '  %-44s %s\n' "iptables rules:" "[OK]"
+                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+                skipped)
+                    printf '  %-44s %s\n' "iptables rules:" "[SKIP]"
+                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+                missing)
+                    network_security_ok="false"
+                    printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
+                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+                partial)
+                    network_security_ok="false"
+                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Incomplete"
+                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+                error)
+                    network_security_ok="false"
+                    printf '  %-44s %s\n' "iptables rules:" "[ERROR]"
+                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+            esac
+
+            printf '\n'
+        fi
+    fi
+
     # === SSH Section ===
     local ssh_key_ok="false"
     local ssh_config_dir_ok="false"
@@ -1131,6 +1170,18 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure SSH"
     fi
 
+    # Network Security summary (Linux/WSL2 hosts only)
+    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
+        if [[ "$in_container" == "false" ]]; then
+            if [[ "$network_security_ok" == "true" ]]; then
+                printf '  %-44s %s\n' "Network Security:" "[OK] Rules configured"
+            else
+                printf '  %-44s %s\n' "Network Security:" "[ERROR] Rules missing"
+                printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
+            fi
+        fi
+    fi
+
     # Template summary
     if [[ "$template_all_ok" == "true" ]]; then
         printf '  %-44s %s\n' "Templates:" "[OK] Ready"
@@ -1139,8 +1190,9 @@ _cai_doctor() {
         printf '  %-44s %s\n' "Recommended:" "Run 'cai doctor fix template' to recover"
     fi
 
-    # Exit code: 0 if isolation ready AND SSH configured AND templates OK, 1 if not
-    if [[ "$isolation_ready" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
+    # Exit code: 0 if isolation ready AND SSH configured AND network OK AND templates OK, 1 if not
+    if [[ "$isolation_ready" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] \
+        && [[ "$network_security_ok" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
         return 0
     else
         return 1
@@ -1455,6 +1507,51 @@ _cai_doctor_fix() {
         fi
     else
         printf '  %-50s %s\n' "Bridge '$_CAI_CONTAINAI_DOCKER_BRIDGE'" "[SKIP] not supported"
+        ((skip_count++))
+    fi
+
+    printf '\n'
+
+    # === Network Security Rules Fix ===
+    printf '%s\n' "Network Security"
+    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
+        if _cai_is_container; then
+            printf '  %-50s %s\n' "iptables rules" "[SKIP] running in container"
+            ((skip_count++))
+        else
+            # Check if iptables is available first
+            if ! _cai_iptables_available; then
+                printf '  %-50s %s\n' "iptables rules" "[SKIP] iptables not installed"
+                ((skip_count++))
+            elif ! _cai_iptables_can_run; then
+                printf '  %-50s %s\n' "iptables rules" "[SKIP] insufficient permissions"
+                ((skip_count++))
+            else
+                local network_status
+                network_status=$(_cai_network_doctor_status)
+                case "$network_status" in
+                    ok)
+                        printf '  %-50s %s\n' "iptables rules" "[OK]"
+                        ;;
+                    skipped)
+                        printf '  %-50s %s\n' "iptables rules" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                        ((skip_count++))
+                        ;;
+                    missing | partial | error)
+                        printf '  %-50s' "Applying iptables rules"
+                        if _cai_apply_network_rules "false" >/dev/null 2>&1; then
+                            printf '%s\n' "[FIXED]"
+                            ((fixed_count++))
+                        else
+                            printf '%s\n' "[FAIL]"
+                            ((fail_count++))
+                        fi
+                        ;;
+                esac
+            fi
+        fi
+    else
+        printf '  %-50s %s\n' "iptables rules" "[SKIP] not supported on $platform"
         ((skip_count++))
     fi
 
@@ -2681,6 +2778,45 @@ _cai_doctor_json() {
     printf '    "all_ok": %s\n' "$ssh_all_ok"
     printf '  },\n'
 
+    # Network security section (Linux/WSL2 hosts only)
+    local network_security_ok_json="true"
+    local network_status_json=""
+    local network_detail_json=""
+    local network_applicable="false"
+
+    if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
+        if [[ "$in_container" == "false" ]]; then
+            network_applicable="true"
+            network_status_json=$(_cai_network_doctor_status)
+            network_detail_json="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+            case "$network_status_json" in
+                ok | skipped)
+                    network_security_ok_json="true"
+                    ;;
+                *)
+                    network_security_ok_json="false"
+                    ;;
+            esac
+        fi
+    fi
+
+    printf '  "network_security": {\n'
+    printf '    "applicable": %s,\n' "$network_applicable"
+    if [[ "$network_applicable" == "true" ]]; then
+        printf '    "status": "%s",\n' "$(_cai_json_escape "$network_status_json")"
+        if [[ -n "$network_detail_json" ]]; then
+            printf '    "detail": "%s",\n' "$(_cai_json_escape "$network_detail_json")"
+        else
+            printf '    "detail": null,\n'
+        fi
+        printf '    "ok": %s\n' "$network_security_ok_json"
+    else
+        printf '    "status": null,\n'
+        printf '    "detail": null,\n'
+        printf '    "ok": true\n'
+    fi
+    printf '  },\n'
+
     # Template checks
     local template_all_ok="true"
     _cai_doctor_template_checks_json "$build_templates" "$sysbox_context_name" || template_all_ok="false"
@@ -2689,14 +2825,16 @@ _cai_doctor_json() {
     printf '    "sysbox_ok": %s,\n' "$sysbox_ok"
     printf '    "containai_docker_ok": %s,\n' "$containai_docker_ok"
     printf '    "ssh_ok": %s,\n' "$ssh_all_ok"
+    printf '    "network_security_ok": %s,\n' "$network_security_ok_json"
     printf '    "templates_ok": %s,\n' "$template_all_ok"
     printf '    "isolation_available": %s,\n' "$isolation_available"
     printf '    "recommended_action": "%s"\n' "$recommended_action"
     printf '  }\n'
     printf '}\n'
 
-    # Exit code: 0 if Sysbox available AND SSH configured AND templates OK, 1 if not
-    if [[ "$isolation_available" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
+    # Exit code: 0 if Sysbox available AND SSH configured AND network OK AND templates OK, 1 if not
+    if [[ "$isolation_available" == "true" ]] && [[ "$ssh_all_ok" == "true" ]] \
+        && [[ "$network_security_ok_json" == "true" ]] && [[ "$template_all_ok" == "true" ]]; then
         return 0
     else
         return 1
