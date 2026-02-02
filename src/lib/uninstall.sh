@@ -29,6 +29,7 @@
 #
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
+#   - Requires lib/platform.sh for platform detection (_cai_is_macos)
 #   - Requires lib/docker.sh for Docker availability checks
 #   - Requires lib/container.sh for container listing
 #   - Requires lib/network.sh for network rule removal
@@ -469,6 +470,18 @@ _cai_uninstall_network_rules() {
 
     _cai_step "Removing network security rules"
 
+    # Prime sudo credentials if needed (interactive) for iptables access
+    # _cai_iptables uses sudo -n (non-interactive) which fails without cached creds
+    # This ensures we can remove rules when running as non-root user
+    if [[ "$dry_run" != "true" ]] && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        if [[ -t 0 ]] && command -v sudo >/dev/null 2>&1; then
+            # Interactive terminal - prime sudo credentials
+            if ! sudo -v 2>/dev/null; then
+                _cai_warn "Could not obtain sudo credentials for iptables access"
+            fi
+        fi
+    fi
+
     # _cai_remove_network_rules handles all the complexity:
     # - Nested container detection
     # - Sysbox skip
@@ -476,7 +489,7 @@ _cai_uninstall_network_rules() {
     # - Permission checks
     # - Dry-run support
     if ! _cai_remove_network_rules "$dry_run"; then
-        # Non-fatal - log and continue
+        # Best-effort - log warning and continue, but track failure in exit code
         _cai_warn "Failed to remove network security rules (continuing uninstall)"
         return 1
     fi
@@ -603,8 +616,8 @@ _cai_uninstall() {
     printf '%s\n' ""
 
     # Execute removal in correct order:
-    # 1. Containers (if --containers) - must happen before context removal
-    # 2. Volumes (if --volumes)
+    # 1. Containers and volumes (if --containers/--volumes) - before context removal
+    # 2. Network security rules - while Docker is still running
     # 3. Docker context - before service removal
     # 4. Systemd service
 
@@ -619,8 +632,8 @@ _cai_uninstall() {
 
     # Step 2: Remove network security rules
     # Do this while Docker is still running (bridge exists)
-    # Non-fatal: if rules don't exist or can't be removed, continue
-    # But track failure in overall_status for accurate exit code
+    # Best-effort: if rules don't exist or can't be removed, continue
+    # but track failure in overall_status for accurate exit code
     if ! _cai_uninstall_network_rules "$dry_run"; then
         overall_status=1
     fi
