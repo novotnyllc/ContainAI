@@ -255,6 +255,13 @@ public static class Program
                 throw new Exception("Agent did not respond to initialize");
             }
 
+            // Check for agent error in initialize response
+            if (initResponse.Error != null)
+            {
+                var errMsg = initResponse.Error.Message ?? "Unknown error";
+                throw new Exception($"Agent initialize failed: {errMsg}");
+            }
+
             // Calculate container cwd - preserve relative path from workspace root
             var containerCwd = "/home/agent/workspace";
             var normalizedWorkspace = Path.GetFullPath(workspace).TrimEnd(Path.DirectorySeparatorChar);
@@ -299,11 +306,24 @@ public static class Program
                 throw new Exception("Agent did not respond to session/new");
             }
 
-            // Extract agent's session ID
+            // Check for agent error in session/new response
+            if (sessionNewResponse.Error != null)
+            {
+                var errMsg = sessionNewResponse.Error.Message ?? "Unknown error";
+                throw new Exception($"Agent session/new failed: {errMsg}");
+            }
+
+            // Extract agent's session ID - required for routing
             if (sessionNewResponse.Result is JsonObject resultObj &&
                 resultObj.TryGetPropertyValue("sessionId", out var sessionIdNode))
             {
                 session.AgentSessionId = sessionIdNode?.GetValue<string>() ?? "";
+            }
+
+            // Validate we got a session ID
+            if (string.IsNullOrEmpty(session.AgentSessionId))
+            {
+                throw new Exception("Agent did not return a session ID");
             }
 
             // Register session
@@ -393,17 +413,18 @@ public static class Program
 
         try
         {
-            // Forward session/end to agent with agent's sessionId
-            var endRequest = new JsonRpcMessage
+            // Forward session/end to agent as a NOTIFICATION (no id) to avoid duplicate responses
+            // The proxy handles the response to the editor, not the agent
+            var endNotification = new JsonRpcMessage
             {
-                Id = message.Id,
+                // No Id - this is a notification, not a request
                 Method = "session/end",
                 Params = new JsonObject
                 {
                     ["sessionId"] = session.AgentSessionId
                 }
             };
-            await session.WriteToAgentAsync(endRequest);
+            await session.WriteToAgentAsync(endNotification);
 
             // Wait for reader to complete (agent may send final messages)
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
