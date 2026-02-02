@@ -475,9 +475,13 @@ _cai_uninstall_network_rules() {
     # This ensures we can remove rules when running as non-root user
     if [[ "$dry_run" != "true" ]] && [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
         if [[ -t 0 ]] && command -v sudo >/dev/null 2>&1; then
-            # Interactive terminal - prime sudo credentials
-            if ! sudo -v 2>/dev/null; then
-                _cai_warn "Could not obtain sudo credentials for iptables access"
+            # Check if sudo credentials are already cached (non-interactive probe)
+            if ! sudo -n true 2>/dev/null; then
+                # Credentials not cached - prompt user with visible password request
+                _cai_info "Sudo required to remove iptables rules"
+                if ! sudo -v; then
+                    _cai_warn "Could not obtain sudo credentials for iptables access"
+                fi
             fi
         fi
     fi
