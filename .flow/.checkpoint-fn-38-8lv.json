@@ -1,0 +1,65 @@
+{
+  "created_at": "2026-02-02T04:19:26.275009Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-38-8lv",
+      "created_at": "2026-01-28T19:13:29.516996Z",
+      "depends_on_epics": [
+        "fn-35-e0x",
+        "fn-37-4xi",
+        "fn-43-container-network-security-private"
+      ],
+      "id": "fn-38-8lv",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-38-8lv.md",
+      "status": "open",
+      "title": "Agent Addition Documentation",
+      "updated_at": "2026-01-28T19:47:44.289894Z"
+    },
+    "spec": "# fn-38-8lv Agent Addition Documentation\n\n## Overview\n\nCreate comprehensive documentation for adding new AI agents to ContainAI. This helps contributors and advanced users understand the process.\n\n**Priority:** LAST - After all other epics, including fn-37-4xi (Base Image Contract).\n\n## Scope\n\n### In Scope\n- Create `docs/adding-agents.md`\n- Document sync-manifest.toml flags and patterns\n- Document Dockerfile.agents conventions\n- Document testing requirements\n- Include examples from existing agents (Claude, Codex, Gemini, Pi)\n\n### Out of Scope\n- Agent marketplace/registry\n- Automated agent discovery\n- User-creatable agents (they use templates instead)\n\n## Approach\n\n### Agent Addition Documentation\n\nCreate `docs/adding-agents.md`:\n\n```markdown\n# Adding a New Agent to ContainAI\n\nThis guide explains how to add support for a new AI coding agent.\n\n## Overview\n\nAdding an agent involves:\n1. Installation in Dockerfile.agents\n2. Config sync in sync-manifest.toml\n3. Testing in container\n\n## Step 1: Research the Agent\n\nBefore adding, understand:\n- Installation method (npm, pip, curl, etc.)\n- Configuration location (~/.config/agent/, ~/.agent/)\n- Credential storage (files, env vars)\n- Startup requirements\n\n## Step 2: Add to Dockerfile.agents\n\nAdd installation after the SDK layers:\n\n```dockerfile\n# =============================================================================\n# Agent Name\n# =============================================================================\nRUN <installation-command> \\\n    && agent --version || echo \"[WARN] Agent installation failed\"\n```\n\nGuidelines:\n- Always verify installation with version check\n- Use `|| echo \"[WARN]\"` to allow build to continue if install fails\n- Group related commands with `&&`\n- Document any special requirements\n\n## Step 3: Add to sync-manifest.toml\n\nAdd entries for each config file/directory:\n\n```toml\n# =============================================================================\n# AGENT NAME\n# Description of what agent does\n# =============================================================================\n\n[[entries]]\nsource = \".agent/config.json\"      # Path on host\ntarget = \"agent/config.json\"       # Path in data volume\ncontainer_link = \".agent/config.json\"  # Symlink in container home\nflags = \"fjo\"                      # Flags (see below)\n```\n\n### Flags Reference\n\n| Flag | Meaning |\n|------|---------|\n| f | File (not directory) |\n| d | Directory |\n| j | JSON init (create {} if empty) |\n| s | Secret (skip with --no-secrets) |\n| o | Optional (only sync if source exists on host) |\n| m | Mirror mode (--delete removes extras) |\n| x | Exclude .system/ subdirectory |\n| R | Remove existing before symlink |\n| g | Git filter (strip credential.helper) |\n\n**IMPORTANT:** Use the `o` flag for all agent-specific entries. This prevents creating empty directories for agents the user doesn't have installed.\n\n## Step 4: Generate Files\n\nRun the generators:\n\n```bash\n./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh\n./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh\n./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json\n```\n\n## Step 5: Test\n\n1. Build the image: `./src/build.sh`\n2. Create a test container\n3. Verify agent is installed: `ssh container 'agent --version'`\n4. Import configs: `cai import`\n5. Verify configs synced: `ssh container 'ls -la ~/.agent/'`\n6. Verify no empty dirs for other agents: `ssh container 'ls -la ~/ | grep -v \"^d.*agent\"'`\n\n## Examples\n\nSee existing agents in sync-manifest.toml:\n- Claude Code: `.claude/`\n- Codex: `.codex/`\n- Gemini: `.gemini/`\n- Pi: `.pi/`\n```\n\n## Tasks\n\n### fn-38-8lv.1: Create adding-agents.md documentation\nComprehensive guide with examples from existing agents. Emphasize `o` flag usage.\n\n### fn-38-8lv.2: Document agent config patterns\nAdd section on conventions (flag usage, path patterns, optional sync).\n\n## Quick commands\n\n```bash\n# View existing agent patterns\ngrep -A5 \"CLAUDE\\|CODEX\\|GEMINI\\|PI\" src/sync-manifest.toml\n\n# View Dockerfile.agents patterns\ncat src/container/Dockerfile.agents\n```\n\n## Acceptance\n\n- [ ] `docs/adding-agents.md` created\n- [ ] Documentation includes flag reference with emphasis on `o` flag\n- [ ] Examples from Claude, Codex, Gemini, Pi included\n- [ ] Generator commands documented\n- [ ] Testing requirements documented\n\n## Dependencies\n\n- **fn-35-e0x**: Pi Support (provides another example agent)\n- **fn-37-4xi**: Base Image Contract (referenced in docs)\n- All other epics should be complete\n\n## References\n\n- Existing agents in sync-manifest.toml\n- Dockerfile.agents: `src/container/Dockerfile.agents`\n- Generator scripts: `src/scripts/gen-*.sh`\n"
+  },
+  "epic_id": "fn-38-8lv",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T19:13:52.110804Z",
+        "depends_on": [],
+        "epic": "fn-38-8lv",
+        "id": "fn-38-8lv.1",
+        "priority": 1,
+        "spec_path": ".flow/tasks/fn-38-8lv.1.md",
+        "status": "todo",
+        "title": "Create adding-agents.md documentation",
+        "updated_at": "2026-01-28T19:13:52.110862Z"
+      },
+      "id": "fn-38-8lv.1",
+      "runtime": null,
+      "spec": "# fn-38-8lv.1 Create adding-agents.md documentation\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-01-28T19:13:52.180339Z",
+        "depends_on": [],
+        "epic": "fn-38-8lv",
+        "id": "fn-38-8lv.2",
+        "priority": 2,
+        "spec_path": ".flow/tasks/fn-38-8lv.2.md",
+        "status": "todo",
+        "title": "Document agent config patterns",
+        "updated_at": "2026-01-28T19:13:52.180351Z"
+      },
+      "id": "fn-38-8lv.2",
+      "runtime": null,
+      "spec": "# fn-38-8lv.2 Document agent config patterns\n\n## Description\nTBD\n\n## Acceptance\n- [ ] TBD\n\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

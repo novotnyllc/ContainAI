@@ -5783,7 +5783,7 @@ _cai_completions() {
     }
 
     # Subcommands
-    local subcommands="run shell exec doctor setup validate docker import export sync stop ssh links config update uninstall completion help version"
+    local subcommands="run shell exec doctor setup validate docker import export sync stop status gc ssh links config update uninstall completion help version"
 
     # Global flags
     local global_flags="-h --help"
@@ -5800,7 +5800,9 @@ _cai_completions() {
     local import_flags="--dry-run --no-excludes --no-secrets --verbose --container --data-volume --config --workspace --from -h --help"
     local export_flags="-o --output --container --data-volume --config --workspace --no-excludes --verbose -h --help"
     local sync_flags="--dry-run --verbose -h --help"
-    local stop_flags="--container --all --remove --verbose -h --help"
+    local stop_flags="--container --all --remove --force --export --verbose -h --help"
+    local status_flags="--json --workspace --container --verbose -h --help"
+    local gc_flags="--dry-run --force --age --images --verbose -h --help"
     local ssh_subcommands="cleanup"
     local ssh_cleanup_flags="--dry-run --verbose -h --help"
     local links_subcommands="check fix"
@@ -5964,6 +5966,12 @@ _cai_completions() {
         stop)
             COMPREPLY=($(compgen -W "$stop_flags" -- "$cur"))
             ;;
+        status)
+            COMPREPLY=($(compgen -W "$status_flags" -- "$cur"))
+            ;;
+        gc)
+            COMPREPLY=($(compgen -W "$gc_flags" -- "$cur"))
+            ;;
         ssh)
             # Check for cleanup subcommand
             local ssh_sub=""
@@ -6117,6 +6125,8 @@ _cai() {
         'export:Export data volume to archive'
         'sync:Move local configs to data volume with symlinks'
         'stop:Stop ContainAI containers'
+        'status:Show container status and resource usage'
+        'gc:Garbage collection for stale containers and images'
         'ssh:Manage SSH configuration'
         'links:Verify and repair symlinks'
         'config:Manage settings'
@@ -6363,6 +6373,25 @@ _cai() {
                         '--container[Container name]:container:->containers' \
                         '--all[Stop all containers]' \
                         '--remove[Remove containers]' \
+                        '--force[Skip session warning prompt]' \
+                        '--export[Export data volume before stopping]' \
+                        '--verbose[Verbose output]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
+                status)
+                    _arguments \
+                        '--json[Output in JSON format]' \
+                        '--workspace[Workspace path]:directory:_files -/' \
+                        '--container[Container name]:container:->containers' \
+                        '--verbose[Verbose output]' \
+                        '(-h --help)'{-h,--help}'[Show help]'
+                    ;;
+                gc)
+                    _arguments \
+                        '--dry-run[Preview without removing]' \
+                        '--force[Skip confirmation prompt]' \
+                        '--age[Minimum age for pruning]:duration:' \
+                        '--images[Also prune unused images]' \
                         '--verbose[Verbose output]' \
                         '(-h --help)'{-h,--help}'[Show help]'
                     ;;

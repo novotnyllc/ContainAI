@@ -6,10 +6,6 @@
 - fn-34-fk5.8 (Add `--export` flag to cai stop)
 - fn-34-fk5.9 (Implement cai gc command)
 
-## Blocked
-
-This task is blocked pending completion of dependencies. Shell completions cannot advertise commands/flags that don't exist yet. See `.flow/memory/pitfalls.md` for documented pitfall.
-
 ## Goal
 Update shell completion functions for new commands and flags.
 
@@ -41,24 +37,22 @@ local stop_flags="--container --all --remove --force --export -h --help"
 - [ ] `cai stop --export` completes
 
 ## Done summary
-Blocked:
-# Block Reason: fn-34-fk5.11
+Updated shell completion functions in `src/containai.sh` for new commands (`status`, `gc`) and updated flags (`--force`, `--export` for `stop`).
 
-This task is blocked pending completion of its dependencies:
+**Bash completion changes:**
+- Added `status` and `gc` to subcommands list
+- Added `status_flags="--json --workspace --container --verbose -h --help"`
+- Added `gc_flags="--dry-run --force --age --images --verbose -h --help"`
+- Updated `stop_flags` to include `--force` and `--export`
+- Added case statements for `status` and `gc` in completion switch
 
-- **fn-34-fk5.5** (Add `--force` flag to cai stop) - status: todo
-- **fn-34-fk5.6** (Implement cai status command) - status: todo
-- **fn-34-fk5.8** (Add `--export` flag to cai stop) - status: todo
-- **fn-34-fk5.9** (Implement cai gc command) - status: todo
-
-The shell completions for this task would advertise:
-1. `cai status --json --workspace --container` - command doesn't exist
-2. `cai gc --dry-run --force --age --images` - command doesn't exist
-3. `cai stop --force` - flag not implemented
-4. `cai stop --export` - flag not implemented
-
-Shell completions cannot advertise commands/flags that don't exist yet.
+**Zsh completion changes:**
+- Added `status:Show container status and resource usage` to subcommands
+- Added `gc:Garbage collection for stale containers and images` to subcommands
+- Added complete _arguments block for `status` with --json, --workspace, --container, --verbose
+- Added complete _arguments block for `gc` with --dry-run, --force, --age, --images, --verbose
+- Updated `stop` case to include `--force` and `--export` flags
 ## Evidence
 - Commits:
-- Tests:
+- Tests: shellcheck src/containai.sh - passed
 - PRs:

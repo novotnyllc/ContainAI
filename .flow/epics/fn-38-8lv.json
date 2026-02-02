@@ -1,6 +1,11 @@
 {
   "branch_name": "fn-38-8lv",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-01-28T19:13:29.516996Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [
     "fn-35-e0x",
     "fn-37-4xi",
@@ -8,10 +13,10 @@
   ],
   "id": "fn-38-8lv",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-02T04:27:17.310602Z",
   "spec_path": ".flow/specs/fn-38-8lv.md",
   "status": "open",
   "title": "Agent Addition Documentation",
-  "updated_at": "2026-01-28T19:47:44.289894Z"
+  "updated_at": "2026-02-02T04:27:17.310616Z"
 }
