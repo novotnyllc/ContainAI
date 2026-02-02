@@ -71,7 +71,8 @@ _containai_libs_exist() {
         && [[ -f "$_CAI_SCRIPT_DIR/lib/update.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/links.sh" ]] \
         && [[ -f "$_CAI_SCRIPT_DIR/lib/sync.sh" ]] \
-        && [[ -f "$_CAI_SCRIPT_DIR/lib/template.sh" ]]
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/template.sh" ]] \
+        && [[ -f "$_CAI_SCRIPT_DIR/lib/network.sh" ]]
 }
 
 if ! _containai_libs_exist; then
@@ -98,6 +99,11 @@ fi
 
 if ! source "$_CAI_SCRIPT_DIR/lib/docker.sh"; then
     echo "[ERROR] Failed to source lib/docker.sh" >&2
+    return 1
+fi
+
+if ! source "$_CAI_SCRIPT_DIR/lib/network.sh"; then
+    echo "[ERROR] Failed to source lib/network.sh" >&2
     return 1
 fi
 

@@ -20,6 +20,12 @@
 #   - Private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
 #   - Link-local: 169.254.0.0/16
 #
+# Implementation Notes:
+#   - Uses DOCKER-USER chain (Docker's intended hook for user rules)
+#   - DOCKER-USER is processed before Docker's own FORWARD rules
+#   - Rules are inserted with proper ordering: gateway ACCEPT first, then DROPs
+#   - Comment markers enable clean identification and removal
+#
 # Dependencies:
 #   - Requires lib/core.sh for logging functions
 #   - Requires lib/platform.sh for _cai_is_container()
@@ -60,6 +66,10 @@ _CAI_PRIVATE_RANGES="10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16"
 # Comment marker for identifying ContainAI rules
 _CAI_IPTABLES_COMMENT="containai-network-security"
 
+# Chain to use for rules - DOCKER-USER is Docker's intended hook for user rules
+# It's processed before Docker's own rules in FORWARD chain
+_CAI_IPTABLES_CHAIN="DOCKER-USER"
+
 # ==============================================================================
 # Network Configuration Detection
 # ==============================================================================
@@ -71,7 +81,7 @@ _CAI_IPTABLES_COMMENT="containai-network-security"
 #   - Host (standard): cai0, 172.30.0.1, 172.30.0.0/16
 #   - Nested container: docker0 or detected bridge, detected gateway, detected subnet
 _cai_get_network_config() {
-    local bridge_name gateway_ip subnet
+    local bridge_name gateway_ip subnet cidr_suffix
 
     if _cai_is_container; then
         # Nested container - detect inner Docker bridge configuration
@@ -97,11 +107,40 @@ _cai_get_network_config() {
     else
         # Standard host - use ContainAI bridge constants
         bridge_name="${_CAI_CONTAINAI_DOCKER_BRIDGE:-cai0}"
-        # Extract gateway IP from CIDR notation (172.30.0.1/16 -> 172.30.0.1)
-        gateway_ip="${_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR:-172.30.0.1/16}"
-        gateway_ip="${gateway_ip%%/*}"
-        # Construct subnet from gateway (172.30.0.1 -> 172.30.0.0/16)
-        subnet="${gateway_ip%.*}.0/16"
+
+        # Parse gateway IP and CIDR suffix from bridge address constant
+        # Format: 172.30.0.1/16 -> gateway=172.30.0.1, cidr=/16
+        local bridge_addr="${_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR:-172.30.0.1/16}"
+        gateway_ip="${bridge_addr%%/*}"
+        cidr_suffix="${bridge_addr##*/}"
+
+        # Construct subnet from gateway IP and CIDR suffix
+        # For 172.30.0.1/16, we need 172.30.0.0/16
+        # Extract network portion based on CIDR (simplified: assume /8, /12, /16, /24)
+        case "$cidr_suffix" in
+            8)
+                subnet="${gateway_ip%%.*}.0.0.0/8"
+                ;;
+            12)
+                local first_octet second_octet
+                first_octet="${gateway_ip%%.*}"
+                second_octet="${gateway_ip#*.}"
+                second_octet="${second_octet%%.*}"
+                # For /12, zero out lower 4 bits of second octet
+                second_octet=$((second_octet & 0xF0))
+                subnet="${first_octet}.${second_octet}.0.0/12"
+                ;;
+            16)
+                subnet="${gateway_ip%.*.*}.0.0/16"
+                ;;
+            24)
+                subnet="${gateway_ip%.*}.0/24"
+                ;;
+            *)
+                # Default to /16 for unknown CIDR
+                subnet="${gateway_ip%.*.*}.0.0/16"
+                ;;
+        esac
     fi
 
     # Validate we have required values
@@ -127,8 +166,36 @@ _cai_iptables_available() {
 # Check if we have permissions to run iptables
 # Returns: 0=have permissions, 1=no permissions
 _cai_iptables_can_run() {
-    # Try a read-only command
-    iptables -L -n >/dev/null 2>&1
+    # Try a read-only command with short output
+    iptables -n -L INPUT 1 >/dev/null 2>&1
+}
+
+# Ensure DOCKER-USER chain exists
+# Docker creates this chain, but we ensure it exists for robustness
+# Returns: 0=chain exists or created, 1=failure
+_cai_ensure_docker_user_chain() {
+    # Check if chain exists
+    if iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Chain doesn't exist - this is unusual (Docker should create it)
+    # Create it and add jump from FORWARD
+    _cai_warn "DOCKER-USER chain does not exist (Docker not running?)"
+
+    if ! iptables -N "$_CAI_IPTABLES_CHAIN" 2>/dev/null; then
+        _cai_error "Failed to create DOCKER-USER chain"
+        return 1
+    fi
+
+    # Add jump from FORWARD to DOCKER-USER at the beginning
+    if ! iptables -I FORWARD -j "$_CAI_IPTABLES_CHAIN"; then
+        _cai_error "Failed to add jump to DOCKER-USER chain"
+        return 1
+    fi
+
+    _cai_step "Created DOCKER-USER chain"
+    return 0
 }
 
 # Apply iptables rules to block private ranges and cloud metadata
@@ -162,6 +229,7 @@ _cai_apply_network_rules() {
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_dryrun "Would apply network security rules to bridge $bridge_name"
+        _cai_dryrun "  Chain: $_CAI_IPTABLES_CHAIN"
         _cai_dryrun "  Gateway allowed: $gateway_ip"
         _cai_dryrun "  Metadata blocked: $_CAI_METADATA_ENDPOINTS"
         _cai_dryrun "  Private ranges blocked: $_CAI_PRIVATE_RANGES"
@@ -174,6 +242,11 @@ _cai_apply_network_rules() {
         return 1
     fi
 
+    # Ensure DOCKER-USER chain exists
+    if ! _cai_ensure_docker_user_chain; then
+        return 1
+    fi
+
     # Check if bridge interface exists
     if ! ip link show "$bridge_name" >/dev/null 2>&1; then
         _cai_warn "Bridge $bridge_name does not exist yet (will be created by Docker)"
@@ -182,15 +255,20 @@ _cai_apply_network_rules() {
         return 0
     fi
 
-    # IMPORTANT: Rule order matters!
-    # 1. First, allow the host gateway (insert at top with -I)
-    # 2. Then, block specific metadata IPs (with higher priority via -I after gateway)
-    # 3. Then, block private ranges (append with -A)
+    # IMPORTANT: Rule order in DOCKER-USER chain matters!
+    # DOCKER-USER is processed BEFORE Docker's rules, so our ordering is:
+    # 1. ACCEPT gateway (must be first so host communication works)
+    # 2. DROP metadata endpoints (specific IPs)
+    # 3. DROP private ranges (broad blocks)
+    # 4. RETURN (implicit - continue to Docker's rules for allowed traffic)
+    #
+    # We use -I (insert) for gateway to ensure it's first, then -A (append)
+    # for drops so they come after the gateway allow but before RETURN.
 
-    # Step 1: Allow host gateway (use -I to insert at top of FORWARD chain)
+    # Step 1: Allow host gateway (insert at top of DOCKER-USER chain)
     # This ensures container can reach the Docker host
-    if ! iptables -C FORWARD -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-        if ! iptables -I FORWARD -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+    if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+        if ! iptables -I "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
             _cai_error "Failed to add gateway allow rule"
             return 1
         fi
@@ -200,10 +278,9 @@ _cai_apply_network_rules() {
     fi
 
     # Step 2: Block specific cloud metadata endpoints
-    # These are inserted after the gateway rule to ensure they take precedence over range blocks
     for endpoint in $_CAI_METADATA_ENDPOINTS; do
-        if ! iptables -C FORWARD -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! iptables -A FORWARD -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+        if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+            if ! iptables -A "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_error "Failed to add metadata block rule for $endpoint"
                 return 1
             fi
@@ -213,10 +290,10 @@ _cai_apply_network_rules() {
         fi
     done
 
-    # Step 3: Block private IP ranges (append with -A to process after gateway allow)
+    # Step 3: Block private IP ranges
     for range in $_CAI_PRIVATE_RANGES; do
-        if ! iptables -C FORWARD -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! iptables -A FORWARD -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+        if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+            if ! iptables -A "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_error "Failed to add private range block rule for $range"
                 return 1
             fi
@@ -270,9 +347,15 @@ _cai_remove_network_rules() {
         return 1
     fi
 
+    # Check if DOCKER-USER chain exists
+    if ! iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+        _cai_info "DOCKER-USER chain does not exist, no rules to remove"
+        return 0
+    fi
+
     # Remove gateway allow rule
-    while iptables -C FORWARD -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
-        if iptables -D FORWARD -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+    while iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
+        if iptables -D "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
             _cai_step "Removed gateway allow rule: $gateway_ip"
             had_rules=true
         fi
@@ -280,8 +363,8 @@ _cai_remove_network_rules() {
 
     # Remove metadata block rules
     for endpoint in $_CAI_METADATA_ENDPOINTS; do
-        while iptables -C FORWARD -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
-            if iptables -D FORWARD -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+        while iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
+            if iptables -D "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_step "Removed metadata block rule: $endpoint"
                 had_rules=true
             fi
@@ -290,8 +373,8 @@ _cai_remove_network_rules() {
 
     # Remove private range block rules
     for range in $_CAI_PRIVATE_RANGES; do
-        while iptables -C FORWARD -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
-            if iptables -D FORWARD -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+        while iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; do
+            if iptables -D "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_step "Removed private range block rule: $range"
                 had_rules=true
             fi
@@ -352,15 +435,24 @@ _cai_check_network_rules() {
         return 1
     fi
 
+    # Check if DOCKER-USER chain exists
+    if ! iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+        _CAI_NETWORK_RULES_STATUS="no_chain"
+        if [[ "$verbose" == "true" ]]; then
+            _cai_warn "DOCKER-USER chain does not exist"
+        fi
+        return 1
+    fi
+
     # Check gateway allow rule
-    ((total_rules++)) || true
-    if iptables -C FORWARD -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-        ((present_rules++)) || true
+    total_rules=$((total_rules + 1))
+    if iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$gateway_ip" -j ACCEPT -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+        present_rules=$((present_rules + 1))
         if [[ "$verbose" == "true" ]]; then
             _cai_ok "Gateway allow rule present: $gateway_ip"
         fi
     else
-        ((missing_rules++)) || true
+        missing_rules=$((missing_rules + 1))
         if [[ "$verbose" == "true" ]]; then
             _cai_warn "Gateway allow rule missing: $gateway_ip"
         fi
@@ -368,14 +460,14 @@ _cai_check_network_rules() {
 
     # Check metadata block rules
     for endpoint in $_CAI_METADATA_ENDPOINTS; do
-        ((total_rules++)) || true
-        if iptables -C FORWARD -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            ((present_rules++)) || true
+        total_rules=$((total_rules + 1))
+        if iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+            present_rules=$((present_rules + 1))
             if [[ "$verbose" == "true" ]]; then
                 _cai_ok "Metadata block rule present: $endpoint"
             fi
         else
-            ((missing_rules++)) || true
+            missing_rules=$((missing_rules + 1))
             if [[ "$verbose" == "true" ]]; then
                 _cai_warn "Metadata block rule missing: $endpoint"
             fi
@@ -384,14 +476,14 @@ _cai_check_network_rules() {
 
     # Check private range block rules
     for range in $_CAI_PRIVATE_RANGES; do
-        ((total_rules++)) || true
-        if iptables -C FORWARD -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            ((present_rules++)) || true
+        total_rules=$((total_rules + 1))
+        if iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
+            present_rules=$((present_rules + 1))
             if [[ "$verbose" == "true" ]]; then
                 _cai_ok "Private range block rule present: $range"
             fi
         else
-            ((missing_rules++)) || true
+            missing_rules=$((missing_rules + 1))
             if [[ "$verbose" == "true" ]]; then
                 _cai_warn "Private range block rule missing: $range"
             fi
@@ -452,7 +544,7 @@ _cai_network_doctor_status() {
 
     # Check if bridge exists
     if ! ip link show "$bridge_name" >/dev/null 2>&1; then
-        _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containersd not running?)"
+        _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
         printf '%s' "missing"
         return 0
     fi
@@ -467,7 +559,7 @@ _cai_network_doctor_status() {
                 _CAI_NETWORK_DOCTOR_DETAIL="Some rules missing on $bridge_name (run cai setup to fix)"
                 printf '%s' "partial"
                 ;;
-            none)
+            none | no_chain)
                 _CAI_NETWORK_DOCTOR_DETAIL="No rules on $bridge_name (run cai setup)"
                 printf '%s' "missing"
                 ;;

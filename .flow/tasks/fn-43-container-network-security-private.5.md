@@ -23,9 +23,8 @@ Create `src/lib/network.sh` with iptables management functions to block private 
 - [x] Uses iptables comment marker for rule identification
 
 ## Done summary
-TBD
-
+Implemented src/lib/network.sh with iptables management functions for blocking private IP ranges and cloud metadata endpoints. The implementation includes _cai_get_network_config() for dynamic bridge detection (supporting both host cai0 and nested docker0), _cai_apply_network_rules() for adding blocking rules with proper ordering (gateway allow first), _cai_remove_network_rules() for clean removal, and _cai_check_network_rules() for doctor integration.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: f34dd75a7f2fa1613fcc40a457d3ca50f58ca53f
+- Tests: shellcheck -x src/lib/network.sh
 - PRs:
