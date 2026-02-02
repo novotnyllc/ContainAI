@@ -766,11 +766,16 @@ _cai_remove_network_rules() {
     # Check iptables availability
     if ! _cai_iptables_available; then
         if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
-            _cai_warn "iptables is not available in Lima VM, no rules to remove"
+            _cai_warn "Lima VM is not running - cannot remove network rules"
+            _cai_warn "  Rules may exist inside the VM. To remove them:"
+            _cai_warn "  1. Start the VM: limactl start ${_CAI_LIMA_VM_NAME:-containai-docker}"
+            _cai_warn "  2. Re-run: cai uninstall"
+            # Return failure since rules may exist but weren't removed
+            return 1
         else
             _cai_warn "iptables is not installed, no rules to remove"
+            return 0
         fi
-        return 0
     fi
 
     if [[ "$dry_run" == "true" ]]; then
