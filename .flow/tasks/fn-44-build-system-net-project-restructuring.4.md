@@ -1,65 +1,83 @@
 # fn-44-build-system-net-project-restructuring.4 Enable sysbox in GitHub Actions for E2E tests
 
 ## Description
-Configure GitHub Actions to run E2E tests with sysbox by running `install.sh` on the runner VM (just like a normal user would). GitHub Actions runners are raw VMs with passwordless sudo, not containers.
+Configure GitHub Actions to attempt running E2E tests with sysbox. Include explicit proof step using the correct docker context and self-hosted fallback if GitHub-hosted runners cannot support sysbox.
 
 **Size:** M
 **Files:**
 - `.github/workflows/docker.yml` (update test job)
-- `install.sh` (may need updates to work in CI context)
+- `install.sh` (ensure non-interactive mode works - coordinate with Task 5)
 
 ## Approach
 
-1. **Run install.sh in CI**: The install script should detect that sysbox is needed and install/configure it. This tests the real installation path that users will follow.
+1. **Coordinate with Task 5's install.sh rewrite**: Task 5 rewrites install.sh to be dual-mode (standalone download OR --local from tarball). This task must use the same artifact flow:
+   - PR builds upload tarball to Actions artifacts (from Task 5)
+   - Download PR artifact tarball
+   - Extract and run `./install.sh --local`
+   - This tests the real install path users will use
 
-2. **GitHub Actions runner context**:
-   - Runners are VMs (ubuntu-latest, ubuntu-22.04), not containers
-   - Have passwordless sudo
-   - Can install kernel modules and system services
-   - sysbox installation will work normally
-
-3. **Test execution flow**:
+2. **Proof step** - After extracting tarball, test sysbox availability:
    ```yaml
-   - name: Install ContainAI (includes sysbox)
-     run: ./install.sh
+   - name: Download and extract tarball
+     uses: actions/download-artifact@v4
+     with:
+       name: containai-tarball-${{ matrix.arch }}
+   - name: Extract and install
+     id: install
+     run: |
+       tar xzf containai-*.tar.gz
+       cd containai-*/
+       ./install.sh --local --yes 2>&1 || echo "SYSBOX_FAILED=true" >> "$GITHUB_OUTPUT"
+   - name: Verify sysbox runtime
+     if: steps.install.outputs.SYSBOX_FAILED != 'true'
+     run: |
+       # Check on containai-docker context (where sysbox is configured)
+       docker --context containai-docker info 2>/dev/null | grep -q sysbox-runc && echo "Sysbox available on containai-docker context"
+   ```
 
+3. **Non-interactive mode**: Ensure `install.sh --yes` works in CI context:
+   - Skip all prompts
+   - Exit with clear success/failure status
+   - Handle case where kernel module can't load
+
+4. **Architecture matrix**: Use appropriate runners for each arch:
+   - ubuntu-22.04 for amd64
+   - ubuntu-24.04-arm for arm64
+
+5. **Fallback plan**: Current `docker.yml` notes "E2E requires self-hosted". If GH-hosted runners can't support sysbox:
+   - Document the limitation
+   - Add self-hosted runner tags for E2E job
+   - Skip E2E on GH-hosted with clear message
+
+6. **Test execution** (if sysbox available):
+   ```yaml
    - name: Run E2E tests
+     if: steps.install.outputs.SYSBOX_FAILED != 'true'
      run: ./tests/integration/test-dind.sh
    ```
 
-4. **Architecture matrix**: Use appropriate runners for each arch (ubuntu-22.04 for amd64, ubuntu-24.04-arm for arm64).
-
 ## Key context
 
-- GitHub-hosted runners have passwordless sudo
-- Runners are fresh VMs, not containers - sysbox kernel module installation works
-- Running install.sh validates the real user experience
-- `build-sysbox.yml` already handles sysbox package building (can use those artifacts or upstream releases)
-## Approach
+- GitHub-hosted runners are VMs with passwordless sudo
+- Sysbox requires kernel module loading - may not work on all runner configurations
+- Current CI explicitly documents E2E requires self-hosted
+- Task 5 rewrites install.sh - this task must use tarball artifact flow, not repo-root install
+- Sysbox is configured on `containai-docker` context, NOT the default docker context
+- Must check sysbox on the right context or use `cai doctor` which knows the context
 
-1. **Install sysbox in workflow**: Use the sysbox deb packages from `build-sysbox.yml` artifacts or install from nestybox releases.
-
-2. **Configure Docker with sysbox runtime**: Add sysbox-runc as a runtime option.
-
-3. **Run E2E tests**: Execute `tests/integration/test-dind.sh` with sysbox runtime.
-
-4. **Use matrix strategy** for architecture (amd64/arm64) following pattern from `build-sysbox.yml:484-597`.
-
-## Key context
-
-- GitHub-hosted runners have passwordless sudo (per user request)
-- Sysbox requires kernel module loading (may need specific runner configuration)
-- `build-sysbox.yml` already builds sysbox-ce deb packages for ubuntu-22.04 and ubuntu-24.04-arm
-- E2E tests use `CONTAINAI_TEST_IMAGE` env var
-- Test resource cleanup uses `containai.test=1` label
 ## Acceptance
-- [ ] CI runs install.sh to set up the environment
-- [ ] Sysbox installed and configured via install.sh (not manual steps)
-- [ ] `tests/integration/test-dind.sh` runs successfully in CI
-- [ ] E2E tests run on both amd64 and arm64
+- [ ] E2E test job downloads PR artifact tarball (not repo-root install)
+- [ ] E2E test job extracts tarball and runs `./install.sh --local`
+- [ ] Proof step checks sysbox on `containai-docker` context (not default)
+- [ ] Proof step captures success/failure cleanly
+- [ ] `install.sh --yes` works in non-interactive CI context
+- [ ] If sysbox works on GH-hosted: E2E tests run
+- [ ] If sysbox fails on GH-hosted: Clear skip message, fallback documented
+- [ ] Self-hosted runner configuration ready if needed
+- [ ] E2E tests run on both amd64 and arm64 (on available runners)
 - [ ] Test artifacts collected on failure
-- [ ] CI logs show sysbox runtime being used
-- [ ] install.sh works in CI context (handles non-interactive mode)
+- [ ] CI logs show which path was taken (sysbox available / fallback)
+
 ## Done summary
 TBD
 
