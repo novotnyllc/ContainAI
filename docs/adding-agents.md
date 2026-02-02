@@ -68,11 +68,13 @@ RUN ( <installation-command> && agent --version ) \
 - Group related commands with `&&`
 - Document any special requirements in comments
 
-### Real Examples
+### Simplified Examples
 
-**Note**: All agents below are installed in the container image (fail-fast). The distinction between "required" and "optional" in sync-manifest.toml (the `o` flag) refers to whether host configs are *synced*, not whether the CLI is installed.
+The examples below show the general pattern. For the canonical source, see `src/container/Dockerfile.agents`.
 
-**Claude Code** (installed, configs always synced):
+**Note**: The `o` flag in sync-manifest.toml refers to whether host configs are *synced*, not whether the CLI is installed. All these CLIs are installed with fail-fast verification.
+
+**Claude Code** (configs always synced):
 
 ```dockerfile
 # Install Claude Code via official installer
@@ -80,15 +82,16 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
     /home/agent/.local/bin/claude --version
 ```
 
-**Gemini CLI** (installed, configs synced only if present on host):
+**Gemini CLI** (configs synced only if present on host):
 
 ```dockerfile
+# Simplified - see Dockerfile.agents for full install with browser deps
 RUN . /home/agent/.nvm/nvm.sh && \
     bun install -g --trust @google/gemini-cli && \
     gemini --version
 ```
 
-**Kimi CLI** (installed, configs synced only if present on host):
+**Kimi CLI** (configs synced only if present on host):
 
 ```dockerfile
 RUN uv tool install --python 3.13 kimi-cli && \
@@ -133,7 +136,7 @@ flags = "fjos"                        # Flags (see reference below)
 
 ### Always-Sync vs Optional-Sync Agents
 
-This distinction is about **config syncing**, not installation. All supported agents are installed in the container image; the `o` flag controls whether their host configs are synced.
+This distinction is about **config syncing**, not installation. Agent CLIs that ContainAI ships are installed via `Dockerfile.agents`; some manifest entries are for editor/integration configs (e.g., Continue, Cursor) and do not imply an installed CLI. The `o` flag controls whether host configs are synced.
 
 **Always-sync agents** (Claude, Codex): Omit the `o` flag. Host configs are always synced and their directories are pre-created in the container image.
 
@@ -202,7 +205,7 @@ disabled = true  # Excluded from _IMPORT_SYNC_MAP
 Disabled entries:
 - Still generate container symlinks and init directories
 - Are not synced during normal `cai import`
-- Can be included via `[import].additional_paths` in `config.toml`
+- Can be included via `[import].additional_paths` in ContainAI's `config.toml` (see [Configuration](configuration.md))
 
 SSH is a common example - disabled by default for security, but users can opt-in.
 
