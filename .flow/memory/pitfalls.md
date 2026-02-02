@@ -349,3 +349,6 @@ When wrapping privileged commands with sudo, try direct first then sudo -n (non-
 
 ## 2026-02-02 manual [pitfall]
 When function sets global variables as side-effects, call directly instead of via $() command substitution which runs in subshell and loses the global variable changes
+
+## 2026-02-02 manual [pitfall]
+When priming sudo credentials interactively, probe with sudo -n true first; only call sudo -v without redirection if probe fails - avoid hiding password prompts with 2>/dev/null
