@@ -352,3 +352,6 @@ When function sets global variables as side-effects, call directly instead of vi
 
 ## 2026-02-02 manual [pitfall]
 When priming sudo credentials interactively, probe with sudo -n true first; only call sudo -v without redirection if probe fails - avoid hiding password prompts with 2>/dev/null
+
+## 2026-02-02 manual [pitfall]
+sshd AllowTcpForwarding no doesn't disable X11/agent forwarding - use DisableForwarding yes for comprehensive block
