@@ -10,8 +10,92 @@ permissions:
   packages: read
 
 jobs:
+  # ============================================================================
+  # Build Multi-arch Tarballs for Release
+  # ============================================================================
+  build-release-tarballs:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            dotnet_rid: linux-x64
+            tarball_arch: linux-x64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            dotnet_rid: linux-arm64
+            tarball_arch: linux-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag exists
+        run: |
+          if ! git rev-parse -q --verify "refs/tags/${GITHUB_REF_NAME}" >/dev/null; then
+            echo "::error::Tag ${GITHUB_REF_NAME} not found in repository"
+            exit 1
+          fi
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install and run NBGV
+        id: nbgv
+        run: |
+          dotnet tool restore
+          echo "SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
+      - name: Build AOT binary
+        run: |
+          echo "============================================="
+          echo "Building acp-proxy for ${{ matrix.dotnet_rid }}"
+          echo "============================================="
+          dotnet publish src/acp-proxy \
+            -r ${{ matrix.dotnet_rid }} \
+            -c Release \
+            --self-contained \
+            -o src/acp-proxy/publish/${{ matrix.dotnet_rid }}
+
+          ls -la src/acp-proxy/publish/${{ matrix.dotnet_rid }}/
+          file src/acp-proxy/publish/${{ matrix.dotnet_rid }}/acp-proxy
+
+      - name: Create release tarball
+        run: |
+          echo "============================================="
+          echo "Creating tarball for ${{ matrix.tarball_arch }}"
+          echo "============================================="
+          ./scripts/package-release.sh \
+            --arch ${{ matrix.tarball_arch }} \
+            --version "$NBGV_SemVer2" \
+            --output-dir ./artifacts
+
+          ls -la ./artifacts/
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-tarball-${{ matrix.arch }}
+          path: ./artifacts/containai-*.tar.gz
+          retention-days: 1
+          if-no-files-found: error
+
+  # ============================================================================
+  # Create Release and Upload Assets
+  # ============================================================================
   release:
+    needs: build-release-tarballs
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,6 +149,28 @@ jobs:
           echo "found=false" >> "$GITHUB_OUTPUT"
           exit 1
 
+      - name: Download amd64 tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-amd64
+          path: ./release-assets
+
+      - name: Download arm64 tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-arm64
+          path: ./release-assets
+
+      - name: Prepare install.sh for release
+        run: |
+          # Copy install.sh to release assets
+          cp install.sh ./release-assets/install.sh
+          chmod +x ./release-assets/install.sh
+
+          # List all release assets
+          echo "Release assets:"
+          ls -la ./release-assets/
+
       - name: Check if release exists
         id: check_release
         env:
@@ -86,4 +192,17 @@ jobs:
             --title "ContainAI ${GITHUB_REF_NAME}" \
             --generate-notes \
             --verify-tag \
-            --latest
+            --latest \
+            ./release-assets/*
+
+      - name: Upload assets to existing release
+        if: steps.check_release.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Upload each asset (skip if already exists)
+          for asset in ./release-assets/*; do
+            asset_name=$(basename "$asset")
+            echo "Uploading: $asset_name"
+            gh release upload "$GITHUB_REF_NAME" "$asset" --clobber || true
+          done

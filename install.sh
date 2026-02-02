@@ -2,51 +2,52 @@
 # ==============================================================================
 # ContainAI Installer
 # ==============================================================================
-# One-liner installation:
-#   curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
+# Dual-mode installer: works both as standalone download and from inside tarball.
 #
-# With auto-confirmation (no prompts):
-#   curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash -s -- --yes
+# Path A - Standalone (curl/wget):
+#   curl -fsSL https://github.com/novotnyllc/containai/releases/latest/download/install.sh | bash
+#
+# Path B - From extracted tarball:
+#   tar xzf containai-0.2.0-linux-x64.tar.gz
+#   cd containai-0.2.0-linux-x64
+#   ./install.sh           # Auto-detects local files
+#   ./install.sh --local   # Force local install
 #
 # This script:
-#   1. Detects OS (macOS, Linux)
-#   2. On macOS: bootstraps bash 4+ via Homebrew if needed
-#   3. Checks prerequisites (Docker, git)
-#   4. Clones/updates the repo to ~/.local/share/containai
-#   5. Creates wrapper script in ~/.local/bin/cai
-#   6. Adds bin directory to PATH if needed
+#   Local mode (--local or auto-detect):
+#     1. Copies files from tarball to ~/.local/share/containai
+#     2. Creates wrapper script in ~/.local/bin/cai
+#     3. Adds bin directory to PATH if needed
 #
-# Note: The installer runs on bash 3.2+, but the cai CLI requires bash 4.0+.
-# On macOS, the installer can auto-install bash 4+ via Homebrew.
+#   Standalone mode (no local files):
+#     1. Detects OS and architecture
+#     2. Downloads tarball from GitHub Releases
+#     3. Extracts and runs local install
 #
 # Flags:
+#   --local     Force local install (from extracted tarball)
 #   --yes       Auto-confirm all prompts (required for non-interactive install)
 #   --no-setup  Skip post-install setup (cai setup/update)
 #
 # Environment variables:
 #   CAI_INSTALL_DIR  - Installation directory (default: ~/.local/share/containai)
 #   CAI_BIN_DIR      - Binary directory (default: ~/.local/bin)
-#   CAI_BRANCH       - Git branch to install (explicit override, takes precedence over CAI_CHANNEL)
-#   CAI_CHANNEL      - Release channel: "stable" (default, installs latest tag) or "nightly" (tracks main)
-#
-# Channel Behavior:
-#   CAI_BRANCH set:       Checkout specified branch (ignores channel)
-#   CAI_CHANNEL=nightly:  Checkout/track main branch
-#   CAI_CHANNEL=stable:   Checkout latest v* tag (default)
+#   CAI_CHANNEL      - Release channel: "stable" (default) or "nightly"
 #
 # ==============================================================================
 set -euo pipefail
 
 # ==============================================================================
-# Flag Parsing (MUST be at TOP - before bash bootstrap)
-# These variables are used by this task AND fn-16-4c9.3/4
+# Flag Parsing (MUST be at TOP - before any other logic)
 # ==============================================================================
 YES_FLAG=""
 NO_SETUP=""
+LOCAL_MODE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --yes) YES_FLAG="1"; shift ;;
         --no-setup) NO_SETUP="true"; shift ;;
+        --local) LOCAL_MODE="true"; shift ;;
         *) shift ;;
     esac
 done
@@ -72,46 +73,32 @@ success() { printf '%b[OK]%b %s\n' "$GREEN" "$NC" "$1"; }
 warn() { printf '%b[WARN]%b %s\n' "$YELLOW" "$NC" "$1" >&2; }
 error() { printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$1" >&2; }
 
-# Get latest release tag (v*) using semver ordering
-# Prefers sort -V when available; falls back to git's version sort
-get_latest_release_tag() {
-    local latest_tag=""
-    if sort -V </dev/null >/dev/null 2>&1; then
-        latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
-    else
-        latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
-    fi
-    printf '%s' "$latest_tag"
-}
-
 # Configuration with defaults
-REPO_URL="https://github.com/novotnyllc/containai.git"
+GITHUB_REPO="novotnyllc/containai"
 INSTALL_DIR="${CAI_INSTALL_DIR:-$HOME/.local/share/containai}"
 BIN_DIR="${CAI_BIN_DIR:-$HOME/.local/bin}"
-# CAI_BRANCH is explicit branch override (takes precedence over channel)
-BRANCH="${CAI_BRANCH:-}"
-# CAI_CHANNEL controls release channel (stable/nightly)
-# Validate channel value and warn on invalid
 CHANNEL="${CAI_CHANNEL:-stable}"
-case "$CHANNEL" in
-    stable|nightly)
-        # Valid channel
-        ;;
-    *)
-        warn "Invalid CAI_CHANNEL='$CHANNEL', using stable"
-        CHANNEL="stable"
-        ;;
-esac
 
 # Path to bash 4+ (set by bootstrap_bash if needed)
 BASH4_PATH=""
 
-# Track if this is a fresh install or update (set by install_containai)
+# Track install state
 IS_FRESH_INSTALL=""
-
-# Track if this is a proper re-run (.git exists AND cai wrapper exists)
-# Used to decide whether to run update vs setup in post_install
 IS_RERUN=""
+
+# Detect script directory (for local mode detection)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ==============================================================================
+# Mode Detection
+# ==============================================================================
+# Check if we're running from an extracted tarball (has containai.sh in same dir)
+detect_local_mode() {
+    if [[ -f "$SCRIPT_DIR/containai.sh" && -f "$SCRIPT_DIR/lib/core.sh" ]]; then
+        return 0  # Local mode
+    fi
+    return 1  # Standalone mode
+}
 
 # ==============================================================================
 # OS Detection
@@ -124,7 +111,6 @@ detect_os() {
             echo "macos"
             ;;
         Linux)
-            # Detect specific Linux distro
             if [[ -f /etc/os-release ]]; then
                 # shellcheck disable=SC1091
                 . /etc/os-release
@@ -153,15 +139,30 @@ detect_os() {
     esac
 }
 
+# Detect architecture for downloads
+detect_arch() {
+    local machine
+    machine="$(uname -m)"
+    case "$machine" in
+        x86_64|amd64)
+            echo "linux-x64"
+            ;;
+        aarch64|arm64)
+            echo "linux-arm64"
+            ;;
+        *)
+            error "Unsupported architecture: $machine"
+            exit 1
+            ;;
+    esac
+}
+
 # ==============================================================================
 # Bash Bootstrap (macOS)
 # ==============================================================================
-# Detect Homebrew installation path (Apple Silicon vs Intel)
 get_brew_path() {
-    # Check Apple Silicon location first
     if [[ -x "/opt/homebrew/bin/brew" ]]; then
         echo "/opt/homebrew/bin/brew"
-    # Then Intel location
     elif [[ -x "/usr/local/bin/brew" ]]; then
         echo "/usr/local/bin/brew"
     else
@@ -169,7 +170,6 @@ get_brew_path() {
     fi
 }
 
-# Check for existing Homebrew bash
 find_homebrew_bash() {
     local brew_path
     brew_path="$(get_brew_path)"
@@ -179,7 +179,6 @@ find_homebrew_bash() {
         return
     fi
 
-    # Get Homebrew prefix directly
     local brew_prefix
     brew_prefix="$("$brew_path" --prefix 2>/dev/null)" || {
         echo ""
@@ -188,7 +187,6 @@ find_homebrew_bash() {
 
     local bash_path="${brew_prefix}/bin/bash"
     if [[ -x "$bash_path" ]]; then
-        # Verify it's bash 4+
         local version
         version="$("$bash_path" -c 'echo "${BASH_VERSION%%.*}"' 2>/dev/null)" || {
             echo ""
@@ -202,27 +200,18 @@ find_homebrew_bash() {
     echo ""
 }
 
-# Check if stdin is interactive (can prompt user)
-# For piped installs (stdin not a TTY), we NEVER prompt - this is per spec
 can_prompt() {
-    # Only allow prompting if stdin is a TTY
-    # Do NOT use /dev/tty fallback - piped installs must not prompt
     [[ -t 0 ]]
 }
 
-# Prompt for confirmation (respects YES_FLAG)
-# Arguments: $1 = message
-#            $2 = default_yes ("true" for default Y, otherwise default N)
 prompt_confirm() {
     local message="$1"
     local default_yes="${2:-false}"
 
-    # Auto-confirm if --yes flag
     if [[ -n "$YES_FLAG" ]]; then
         return 0
     fi
 
-    # Can't prompt in non-interactive mode without --yes
     if ! can_prompt; then
         return 1
     fi
@@ -236,32 +225,24 @@ prompt_confirm() {
 
     printf '%s %s: ' "$message" "$prompt_suffix"
     if ! read -r response; then
-        # EOF (Ctrl-D) - treat as decline/cancel
         return 1
     fi
 
-    # Normalize: lowercase for consistent matching (bash 3.2 compatible)
     response=$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')
 
-    # Evaluate response based on default
-    # Only accept explicit y/yes/n/no/empty - reject ambiguous input like "maybe"
     if [[ "$default_yes" == "true" ]]; then
-        # Default Y: empty/y/yes confirms, n/no denies, other input denies (safe default)
         case "$response" in
             ""|y|yes) return 0 ;;
-            n|no)     return 1 ;;
-            *)        return 1 ;;  # Ambiguous input defaults to deny for safety
+            *) return 1 ;;
         esac
     else
-        # Default N: y/yes confirms, empty/n/no/other denies
         case "$response" in
             y|yes) return 0 ;;
-            *)     return 1 ;;
+            *) return 1 ;;
         esac
     fi
 }
 
-# Install Homebrew (macOS only)
 install_homebrew() {
     info "Homebrew is required to install bash 4+ on macOS"
 
@@ -272,21 +253,17 @@ install_homebrew() {
             return 1
         fi
     else
-        # Non-interactive without --yes: show instructions only
         warn "Homebrew not found. Install it with:"
         warn '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
         return 1
     fi
 
-    # Install Homebrew
-    # NONINTERACTIVE=1 prevents prompts (Homebrew's official non-interactive mode)
     if [[ -n "$YES_FLAG" ]]; then
         NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     else
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     fi
 
-    # Verify installation
     local brew_path
     brew_path="$(get_brew_path)"
     if [[ -z "$brew_path" ]]; then
@@ -298,7 +275,6 @@ install_homebrew() {
     return 0
 }
 
-# Install bash via Homebrew (macOS only)
 install_bash_homebrew() {
     local brew_path="$1"
 
@@ -311,7 +287,6 @@ install_bash_homebrew() {
             return 1
         fi
     else
-        # Non-interactive without --yes: show instructions only
         local brew_prefix
         brew_prefix="$("$brew_path" --prefix 2>/dev/null)" || brew_prefix="/opt/homebrew"
         warn "bash 4+ required. Install it with:"
@@ -320,10 +295,8 @@ install_bash_homebrew() {
         return 1
     fi
 
-    # Install bash
     "$brew_path" install bash
 
-    # Verify installation
     local bash_path
     bash_path="$(find_homebrew_bash)"
     if [[ -z "$bash_path" ]]; then
@@ -336,13 +309,10 @@ install_bash_homebrew() {
     return 0
 }
 
-# Bootstrap bash 4+ on macOS
-# Sets BASH4_PATH if bash 4+ is available/installed
 bootstrap_bash_macos() {
     local major_version
     major_version="${BASH_VERSION%%.*}"
 
-    # Already running bash 4+, no bootstrap needed
     if [[ "$major_version" -ge 4 ]]; then
         BASH4_PATH="$BASH"
         return 0
@@ -350,7 +320,6 @@ bootstrap_bash_macos() {
 
     info "macOS ships with bash $BASH_VERSION (cai requires bash 4.0+)"
 
-    # Check for existing Homebrew bash first
     local existing_bash
     existing_bash="$(find_homebrew_bash)"
     if [[ -n "$existing_bash" ]]; then
@@ -359,30 +328,23 @@ bootstrap_bash_macos() {
         return 0
     fi
 
-    # Check for Homebrew
     local brew_path
     brew_path="$(get_brew_path)"
 
     if [[ -z "$brew_path" ]]; then
-        # Need to install Homebrew first
         if ! install_homebrew; then
-            # Couldn't install Homebrew, BASH4_PATH remains empty
             return 0
         fi
         brew_path="$(get_brew_path)"
     fi
 
-    # Install bash via Homebrew
     if ! install_bash_homebrew "$brew_path"; then
-        # Couldn't install bash, BASH4_PATH remains empty
         return 0
     fi
 
     return 0
 }
 
-# Main bash bootstrap function
-# Called early in install.sh, BEFORE creating the cai wrapper
 bootstrap_bash() {
     local os
     os="$(detect_os)"
@@ -390,7 +352,6 @@ bootstrap_bash() {
     if [[ "$os" == "macos" ]]; then
         bootstrap_bash_macos
     else
-        # Linux typically has bash 4+ in standard packages
         local major_version
         major_version="${BASH_VERSION%%.*}"
         if [[ "$major_version" -ge 4 ]]; then
@@ -398,7 +359,6 @@ bootstrap_bash() {
         else
             warn "bash $BASH_VERSION detected, cai requires bash 4.0+"
             warn "Please install bash 4.0 or later"
-            # Continue without BASH4_PATH - wrapper will handle it
         fi
     fi
 }
@@ -407,14 +367,11 @@ bootstrap_bash() {
 # Prerequisite Checks
 # ==============================================================================
 check_bash_version() {
-    # Check for bash 4.0+ (required by cai CLI, not installer)
-    # This is now just a status display, bootstrap_bash handles installation
     local major_version
     major_version="${BASH_VERSION%%.*}"
 
     if [[ "$major_version" -lt 4 ]]; then
         if [[ -n "$BASH4_PATH" ]]; then
-            # bash 4+ was installed/found during bootstrap
             local bash4_version
             bash4_version="$("$BASH4_PATH" -c 'echo "$BASH_VERSION"' 2>/dev/null)" || bash4_version="4.x"
             success "bash $bash4_version (Homebrew)"
@@ -438,11 +395,9 @@ check_docker() {
                 ;;
             debian)
                 error "Install Docker: sudo apt-get update && sudo apt-get install -y docker.io"
-                error "Or Docker Desktop: https://docs.docker.com/desktop/install/linux-install/"
                 ;;
             fedora)
                 error "Install Docker: sudo dnf install -y docker"
-                error "Or Docker Desktop: https://docs.docker.com/desktop/install/linux-install/"
                 ;;
             *)
                 error "Install Docker: https://docs.docker.com/engine/install/"
@@ -451,7 +406,6 @@ check_docker() {
         return 1
     fi
 
-    # Check if Docker is running
     if ! docker info >/dev/null 2>&1; then
         warn "Docker is installed but not running"
         warn "Please start Docker and run this script again"
@@ -461,43 +415,11 @@ check_docker() {
     return 0
 }
 
-check_git() {
-    if ! command -v git >/dev/null 2>&1; then
-        local os
-        os="$(detect_os)"
-        error "git is not installed"
-        case "$os" in
-            macos)
-                error "Install git: xcode-select --install"
-                error "Or: brew install git"
-                ;;
-            debian)
-                error "Install git: sudo apt-get update && sudo apt-get install -y git"
-                ;;
-            fedora)
-                error "Install git: sudo dnf install -y git"
-                ;;
-            *)
-                error "Install git from: https://git-scm.com/downloads"
-                ;;
-        esac
-        return 1
-    fi
-    return 0
-}
-
 check_prerequisites() {
     info "Checking prerequisites..."
     local failed=0
 
-    # bash check (warn only, don't fail) - check_bash_version handles its own output
     check_bash_version
-
-    if ! check_git; then
-        failed=1
-    else
-        success "git $(git --version | cut -d' ' -f3)"
-    fi
 
     if ! check_docker; then
         failed=1
@@ -516,193 +438,212 @@ check_prerequisites() {
 }
 
 # ==============================================================================
-# Installation
+# Download Functions (Standalone Mode)
 # ==============================================================================
-install_containai() {
-    # Determine checkout strategy based on BRANCH vs CHANNEL
-    # BRANCH takes precedence (power users, testing specific branch)
-    # CHANNEL controls stable (tags) vs nightly (main)
-    local checkout_mode checkout_target
+get_download_url() {
+    local arch="$1"
 
-    if [[ -n "$BRANCH" ]]; then
-        # CAI_BRANCH set - explicit branch override
-        # Validate branch name (reject option-like values)
-        if [[ "$BRANCH" == -* ]]; then
-            error "Invalid branch name: '$BRANCH'"
+    # Get latest release tag from GitHub API
+    local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
+    local release_info
+
+    if command -v curl >/dev/null 2>&1; then
+        release_info=$(curl -fsSL "$api_url" 2>/dev/null) || {
+            error "Failed to fetch release information from GitHub"
             return 1
-        fi
-        checkout_mode="branch"
-        checkout_target="$BRANCH"
-        info "Installing ContainAI to $INSTALL_DIR..."
-        info "Branch override: $BRANCH (CAI_BRANCH)"
-    elif [[ "$CHANNEL" == "nightly" ]]; then
-        # Nightly channel - track main branch
-        checkout_mode="nightly"
-        checkout_target="main"
-        info "Installing ContainAI to $INSTALL_DIR..."
-        info "Channel: nightly (main branch)"
+        }
+    elif command -v wget >/dev/null 2>&1; then
+        release_info=$(wget -qO- "$api_url" 2>/dev/null) || {
+            error "Failed to fetch release information from GitHub"
+            return 1
+        }
     else
-        # Stable channel (default) - will checkout latest tag after clone
-        checkout_mode="stable"
-        checkout_target=""
-        info "Installing ContainAI to $INSTALL_DIR..."
-        info "Channel: stable (latest release)"
+        error "Neither curl nor wget found. Please install one of them."
+        return 1
     fi
 
-    # Create parent directory
-    mkdir -p "$(dirname "$INSTALL_DIR")"
+    # Extract tarball download URL for the architecture
+    # Look for asset matching containai-*-<arch>.tar.gz
+    local tarball_url
+    tarball_url=$(printf '%s' "$release_info" | grep -o "\"browser_download_url\":[[:space:]]*\"[^\"]*containai-[^\"]*-${arch}.tar.gz\"" | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/')
 
-    if [[ -d "$INSTALL_DIR/.git" ]]; then
-        # Existing installation - update
+    if [[ -z "$tarball_url" ]]; then
+        error "Could not find tarball for architecture: $arch"
+        return 1
+    fi
+
+    printf '%s' "$tarball_url"
+}
+
+download_and_extract() {
+    local url="$1"
+    local dest_dir="$2"
+
+    info "Downloading tarball..."
+    info "  URL: $url"
+
+    local temp_dir
+    temp_dir="$(mktemp -d)"
+    local tarball_path="$temp_dir/containai.tar.gz"
+
+    # Download tarball
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL -o "$tarball_path" "$url"; then
+            error "Download failed"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -q -O "$tarball_path" "$url"; then
+            error "Download failed"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    fi
+
+    # Extract tarball
+    info "Extracting tarball..."
+    if ! tar -xzf "$tarball_path" -C "$temp_dir"; then
+        error "Extraction failed"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    # Find extracted directory (containai-VERSION-ARCH)
+    local extracted_dir
+    extracted_dir=$(find "$temp_dir" -maxdepth 1 -type d -name 'containai-*' | head -1)
+
+    if [[ -z "$extracted_dir" || ! -d "$extracted_dir" ]]; then
+        error "Could not find extracted directory"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    # Re-run install.sh from extracted directory in local mode
+    info "Running local installer..."
+    local install_script="$extracted_dir/install.sh"
+    if [[ ! -f "$install_script" ]]; then
+        error "install.sh not found in tarball"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    chmod +x "$install_script"
+
+    # Build arguments to pass to local installer
+    local args=("--local")
+    [[ -n "$YES_FLAG" ]] && args+=("--yes")
+    [[ -n "$NO_SETUP" ]] && args+=("--no-setup")
+
+    # Execute local installer
+    (cd "$extracted_dir" && bash ./install.sh "${args[@]}")
+    local rc=$?
+
+    # Cleanup
+    rm -rf "$temp_dir"
+
+    return $rc
+}
+
+# ==============================================================================
+# Local Installation (from tarball)
+# ==============================================================================
+install_from_local() {
+    info "Installing ContainAI from local files..."
+
+    # Determine if this is update or fresh install
+    if [[ -d "$INSTALL_DIR" && -f "$INSTALL_DIR/containai.sh" ]]; then
         IS_FRESH_INSTALL="false"
-        # Check if cai wrapper also exists (proper re-run vs corrupted state)
-        # Use -f (file exists) not -x (executable) since wrapper is invoked via bash
         if [[ -f "$BIN_DIR/cai" ]]; then
             IS_RERUN="true"
         fi
-        info "Existing installation found, updating..."
-        (
-            cd -- "$INSTALL_DIR"
-            git fetch --tags origin
-
-            case "$checkout_mode" in
-                branch)
-                    # Explicit branch override
-                    git fetch origin "refs/heads/$checkout_target:refs/remotes/origin/$checkout_target"
-                    git checkout -B "$checkout_target" "origin/$checkout_target"
-                    ;;
-                nightly)
-                    # Nightly: track main branch
-                    git checkout main
-                    git pull origin main
-                    ;;
-                stable)
-                    # Stable: checkout latest semver tag
-                    local latest_tag
-                    latest_tag=$(get_latest_release_tag)
-                    if [[ -n "$latest_tag" ]]; then
-                        git checkout "$latest_tag"
-                    else
-                        warn "No release tags found, staying on main"
-                        git checkout main
-                        git pull origin main
-                    fi
-                    ;;
-            esac
-        )
-        success "Updated to latest version"
+        info "Updating existing installation at $INSTALL_DIR"
     else
-        # Fresh installation
         IS_FRESH_INSTALL="true"
-        if [[ -d "$INSTALL_DIR" ]]; then
-            warn "Directory exists but is not a git repository: $INSTALL_DIR"
-            warn "Removing and re-cloning..."
-            rm -rf "$INSTALL_DIR"
-        fi
-
-        # Clone repo (always start with main for fresh clone, then checkout target)
-        git clone --depth 1 -- "$REPO_URL" "$INSTALL_DIR"
-
-        # Fetch tags and checkout based on mode
-        (
-            cd -- "$INSTALL_DIR"
-
-            case "$checkout_mode" in
-                branch)
-                    # Explicit branch override - fetch the specific branch
-                    git fetch origin "refs/heads/$checkout_target:refs/remotes/origin/$checkout_target" --depth 1
-                    git checkout -B "$checkout_target" "origin/$checkout_target"
-                    ;;
-                nightly)
-                    # Nightly: already on main from clone
-                    :
-                    ;;
-                stable)
-                    # Stable: fetch tags and checkout latest
-                    git fetch --tags origin
-                    local latest_tag
-                    latest_tag=$(get_latest_release_tag)
-                    if [[ -n "$latest_tag" ]]; then
-                        git checkout "$latest_tag"
-                    else
-                        warn "No release tags found, staying on main"
-                    fi
-                    ;;
-            esac
-        )
-        success "Cloned ContainAI repository"
+        info "Installing to $INSTALL_DIR"
     fi
 
-    # Show installed version and checkout info
+    # Create installation directory
+    mkdir -p "$INSTALL_DIR"
+    mkdir -p "$INSTALL_DIR/lib"
+    mkdir -p "$INSTALL_DIR/scripts"
+    mkdir -p "$INSTALL_DIR/templates"
+
+    # Copy files from tarball to install directory
+    info "Copying files..."
+
+    # Main CLI
+    cp "$SCRIPT_DIR/containai.sh" "$INSTALL_DIR/containai.sh"
+    chmod +x "$INSTALL_DIR/containai.sh"
+
+    # Shell libraries
+    cp "$SCRIPT_DIR/lib/"*.sh "$INSTALL_DIR/lib/"
+
+    # Runtime scripts (only parse-manifest.sh)
+    cp "$SCRIPT_DIR/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
+    chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
+
+    # Sync manifest
+    cp "$SCRIPT_DIR/sync-manifest.toml" "$INSTALL_DIR/"
+
+    # Templates
+    if [[ -d "$SCRIPT_DIR/templates" ]]; then
+        cp -r "$SCRIPT_DIR/templates/"* "$INSTALL_DIR/templates/" 2>/dev/null || true
+    fi
+
+    # ACP proxy binary
+    if [[ -f "$SCRIPT_DIR/acp-proxy" ]]; then
+        cp "$SCRIPT_DIR/acp-proxy" "$INSTALL_DIR/acp-proxy"
+        chmod +x "$INSTALL_DIR/acp-proxy"
+    fi
+
+    # Version file
+    if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
+        cp "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
+    fi
+
+    # LICENSE
+    if [[ -f "$SCRIPT_DIR/LICENSE" ]]; then
+        cp "$SCRIPT_DIR/LICENSE" "$INSTALL_DIR/LICENSE"
+    fi
+
+    success "Files installed to $INSTALL_DIR"
+
+    # Show version
     if [[ -f "$INSTALL_DIR/VERSION" ]]; then
         local version
         version=$(tr -d '[:space:]' <"$INSTALL_DIR/VERSION")
         info "Installed version: $version"
     fi
-
-    # Show checkout state
-    (
-        cd -- "$INSTALL_DIR"
-        local current_ref
-        current_ref=$(git describe --tags --exact-match 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-        case "$checkout_mode" in
-            branch)
-                success "Checked out branch: $checkout_target (CAI_BRANCH override)"
-                ;;
-            nightly)
-                local short_sha
-                short_sha=$(git rev-parse --short HEAD 2>/dev/null)
-                success "Checked out nightly channel (main branch, $short_sha)"
-                ;;
-            stable)
-                if [[ "$current_ref" == v* ]]; then
-                    success "Checked out stable release: $current_ref"
-                else
-                    warn "On branch $current_ref (no release tags found)"
-                fi
-                ;;
-        esac
-    )
 }
 
+# ==============================================================================
+# PATH Setup
+# ==============================================================================
 setup_path() {
     info "Setting up PATH integration..."
 
-    # Create bin directory
     mkdir -p "$BIN_DIR"
 
-    # Create wrapper script (bake in INSTALL_DIR so it works without env var)
     local wrapper="$BIN_DIR/cai"
 
-    # Write wrapper in two parts:
-    # 1. First part: single-quoted heredoc (no expansion)
-    # 2. Install dir: written separately with proper escaping
-    # 3. Second part: rest of the script
-
-    # Part 1: Script header and bash version check (quoted heredoc - no expansion)
+    # Part 1: Script header and bash version check
     cat >"$wrapper" <<'WRAPPER_PART1'
 #!/usr/bin/env bash
 # ContainAI CLI wrapper
-# This wrapper sources containai.sh and runs the cai function
 # Generated by install.sh - install directory baked in at install time
 
-# Require bash
 if [ -z "${BASH_VERSION:-}" ]; then
     echo "[ERROR] cai requires bash" >&2
     exit 1
 fi
 
-# Check bash version - re-exec with Homebrew bash on macOS if needed
 major_version="${BASH_VERSION%%.*}"
 if [[ "$major_version" -lt 4 ]]; then
-    # On macOS, try to re-exec with Homebrew bash
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        # Prevent infinite re-exec loop
         if [[ -z "${_CAI_REEXEC:-}" ]]; then
-            # Check for Homebrew bash (Apple Silicon then Intel)
             for brew_bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
                 if [[ -x "$brew_bash" ]]; then
-                    # Verify it's bash 4+
                     brew_major="$("$brew_bash" -c 'echo "${BASH_VERSION%%.*}"' 2>/dev/null)" || continue
                     if [[ "$brew_major" -ge 4 ]]; then
                         export _CAI_REEXEC=1
@@ -721,55 +662,43 @@ if [[ "$major_version" -lt 4 ]]; then
     fi
 fi
 
-# Default install directory (baked in at install time)
-# __CAI_ESCAPED_INSTALL_DIR__ is replaced during installation
 _CAI_DEFAULT_INSTALL_DIR="__CAI_ESCAPED_INSTALL_DIR__"
-
-# Allow override via environment variable
 CAI_INSTALL_DIR="${CAI_INSTALL_DIR:-$_CAI_DEFAULT_INSTALL_DIR}"
 WRAPPER_PART1
 
-    # Part 2: Replace placeholder with properly escaped install directory
-    # Escape for double-quoted context: \, ", `, $
+    # Part 2: Replace placeholder with install directory
     local escaped_dir
     escaped_dir="$INSTALL_DIR"
-    escaped_dir="${escaped_dir//\\/\\\\}"  # \ -> \\
-    escaped_dir="${escaped_dir//\"/\\\"}"  # " -> \"
-    escaped_dir="${escaped_dir//\`/\\\`}"  # ` -> \`
-    escaped_dir="${escaped_dir//\$/\\\$}"  # $ -> \$
+    escaped_dir="${escaped_dir//\\/\\\\}"
+    escaped_dir="${escaped_dir//\"/\\\"}"
+    escaped_dir="${escaped_dir//\`/\\\`}"
+    escaped_dir="${escaped_dir//\$/\\\$}"
 
-    # Use a unique delimiter that won't appear in typical paths
-    # Write to temp file and mv to avoid BSD/GNU sed -i incompatibility
     local tmp_wrapper
     tmp_wrapper=$(mktemp)
     sed "s|__CAI_ESCAPED_INSTALL_DIR__|$escaped_dir|g" "$wrapper" > "$tmp_wrapper"
     mv "$tmp_wrapper" "$wrapper"
 
-    # Part 3: Rest of the script (quoted heredoc - no expansion)
+    # Part 3: Rest of the script
     cat >>"$wrapper" <<'WRAPPER_PART2'
 
-# Source the main script
-if [[ ! -f "$CAI_INSTALL_DIR/src/containai.sh" ]]; then
+if [[ ! -f "$CAI_INSTALL_DIR/containai.sh" ]]; then
     echo "[ERROR] ContainAI not found at $CAI_INSTALL_DIR" >&2
     echo "  Re-run the installer or set CAI_INSTALL_DIR" >&2
     exit 1
 fi
 
-# Source in a subshell-like manner to get the functions
-source "$CAI_INSTALL_DIR/src/containai.sh"
-
-# Run cai with all arguments
+source "$CAI_INSTALL_DIR/containai.sh"
 cai "$@"
 WRAPPER_PART2
 
     chmod +x "$wrapper"
     success "Created cai wrapper at $wrapper"
 
-    # Check if BIN_DIR is in PATH
+    # Check PATH and update shell config
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH"
 
-        # Detect shell and suggest adding to PATH
         local shell_name
         shell_name="$(basename "${SHELL:-/bin/bash}")"
         local rc_file
@@ -793,10 +722,8 @@ WRAPPER_PART2
                 ;;
         esac
 
-        # Ensure parent directory exists (especially for fish config)
         mkdir -p "$(dirname "$rc_file")"
 
-        # Build PATH line using actual BIN_DIR (escape for shell literal)
         local path_line
         if [[ "$shell_name" == "fish" ]]; then
             path_line="set -gx PATH $BIN_DIR \$PATH"
@@ -805,7 +732,6 @@ WRAPPER_PART2
         fi
 
         if [[ -f "$rc_file" ]]; then
-            # Check if already present (match full BIN_DIR path to avoid false positives)
             if ! grep -qF -- "$BIN_DIR" "$rc_file" 2>/dev/null; then
                 {
                     echo ""
@@ -818,7 +744,6 @@ WRAPPER_PART2
                 info "$rc_file already contains PATH entry for $BIN_DIR"
             fi
         else
-            # Create the rc file
             {
                 echo "# Added by ContainAI installer"
                 echo "$path_line"
@@ -827,7 +752,6 @@ WRAPPER_PART2
             warn "Run 'source $rc_file' or start a new terminal to use cai"
         fi
 
-        # Store rc_file for post_install message
         _CAI_RC_FILE="$rc_file"
     else
         success "$BIN_DIR is already in PATH"
@@ -838,9 +762,6 @@ WRAPPER_PART2
 # ==============================================================================
 # Post-installation
 # ==============================================================================
-
-# Show manual setup instructions (when auto-setup is skipped)
-# Arguments: $1 = "update" for update-specific instructions, otherwise setup
 show_setup_instructions() {
     local mode="${1:-setup}"
     local os
@@ -862,7 +783,6 @@ show_setup_instructions() {
     echo "  4. Start the sandbox: cai"
     echo ""
 
-    # Platform-specific setup information
     if [[ "$mode" != "update" ]]; then
         info "What 'cai setup' does:"
         case "$os" in
@@ -892,8 +812,6 @@ show_setup_instructions() {
     info "Documentation: https://github.com/novotnyllc/containai#readme"
 }
 
-# Run cai setup automatically
-# Arguments: $1 = CAI_YES_VALUE (1 for auto-confirm, empty otherwise)
 run_auto_setup() {
     local cai_yes_value="$1"
 
@@ -901,7 +819,6 @@ run_auto_setup() {
     info "Running initial setup..."
     echo ""
 
-    # Determine bash path to use
     local bash_cmd
     if [[ -n "$BASH4_PATH" ]]; then
         bash_cmd="$BASH4_PATH"
@@ -909,12 +826,8 @@ run_auto_setup() {
         bash_cmd="bash"
     fi
 
-    # Run cai setup with CAI_YES if auto-confirm is enabled
-    # Use explicit path to cai wrapper we just created
     local cai_wrapper="$BIN_DIR/cai"
     if [[ -x "$cai_wrapper" ]]; then
-        # Capture exit code without triggering set -e
-        # cai setup may return non-zero for expected reasons (e.g., 75 = WSL restart)
         local rc=0
         if [[ "$cai_yes_value" == "1" ]]; then
             CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup || rc=$?
@@ -924,7 +837,6 @@ run_auto_setup() {
         if [[ $rc -eq 0 ]]; then
             success "Setup completed successfully!"
         elif [[ $rc -eq 75 ]]; then
-            # Special exit code: WSL restart required
             info "Please restart your terminal and run 'cai setup' again."
         else
             warn "Setup had some issues (exit code: $rc)"
@@ -936,8 +848,6 @@ run_auto_setup() {
     fi
 }
 
-# Run cai update automatically (for re-runs)
-# Arguments: $1 = CAI_YES_VALUE (1 for auto-confirm, empty otherwise)
 run_auto_update() {
     local cai_yes_value="$1"
 
@@ -945,7 +855,6 @@ run_auto_update() {
     info "Updating existing installation..."
     echo ""
 
-    # Determine bash path to use
     local bash_cmd
     if [[ -n "$BASH4_PATH" ]]; then
         bash_cmd="$BASH4_PATH"
@@ -953,13 +862,8 @@ run_auto_update() {
         bash_cmd="bash"
     fi
 
-    # Run cai update with CAI_YES if auto-confirm is enabled
-    # Use explicit path to cai wrapper
     local cai_wrapper="$BIN_DIR/cai"
-    # Use -f (file exists) not -x (executable) since wrapper is invoked via bash
     if [[ -f "$cai_wrapper" ]]; then
-        # Capture exit code without triggering set -e
-        # cai update may return non-zero for expected reasons
         local rc=0
         if [[ "$cai_yes_value" == "1" ]]; then
             CAI_YES=1 "$bash_cmd" "$cai_wrapper" update || rc=$?
@@ -969,7 +873,6 @@ run_auto_update() {
         if [[ $rc -eq 0 ]]; then
             success "Update completed successfully!"
         elif [[ $rc -eq 75 ]]; then
-            # Special exit code: WSL restart required
             info "Please restart your terminal and run 'cai update' again."
         else
             warn "Update had some issues (exit code: $rc)"
@@ -989,8 +892,6 @@ post_install() {
         success "ContainAI updated successfully!"
     fi
 
-    # Determine whether to auto-run setup/update
-    # Skip if --no-setup was passed
     if [[ "$NO_SETUP" == "true" ]]; then
         info "Skipping automatic configuration (--no-setup flag)"
         if [[ "$IS_RERUN" == "true" ]]; then
@@ -1001,15 +902,12 @@ post_install() {
         return
     fi
 
-    # Require bash 4+ to run setup/update (cai CLI needs it)
-    # Check the bash_cmd we'll use for auto-setup/update
     local bash_cmd bash_major
     if [[ -n "$BASH4_PATH" ]]; then
         bash_cmd="$BASH4_PATH"
     else
         bash_cmd="bash"
     fi
-    # Verify bash 4+ is available
     bash_major=$("$bash_cmd" -c 'echo "${BASH_VERSION%%.*}"' 2>/dev/null) || bash_major=0
     if [[ "$bash_major" -lt 4 ]]; then
         local os
@@ -1030,23 +928,15 @@ post_install() {
         return
     fi
 
-    # Determine CAI_YES_VALUE for auto-confirm
-    # Set CAI_YES=1 when EITHER --yes flag is passed OR user confirms interactively
-    # This auto-confirms downstream prompts in cai setup/update
     local cai_yes_value=""
 
-    # Determine which action to run: setup (fresh) or update (re-run)
     if [[ "$IS_RERUN" == "true" ]]; then
-        # Re-run: call cai update instead of setup
         if [[ -n "$YES_FLAG" ]]; then
-            # --yes flag passed: auto-confirm everything including downstream prompts
             cai_yes_value="1"
             run_auto_update "$cai_yes_value"
         elif can_prompt; then
-            # Interactive mode: prompt user (default Y for updates)
             echo ""
             if prompt_confirm "Would you like to run 'cai update' now to update your environment?" "true"; then
-                # User confirmed interactively: auto-confirm downstream prompts too
                 cai_yes_value="1"
                 run_auto_update "$cai_yes_value"
             else
@@ -1054,22 +944,17 @@ post_install() {
                 show_setup_instructions "update"
             fi
         else
-            # Non-interactive without --yes: show instructions only
             info "Non-interactive install detected. Skipping automatic update."
             info "To auto-run update, use: curl ... | bash -s -- --yes"
             show_setup_instructions "update"
         fi
     else
-        # Fresh install: call cai setup
         if [[ -n "$YES_FLAG" ]]; then
-            # --yes flag passed: auto-confirm everything including downstream prompts
             cai_yes_value="1"
             run_auto_setup "$cai_yes_value"
         elif can_prompt; then
-            # Interactive mode: prompt user (default Y for first-time install)
             echo ""
             if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
-                # User confirmed interactively: auto-confirm downstream prompts too
                 cai_yes_value="1"
                 run_auto_setup "$cai_yes_value"
             else
@@ -1077,7 +962,6 @@ post_install() {
                 show_setup_instructions
             fi
         else
-            # Non-interactive without --yes: show instructions only
             info "Non-interactive install detected. Skipping automatic setup."
             info "To auto-run setup, use: curl ... | bash -s -- --yes"
             show_setup_instructions
@@ -1097,23 +981,53 @@ main() {
     local os
     os="$(detect_os)"
     info "Detected OS: $os"
+
+    # Determine mode: local (from tarball) or standalone (download)
+    local use_local_mode="false"
+
+    if [[ "$LOCAL_MODE" == "true" ]]; then
+        # Explicit --local flag
+        use_local_mode="true"
+        info "Mode: Local install (--local flag)"
+    elif detect_local_mode; then
+        # Auto-detected local files
+        use_local_mode="true"
+        info "Mode: Local install (tarball detected)"
+    else
+        info "Mode: Standalone install (will download)"
+    fi
     echo ""
 
-    # Bootstrap bash 4+ on macOS BEFORE creating wrapper
-    # This sets BASH4_PATH if bash 4+ is available/installed
+    # Bootstrap bash 4+ on macOS
     bootstrap_bash
     echo ""
 
+    # Check prerequisites
     check_prerequisites
     echo ""
 
-    install_containai
-    echo ""
+    if [[ "$use_local_mode" == "true" ]]; then
+        # Local mode: install from tarball files
+        install_from_local
+        echo ""
+        setup_path
+        echo ""
+        post_install
+    else
+        # Standalone mode: download tarball and run local installer
+        local arch
+        arch="$(detect_arch)"
+        info "Detected architecture: $arch"
 
-    setup_path
-    echo ""
+        local download_url
+        if ! download_url="$(get_download_url "$arch")"; then
+            exit 1
+        fi
 
-    post_install
+        download_and_extract "$download_url" "$INSTALL_DIR"
+        # Note: download_and_extract runs the local installer which handles
+        # setup_path and post_install
+    fi
 }
 
 # Run main

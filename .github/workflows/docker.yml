@@ -222,6 +222,84 @@ jobs:
           cache-to: type=gha,mode=max,scope=main
 
   # ============================================================================
+  # Build Multi-arch Tarballs
+  # ============================================================================
+  # Builds AOT .NET binaries for each architecture and creates release tarballs.
+  # PR builds upload tarballs as artifacts for E2E testing.
+  # Release builds are handled by the release workflow.
+  # ============================================================================
+  build-tarballs:
+    needs: lint
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            dotnet_rid: linux-x64
+            tarball_arch: linux-x64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            dotnet_rid: linux-arm64
+            tarball_arch: linux-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install and run NBGV
+        id: nbgv
+        run: |
+          dotnet tool restore
+          echo "SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
+      - name: Build AOT binary
+        run: |
+          echo "============================================="
+          echo "Building acp-proxy for ${{ matrix.dotnet_rid }}"
+          echo "============================================="
+          dotnet publish src/acp-proxy \
+            -r ${{ matrix.dotnet_rid }} \
+            -c Release \
+            --self-contained \
+            -o src/acp-proxy/publish/${{ matrix.dotnet_rid }}
+
+          # Verify binary exists and is executable
+          ls -la src/acp-proxy/publish/${{ matrix.dotnet_rid }}/
+          file src/acp-proxy/publish/${{ matrix.dotnet_rid }}/acp-proxy
+
+      - name: Create release tarball
+        run: |
+          echo "============================================="
+          echo "Creating tarball for ${{ matrix.tarball_arch }}"
+          echo "============================================="
+          ./scripts/package-release.sh \
+            --arch ${{ matrix.tarball_arch }} \
+            --version "$NBGV_SemVer2" \
+            --output-dir ./artifacts
+
+          ls -la ./artifacts/
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-tarball-${{ matrix.arch }}
+          path: ./artifacts/containai-*.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  # ============================================================================
   # Import Tests
   # ============================================================================
   # Tiered test strategy:
@@ -345,11 +423,11 @@ jobs:
   # module loading which may not work due to virtualization constraints.
   # This job gracefully skips if sysbox installation fails.
   #
-  # Install flow: Prefers tarball artifact (from Task 5) with fallback to repo checkout.
-  # Once Task 5 lands, the tarball path will be the primary install method.
+  # Install flow: Downloads tarball artifact from build-tarballs job, tests
+  # install.sh --local --yes to verify the tarball install path works.
   # ============================================================================
   e2e-test:
-    needs: build
+    needs: [build, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -400,9 +478,9 @@ jobs:
       - name: Log install method
         run: |
           if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Tested install from tarball artifact (Task 5 flow)"
+            echo "Tested install from tarball artifact"
           else
-            echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
+            echo "Tarball artifact not available - build-tarballs job may have failed"
           fi
 
       # Fail if tarball was downloaded but install failed - this is a regression
@@ -669,10 +747,11 @@ jobs:
   # when no self-hosted runners are available. Forks can set the repo variable
   # ENABLE_SELF_HOSTED_E2E=true if they have configured self-hosted runners.
   #
-  # Install flow: Prefers tarball artifact (from Task 5) with fallback to repo checkout.
+  # Install flow: Downloads tarball artifact from build-tarballs job, tests
+  # install.sh --local --yes to verify the tarball install path works.
   # ============================================================================
   e2e-test-selfhosted:
-    needs: build
+    needs: [build, build-tarballs]
     # Only run on main repo or when explicitly enabled via repo variable
     # This prevents forks from hanging indefinitely waiting for self-hosted runners
     if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
@@ -722,9 +801,9 @@ jobs:
       - name: Log install method
         run: |
           if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Tested install from tarball artifact (Task 5 flow)"
+            echo "Tested install from tarball artifact"
           else
-            echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
+            echo "Tarball artifact not available - build-tarballs job may have failed"
           fi
 
       # Fail if tarball was downloaded but install failed - this is a regression
