@@ -266,9 +266,8 @@ EOF
 - [ ] cai export --no-excludes skips excludes
 
 ## Done summary
-TBD
-
+Added comprehensive tests for manifest flags (s, j, R, x, o) and CLI operations (--dry-run, --no-secrets, export with excludes). Tests cover 600 permissions for secrets, JSON init behavior for optional/non-optional entries, symlink replacement via link-repair, .system/ exclusion, and import/export operations.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 8372219, 505d10617ce9b97a09ae8865064a97b7a682e113
+- Tests: shellcheck -x tests/integration/sync-tests/test-flags.sh
 - PRs:
