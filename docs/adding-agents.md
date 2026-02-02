@@ -70,7 +70,9 @@ RUN ( <installation-command> && agent --version ) \
 
 ### Real Examples
 
-**Claude Code** (required, fail-fast):
+**Note**: All agents below are installed in the container image (fail-fast). The distinction between "required" and "optional" in sync-manifest.toml (the `o` flag) refers to whether host configs are *synced*, not whether the CLI is installed.
+
+**Claude Code** (installed, configs always synced):
 
 ```dockerfile
 # Install Claude Code via official installer
@@ -78,7 +80,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
     /home/agent/.local/bin/claude --version
 ```
 
-**Gemini CLI** (required, installed via bun):
+**Gemini CLI** (installed, configs synced only if present on host):
 
 ```dockerfile
 RUN . /home/agent/.nvm/nvm.sh && \
@@ -86,7 +88,7 @@ RUN . /home/agent/.nvm/nvm.sh && \
     gemini --version
 ```
 
-**Kimi CLI** (required, installed via uv):
+**Kimi CLI** (installed, configs synced only if present on host):
 
 ```dockerfile
 RUN uv tool install --python 3.13 kimi-cli && \
@@ -127,13 +129,16 @@ flags = "fjos"                        # Flags (see reference below)
 | `R` | Remove existing path first (`rm -rf` before `ln -sfn`) | Directories that may be pre-populated |
 | `g` | Git filter (strip credential.helper and signing config) | `.gitconfig` special handling |
 | `G` | Glob/dynamic pattern (discovered at runtime, not synced directly) | SSH key patterns like `id_*` |
+| `p` | Privacy filter (exclude `*.priv.*` files) | Directories with private scripts |
 
-### Required vs Optional Agents
+### Always-Sync vs Optional-Sync Agents
 
-**Required/primary agents** (Claude, Codex): Omit the `o` flag. These are always synced and their directories are pre-created in the container image.
+This distinction is about **config syncing**, not installation. All supported agents are installed in the container image; the `o` flag controls whether their host configs are synced.
+
+**Always-sync agents** (Claude, Codex): Omit the `o` flag. Host configs are always synced and their directories are pre-created in the container image.
 
 ```toml
-# Claude - required agent, no 'o' flag
+# Claude - always synced, no 'o' flag
 [[entries]]
 source = ".claude/settings.json"
 target = "claude/settings.json"
@@ -141,15 +146,15 @@ container_link = ".claude/settings.json"
 flags = "fj"  # file, json-init (no 'o')
 ```
 
-**Optional agents** (Gemini, Pi, Copilot, Kimi): Use the `o` flag. These are only synced if the user has them configured on the host, preventing empty directories in the container for agents the user doesn't use.
+**Optional-sync agents** (Gemini, Pi, Copilot, Kimi): Use the `o` flag. Host configs are only synced if the user has them configured on the host, preventing empty directories in the container for agents the user doesn't use. The agent CLIs are still installed in the image.
 
 ```toml
-# Gemini - optional agent, has 'o' flag
+# Gemini - optional sync, has 'o' flag
 [[entries]]
 source = ".gemini/settings.json"
 target = "gemini/settings.json"
 container_link = ".gemini/settings.json"
-flags = "fjo"  # file, json-init, OPTIONAL
+flags = "fjo"  # file, json-init, OPTIONAL sync
 ```
 
 ### Secret Files
@@ -205,7 +210,17 @@ SSH is a common example - disabled by default for security, but users can opt-in
 
 After modifying `sync-manifest.toml`, update the corresponding import map in `src/lib/import.sh`.
 
-The `_IMPORT_SYNC_MAP` array must match the manifest exactly (excluding disabled entries and entries with `G` flag).
+The `_IMPORT_SYNC_MAP` array must match the manifest for comparable entries. The consistency checker normalizes flags and skips certain entries:
+
+**Excluded from comparison:**
+- Entries with `disabled = true`
+- Entries with `G` flag (glob/dynamic patterns)
+- `container_symlinks` section (container-only, not imported)
+- `.gitconfig` (handled specially by `_cai_import_git_config()`)
+
+**Flags not compared:**
+- `R` (remove existing) - only affects Dockerfile symlinks
+- `g` (git filter) - handled by special gitconfig logic
 
 ### Entry Format
 
@@ -298,9 +313,13 @@ cai run --container test-agent
 
 **2. Verify agent installed (from host, via SSH):**
 
+Note: Direct `ssh <container-name>` works after `cai run` sets up SSH config. Alternatively, use `cai exec --container test-agent -- <cmd>`.
+
 ```bash
 # Replace 'newagent' with actual agent binary name
 ssh test-agent 'newagent --version'
+# Or using cai exec:
+cai exec --container test-agent -- newagent --version
 ```
 
 **3. Import configs (from host):**
@@ -336,7 +355,7 @@ ssh test-agent 'ls -la ~/.newagent/'
 
 ## Examples from Existing Agents
 
-### Required Agents (no `o` flag)
+### Always-Sync Agents (no `o` flag)
 
 **Claude Code** - Primary supported agent:
 
@@ -383,9 +402,9 @@ container_link = ".codex/skills"
 flags = "dxR"  # directory, exclude .system/, remove existing first
 ```
 
-### Optional Agents (with `o` flag)
+### Optional-Sync Agents (with `o` flag)
 
-**Gemini** - Optional:
+**Gemini** - Optional sync:
 
 ```toml
 [[entries]]
@@ -407,7 +426,7 @@ container_link = ".gemini/settings.json"
 flags = "fjo"  # file, json-init, OPTIONAL
 ```
 
-**Pi** - Optional:
+**Pi** - Optional sync:
 
 ```toml
 [[entries]]
@@ -429,7 +448,7 @@ container_link = ".pi/agent/skills"
 flags = "dxRo"  # directory, exclude .system/, remove-first, optional
 ```
 
-**Copilot** - Optional:
+**Copilot** - Optional sync:
 
 ```toml
 [[entries]]
@@ -443,9 +462,15 @@ source = ".copilot/mcp-config.json"
 target = "copilot/mcp-config.json"
 container_link = ".copilot/mcp-config.json"
 flags = "fo"  # file, optional
+
+[[entries]]
+source = ".copilot/skills"
+target = "copilot/skills"
+container_link = ".copilot/skills"
+flags = "dRo"  # directory, remove existing first, optional
 ```
 
-**Kimi** - Optional:
+**Kimi** - Optional sync:
 
 ```toml
 [[entries]]
