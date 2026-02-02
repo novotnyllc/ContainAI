@@ -8,193 +8,99 @@ Set up modern .NET project infrastructure with Central Package Management, NBGV 
 - `Directory.Build.props` (new)
 - `Directory.Packages.props` (new)
 - `version.json` (new)
+- `global.json` (new - SDK version + MTP test runner config)
+- `.config/dotnet-tools.json` (new - local tool manifest with nbgv)
 - `ContainAI.slnx` (new, replaces `ContainAI.sln`)
 - `src/acp-proxy/acp-proxy.csproj` (update)
 - `nuget.config` (new or update)
-- `.github/workflows/docker.yml` (add NBGV action)
+- `.github/workflows/docker.yml` (update for NBGV as .NET tool)
 
 ## Approach
 
-1. **NBGV for unified versioning**: NBGV sets environment variables (`NBGV_SemVer2`, `NBGV_SimpleVersion`, `NBGV_GitCommitId`, etc.) that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
+1. **NBGV for unified versioning**: NBGV sets environment variables that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
 
 2. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions including:
    - `Nerdbank.GitVersioning` (GlobalPackageReference)
    - `Microsoft.SourceLink.GitHub`
-   - `StreamJsonRpc` - JSON-RPC protocol handling
-   - `CliWrap` - Process execution
-   - `xunit.v3` - Testing (VSTest v2 native)
-   - `Microsoft.NET.Test.Sdk`
+   - `System.CommandLine` - CLI parsing (AOT-compatible)
+   - `StreamJsonRpc` - JSON-RPC implementation (AOT-compatible with SystemTextJsonFormatter)
+   - `CliWrap` - Process execution (AOT-compatible)
+   - `xunit.v3` - Testing framework (no runner packages needed with .NET 10 MTP)
 
 3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
 
 4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`.
 
-5. **GitHub Actions NBGV setup**:
+5. **NBGV as .NET local tool** (not GitHub Action):
+   - Create `.config/dotnet-tools.json` manifest with nbgv tool (no pinned version)
+   - Use `dotnet tool restore` to install
+   - Use `dotnet nbgv get-version -v <variable>` to get version info
+
+6. **version.json with release branching**:
+   - Main branch: `"version": "0.2-dev"` (prerelease suffix)
+   - Release branches (`rel/v0.2`): `"version": "0.2"` (stable)
+   - NBGV derives full SemVer from branch + git height
+
+7. **GitHub Actions setup** (use setup-dotnet with global.json):
    ```yaml
-   - uses: dotnet/nbgv@master
-     id: nbgv
-   # All subsequent steps can use ${{ steps.nbgv.outputs.SemVer2 }}
-   # Or env: NBGV_SemVer2, NBGV_SimpleVersion, etc.
+   - uses: actions/checkout@v4
+     with:
+       fetch-depth: 0  # CRITICAL for NBGV
+   - uses: actions/setup-dotnet@v4
+     with:
+       global-json-file: global.json  # Use SDK version from global.json
+   - name: Install and run NBGV
+     run: |
+       dotnet tool restore
+       echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+       echo "NBGV_SimpleVersion=$(dotnet nbgv get-version -v SimpleVersion)" >> "$GITHUB_ENV"
+       echo "NBGV_GitCommitId=$(dotnet nbgv get-version -v GitCommitId)" >> "$GITHUB_ENV"
+   ```
+
+8. **global.json for .NET 10 MTP**: Configure Microsoft Testing Platform as test runner:
+   ```json
+   {
+     "sdk": { "version": "10.0.100" },
+     "test": { "runner": "Microsoft.Testing.Platform" }
+   }
    ```
 
 ## Key context
 
 - NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- NBGV outputs are available as both step outputs AND environment variables
-- Shell scripts in CI can use `$NBGV_SemVer2` directly after the NBGV action runs
-- Docker build can use `--build-arg VERSION=$NBGV_SemVer2`
-- StreamJsonRpc is Microsoft's production JSON-RPC implementation
-- xUnit 3 uses VSTest v2 natively - no separate runner needed
-- CliWrap provides fluent API for process execution
-## Approach
+- Use NBGV as .NET local tool (not GitHub Action) for better reproducibility
+- `setup-dotnet` action must use `global-json-file: global.json` to get correct SDK version
+- `dotnet tool restore` installs tools from `.config/dotnet-tools.json`
+- `dotnet nbgv get-version -v <var>` outputs specific version components
+- System.CommandLine is AOT-compatible (used by .NET CLI itself)
+- StreamJsonRpc is AOT-compatible with SystemTextJsonFormatter (not Newtonsoft)
+- CliWrap provides fluent API for process execution, is AOT-compatible
+- .NET 10 TestPlatform v2 (MTP) eliminates need for `xunit.runner.visualstudio` and `Microsoft.NET.Test.Sdk`
 
-1. **NBGV for unified versioning**: NBGV sets environment variables (`NBGV_SemVer2`, `NBGV_SimpleVersion`, `NBGV_GitCommitId`, etc.) that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
-
-2. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions including:
-   - `Nerdbank.GitVersioning` (GlobalPackageReference)
-   - `Microsoft.SourceLink.GitHub`
-   - `CliWrap` (process management, replaces ProcessStartInfo)
-   - `xunit.v3` (xUnit 3 with VSTest v2 integration - no separate runner needed)
-   - `Microsoft.NET.Test.Sdk`
-
-3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
-
-4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`.
-
-5. **GitHub Actions NBGV setup**:
-   ```yaml
-   - uses: dotnet/nbgv@master
-     id: nbgv
-   # All subsequent steps can use ${{ steps.nbgv.outputs.SemVer2 }}
-   # Or env: NBGV_SemVer2, NBGV_SimpleVersion, etc.
-   ```
-
-## Key context
-
-- NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- NBGV outputs are available as both step outputs AND environment variables
-- Shell scripts in CI can use `$NBGV_SemVer2` directly after the NBGV action runs
-- Docker build can use `--build-arg VERSION=$NBGV_SemVer2`
-- xUnit 3 uses VSTest v2 natively - no `xunit.runner.visualstudio` package needed
-- CliWrap provides fluent API for process execution, better than raw ProcessStartInfo
-## Approach
-
-1. **NBGV for unified versioning**: NBGV sets environment variables (`NBGV_SemVer2`, `NBGV_SimpleVersion`, `NBGV_GitCommitId`, etc.) that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
-
-2. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions including:
-   - `Nerdbank.GitVersioning` (GlobalPackageReference)
-   - `Microsoft.SourceLink.GitHub`
-   - `CliWrap` (process management, replaces ProcessStartInfo)
-   - `xunit` (3.x)
-   - `xunit.runner.visualstudio`
-   - `Microsoft.NET.Test.Sdk`
-
-3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
-
-4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`.
-
-5. **GitHub Actions NBGV setup**:
-   ```yaml
-   - uses: dotnet/nbgv@master
-     id: nbgv
-   # All subsequent steps can use ${{ steps.nbgv.outputs.SemVer2 }}
-   # Or env: NBGV_SemVer2, NBGV_SimpleVersion, etc.
-   ```
-
-## Key context
-
-- NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- NBGV outputs are available as both step outputs AND environment variables
-- Shell scripts in CI can use `$NBGV_SemVer2` directly after the NBGV action runs
-- Docker build can use `--build-arg VERSION=$NBGV_SemVer2`
-- xUnit 3 is the latest major version with improved performance and features
-- CliWrap provides fluent API for process execution, better than raw ProcessStartInfo
-## Approach
-
-1. **NBGV for unified versioning**: NBGV sets environment variables (`NBGV_SemVer2`, `NBGV_SimpleVersion`, `NBGV_GitCommitId`, etc.) that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
-
-2. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions including:
-   - `Nerdbank.GitVersioning` (GlobalPackageReference)
-   - `Microsoft.SourceLink.GitHub`
-   - `xunit` (3.x)
-   - `xunit.runner.visualstudio`
-   - `Microsoft.NET.Test.Sdk`
-
-3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
-
-4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`.
-
-5. **GitHub Actions NBGV setup**:
-   ```yaml
-   - uses: dotnet/nbgv@master
-     id: nbgv
-   # All subsequent steps can use ${{ steps.nbgv.outputs.SemVer2 }}
-   # Or env: NBGV_SemVer2, NBGV_SimpleVersion, etc.
-   ```
-
-## Key context
-
-- NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- NBGV outputs are available as both step outputs AND environment variables
-- Shell scripts in CI can use `$NBGV_SemVer2` directly after the NBGV action runs
-- Docker build can use `--build-arg VERSION=$NBGV_SemVer2`
-- xUnit 3 is the latest major version with improved performance and features
-## Approach
-
-1. **NBGV for unified versioning**: NBGV sets environment variables (`NBGV_SemVer2`, `NBGV_SimpleVersion`, `NBGV_GitCommitId`, etc.) that ALL build steps can use - shell scripts, Docker builds, release tags, etc.
-
-2. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions.
-
-3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
-
-4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`.
-
-5. **GitHub Actions NBGV setup**:
-   ```yaml
-   - uses: dotnet/nbgv@master
-     id: nbgv
-   # All subsequent steps can use ${{ steps.nbgv.outputs.SemVer2 }}
-   # Or env: NBGV_SemVer2, NBGV_SimpleVersion, etc.
-   ```
-
-## Key context
-
-- NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- NBGV outputs are available as both step outputs AND environment variables
-- Shell scripts in CI can use `$NBGV_SemVer2` directly after the NBGV action runs
-- Docker build can use `--build-arg VERSION=$NBGV_SemVer2`
-## Approach
-
-1. **Central Package Management**: Create `Directory.Packages.props` at repo root with all package versions. Update csproj to remove version attributes from PackageReference items.
-
-2. **NBGV**: Create `version.json` with initial version `0.1` and configure `publicReleaseRefSpec` for main branch. Add NBGV as GlobalPackageReference.
-
-3. **ArtifactsOutput**: Add `UseArtifactsOutput` to `Directory.Build.props`. Output goes to `artifacts/` directory.
-
-4. **slnx migration**: Run `dotnet sln migrate` to convert `ContainAI.sln` to `ContainAI.slnx`. Delete old .sln file.
-
-5. **SourceLink**: Add Microsoft.SourceLink.GitHub for debugging support.
-
-## Key context
-
-- NBGV requires `fetch-depth: 0` in GitHub Actions checkout (critical!)
-- CPM with `CentralPackageTransitivePinningEnabled` for transitive control
-- ArtifactsOutput structure: `artifacts/bin/<project>/<config>/`, `artifacts/publish/<project>/<config>/`
-- Current packages in acp-proxy.csproj: no external packages (all BCL)
 ## Acceptance
 - [ ] `Directory.Build.props` exists with ArtifactsOutput enabled
 - [ ] `Directory.Packages.props` exists with CPM enabled
+- [ ] `Directory.Packages.props` includes System.CommandLine package
 - [ ] `Directory.Packages.props` includes StreamJsonRpc package
 - [ ] `Directory.Packages.props` includes CliWrap package
-- [ ] `Directory.Packages.props` includes xunit.v3 (no separate runner package)
-- [ ] `version.json` exists with NBGV configuration
+- [ ] `Directory.Packages.props` includes xunit.v3 (no runner packages needed with MTP)
+- [ ] `Directory.Packages.props` does NOT include xunit.runner.visualstudio (not needed)
+- [ ] `Directory.Packages.props` does NOT include Microsoft.NET.Test.Sdk (not needed)
+- [ ] `global.json` configures `"test": { "runner": "Microsoft.Testing.Platform" }`
+- [ ] `version.json` exists with `-dev` prerelease suffix on main
+- [ ] `version.json` has NBGV configuration for `rel/v*` release branches
 - [ ] `ContainAI.slnx` exists and builds successfully
 - [ ] Old `ContainAI.sln` removed
 - [ ] `dotnet build` produces output in `artifacts/bin/`
-- [ ] `nbgv get-version` returns valid version
-- [ ] GitHub Actions workflow uses NBGV action with fetch-depth: 0
-- [ ] NBGV env vars available to all subsequent CI steps (not just .NET)
+- [ ] `dotnet test` works with MTP runner (no VSTest)
+- [ ] `.config/dotnet-tools.json` manifest exists with nbgv tool (no pinned version)
+- [ ] `dotnet tool restore && dotnet nbgv get-version` returns valid version
+- [ ] GitHub Actions uses `setup-dotnet` with `global-json-file: global.json`
+- [ ] Checkout uses `fetch-depth: 0`
+- [ ] NBGV env vars exported via `dotnet nbgv get-version -v <var>`
+- [ ] Shell steps can access `$NBGV_SemVer2` after export
 - [ ] Docker build uses NBGV version for OCI labels
+
 ## Done summary
 TBD
 

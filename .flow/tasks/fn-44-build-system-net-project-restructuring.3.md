@@ -1,86 +1,84 @@
 # fn-44-build-system-net-project-restructuring.3 Refactor ACP code into ContainAI.Acp library and acp-proxy CLI
 
 ## Description
-Refactor the monolithic Program.cs (1029 lines) into a proper library/CLI structure with ContainAI.Acp library and acp-proxy CLI application. Use StreamJsonRpc for JSON-RPC protocol, CliWrap for process management. Add xUnit 3 unit tests.
+Refactor the monolithic Program.cs (1029 lines) into a proper library/CLI structure with ContainAI.Acp library and acp-proxy CLI application. Use System.CommandLine for CLI parsing and CliWrap for process management. Add xUnit 3 unit tests using .NET 10 TestPlatform v2 (no legacy runner packages). Include AOT viability gate for any new packages.
+
+**CLI invocation change:** Users call `cai acp proxy <agent>` (subcommand pattern). The shell script delegates to the .NET binary. This is preparation for a future epic where all of `cai` migrates to C#.
 
 **Size:** M
 **Files:**
 - `src/ContainAI.Acp/ContainAI.Acp.csproj` (new library)
-- `src/ContainAI.Acp/Protocol/` (new - StreamJsonRpc integration)
+- `src/ContainAI.Acp/Protocol/` (new - JSON-RPC types)
 - `src/ContainAI.Acp/Sessions/` (new - session management with CliWrap)
 - `src/ContainAI.Acp/PathTranslation/` (new - path translation)
-- `src/acp-proxy/acp-proxy.csproj` (update - reference library)
-- `src/acp-proxy/Program.cs` (simplify to CLI entry point)
-- `tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj` (new - xUnit 3 tests)
+- `src/acp-proxy/acp-proxy.csproj` (update - reference library, add System.CommandLine)
+- `src/acp-proxy/Program.cs` (simplify to CLI entry point with System.CommandLine)
+- `src/containai.sh` (update `_containai_acp_proxy` → new subcommand handler)
+- `tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj` (new - xUnit 3 tests, MTP)
 - `tests/ContainAI.Acp.Tests/*.cs` (new - test files)
+- `global.json` (configure Microsoft Testing Platform)
 - `ContainAI.slnx` (add new projects)
 
 ## Approach
 
 1. **Create ContainAI.Acp library project** with proper structure:
-   - `Protocol/` - Use StreamJsonRpc for JSON-RPC message handling
+   - `Protocol/` - JSON-RPC message types, serialization (keep current implementation initially)
    - `Sessions/` - Session management using CliWrap for process spawning
    - `PathTranslation/` - Host/container path mapping
    - Keep AOT-compatible
 
-2. **Use StreamJsonRpc for JSON-RPC**:
-   - Microsoft's production JSON-RPC implementation
-   - Handles message framing, serialization, request/response correlation
-   - Supports NDJSON (newline-delimited) format
-   - Properly handles bidirectional communication
+2. **Use System.CommandLine for CLI parsing**:
+   - Define `proxy` command with `<agent>` argument
+   - Use source generators for AOT compatibility (`[GeneratedCode]` attributes)
+   - Handle `--help` and `--version` automatically
+   - Example invocation: `acp-proxy proxy claude` (called by `cai acp proxy claude`)
+   - System.CommandLine 2.0.2 is AOT-friendly (32% smaller, 20% smaller NativeAOT)
 
 3. **Use CliWrap for process execution**:
    - Fluent API for spawning MCP server processes
    - Clean stdin/stdout piping
    - Proper cancellation support
+   - AOT-compatible (no reflection)
 
-4. **Update acp-proxy CLI** to be thin wrapper:
-   - Parse command line arguments
-   - Initialize and run the ACP server from library
-   - Handle process lifecycle
+4. **Use StreamJsonRpc with SystemTextJsonFormatter for JSON-RPC**:
+   - Use `SystemTextJsonFormatter` (NOT Newtonsoft, NOT MessagePack) - ACP requires UTF-8 JSON
+   - Enable `EnableStreamJsonRpcInterceptors` MSBuild property for AOT proxy generation
+   - Annotate RPC interfaces with `[JsonRpcContract]` attribute
+   - Create `JsonSerializerContext` with `[JsonSerializable]` for all message types
+   - Use `RpcTargetMetadata.FromShape<T>()` when adding local RPC targets
+   - Configure `TypeInfoResolver` on formatter options
+   - See: https://microsoft.github.io/vs-streamjsonrpc/docs/nativeAOT.html
 
-5. **Create xUnit 3 test project**:
-   - Test protocol handling with StreamJsonRpc
+5. **Update build.sh to be self-contained with NBGV**:
+   - Detect local .NET SDK: `command -v dotnet`
+   - If SDK found: use `dotnet tool restore && dotnet nbgv get-version`
+   - If no SDK: fall back to Microsoft's SDK Docker image
+   - Export `NBGV_*` environment variables for downstream use
+   - Use version in AOT binary build (`-p:Version=$NBGV_SemVer2`)
+
+6. **AOT viability gate** for all packages:
+   - After adding all packages, run: `dotnet publish -r linux-x64 -c Release`
+   - Run `tests/integration/test-acp-proxy.sh`
+   - Verify no trimming warnings in build output
+
+7. **Update acp-proxy CLI** to be thin wrapper:
+   - System.CommandLine root command with `proxy` subcommand
+   - `proxy <agent>` command runs the ACP server from library
+   - Handle process lifecycle and cancellation
+
+8. **Update shell script for new invocation pattern**:
+   - Change `cai --acp <agent>` → `cai acp proxy <agent>`
+   - Update `_containai_acp_proxy` to call `$proxy_bin proxy "$agent"`
+   - Add `acp` subcommand handler in `containai()` function
+   - Update help text to show new invocation
+
+9. **Create xUnit 3 test project with .NET 10 MTP**:
+   - Package reference: `xunit.v3` only (no runner packages needed)
+   - Configure `global.json` with `"test": { "runner": "Microsoft.Testing.Platform" }`
    - Test path translation logic
    - Test session state management
+   - Test JSON-RPC message handling
    - Use `[Fact]` and `[Theory]` attributes
-
-## Key context
-
-- StreamJsonRpc handles JSON-RPC 2.0 protocol correctly
-- Current code has manual JSON-RPC handling that StreamJsonRpc replaces
-- Session management handles multiple concurrent MCP sessions
-- Path translation maps between host and container paths
-- Race condition pitfall: StreamJsonRpc handles request/response correlation properly
-- CliWrap is AOT-compatible
-## Approach
-
-1. **Create ContainAI.Acp library project** with proper structure:
-   - `Protocol/` - JSON-RPC message types, serialization
-   - `Sessions/` - Session management using CliWrap for process spawning
-   - `PathTranslation/` - Host/container path mapping
-   - Keep AOT-compatible (no reflection)
-
-2. **Replace ProcessStartInfo with CliWrap**:
-   - Use `Cli.Wrap()` fluent API for spawning MCP server processes
-   - Use `PipeTarget` for stdout/stderr handling
-   - Use `CancellationToken` for process cancellation
-   - CliWrap handles stdin/stdout piping cleanly
-
-3. **Update acp-proxy CLI** to be thin wrapper:
-   - Parse command line arguments
-   - Initialize and run the ACP server from library
-   - Handle process lifecycle
-
-4. **Create xUnit 3 test project**:
-   - Add `tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj`
-   - Use xUnit 3.x (latest) with `Microsoft.NET.Test.Sdk`
-   - Test protocol serialization/deserialization
-   - Test path translation logic
-   - Test session state management
-   - Use `[Fact]` and `[Theory]` attributes
-
-5. **Preserve AOT compatibility**: Use `[JsonSerializable]` attributes, avoid reflection. CliWrap is AOT-compatible.
 
 ## Key context
 
@@ -89,77 +87,43 @@ Refactor the monolithic Program.cs (1029 lines) into a proper library/CLI struct
 - Path translation maps between host and container paths
 - NDJSON framing for message protocol (per `.flow/memory/conventions.md`)
 - Race condition pitfall: Register TCS before sending request (per `.flow/memory/pitfalls.md:381`)
-- CliWrap: https://github.com/Tyrrrz/CliWrap - fluent process execution library
+- System.CommandLine 2.0.2 is AOT-friendly (used by .NET CLI itself)
 - CliWrap is AOT-compatible and has no reflection usage
-## Approach
+- **StreamJsonRpc IS AOT-compatible** with `SystemTextJsonFormatter` (see https://microsoft.github.io/vs-streamjsonrpc/docs/nativeAOT.html)
+- **Do NOT use Newtonsoft** - use System.Text.Json source generators exclusively
+- **ACP protocol requires UTF-8 JSON** - use `SystemTextJsonFormatter`, not MessagePack
+- .NET 10 TestPlatform v2 (MTP) eliminates need for legacy runner packages
+- `global.json` `test.runner` setting controls test execution (see https://github.com/xunit/xunit/issues/3421)
 
-1. **Create ContainAI.Acp library project** with proper structure:
-   - `Protocol/` - JSON-RPC message types, serialization
-   - `Sessions/` - Session management, process spawning
-   - `PathTranslation/` - Host/container path mapping
-   - Keep AOT-compatible (no reflection)
-
-2. **Update acp-proxy CLI** to be thin wrapper:
-   - Parse command line arguments
-   - Initialize and run the ACP server from library
-   - Handle process lifecycle
-
-3. **Create xUnit 3 test project**:
-   - Add `tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj`
-   - Use xUnit 3.x (latest) with `Microsoft.NET.Test.Sdk`
-   - Test protocol serialization/deserialization
-   - Test path translation logic
-   - Test session state management
-   - Use `[Fact]` and `[Theory]` attributes
-
-4. **Preserve AOT compatibility**: Use `[JsonSerializable]` attributes, avoid reflection.
-
-## Key context
-
-- Current code uses System.Text.Json source generators for AOT
-- Session management handles multiple concurrent MCP sessions
-- Path translation maps between host and container paths
-- NDJSON framing for message protocol (per `.flow/memory/conventions.md`)
-- Race condition pitfall: Register TCS before sending request (per `.flow/memory/pitfalls.md:381`)
-- xUnit 3 supports parallel test execution and modern .NET features
-## Approach
-
-1. **Create ContainAI.Acp library project** with proper structure:
-   - `Protocol/` - JSON-RPC message types, serialization
-   - `Sessions/` - Session management, process spawning
-   - `PathTranslation/` - Host/container path mapping
-   - Keep AOT-compatible (no reflection)
-
-2. **Update acp-proxy CLI** to be thin wrapper:
-   - Parse command line arguments
-   - Initialize and run the ACP server from library
-   - Handle process lifecycle
-
-3. **Preserve AOT compatibility**: Use `[JsonSerializable]` attributes, avoid reflection.
-
-## Key context
-
-- Current code uses System.Text.Json source generators for AOT
-- Session management handles multiple concurrent MCP sessions
-- Path translation maps between host and container paths
-- NDJSON framing for message protocol (per `.flow/memory/conventions.md`)
-- Race condition pitfall: Register TCS before sending request (per `.flow/memory/pitfalls.md:381`)
 ## Acceptance
 - [ ] ContainAI.Acp library project exists and builds
-- [ ] Library uses StreamJsonRpc for JSON-RPC protocol
+- [ ] Library uses StreamJsonRpc with SystemTextJsonFormatter for JSON-RPC (no Newtonsoft)
 - [ ] Library uses CliWrap for all process execution (no raw ProcessStartInfo)
+- [ ] acp-proxy CLI uses System.CommandLine for argument parsing
+- [ ] CLI has `proxy <agent>` subcommand (invoked as `acp-proxy proxy claude`)
+- [ ] StreamJsonRpc interfaces annotated with `[JsonRpcContract]`
+- [ ] JsonSerializerContext configured with `[JsonSerializable]` for all RPC message types
+- [ ] `EnableStreamJsonRpcInterceptors` MSBuild property enabled
+- [ ] AOT viability gate passed: `dotnet publish -r linux-x64 -c Release` succeeds without warnings
 - [ ] Library is AOT-compatible (no trimming warnings)
 - [ ] acp-proxy CLI references ContainAI.Acp library
 - [ ] acp-proxy CLI builds as self-contained AOT binary
+- [ ] `src/acp-proxy/build.sh` invokes NBGV for version
+- [ ] `src/acp-proxy/build.sh` falls back to Docker SDK image when .NET not installed
+- [ ] Shell invocation changed: `cai acp proxy <agent>` (not `cai --acp`)
+- [ ] Help text updated to show new `cai acp proxy` invocation
 - [ ] xUnit 3 test project exists at tests/ContainAI.Acp.Tests/
-- [ ] Unit tests cover JSON-RPC message handling
+- [ ] Test project uses xunit.v3 only (no xunit.runner.visualstudio, no Microsoft.NET.Test.Sdk)
+- [ ] global.json configures `"test": { "runner": "Microsoft.Testing.Platform" }`
 - [ ] Unit tests cover path translation
 - [ ] Unit tests cover session management
-- [ ] `dotnet test` passes all unit tests
+- [ ] Unit tests cover JSON-RPC message handling
+- [ ] `dotnet test` passes all unit tests (using MTP, not VSTest)
+- [ ] `tests/integration/test-acp-proxy.sh` passes (post-AOT-publish)
 - [ ] All existing ACP functionality preserved
-- [ ] `tests/integration/test-acp-proxy.sh` passes
 - [ ] Library can be referenced by external projects (future NuGet publishing)
 - [ ] Code follows project conventions (no single 1000+ line files)
+
 ## Done summary
 TBD
 

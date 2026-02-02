@@ -9,10 +9,10 @@
   "depends_on_epics": [],
   "id": "fn-44-build-system-net-project-restructuring",
   "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-02T18:49:18.637320Z",
   "spec_path": ".flow/specs/fn-44-build-system-net-project-restructuring.md",
   "status": "open",
   "title": "Build System & .NET Project Restructuring",
-  "updated_at": "2026-02-02T15:44:17.043738Z"
+  "updated_at": "2026-02-02T19:10:24.296439Z"
 }

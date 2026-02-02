@@ -11,6 +11,6 @@
   "priority": null,
   "spec_path": ".flow/tasks/fn-44-build-system-net-project-restructuring.3.md",
   "status": "todo",
-  "title": "Refactor ACP code into ContainAI.Acp library and acp-proxy CLI",
-  "updated_at": "2026-02-02T15:45:27.275457Z"
+  "title": "Refactor ACP code into ContainAI.Acp library and acp-proxy CLI with System.CommandLine",
+  "updated_at": "2026-02-02T19:10:24.296439Z"
 }
