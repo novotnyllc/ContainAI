@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/acp-proxy/acp-proxy.csproj" />
+  </Folder>
+</Solution>

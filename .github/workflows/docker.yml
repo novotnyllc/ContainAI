@@ -47,25 +47,28 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
 
       - name: Convert repository name to lowercase
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Read VERSION file
-        id: version
-        run: echo "version=$(cat VERSION | tr -d '[:space:]')" >> $GITHUB_OUTPUT
+      - name: Set up .NET for NBGV
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
 
-      - name: Determine image version
-        id: image_version
+      - name: Install and run NBGV
+        id: nbgv
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            # For tag builds, use the tag version (strip leading 'v')
-            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-          else
-            # For branch builds, use VERSION file
-            echo "version=${{ steps.version.outputs.version }}" >> $GITHUB_OUTPUT
-          fi
+          dotnet tool restore
+          echo "SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
+          echo "SimpleVersion=$(dotnet nbgv get-version -v SimpleVersion)" >> "$GITHUB_OUTPUT"
+          echo "GitCommitId=$(dotnet nbgv get-version -v GitCommitId)" >> "$GITHUB_OUTPUT"
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+          echo "NBGV_SimpleVersion=$(dotnet nbgv get-version -v SimpleVersion)" >> "$GITHUB_ENV"
+          echo "NBGV_GitCommitId=$(dotnet nbgv get-version -v GitCommitId)" >> "$GITHUB_ENV"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -131,7 +134,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.image_version.outputs.version }}
+            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -149,7 +152,7 @@ jobs:
             BASE_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/base:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.image_version.outputs.version }}
+            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
           cache-from: type=gha,scope=sdks
           cache-to: type=gha,mode=max,scope=sdks
 
@@ -176,7 +179,7 @@ jobs:
             SDKS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.image_version.outputs.version }}
+            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
           cache-from: type=gha,scope=full-v2
           cache-to: type=gha,mode=max,scope=full-v2
 
@@ -213,7 +216,7 @@ jobs:
             AGENTS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/agents:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.image_version.outputs.version }}
+            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
           cache-from: type=gha,scope=main
           cache-to: type=gha,mode=max,scope=main
 
@@ -243,6 +246,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -279,8 +284,19 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
-          # .NET 10 preview required for acp-proxy (net10.0 target framework)
-          dotnet-version: '10.0.x'          
+          global-json-file: global.json
+
+      - name: Restore and install tools
+        run: |
+          dotnet tool restore
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
+      - name: Run .NET unit tests
+        run: |
+          echo "============================================="
+          echo "Running .NET unit tests (MTP runner)"
+          echo "============================================="
+          dotnet test --configuration Release
 
       - name: Build ACP Proxy
         run: |

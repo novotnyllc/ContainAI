@@ -2,26 +2,34 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <PublishAot>true</PublishAot>
     <AssemblyName>acp-proxy</AssemblyName>
     <RootNamespace>ContainAI.AcpProxy</RootNamespace>
-
-    <!-- AOT settings -->
-    <OptimizationPreference>Speed</OptimizationPreference>
-    <InvariantGlobalization>true</InvariantGlobalization>
-    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
-
-    <!-- Trim settings for minimal binary size -->
-    <TrimMode>link</TrimMode>
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-
-    <!-- Version info -->
-    <Version>0.1.0</Version>
     <Description>ACP terminating proxy for ContainAI</Description>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- AOT publishing -->
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Trimming for minimal binary size -->
+    <TrimMode>link</TrimMode>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- CLI parsing (AOT-compatible) -->
+    <PackageReference Include="System.CommandLine" />
+
+    <!-- JSON-RPC implementation (AOT-compatible with SystemTextJsonFormatter) -->
+    <PackageReference Include="StreamJsonRpc" />
+
+    <!-- Process execution (AOT-compatible) -->
+    <PackageReference Include="CliWrap" />
+  </ItemGroup>
 
 </Project>
