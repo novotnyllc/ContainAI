@@ -26,6 +26,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Make tests hermetic: clear config discovery inputs to prevent developer's
+# real config (e.g., ~/.config/containai/containai.toml) from affecting tests.
+unset XDG_CONFIG_HOME 2>/dev/null || true
+
 # Source test helpers
 source "$SCRIPT_DIR/../sync-test-helpers.sh"
 
@@ -162,14 +166,15 @@ test_bashrc_d_sourced_assertions() {
 
     # Use bash -i -c (interactive) to verify scripts are sourced
     # The container's .bashrc has a hook that sources /mnt/agent-data/shell/bashrc.d/*.sh
+    # Use sentinel pattern to handle potential .bashrc stdout noise
     local result
-    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'echo $BASHRC_D_TEST' 2>/dev/null) || {
+    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'printf "__BASHRC_D__%s\n" "${BASHRC_D_TEST:-}"' 2>/dev/null | grep '^__BASHRC_D__' | tail -n 1) || {
         printf '%s\n' "[DEBUG] Failed to run bash -i -c in container" >&2
         return 1
     }
 
-    if [[ "$result" != "sourced_from_volume" ]]; then
-        printf '%s\n' "[DEBUG] BASHRC_D_TEST='$result', expected 'sourced_from_volume'" >&2
+    if [[ "$result" != "__BASHRC_D__sourced_from_volume" ]]; then
+        printf '%s\n' "[DEBUG] BASHRC_D_TEST='$result', expected '__BASHRC_D__sourced_from_volume'" >&2
         printf '%s\n' "[DEBUG] .bashrc.d script not being sourced correctly" >&2
         return 1
     fi
@@ -289,8 +294,9 @@ test_alias_works_assertions() {
 
     # Run the alias in an interactive shell
     # bash -i sources .bashrc which sources .bash_aliases_imported
+    # Use tail -n 1 to handle potential .bashrc stdout noise
     local result
-    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'synctest' 2>/dev/null) || {
+    result=$(exec_in_container "$SYNC_TEST_CONTAINER" bash -i -c 'synctest' 2>/dev/null | tail -n 1) || {
         printf '%s\n' "[DEBUG] Failed to run alias in interactive shell" >&2
         return 1
     }
@@ -561,6 +567,80 @@ test_ohmyzsh_custom_synced_assertions() {
     return 0
 }
 
+# ==============================================================================
+# Test 10: R flag replaces existing directory on container restart
+# ==============================================================================
+# The R flag means "remove existing first" - verifies that on restart,
+# a real directory at ~/.oh-my-zsh/custom is replaced by the symlink.
+# This is a two-phase test: create real dir after first start, restart container.
+
+setup_ohmyzsh_rflag_fixture() {
+    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
+    mkdir -p "$fixture/.oh-my-zsh/custom"
+
+    # Create content that should be synced
+    printf '%s\n' '# RFLAG_SYNC_MARKER' >"$fixture/.oh-my-zsh/custom/synced.zsh"
+}
+
+test_ohmyzsh_rflag_assertions() {
+    # Phase 1: Verify initial sync created the symlink
+    local actual_target
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.oh-my-zsh/custom" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Phase 1: Failed to read initial symlink ~/.oh-my-zsh/custom" >&2
+        return 1
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/oh-my-zsh-custom" ]]; then
+        printf '%s\n' "[DEBUG] Phase 1: Unexpected initial symlink target='$actual_target'" >&2
+        return 1
+    fi
+
+    # Phase 2: Replace symlink with real directory containing sentinel file
+    # This simulates a scenario where something creates a real directory
+    exec_in_container "$SYNC_TEST_CONTAINER" rm -f "/home/agent/.oh-my-zsh/custom" 2>/dev/null || true
+    exec_in_container "$SYNC_TEST_CONTAINER" mkdir -p "/home/agent/.oh-my-zsh/custom" 2>/dev/null || {
+        printf '%s\n' "[DEBUG] Phase 2: Failed to create real directory" >&2
+        return 1
+    }
+    exec_in_container "$SYNC_TEST_CONTAINER" sh -c 'echo "SENTINEL_SHOULD_BE_GONE" > /home/agent/.oh-my-zsh/custom/sentinel.txt' 2>/dev/null || {
+        printf '%s\n' "[DEBUG] Phase 2: Failed to create sentinel file" >&2
+        return 1
+    }
+
+    # Verify sentinel exists
+    if ! exec_in_container "$SYNC_TEST_CONTAINER" test -f "/home/agent/.oh-my-zsh/custom/sentinel.txt" 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 2: Sentinel file not created" >&2
+        return 1
+    fi
+
+    # Phase 3: Stop and restart container - entrypoint should replace real dir with symlink
+    stop_test_container "$SYNC_TEST_CONTAINER"
+    start_test_container "$SYNC_TEST_CONTAINER"
+
+    # Phase 4: Verify R flag behavior - symlink should be restored, sentinel gone
+    if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.oh-my-zsh/custom" 2>/dev/null); then
+        printf '%s\n' "[DEBUG] Phase 4: ~/.oh-my-zsh/custom is not a symlink after restart (R flag failed)" >&2
+        return 1
+    fi
+    if [[ "$actual_target" != "/mnt/agent-data/shell/oh-my-zsh-custom" ]]; then
+        printf '%s\n' "[DEBUG] Phase 4: Symlink target='$actual_target' after restart, expected volume path" >&2
+        return 1
+    fi
+
+    # Verify sentinel is gone (was in the replaced real directory)
+    if exec_in_container "$SYNC_TEST_CONTAINER" test -f "/home/agent/.oh-my-zsh/custom/sentinel.txt" 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 4: Sentinel file still exists - R flag did not replace directory" >&2
+        return 1
+    fi
+
+    # Verify synced content still accessible
+    if ! exec_in_container "$SYNC_TEST_CONTAINER" test -f "/home/agent/.oh-my-zsh/custom/synced.zsh" 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 4: Synced content not accessible after restart" >&2
+        return 1
+    fi
+
+    return 0
+}
+
 
 # ==============================================================================
 # Main Test Execution
@@ -598,6 +678,9 @@ main() {
     # The symlink replacement behavior is tested by the container image build process.
     # This test verifies content syncs correctly to the volume.
     run_shell_sync_test "ohmyzsh-custom" setup_ohmyzsh_custom_fixture test_ohmyzsh_custom_synced_assertions
+
+    # Test 10: R flag replaces existing directory on container restart
+    run_shell_sync_test "ohmyzsh-rflag" setup_ohmyzsh_rflag_fixture test_ohmyzsh_rflag_assertions
 
     sync_test_section "Summary"
     if [[ $SYNC_TEST_FAILED -eq 0 ]]; then

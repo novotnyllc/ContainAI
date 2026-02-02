@@ -131,11 +131,12 @@ run_tool_sync_test() {
 
 # Special helper for git test that uses profile import (HOME == fixture)
 # This is needed because _cai_import_git_config reads from $HOME, not --from
+# Note: Does not support extra_import_args (profile import has fixed args)
 run_git_sync_test() {
     local test_name="$1"
     local setup_fn="$2"
     local test_fn="$3"
-    shift 3
+    # No extra args - profile import mode has fixed behavior
 
     local import_output import_exit=0
 

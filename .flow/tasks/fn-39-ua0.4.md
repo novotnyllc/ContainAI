@@ -121,9 +121,8 @@ test_ohmyzsh_custom_with_R_flag() {
 - [ ] .oh-my-zsh/custom synced with R flag
 
 ## Done summary
-TBD
-
+Added comprehensive shell customization sync tests covering .bashrc.d sourcing, .bash_aliases linking, .inputrc, zsh configs (.zshrc, .zprofile, .zshenv), and oh-my-zsh/custom directory sync with content verification.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 9e28ead, db26df5, 0266f20, c7e592d
+- Tests: shellcheck -x tests/integration/sync-tests/test-shell-sync.sh
 - PRs:
