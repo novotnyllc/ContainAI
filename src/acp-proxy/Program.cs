@@ -454,6 +454,7 @@ public static class Program
                         continue;
 
                     // Check if this is a response to a pending request
+                    // Note: NormalizeJsonRpcId extracts raw value from JsonNode (avoids quoted strings)
                     if (message.Id != null && (message.Result != null || message.Error != null))
                     {
                         var idStr = NormalizeJsonRpcId(message.Id);
