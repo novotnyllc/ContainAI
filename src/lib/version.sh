@@ -190,16 +190,26 @@ _cai_resolve_update_mode() {
         fi
     fi
 
-    # 2. Resolve channel using config system
+    # 2. Check CAI_CHANNEL env var (task spec precedence: env var before config file)
+    # CAI_CHANNEL is the shorter env var name for scripting (like install.sh uses)
+    # CONTAINAI_CHANNEL is checked by _cai_config_channel for runtime config
     local channel="stable"
-    if command -v _cai_config_channel >/dev/null 2>&1; then
-        channel=$(_cai_config_channel)
-    elif [[ -n "${CAI_CHANNEL:-}" ]]; then
-        # Fallback if config.sh not loaded
+    if [[ -n "${CAI_CHANNEL:-}" ]]; then
         case "${CAI_CHANNEL}" in
-            stable|nightly) channel="${CAI_CHANNEL}" ;;
-            *) channel="stable" ;;
+            stable|nightly)
+                channel="${CAI_CHANNEL}"
+                ;;
+            *)
+                _cai_warn "Invalid CAI_CHANNEL='$CAI_CHANNEL', falling back to config"
+                # Fall through to config system
+                if command -v _cai_config_channel >/dev/null 2>&1; then
+                    channel=$(_cai_config_channel)
+                fi
+                ;;
         esac
+    elif command -v _cai_config_channel >/dev/null 2>&1; then
+        # Use config system (checks CONTAINAI_CHANNEL env var and config file)
+        channel=$(_cai_config_channel)
     fi
 
     case "$channel" in
@@ -391,12 +401,14 @@ _cai_update_code() {
             if [[ -z "$latest_tag" ]]; then
                 # Gracefully handle no tags - warn and switch to main (per spec)
                 _cai_warn "No release tags found, switching to main branch"
-                _cai_info "Consider using nightly channel: CONTAINAI_CHANNEL=nightly cai update"
-                if ! (cd -- "$install_dir" && git checkout -B main origin/main 2>/dev/null); then
-                    _cai_warn "Failed to switch to main branch"
+                _cai_info "Consider using nightly channel: CAI_CHANNEL=nightly cai update"
+                if (cd -- "$install_dir" && git checkout -B main origin/main 2>/dev/null); then
+                    _cai_ok "Switched to main (no tags available)"
+                    return 0
+                else
+                    _cai_error "Failed to switch to main branch"
+                    return 1
                 fi
-                _cai_ok "Switched to main (no tags available)"
-                return 0
             fi
 
             # Check if already on latest tag
@@ -458,7 +470,7 @@ Updates the ContainAI CLI code based on channel configuration.
 
 Channel Selection (precedence highest to lowest):
   1. CAI_BRANCH env var - explicit branch override (power users)
-  2. CONTAINAI_CHANNEL env var - channel override
+  2. CAI_CHANNEL env var - channel override (or CONTAINAI_CHANNEL)
   3. [image].channel in config file
   4. Default: stable
 

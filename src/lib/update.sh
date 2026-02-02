@@ -123,7 +123,7 @@ Container Handling (Linux/WSL2):
 
 Channel Selection (for CLI code updates):
   1. CAI_BRANCH env var - explicit branch override (power users)
-  2. CONTAINAI_CHANNEL env var - channel override
+  2. CAI_CHANNEL env var - channel override (or CONTAINAI_CHANNEL)
   3. [image].channel in config file
   4. Default: stable (checkout latest v* tag)
 
@@ -136,12 +136,12 @@ Notes:
   - Use 'cai doctor' after update to verify installation
 
 Examples:
-  cai update                               Update (prompts if containers running)
-  cai update --dry-run                     Preview what would be updated
-  cai update --stop-containers             Stop containers without prompting (for CI)
-  cai update --force                       Update without confirmation prompts
-  cai update --lima-recreate               Force VM recreation (macOS)
-  CONTAINAI_CHANNEL=nightly cai update     Update code to latest nightly
+  cai update                           Update (prompts if containers running)
+  cai update --dry-run                 Preview what would be updated
+  cai update --stop-containers         Stop containers without prompting (for CI)
+  cai update --force                   Update without confirmation prompts
+  cai update --lima-recreate           Force VM recreation (macOS)
+  CAI_CHANNEL=nightly cai update       Update code to latest nightly
   CAI_BRANCH=feature-x cai update      Update code to specific branch
 EOF
 }
