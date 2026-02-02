@@ -218,7 +218,8 @@ Subcommands:
   completion    Generate shell completion scripts (bash, zsh)
   version       Show current version
   update        Update ContainAI installation
-  --refresh     Pull latest base image and optionally rebuild template
+  refresh       Pull latest base image and optionally rebuild template
+              (also available as --refresh)
   uninstall     Clean removal of system-level components
   help          Show this help message
 

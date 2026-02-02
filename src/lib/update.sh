@@ -2047,14 +2047,17 @@ _cai_refresh_template_has_hardcoded_base() {
     fi
 
     # Check if Dockerfile has ARG BASE_IMAGE pattern (channel-aware)
+    # Match both "ARG BASE_IMAGE=" and "ARG BASE_IMAGE" (no default)
     # If it does, it's not hardcoded
-    if grep -qE '^[[:space:]]*ARG[[:space:]]+BASE_IMAGE=' "$dockerfile_path" 2>/dev/null; then
+    if grep -qE '^[[:space:]]*ARG[[:space:]]+BASE_IMAGE([[:space:]]*=|[[:space:]]*$)' "$dockerfile_path" 2>/dev/null; then
         return 1  # Has ARG pattern - not hardcoded
     fi
 
     # Check if FROM line contains ghcr.io/novotnyllc/containai directly
     # (without variable substitution)
-    if grep -qE '^[[:space:]]*FROM[[:space:]]+(--[a-z]+=\S+[[:space:]]+)?ghcr\.io/novotnyllc/containai' "$dockerfile_path" 2>/dev/null; then
+    # Handle optional --flag=value before image name (e.g., --platform=$BUILDPLATFORM)
+    # Use POSIX ERE: [^[:space:]]+ instead of \S+
+    if grep -qE '^[[:space:]]*FROM[[:space:]]+(--[a-z]+=[^[:space:]]+[[:space:]]+)?ghcr\.io/novotnyllc/containai' "$dockerfile_path" 2>/dev/null; then
         return 0  # Hardcoded FROM
     fi
 
@@ -2114,9 +2117,9 @@ _cai_refresh() {
         return 1
     fi
 
-    _cai_info "Refreshing ContainAI base image..."
-    _cai_info "       Channel: $channel"
-    _cai_info "       Pulling: $base_image"
+    _cai_notice "Refreshing ContainAI base image..."
+    printf '%s\n' "         Channel: $channel" >&2
+    printf '%s\n' "         Pulling: $base_image" >&2
 
     # Get local version before pull (for before/after display)
     local local_version_before=""
@@ -2136,17 +2139,17 @@ _cai_refresh() {
     local local_version_after=""
     local_version_after=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version_after=""
 
-    # Show before/after version
+    # Show before/after version (always visible, not verbose-gated)
     if [[ -n "$local_version_before" ]] && [[ -n "$local_version_after" ]]; then
         if [[ "$local_version_before" == "$local_version_after" ]]; then
-            _cai_ok "Already at latest: $local_version_after"
+            printf '%s\n' "[OK] Already at latest: $local_version_after" >&2
         else
-            _cai_ok "Updated from $local_version_before to $local_version_after"
+            printf '%s\n' "[OK] Updated from $local_version_before to $local_version_after" >&2
         fi
     elif [[ -n "$local_version_after" ]]; then
-        _cai_ok "Pulled version: $local_version_after"
+        printf '%s\n' "[OK] Pulled version: $local_version_after" >&2
     else
-        _cai_ok "Base image pulled successfully"
+        printf '%s\n' "[OK] Base image pulled successfully" >&2
     fi
 
     # Clear registry cache for this image
@@ -2162,8 +2165,8 @@ _cai_refresh() {
     if [[ "$rebuild_flag" == "true" ]]; then
         # Check if default template exists
         if [[ ! -f "$default_template_path" ]]; then
-            _cai_info "No default template found at $default_template_path"
-            _cai_info "Skipping template rebuild."
+            _cai_notice "No default template found at $default_template_path"
+            printf '%s\n' "         Skipping template rebuild." >&2
         else
             # Check for hardcoded FROM (suggest upgrade)
             if _cai_refresh_template_has_hardcoded_base "$default_template_path"; then
@@ -2171,22 +2174,22 @@ _cai_refresh() {
                 _cai_warn "Run 'cai template upgrade' to enable channel selection."
             fi
 
-            # Rebuild default template
-            _cai_info ""
-            _cai_info "Rebuilding default template..."
+            # Rebuild default template (don't suppress base-image validation warnings)
+            printf '\n' >&2
+            _cai_notice "Rebuilding default template..."
             local template_image
-            if template_image=$(_cai_build_template "default" "$selected_context" "false" "true"); then
-                _cai_ok "Template rebuilt: $template_image"
+            if template_image=$(_cai_build_template "default" "$selected_context" "false" "false"); then
+                printf '%s\n' "[OK] Template rebuilt: $template_image" >&2
             else
                 _cai_error "Failed to rebuild template"
                 return 1
             fi
         fi
     else
-        # Without --rebuild, remind user if template exists
+        # Without --rebuild, remind user if template exists (always visible)
         if [[ -f "$default_template_path" ]]; then
-            _cai_info ""
-            _cai_info "Template image may need rebuild. Run 'cai --refresh --rebuild' to update."
+            printf '\n' >&2
+            _cai_notice "Template image may need rebuild. Run 'cai --refresh --rebuild' to update."
         fi
     fi
 
