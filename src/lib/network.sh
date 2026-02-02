@@ -272,20 +272,41 @@ _cai_iptables_available() {
     command -v iptables >/dev/null 2>&1
 }
 
-# Run iptables with sudo if not root
-# Uses sudo only when EUID != 0 and sudo is available
-# Falls back to direct iptables for containers with CAP_NET_ADMIN but no sudo
+# Run iptables with appropriate privileges
+# Order of attempts:
+# 1. If root (EUID == 0): direct iptables
+# 2. If not root: try direct first (works with CAP_NET_ADMIN in containers)
+# 3. If direct fails with EPERM and sudo available: try sudo -n (non-interactive)
 # Arguments: same as iptables
 # Returns: iptables exit code
 _cai_iptables() {
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
         iptables "$@"
-    elif command -v sudo >/dev/null 2>&1; then
-        sudo iptables "$@"
-    else
-        # No sudo available - try direct (works with CAP_NET_ADMIN in containers)
-        iptables "$@"
+        return $?
     fi
+
+    # Try direct first - works with CAP_NET_ADMIN in containers
+    local output rc
+    output=$(iptables "$@" 2>&1) && rc=0 || rc=$?
+
+    if [[ $rc -eq 0 ]]; then
+        [[ -n "$output" ]] && printf '%s\n' "$output"
+        return 0
+    fi
+
+    # Check if failure was permission-related (EPERM typically gives rc=4 or message)
+    if [[ "$output" == *"Permission denied"* ]] || [[ "$output" == *"Operation not permitted"* ]]; then
+        # Try sudo -n (non-interactive, fails if password needed)
+        if command -v sudo >/dev/null 2>&1; then
+            if sudo -n iptables "$@" 2>/dev/null; then
+                return 0
+            fi
+        fi
+    fi
+
+    # Return original error
+    [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+    return $rc
 }
 
 # Check if we have permissions to run iptables
@@ -647,7 +668,7 @@ _cai_remove_network_rules() {
     fi
 
     # Check if DOCKER-USER chain exists
-    if ! iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+    if ! _cai_iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
         _cai_info "DOCKER-USER chain does not exist, no rules to remove"
         return 0
     fi
@@ -735,7 +756,7 @@ _cai_check_network_rules() {
     fi
 
     # Check if DOCKER-USER chain exists
-    if ! iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+    if ! _cai_iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
         _CAI_NETWORK_RULES_STATUS="no_chain"
         if [[ "$verbose" == "true" ]]; then
             _cai_warn "DOCKER-USER chain does not exist"
