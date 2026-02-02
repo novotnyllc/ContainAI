@@ -6,16 +6,16 @@
 #
 # Verifies:
 # 1. NDJSON framing (newline-delimited, not Content-Length)
-# 2. Stdout purity (no diagnostic output leaks)
+# 2. Stdout purity (no diagnostic output leaks, even with verbose mode)
 # 3. Initialize response
-# 4. Single session lifecycle (including session/prompt)
+# 4. Single session lifecycle (session/new -> session/prompt -> session/update)
 # 5. Multiple simultaneous sessions
-# 6. Concurrent output serialization (no byte interleaving)
+# 6. Concurrent output serialization (no byte interleaving with prompts)
 # 7. Session ID namespacing
-# 8. Session routing by proxySessionId
-# 9. Workspace resolution
-# 10. MCP path translation
-# 11. Session cleanup on session/end
+# 8. Session routing by proxySessionId (prompts routed to correct session)
+# 9. Workspace resolution (subdirectory -> git root)
+# 10. MCP path translation (host paths -> container paths)
+# 11. Session cleanup on session/end (create, end, verify prompt fails)
 # 12. Stdin EOF graceful shutdown
 #
 # Usage: ./tests/integration/test-acp-proxy.sh
@@ -69,10 +69,21 @@ section() {
 }
 
 cleanup() {
+    # Stop interactive proxy if running
+    if [[ -n "${PROXY_PID:-}" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
+        kill "$PROXY_PID" 2>/dev/null || true
+        wait "$PROXY_PID" 2>/dev/null || true
+    fi
+    # Close file descriptors
+    exec 3>&- 2>/dev/null || true
+    exec 4<&- 2>/dev/null || true
+    # Clean up temp files
     local file
     for file in "${TEMP_FILES[@]:-}"; do
         rm -rf "$file" 2>/dev/null || true
     done
+    # Kill any lingering proxy processes
+    pkill -f "acp-proxy mock-acp-server" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -106,7 +117,7 @@ run_with_timeout() {
     "$@"
 }
 
-# Run proxy with input and capture all output
+# Run proxy with input and capture all output (single-shot mode)
 # Usage: run_proxy "input" [num_lines]
 # Sets global PROXY_OUTPUT with the result and PROXY_EXIT_CODE with exit code
 PROXY_OUTPUT=""
@@ -137,6 +148,89 @@ run_proxy() {
 get_line() {
     local n="$1"
     printf '%s' "$PROXY_OUTPUT" | sed -n "${n}p"
+}
+
+# ==============================================================================
+# Interactive proxy helpers (using FIFOs for bidirectional communication)
+# ==============================================================================
+
+# Global variables for interactive proxy
+PROXY_PID=""
+PROXY_IN_FIFO=""
+PROXY_OUT_FIFO=""
+PROXY_OUT_FILE=""
+
+# Start an interactive proxy session
+# This allows sending messages and reading responses dynamically
+start_interactive_proxy() {
+    PROXY_IN_FIFO=$(mktemp -u)
+    PROXY_OUT_FIFO=$(mktemp -u)
+    PROXY_OUT_FILE=$(mktemp)
+    TEMP_FILES+=("$PROXY_IN_FIFO" "$PROXY_OUT_FIFO" "$PROXY_OUT_FILE")
+
+    mkfifo "$PROXY_IN_FIFO"
+    mkfifo "$PROXY_OUT_FIFO"
+
+    # Start proxy with FIFOs
+    # Use a subshell to handle the proxy I/O
+    (
+        "$PROXY_BIN" mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>/dev/null
+    ) &
+    PROXY_PID=$!
+
+    # Open FIFOs for reading/writing (must open write end first to avoid blocking)
+    exec 3>"$PROXY_IN_FIFO"
+    exec 4<"$PROXY_OUT_FIFO"
+
+    # Give the proxy time to start
+    sleep 0.2
+}
+
+# Send a message to the interactive proxy and read the response
+# Usage: send_and_receive "json message"
+# Returns: response line (or empty on timeout)
+send_and_receive() {
+    local message="$1"
+    local timeout_secs="${2:-5}"
+
+    # Send message
+    printf '%s\n' "$message" >&3
+
+    # Read response with timeout
+    local response=""
+    if read -r -t "$timeout_secs" response <&4; then
+        printf '%s' "$response"
+    fi
+}
+
+# Send a message without waiting for response (for notifications)
+send_message() {
+    local message="$1"
+    printf '%s\n' "$message" >&3
+}
+
+# Read next response line with timeout
+read_response() {
+    local timeout_secs="${1:-5}"
+    local response=""
+    if read -r -t "$timeout_secs" response <&4; then
+        printf '%s' "$response"
+    fi
+}
+
+# Stop the interactive proxy
+stop_interactive_proxy() {
+    # Close our file descriptors
+    exec 3>&- 2>/dev/null || true
+    exec 4<&- 2>/dev/null || true
+
+    # Kill the proxy process
+    if [[ -n "$PROXY_PID" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
+        kill "$PROXY_PID" 2>/dev/null || true
+        wait "$PROXY_PID" 2>/dev/null || true
+    fi
+
+    PROXY_PID=""
 }
 
 # ==============================================================================
@@ -226,16 +320,28 @@ test_ndjson_framing() {
 }
 
 # ==============================================================================
-# Test 2: Stdout Purity
+# Test 2: Stdout Purity (with verbose mode)
 # ==============================================================================
 
 test_stdout_purity() {
     section "Test 2: Stdout purity"
 
     # Test that stdout contains only NDJSON, no diagnostic output
-    # Send a simple initialize request and verify the response is pure JSON
-    run_proxy '{"jsonrpc":"2.0","id":"purity-test","method":"initialize","params":{"protocolVersion":"2025-01-01"}}' 1
-    local response="$PROXY_OUTPUT"
+    # Enable verbose mode to try to trigger diagnostic output leaks
+    local tmpfile
+    tmpfile=$(mktemp)
+    TEMP_FILES+=("$tmpfile")
+
+    # Set environment variables for the subshell
+    (
+        export CONTAINAI_VERBOSE=1
+        export CAI_NO_UPDATE_CHECK=1
+        (printf '%s\n' '{"jsonrpc":"2.0","id":"purity-test","method":"initialize","params":{"protocolVersion":"2025-01-01"}}'; sleep 0.1) \
+            | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" mock-acp-server 2>/dev/null > "$tmpfile"
+    )
+
+    local response
+    response=$(head -1 < "$tmpfile")
 
     # Must receive a response
     if [[ -z "$response" ]]; then
@@ -262,7 +368,7 @@ test_stdout_purity() {
         return
     fi
 
-    pass "stdout purity maintained (no diagnostic leaks)"
+    pass "stdout purity maintained (no diagnostic leaks, even with CONTAINAI_VERBOSE=1)"
 }
 
 # ==============================================================================
@@ -300,7 +406,7 @@ test_initialize_response() {
 }
 
 # ==============================================================================
-# Test 4: Single Session Lifecycle (including session/prompt)
+# Test 4: Single Session Lifecycle (session/new -> session/prompt -> session/update)
 # ==============================================================================
 
 test_single_session() {
@@ -309,59 +415,57 @@ test_single_session() {
     local ws
     ws=$(make_temp_dir)
 
-    # The proxy generates a UUID for each session. We can't know the UUID ahead
-    # of time, but we can use a placeholder and let the proxy create a new session
-    # for the prompt message. The key insight: use a SINGLE input stream with
-    # init + session/new + session/prompt where the prompt uses a session ID that
-    # we DON'T know yet. Instead, we'll create a single session and immediately
-    # send a prompt to it using NDJSON pipelining.
-    #
-    # Actually, the correct approach is: since we can't know the proxy session ID
-    # until after session/new returns, and we need to include it in session/prompt,
-    # we need to test this differently. The proxy's session ID is generated server-side.
-    #
-    # The test needs to verify:
-    # 1. session/new returns a sessionId (verified in test_multiple_sessions)
-    # 2. session/prompt with valid sessionId returns session/update
-    #
-    # But there's no way to get the sessionId from one message and use it in the
-    # next without making it a single-shot test. So we test that session/prompt
-    # to an invalid session returns an error, and trust that session/new works.
-    #
-    # Alternative: Test that the full flow works by NOT verifying the session ID
-    # matches - just verify we get proper responses.
+    start_interactive_proxy
 
-    # Send initialize + session/new, verify both work
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}'
-
-    run_proxy "$input" 2
-
-    # Verify initialize
+    # Initialize
     local init_response
-    init_response=$(get_line 1)
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
     if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
         fail "Initialize failed: $init_response"
         return
     fi
 
-    # Verify session/new response has sessionId (UUID format)
+    # Create session
     local session_response session_id
-    session_response=$(get_line 2)
+    session_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}')
     session_id=$(printf '%s' "$session_response" | jq -r '.result.sessionId // empty')
     if [[ -z "$session_id" ]]; then
+        stop_interactive_proxy
         fail "session/new did not return sessionId: $session_response"
         return
     fi
 
-    # Verify sessionId is a UUID (not the raw mock session ID)
+    # Verify sessionId is a UUID
     if [[ ${#session_id} -ne 36 ]] || [[ ! "$session_id" =~ ^[0-9a-f-]+$ ]]; then
+        stop_interactive_proxy
         fail "Session ID doesn't look like UUID: $session_id"
         return
     fi
 
-    pass "Single session lifecycle works (sessionId=$session_id is valid UUID)"
+    # Send prompt using the obtained session ID
+    send_message '{"jsonrpc":"2.0","id":"3","method":"session/prompt","params":{"sessionId":"'"$session_id"'","message":"test prompt"}}'
+
+    # Read the session/update notification
+    local update_response update_method update_session_id
+    update_response=$(read_response 5)
+    update_method=$(printf '%s' "$update_response" | jq -r '.method // empty')
+
+    if [[ "$update_method" != "session/update" ]]; then
+        stop_interactive_proxy
+        fail "Expected session/update notification, got: $update_response"
+        return
+    fi
+
+    update_session_id=$(printf '%s' "$update_response" | jq -r '.params.sessionId // empty')
+    if [[ "$update_session_id" != "$session_id" ]]; then
+        stop_interactive_proxy
+        fail "session/update has wrong sessionId: expected $session_id, got $update_session_id"
+        return
+    fi
+
+    stop_interactive_proxy
+    pass "Single session lifecycle works (sessionId=$session_id, prompt -> update verified)"
 }
 
 # ==============================================================================
@@ -403,7 +507,7 @@ test_multiple_sessions() {
 }
 
 # ==============================================================================
-# Test 6: Concurrent Output Serialization
+# Test 6: Concurrent Output Serialization (with prompts)
 # ==============================================================================
 
 test_concurrent_output_serialization() {
@@ -413,44 +517,59 @@ test_concurrent_output_serialization() {
     ws1=$(make_temp_dir)
     ws2=$(make_temp_dir)
 
-    # Build input: init, create 2 sessions
-    # Since we can't know the proxy-generated session IDs ahead of time,
-    # we'll send the prompts to the sessions created in THIS same proxy run.
-    # The trick: use placeholder session IDs that match what mock-acp-server returns.
-    # But wait - the proxy namespaces session IDs, so we can't predict them.
-    #
-    # Actually, we CAN test concurrent output serialization by just creating
-    # multiple sessions and verifying all output lines are valid JSON.
-    # The proxy must serialize output from concurrent agents.
+    start_interactive_proxy
 
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws1"'"}}
-{"jsonrpc":"2.0","id":"3","method":"session/new","params":{"cwd":"'"$ws2"'"}}
-{"jsonrpc":"2.0","id":"4","method":"session/new","params":{"cwd":"'"$ws1"'"}}
-{"jsonrpc":"2.0","id":"5","method":"session/new","params":{"cwd":"'"$ws2"'"}}
-{"jsonrpc":"2.0","id":"6","method":"session/new","params":{"cwd":"'"$ws1"'"}}
-{"jsonrpc":"2.0","id":"7","method":"session/new","params":{"cwd":"'"$ws2"'"}}'
+    # Initialize
+    local init_response
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
+    if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Initialize failed: $init_response"
+        return
+    fi
 
-    run_proxy "$input"
+    # Create two sessions
+    local s1_response s2_response s1 s2
+    s1_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws1"'"}}')
+    s1=$(printf '%s' "$s1_response" | jq -r '.result.sessionId // empty')
 
-    # Validate each line is complete valid JSON (no byte interleaving)
-    local line all_valid=true line_num=0
-    while IFS= read -r line; do
-        ((line_num++)) || true
-        [[ -z "$line" ]] && continue
+    s2_response=$(send_and_receive '{"jsonrpc":"2.0","id":"3","method":"session/new","params":{"cwd":"'"$ws2"'"}}')
+    s2=$(printf '%s' "$s2_response" | jq -r '.result.sessionId // empty')
+
+    if [[ -z "$s1" ]] || [[ -z "$s2" ]]; then
+        stop_interactive_proxy
+        fail "Could not create sessions for concurrency test"
+        return
+    fi
+
+    # Send interleaved prompts to both sessions rapidly
+    local i
+    for i in 1 2 3 4 5; do
+        send_message '{"jsonrpc":"2.0","id":"p'"$i"'a","method":"session/prompt","params":{"sessionId":"'"$s1"'","message":"msg'"$i"'"}}'
+        send_message '{"jsonrpc":"2.0","id":"p'"$i"'b","method":"session/prompt","params":{"sessionId":"'"$s2"'","message":"msg'"$i"'"}}'
+    done
+
+    # Read all responses and verify they're valid JSON (no interleaving)
+    local line all_valid=true line_count=0
+    while [[ $line_count -lt 10 ]]; do
+        line=$(read_response 2)
+        if [[ -z "$line" ]]; then
+            break
+        fi
+        ((line_count++)) || true
         if ! printf '%s' "$line" | jq -e . >/dev/null 2>&1; then
-            fail "Line $line_num is not valid JSON (interleaving?): $line"
+            fail "Line $line_count is not valid JSON (interleaving?): $line"
             all_valid=false
             break
         fi
-    done <<< "$PROXY_OUTPUT"
+    done
 
-    # We expect 7 responses (1 init + 6 session/new)
-    if $all_valid && [[ $line_num -ge 7 ]]; then
-        pass "Concurrent output serialization correct ($line_num lines, no interleaving)"
+    stop_interactive_proxy
+
+    if $all_valid && [[ $line_count -ge 10 ]]; then
+        pass "Concurrent output serialization correct ($line_count session/update notifications, no interleaving)"
     elif $all_valid; then
-        fail "Expected at least 7 response lines, got $line_num"
+        fail "Expected at least 10 session/update notifications, got $line_count"
     fi
 }
 
@@ -508,42 +627,57 @@ test_session_routing() {
     ws1=$(make_temp_dir)
     ws2=$(make_temp_dir)
 
-    # Create two sessions and verify they have different session IDs
-    # This verifies the proxy routes different cwd's to different sessions
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws1"'"}}
-{"jsonrpc":"2.0","id":"3","method":"session/new","params":{"cwd":"'"$ws2"'"}}'
+    start_interactive_proxy
 
-    run_proxy "$input" 3
+    # Initialize
+    local init_response
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
+    if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Initialize failed: $init_response"
+        return
+    fi
 
-    local s1 s2
-    s1=$(get_line 2 | jq -r '.result.sessionId // empty')
-    s2=$(get_line 3 | jq -r '.result.sessionId // empty')
+    # Create two sessions
+    local s1_response s2_response s1 s2
+    s1_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws1"'"}}')
+    s1=$(printf '%s' "$s1_response" | jq -r '.result.sessionId // empty')
+
+    s2_response=$(send_and_receive '{"jsonrpc":"2.0","id":"3","method":"session/new","params":{"cwd":"'"$ws2"'"}}')
+    s2=$(printf '%s' "$s2_response" | jq -r '.result.sessionId // empty')
 
     if [[ -z "$s1" ]] || [[ -z "$s2" ]]; then
+        stop_interactive_proxy
         fail "Could not create sessions for routing test"
         return
     fi
 
-    # Verify sessions are different (each request gets unique proxy session ID)
-    if [[ "$s1" == "$s2" ]]; then
-        fail "Sessions have same ID (routing would be ambiguous): $s1 == $s2"
+    # Send prompt to session 1
+    send_message '{"jsonrpc":"2.0","id":"4","method":"session/prompt","params":{"sessionId":"'"$s1"'","message":"msg-for-session1"}}'
+    local update1 update1_sid
+    update1=$(read_response 5)
+    update1_sid=$(printf '%s' "$update1" | jq -r '.params.sessionId // empty')
+
+    if [[ "$update1_sid" != "$s1" ]]; then
+        stop_interactive_proxy
+        fail "Session 1 update has wrong sessionId: expected $s1, got $update1_sid"
         return
     fi
 
-    # Verify both are UUIDs (proxy-generated, not raw agent IDs)
-    if [[ ${#s1} -ne 36 ]] || [[ ! "$s1" =~ ^[0-9a-f-]+$ ]]; then
-        fail "Session 1 ID is not a valid UUID: $s1"
+    # Send prompt to session 2
+    send_message '{"jsonrpc":"2.0","id":"5","method":"session/prompt","params":{"sessionId":"'"$s2"'","message":"msg-for-session2"}}'
+    local update2 update2_sid
+    update2=$(read_response 5)
+    update2_sid=$(printf '%s' "$update2" | jq -r '.params.sessionId // empty')
+
+    if [[ "$update2_sid" != "$s2" ]]; then
+        stop_interactive_proxy
+        fail "Session 2 update has wrong sessionId: expected $s2, got $update2_sid"
         return
     fi
 
-    if [[ ${#s2} -ne 36 ]] || [[ ! "$s2" =~ ^[0-9a-f-]+$ ]]; then
-        fail "Session 2 ID is not a valid UUID: $s2"
-        return
-    fi
-
-    pass "Session routing established (s1=$s1, s2=$s2 are distinct UUIDs)"
+    stop_interactive_proxy
+    pass "Session routing works correctly (prompts routed to correct sessions)"
 }
 
 # ==============================================================================
@@ -561,35 +695,59 @@ test_workspace_resolution() {
     mkdir -p "$subdir"
     git -C "$git_root" init >/dev/null 2>&1
 
-    # Create session from subdirectory - the proxy should resolve to git root
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$subdir"'"}}'
+    start_interactive_proxy
 
-    run_proxy "$input" 2
+    # Initialize
+    local init_response
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
+    if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Initialize failed: $init_response"
+        return
+    fi
 
+    # Create session from subdirectory
     local session_response session_id
-    session_response=$(get_line 2)
+    session_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$subdir"'"}}')
     session_id=$(printf '%s' "$session_response" | jq -r '.result.sessionId // empty')
 
     if [[ -z "$session_id" ]]; then
+        stop_interactive_proxy
         fail "Failed to create session from subdirectory"
         info "Response: $session_response"
         return
     fi
 
+    # The mock server echoes back the received cwd in receivedCwd
+    # The proxy should have translated the subdirectory to a container path relative to workspace root
+    local received_cwd
+    received_cwd=$(printf '%s' "$session_response" | jq -r '.result.receivedCwd // empty')
+
+    # Note: The proxy returns its own response, not the mock's raw response
+    # So receivedCwd won't be present in the proxy's response to the editor
+    # But we can verify session creation succeeded from a subdirectory
+
     # Verify session ID is a valid UUID (proxy generated)
     if [[ ${#session_id} -ne 36 ]] || [[ ! "$session_id" =~ ^[0-9a-f-]+$ ]]; then
+        stop_interactive_proxy
         fail "Session ID is not a valid UUID: $session_id"
         return
     fi
 
-    # The proxy:
-    # 1. Resolves workspace root (git root) from the subdirectory
-    # 2. Calculates container cwd based on relative path from workspace root
-    # 3. Creates session with the agent
-    # If session creation succeeds, workspace resolution is working.
-    pass "Workspace resolution works (session created from subdirectory, id=$session_id)"
+    # Send a prompt to verify the session works
+    send_message '{"jsonrpc":"2.0","id":"3","method":"session/prompt","params":{"sessionId":"'"$session_id"'","message":"test"}}'
+    local update_response update_method
+    update_response=$(read_response 5)
+    update_method=$(printf '%s' "$update_response" | jq -r '.method // empty')
+
+    if [[ "$update_method" != "session/update" ]]; then
+        stop_interactive_proxy
+        fail "Session created from subdirectory doesn't work: $update_response"
+        return
+    fi
+
+    stop_interactive_proxy
+    pass "Workspace resolution works (session from subdirectory functional, id=$session_id)"
 }
 
 # ==============================================================================
@@ -602,19 +760,24 @@ test_mcp_path_translation() {
     local ws
     ws=$(make_temp_dir)
 
-    # Create session with mcpServers config containing absolute paths
-    # The proxy should translate absolute paths to container paths
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'","mcpServers":{"test-server":{"command":"test-mcp","args":["--config","relative/path","--workspace","'"$ws"'","--data","'"$ws"'/data"]}}}}'
+    start_interactive_proxy
 
-    run_proxy "$input" 2
+    # Initialize
+    local init_response
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
+    if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Initialize failed: $init_response"
+        return
+    fi
 
+    # Create session with mcpServers config containing absolute and relative paths
     local session_response session_id
-    session_response=$(get_line 2)
+    session_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'","mcpServers":{"test-server":{"command":"test-mcp","args":["--config","relative/path","--workspace","'"$ws"'","--data","'"$ws"'/data"]}}}}')
     session_id=$(printf '%s' "$session_response" | jq -r '.result.sessionId // empty')
 
     if [[ -z "$session_id" ]]; then
+        stop_interactive_proxy
         fail "Failed to create session with MCP config"
         info "Response: $session_response"
         return
@@ -622,17 +785,25 @@ test_mcp_path_translation() {
 
     # Verify session ID is a valid UUID
     if [[ ${#session_id} -ne 36 ]] || [[ ! "$session_id" =~ ^[0-9a-f-]+$ ]]; then
+        stop_interactive_proxy
         fail "Session ID is not a valid UUID: $session_id"
         return
     fi
 
-    # The proxy:
-    # 1. Parses mcpServers config from the request
-    # 2. Translates absolute host paths to container paths (/home/agent/workspace/...)
-    # 3. Preserves relative paths (no translation needed)
-    # 4. Forwards the translated config to the agent
-    # If session creation succeeds with MCP config, path translation is working.
-    pass "MCP path translation works (session created with mcpServers config, id=$session_id)"
+    # Send a prompt to verify the session works with MCP config
+    send_message '{"jsonrpc":"2.0","id":"3","method":"session/prompt","params":{"sessionId":"'"$session_id"'","message":"test"}}'
+    local update_response update_method
+    update_response=$(read_response 5)
+    update_method=$(printf '%s' "$update_response" | jq -r '.method // empty')
+
+    if [[ "$update_method" != "session/update" ]]; then
+        stop_interactive_proxy
+        fail "Session with MCP config doesn't work: $update_response"
+        return
+    fi
+
+    stop_interactive_proxy
+    pass "MCP path translation works (session with mcpServers config functional, id=$session_id)"
 }
 
 # ==============================================================================
@@ -645,31 +816,61 @@ test_session_cleanup() {
     local ws
     ws=$(make_temp_dir)
 
-    # Test session/end with a nonexistent session ID
-    # This verifies the proxy handles session/end properly (either success or proper error)
-    # We can't test the "create then end" flow in a single stream because we don't
-    # know the session ID until after session/new returns.
-    #
-    # We test that session/end to a nonexistent session returns an error,
-    # which validates the proxy's session cleanup path is working.
-    local input
-    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
-{"jsonrpc":"2.0","id":"end-1","method":"session/end","params":{"sessionId":"nonexistent-session-cleanup-test"}}'
+    start_interactive_proxy
 
-    run_proxy "$input" 2
-
-    local end_response
-    end_response=$(get_line 2)
-
-    # Should have an error (session not found) since we're ending a nonexistent session
-    if printf '%s' "$end_response" | jq -e '.error' >/dev/null 2>&1; then
-        pass "Session cleanup returns error for unknown session (as expected)"
-    elif printf '%s' "$end_response" | jq -e '.result' >/dev/null 2>&1; then
-        # Some implementations may return success for idempotent cleanup
-        pass "Session cleanup returns success for unknown session (idempotent)"
-    else
-        fail "Unexpected session/end response: $end_response"
+    # Initialize
+    local init_response
+    init_response=$(send_and_receive '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}')
+    if ! printf '%s' "$init_response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Initialize failed: $init_response"
+        return
     fi
+
+    # Create session
+    local session_response session_id
+    session_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}')
+    session_id=$(printf '%s' "$session_response" | jq -r '.result.sessionId // empty')
+
+    if [[ -z "$session_id" ]]; then
+        stop_interactive_proxy
+        fail "Could not create session for cleanup test"
+        return
+    fi
+
+    # Verify session works before ending it
+    send_message '{"jsonrpc":"2.0","id":"3","method":"session/prompt","params":{"sessionId":"'"$session_id"'","message":"before-end"}}'
+    local update_before
+    update_before=$(read_response 5)
+    if ! printf '%s' "$update_before" | jq -e '.method == "session/update"' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Session didn't work before ending: $update_before"
+        return
+    fi
+
+    # End the session (use longer timeout as session/end may wait for agent cleanup)
+    local end_response
+    end_response=$(send_and_receive '{"jsonrpc":"2.0","id":"4","method":"session/end","params":{"sessionId":"'"$session_id"'"}}' 10)
+
+    # Verify session/end was acknowledged (either result or acceptable error)
+    if ! printf '%s' "$end_response" | jq -e '.result or .error' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Unexpected session/end response: $end_response"
+        return
+    fi
+
+    # Try to use the ended session - should fail with "session not found"
+    local error_response
+    error_response=$(send_and_receive '{"jsonrpc":"2.0","id":"5","method":"session/prompt","params":{"sessionId":"'"$session_id"'","message":"after-end"}}' 5)
+
+    if ! printf '%s' "$error_response" | jq -e '.error' >/dev/null 2>&1; then
+        stop_interactive_proxy
+        fail "Session still works after session/end: $error_response"
+        return
+    fi
+
+    stop_interactive_proxy
+    pass "Session cleanup works (session/end acknowledged, subsequent prompt fails)"
 }
 
 # ==============================================================================
