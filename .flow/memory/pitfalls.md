@@ -334,3 +334,6 @@ Integration tests must clear XDG_CONFIG_HOME and similar env vars to prevent dev
 
 ## 2026-02-01 manual [pitfall]
 When testing import functions that read from $HOME (like _cai_import_git_config), ensure HOME points to the fixture, not a separate profile home
+
+## 2026-02-02 manual [pitfall]
+Container restart doesn't trigger link-repair; use link-repair.sh --fix explicitly or update .containai-imported-at timestamp
