@@ -2247,8 +2247,9 @@ _cai_refresh() {
     local_version=$(_cai_local_image_version "$base_image" "$selected_context" 2>/dev/null) || local_version=""
 
     # If we have a local image, check remote digest before pulling
+    # Only attempt digest comparison for ghcr.io images without digest pins (@sha256:)
     local need_pull=1
-    if [[ -n "$local_digest" ]]; then
+    if [[ -n "$local_digest" ]] && [[ "$base_image" == ghcr.io/* ]] && [[ "$base_image" != *"@"* ]]; then
         if [[ "$verbose" == "true" ]]; then
             _cai_info "Local image digest: ${local_digest:0:19}..."
         fi
@@ -2293,6 +2294,10 @@ _cai_refresh() {
             if [[ "$verbose" == "true" ]]; then
                 _cai_info "Could not get registry token, will pull to check"
             fi
+        fi
+    elif [[ -n "$local_digest" ]]; then
+        if [[ "$verbose" == "true" ]]; then
+            _cai_info "Non-GHCR or digest-pinned image, skipping digest comparison"
         fi
     else
         if [[ "$verbose" == "true" ]]; then

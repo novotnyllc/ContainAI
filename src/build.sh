@@ -498,7 +498,7 @@ case "$BUILD_LAYER" in
         else
             printf '[INFO] No local sdks image found, using Dockerfile default\n'
         fi
-        build_layer "agents" "Dockerfile.agents" ${agents_args[@]+"${agents_args[@]}"}
+        build_layer "agents" "Dockerfile.agents" "${agents_args[@]}"
         ;;
     full)
         echo "ERROR: Layer 'full' has been renamed to 'agents'. Use: --layer agents" >&2
@@ -514,9 +514,14 @@ case "$BUILD_LAYER" in
         # Build in dependency order
         build_layer "base" "Dockerfile.base"
 
-        # sdks layer: conditionally pass BASE_IMAGE if local base exists
+        # sdks layer: pass BASE_IMAGE build-arg
+        # When using --push, images aren't loaded locally, so always pass the arg
+        # to chain layers correctly. For local builds, check if image exists.
         all_sdks_args=(--build-arg DOTNET_CHANNEL="$DOTNET_CHANNEL")
-        if local_image_exists "${IMAGE_BASE}:latest"; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
+            printf '[INFO] Using built base image: %s\n' "${IMAGE_BASE}:latest"
+            all_sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
+        elif local_image_exists "${IMAGE_BASE}:latest"; then
             printf '[INFO] Using local base image: %s\n' "${IMAGE_BASE}:latest"
             all_sdks_args+=(--build-arg BASE_IMAGE="${IMAGE_BASE}:latest")
         else
@@ -524,15 +529,18 @@ case "$BUILD_LAYER" in
         fi
         build_layer "sdks" "Dockerfile.sdks" "${all_sdks_args[@]}"
 
-        # agents layer: conditionally pass SDKS_IMAGE if local sdks exists
+        # agents layer: pass SDKS_IMAGE build-arg
         all_agents_args=()
-        if local_image_exists "${IMAGE_SDKS}:latest"; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
+            printf '[INFO] Using built sdks image: %s\n' "${IMAGE_SDKS}:latest"
+            all_agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
+        elif local_image_exists "${IMAGE_SDKS}:latest"; then
             printf '[INFO] Using local sdks image: %s\n' "${IMAGE_SDKS}:latest"
             all_agents_args+=(--build-arg SDKS_IMAGE="${IMAGE_SDKS}:latest")
         else
             printf '[INFO] No local sdks image found, using Dockerfile default\n'
         fi
-        build_layer "agents" "Dockerfile.agents" ${all_agents_args[@]+"${all_agents_args[@]}"}
+        build_layer "agents" "Dockerfile.agents" "${all_agents_args[@]}"
 
         # Build final alias image
         echo ""
@@ -553,9 +561,12 @@ case "$BUILD_LAYER" in
                 final_cmd+=(--load)
             fi
         fi
-        # Conditionally pass AGENTS_IMAGE if local agents exists
+        # Pass AGENTS_IMAGE build-arg for final image
         final_args=()
-        if local_image_exists "${IMAGE_AGENTS}:latest"; then
+        if [[ "$BUILDX_PUSH" -eq 1 ]] || [[ "$HAS_OUTPUT" -eq 1 ]]; then
+            printf '[INFO] Using built agents image: %s\n' "${IMAGE_AGENTS}:latest"
+            final_args+=(--build-arg AGENTS_IMAGE="${IMAGE_AGENTS}:latest")
+        elif local_image_exists "${IMAGE_AGENTS}:latest"; then
             printf '[INFO] Using local agents image: %s\n' "${IMAGE_AGENTS}:latest"
             final_args+=(--build-arg AGENTS_IMAGE="${IMAGE_AGENTS}:latest")
         else
@@ -566,7 +577,7 @@ case "$BUILD_LAYER" in
             -t "${IMAGE_MAIN}:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
-            ${final_args[@]+"${final_args[@]}"} \
+            "${final_args[@]}" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/container/Dockerfile" \
             "$SCRIPT_DIR"
