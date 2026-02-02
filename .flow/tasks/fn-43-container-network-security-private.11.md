@@ -16,9 +16,8 @@ Add integration test suite for network security features including iptables rule
 - [x] Uses shellcheck-clean bash
 
 ## Done summary
-Created comprehensive integration test suite for network security at tests/integration/test-network-blocking.sh
-
+Created comprehensive integration test suite for network security at tests/integration/test-network-blocking.sh with proper tool verification, dynamic network config detection, and explicit opt-out for iptables skip.
 ## Evidence
-- Commits:
-- Tests: tests/integration/test-network-blocking.sh
+- Commits: c0c55caca21f99f56ff24f1e67f3b3ea3bc0b350, 5710ffefa8e81c8d5b0c87ac6a3952d0a60c195e
+- Tests: shellcheck -x tests/integration/test-network-blocking.sh
 - PRs:

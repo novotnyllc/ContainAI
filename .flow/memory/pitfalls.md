@@ -355,3 +355,9 @@ When priming sudo credentials interactively, probe with sudo -n true first; only
 
 ## 2026-02-02 manual [pitfall]
 sshd AllowTcpForwarding no doesn't disable X11/agent forwarding - use DisableForwarding yes for comprehensive block
+
+## 2026-02-02 manual [pitfall]
+Integration tests must verify required tools exist in container before using them - exit code 127 (command not found) should fail, not pass as 'blocked'
+
+## 2026-02-02 manual [pitfall]
+Security tests should not treat 'cannot verify' as 'verified pass' - skip with warning requires explicit opt-out env var
