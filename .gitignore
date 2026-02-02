@@ -490,9 +490,10 @@ $RECYCLE.BIN/
 !.flow/bin/
 .flow/tmp/
 
-# ACP proxy native binary (built from src/acp-proxy/)
-# The .gitkeep is tracked to preserve directory structure
+# ACP proxy native binaries (built from src/acp-proxy/)
+# Directory structure preserved via .gitkeep (which must be negated below)
 src/bin/acp-proxy
+!src/bin/.gitkeep
 
 # Docker buildx local state (machine-specific)
 .docker/buildx/

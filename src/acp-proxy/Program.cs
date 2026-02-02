@@ -17,6 +17,9 @@ public static class Program
     private static readonly OutputWriter Output = new(Console.OpenStandardOutput());
     private static readonly CancellationTokenSource Cts = new();
 
+    // Cached initialize params from editor (for forwarding to agents)
+    private static JsonNode? CachedInitializeParams;
+
     public static async Task<int> Main(string[] args)
     {
         var agent = args.Length > 0 ? args[0] : "claude";
@@ -36,19 +39,32 @@ public static class Program
         var writerTask = Output.RunAsync(Cts.Token);
 
         // Set up console cancel handler for graceful shutdown
-        Console.CancelKeyPress += async (_, e) =>
+        Console.CancelKeyPress += (_, e) =>
         {
             e.Cancel = true;
-            await ShutdownAsync();
+            // Signal cancellation - the main loop will handle shutdown
+            Cts.Cancel();
         };
 
         try
         {
             // Read messages from stdin (NDJSON)
             using var reader = new StreamReader(Console.OpenStandardInput(), Encoding.UTF8);
-            string? line;
-            while ((line = await reader.ReadLineAsync()) != null)
+            while (!Cts.IsCancellationRequested)
             {
+                string? line;
+                try
+                {
+                    line = await reader.ReadLineAsync(Cts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                if (line == null)
+                    break; // EOF
+
                 if (string.IsNullOrWhiteSpace(line))
                     continue;
 
@@ -66,7 +82,7 @@ public static class Program
                 }
             }
 
-            // stdin EOF - graceful shutdown
+            // stdin EOF or cancellation - graceful shutdown
             await ShutdownAsync();
         }
         catch (Exception ex)
@@ -77,6 +93,7 @@ public static class Program
         finally
         {
             await Cts.CancelAsync();
+            Output.Complete();
             try { await writerTask; } catch { }
         }
 
@@ -106,9 +123,9 @@ public static class Program
                 break;
 
             default:
-                // Forward unknown methods to all sessions (broadcast)
-                // or respond with error if no sessions
-                if (Sessions.IsEmpty)
+                // For unknown methods: only respond with error if it's a request (has id)
+                // JSON-RPC forbids responding to notifications (no id)
+                if (message.Id != null)
                 {
                     await Output.EnqueueAsync(new JsonRpcMessage
                     {
@@ -120,27 +137,31 @@ public static class Program
                         }
                     });
                 }
-                else
-                {
-                    // Forward to all sessions
-                    foreach (var session in Sessions.Values)
-                    {
-                        await session.WriteToAgentAsync(message);
-                    }
-                }
+                // Notifications are silently ignored (per JSON-RPC spec)
                 break;
         }
     }
 
     private static async Task HandleInitializeAsync(JsonRpcMessage message)
     {
-        // Respond with proxy capabilities
+        // Cache editor's initialize params for forwarding to agents
+        CachedInitializeParams = message.Params?.DeepClone();
+
+        // Extract requested protocol version (or use default)
+        var requestedVersion = "2025-01-01";
+        if (message.Params is JsonObject paramsObj &&
+            paramsObj.TryGetPropertyValue("protocolVersion", out var versionNode))
+        {
+            requestedVersion = versionNode?.GetValue<string>() ?? "2025-01-01";
+        }
+
+        // Respond with proxy capabilities using negotiated version
         var response = new JsonRpcMessage
         {
             Id = message.Id,
             Result = new JsonObject
             {
-                ["protocolVersion"] = "2025-01-01",
+                ["protocolVersion"] = requestedVersion,
                 ["capabilities"] = new JsonObject
                 {
                     ["multiSession"] = true
@@ -168,12 +189,14 @@ public static class Program
                 cwd = cwdNode?.GetValue<string>();
             if (paramsObj.TryGetPropertyValue("mcpServers", out mcpServersNode))
             {
-                // mcpServersNode is already captured
+                // mcpServersNode captured
             }
         }
 
+        var originalCwd = cwd ?? Directory.GetCurrentDirectory();
+
         // Resolve workspace root
-        var workspace = await ResolveWorkspaceRootAsync(cwd ?? Directory.GetCurrentDirectory());
+        var workspace = await ResolveWorkspaceRootAsync(originalCwd);
 
         // Create session
         var session = new Session(workspace);
@@ -184,34 +207,63 @@ public static class Program
             var process = SpawnAgentProcess(workspace, agent);
             session.AgentProcess = process;
 
-            // Send initialize to agent
+            // Start reader task FIRST to handle out-of-order responses and notifications
+            session.ReaderTask = Task.Run(() => ReadAgentOutputAsync(session));
+
+            // Build initialize request for agent (forward editor's params)
+            var initParams = new JsonObject
+            {
+                ["protocolVersion"] = "2025-01-01"
+            };
+            if (CachedInitializeParams is JsonObject cachedParams)
+            {
+                // Forward clientInfo if present
+                if (cachedParams.TryGetPropertyValue("clientInfo", out var clientInfo))
+                {
+                    initParams["clientInfo"] = clientInfo?.DeepClone();
+                }
+                // Forward capabilities if present
+                if (cachedParams.TryGetPropertyValue("capabilities", out var caps))
+                {
+                    initParams["capabilities"] = caps?.DeepClone();
+                }
+            }
+
+            var initRequestId = "init-" + session.ProxySessionId;
             var initRequest = new JsonRpcMessage
             {
-                Id = "init-" + session.ProxySessionId,
+                Id = initRequestId,
                 Method = "initialize",
-                Params = new JsonObject
-                {
-                    ["protocolVersion"] = "2025-01-01",
-                    ["clientInfo"] = new JsonObject
-                    {
-                        ["name"] = "containai-proxy",
-                        ["version"] = "0.1.0"
-                    }
-                }
+                Params = initParams
             };
             await session.WriteToAgentAsync(initRequest);
 
-            // Wait for initialize response
-            var initResponse = await session.ReadFromAgentAsync();
+            // Wait for initialize response (with timeout)
+            var initResponse = await session.WaitForResponseAsync(initRequestId, TimeSpan.FromSeconds(30));
             if (initResponse == null)
             {
                 throw new Exception("Agent did not respond to initialize");
             }
 
+            // Calculate container cwd - preserve relative path from workspace root
+            var containerCwd = "/home/agent/workspace";
+            var normalizedWorkspace = Path.GetFullPath(workspace).TrimEnd(Path.DirectorySeparatorChar);
+            var normalizedOriginalCwd = Path.GetFullPath(originalCwd).TrimEnd(Path.DirectorySeparatorChar);
+
+            if (normalizedOriginalCwd != normalizedWorkspace)
+            {
+                var prefix = normalizedWorkspace + Path.DirectorySeparatorChar;
+                if (normalizedOriginalCwd.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    var relativePath = normalizedOriginalCwd.Substring(prefix.Length);
+                    containerCwd = "/home/agent/workspace/" + relativePath.Replace(Path.DirectorySeparatorChar, '/');
+                }
+            }
+
             // Create session/new request for agent
             var sessionNewParams = new JsonObject
             {
-                ["cwd"] = "/home/agent/workspace"  // Container path
+                ["cwd"] = containerCwd
             };
 
             // Translate MCP server args if provided
@@ -221,16 +273,17 @@ public static class Program
                 sessionNewParams["mcpServers"] = translatedMcp;
             }
 
+            var sessionNewRequestId = "session-new-" + session.ProxySessionId;
             var sessionNewRequest = new JsonRpcMessage
             {
-                Id = "session-new-" + session.ProxySessionId,
+                Id = sessionNewRequestId,
                 Method = "session/new",
                 Params = sessionNewParams
             };
             await session.WriteToAgentAsync(sessionNewRequest);
 
             // Wait for session/new response
-            var sessionNewResponse = await session.ReadFromAgentAsync();
+            var sessionNewResponse = await session.WaitForResponseAsync(sessionNewRequestId, TimeSpan.FromSeconds(30));
             if (sessionNewResponse == null)
             {
                 throw new Exception("Agent did not respond to session/new");
@@ -245,9 +298,6 @@ public static class Program
 
             // Register session
             Sessions[session.ProxySessionId] = session;
-
-            // Start reader task for agent responses
-            session.ReaderTask = Task.Run(() => ReadAgentOutputAsync(session));
 
             // Respond to editor with proxy session ID
             var response = new JsonRpcMessage
@@ -265,15 +315,19 @@ public static class Program
             // Clean up on failure
             session.Dispose();
 
-            await Output.EnqueueAsync(new JsonRpcMessage
+            // Only respond if this was a request (has id)
+            if (message.Id != null)
             {
-                Id = message.Id,
-                Error = new JsonRpcError
+                await Output.EnqueueAsync(new JsonRpcMessage
                 {
-                    Code = -32000,
-                    Message = $"Failed to create session: {ex.Message}"
-                }
-            });
+                    Id = message.Id,
+                    Error = new JsonRpcError
+                    {
+                        Code = -32000,
+                        Message = $"Failed to create session: {ex.Message}"
+                    }
+                });
+            }
         }
     }
 
@@ -289,15 +343,19 @@ public static class Program
 
         if (string.IsNullOrEmpty(sessionId) || !Sessions.TryGetValue(sessionId, out var session))
         {
-            await Output.EnqueueAsync(new JsonRpcMessage
+            // Only respond with error if this is a request (has id)
+            if (message.Id != null)
             {
-                Id = message.Id,
-                Error = new JsonRpcError
+                await Output.EnqueueAsync(new JsonRpcMessage
                 {
-                    Code = -32001,
-                    Message = $"Session not found: {sessionId}"
-                }
-            });
+                    Id = message.Id,
+                    Error = new JsonRpcError
+                    {
+                        Code = -32001,
+                        Message = $"Session not found: {sessionId}"
+                    }
+                });
+            }
             return;
         }
 
@@ -354,12 +412,15 @@ public static class Program
             session.Dispose();
         }
 
-        // Acknowledge to editor
-        await Output.EnqueueAsync(new JsonRpcMessage
+        // Acknowledge to editor (only if this was a request)
+        if (message.Id != null)
         {
-            Id = message.Id,
-            Result = new JsonObject { }
-        });
+            await Output.EnqueueAsync(new JsonRpcMessage
+            {
+                Id = message.Id,
+                Result = new JsonObject { }
+            });
+        }
     }
 
     private static async Task ReadAgentOutputAsync(Session session)
@@ -382,7 +443,18 @@ public static class Program
                     if (message == null)
                         continue;
 
-                    // Replace agent's sessionId with proxy's sessionId in responses
+                    // Check if this is a response to a pending request
+                    if (message.Id != null && (message.Result != null || message.Error != null))
+                    {
+                        var idStr = message.Id.ToString();
+                        if (session.TryCompleteResponse(idStr, message))
+                        {
+                            // Response was consumed by a waiter
+                            continue;
+                        }
+                    }
+
+                    // Replace agent's sessionId with proxy's sessionId in responses/notifications
                     if (message.Params is JsonObject paramsObj)
                     {
                         if (paramsObj.TryGetPropertyValue("sessionId", out var sidNode) &&
@@ -451,37 +523,47 @@ public static class Program
     {
         var directSpawn = Environment.GetEnvironmentVariable("CAI_ACP_DIRECT_SPAWN") == "1";
 
-        ProcessStartInfo psi;
+        Process? process;
         if (directSpawn)
         {
-            psi = new ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
                 FileName = agent,
-                Arguments = "--acp",
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            psi.ArgumentList.Add("--acp");
+            process = Process.Start(psi);
         }
         else
         {
-            psi = new ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
                 FileName = "cai",
-                Arguments = $"exec --workspace \"{workspace}\" --quiet -- {agent} --acp",
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            // Use ArgumentList to safely pass arguments without quoting issues
+            psi.ArgumentList.Add("exec");
+            psi.ArgumentList.Add("--workspace");
+            psi.ArgumentList.Add(workspace);
+            psi.ArgumentList.Add("--quiet");
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add(agent);
+            psi.ArgumentList.Add("--acp");
+
             // Prevent stdout pollution from child cai processes
             psi.Environment["CAI_NO_UPDATE_CHECK"] = "1";
+
+            process = Process.Start(psi);
         }
 
-        var process = Process.Start(psi);
         if (process == null)
         {
             throw new Exception($"Failed to start agent process: {agent}");
@@ -513,12 +595,15 @@ public static class Program
             var psi = new ProcessStartInfo
             {
                 FileName = "git",
-                Arguments = $"-C \"{cwd}\" rev-parse --show-toplevel",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            psi.ArgumentList.Add("-C");
+            psi.ArgumentList.Add(cwd);
+            psi.ArgumentList.Add("rev-parse");
+            psi.ArgumentList.Add("--show-toplevel");
 
             using var process = Process.Start(psi);
             if (process != null)
@@ -646,6 +731,7 @@ public class Session : IDisposable
     public Task? ReaderTask { get; set; }
 
     private readonly SemaphoreSlim _writeLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpcMessage>> _pendingRequests = new();
 
     public Session(string workspace)
     {
@@ -670,20 +756,46 @@ public class Session : IDisposable
         }
     }
 
-    public async Task<JsonRpcMessage?> ReadFromAgentAsync()
+    public async Task<JsonRpcMessage?> WaitForResponseAsync(string requestId, TimeSpan timeout)
     {
-        if (AgentProcess?.StandardOutput == null)
-            return null;
+        var tcs = new TaskCompletionSource<JsonRpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingRequests[requestId] = tcs;
 
-        var line = await AgentProcess.StandardOutput.ReadLineAsync();
-        if (string.IsNullOrWhiteSpace(line))
-            return null;
+        try
+        {
+            using var cts = new CancellationTokenSource(timeout);
+            var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, cts.Token));
+            if (completedTask == tcs.Task)
+            {
+                return await tcs.Task;
+            }
+            return null; // Timeout
+        }
+        finally
+        {
+            _pendingRequests.TryRemove(requestId, out _);
+        }
+    }
 
-        return JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+    public bool TryCompleteResponse(string requestId, JsonRpcMessage response)
+    {
+        if (_pendingRequests.TryRemove(requestId, out var tcs))
+        {
+            tcs.TrySetResult(response);
+            return true;
+        }
+        return false;
     }
 
     public void Dispose()
     {
+        // Cancel any pending requests
+        foreach (var tcs in _pendingRequests.Values)
+        {
+            tcs.TrySetCanceled();
+        }
+        _pendingRequests.Clear();
+
         try
         {
             AgentProcess?.Kill();
@@ -707,6 +819,11 @@ public class OutputWriter
     public async Task EnqueueAsync(JsonRpcMessage message)
     {
         await _channel.Writer.WriteAsync(message);
+    }
+
+    public void Complete()
+    {
+        _channel.Writer.Complete();
     }
 
     public async Task RunAsync(CancellationToken ct)
@@ -733,9 +850,10 @@ public class JsonRpcMessage
     [JsonPropertyName("jsonrpc")]
     public string JsonRpc { get; set; } = "2.0";
 
+    // Id can be string or number in JSON-RPC, use JsonNode to preserve type
     [JsonPropertyName("id")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Id { get; set; }
+    public JsonNode? Id { get; set; }
 
     [JsonPropertyName("method")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
