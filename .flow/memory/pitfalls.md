@@ -343,3 +343,6 @@ DOCKER-USER chain ends with RETURN - appended rules never execute; must insert b
 
 ## 2026-02-02 manual [pitfall]
 When checking capability/permission, verify the tool exists first - iptables permission denied vs missing are different errors requiring different guidance
+
+## 2026-02-02 manual [pitfall]
+When wrapping privileged commands with sudo, try direct first then sudo -n (non-interactive) - handles CAP_NET_ADMIN containers without sudo and hosts with passwordless sudo
