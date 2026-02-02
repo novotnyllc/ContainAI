@@ -68,12 +68,23 @@ section() {
     ((TEST_COUNT++)) || true
 }
 
+# Track all PIDs started by this test
+TEST_PIDS=()
+
 cleanup() {
     # Stop interactive proxy if running
     if [[ -n "${PROXY_PID:-}" ]] && kill -0 "$PROXY_PID" 2>/dev/null; then
         kill "$PROXY_PID" 2>/dev/null || true
         wait "$PROXY_PID" 2>/dev/null || true
     fi
+    # Kill all tracked PIDs
+    local pid
+    for pid in "${TEST_PIDS[@]:-}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+        fi
+    done
     # Close file descriptors
     exec 3>&- 2>/dev/null || true
     exec 4<&- 2>/dev/null || true
@@ -82,8 +93,6 @@ cleanup() {
     for file in "${TEMP_FILES[@]:-}"; do
         rm -rf "$file" 2>/dev/null || true
     done
-    # Kill any lingering proxy processes
-    pkill -f "acp-proxy mock-acp-server" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -158,23 +167,22 @@ get_line() {
 PROXY_PID=""
 PROXY_IN_FIFO=""
 PROXY_OUT_FIFO=""
-PROXY_OUT_FILE=""
+PROXY_ERR_FILE=""
 
 # Start an interactive proxy session
 # This allows sending messages and reading responses dynamically
 start_interactive_proxy() {
     PROXY_IN_FIFO=$(mktemp -u)
     PROXY_OUT_FIFO=$(mktemp -u)
-    PROXY_OUT_FILE=$(mktemp)
-    TEMP_FILES+=("$PROXY_IN_FIFO" "$PROXY_OUT_FIFO" "$PROXY_OUT_FILE")
+    PROXY_ERR_FILE=$(mktemp)
+    TEMP_FILES+=("$PROXY_IN_FIFO" "$PROXY_OUT_FIFO" "$PROXY_ERR_FILE")
 
     mkfifo "$PROXY_IN_FIFO"
     mkfifo "$PROXY_OUT_FIFO"
 
-    # Start proxy with FIFOs
-    # Use a subshell to handle the proxy I/O
+    # Start proxy with FIFOs, capture stderr for mock server logs
     (
-        "$PROXY_BIN" mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>/dev/null
+        "$PROXY_BIN" mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>"$PROXY_ERR_FILE"
     ) &
     PROXY_PID=$!
 
@@ -184,6 +192,13 @@ start_interactive_proxy() {
 
     # Give the proxy time to start
     sleep 0.2
+}
+
+# Get stderr output from the proxy (includes mock server logs)
+get_proxy_stderr() {
+    if [[ -f "$PROXY_ERR_FILE" ]]; then
+        cat "$PROXY_ERR_FILE"
+    fi
 }
 
 # Send a message to the interactive proxy and read the response
@@ -340,8 +355,20 @@ test_stdout_purity() {
             | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" mock-acp-server 2>/dev/null > "$tmpfile"
     )
 
+    # Count total lines in output
+    local line_count
+    line_count=$(wc -l < "$tmpfile" | tr -d ' ')
+
+    # Should have exactly 1 line (the JSON response)
+    if [[ "$line_count" -ne 1 ]]; then
+        fail "Expected exactly 1 line of output, got $line_count lines"
+        info "Full output:"
+        head -5 < "$tmpfile" | while IFS= read -r line; do info "  $line"; done
+        return
+    fi
+
     local response
-    response=$(head -1 < "$tmpfile")
+    response=$(< "$tmpfile")
 
     # Must receive a response
     if [[ -z "$response" ]]; then
@@ -349,7 +376,7 @@ test_stdout_purity() {
         return
     fi
 
-    # Must be valid JSON (no diagnostic output before/after)
+    # Must be valid JSON (no diagnostic output mixed in)
     if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
         fail "stdout contains non-JSON content: $response"
         return
@@ -652,27 +679,38 @@ test_session_routing() {
         return
     fi
 
-    # Send prompt to session 1
+    # Send prompts to both sessions
     send_message '{"jsonrpc":"2.0","id":"4","method":"session/prompt","params":{"sessionId":"'"$s1"'","message":"msg-for-session1"}}'
-    local update1 update1_sid
-    update1=$(read_response 5)
-    update1_sid=$(printf '%s' "$update1" | jq -r '.params.sessionId // empty')
+    send_message '{"jsonrpc":"2.0","id":"5","method":"session/prompt","params":{"sessionId":"'"$s2"'","message":"msg-for-session2"}}'
 
-    if [[ "$update1_sid" != "$s1" ]]; then
+    # Read both responses (order may vary)
+    local update1 update2 update1_sid update2_sid
+    local got_s1=false got_s2=false
+    local response i
+    for i in 1 2; do
+        response=$(read_response 5)
+        local sid
+        sid=$(printf '%s' "$response" | jq -r '.params.sessionId // empty')
+        if [[ "$sid" == "$s1" ]]; then
+            got_s1=true
+            update1="$response"
+            update1_sid="$sid"
+        elif [[ "$sid" == "$s2" ]]; then
+            got_s2=true
+            update2="$response"
+            update2_sid="$sid"
+        fi
+    done
+
+    if ! $got_s1; then
         stop_interactive_proxy
-        fail "Session 1 update has wrong sessionId: expected $s1, got $update1_sid"
+        fail "Did not receive update for session 1 ($s1)"
         return
     fi
 
-    # Send prompt to session 2
-    send_message '{"jsonrpc":"2.0","id":"5","method":"session/prompt","params":{"sessionId":"'"$s2"'","message":"msg-for-session2"}}'
-    local update2 update2_sid
-    update2=$(read_response 5)
-    update2_sid=$(printf '%s' "$update2" | jq -r '.params.sessionId // empty')
-
-    if [[ "$update2_sid" != "$s2" ]]; then
+    if ! $got_s2; then
         stop_interactive_proxy
-        fail "Session 2 update has wrong sessionId: expected $s2, got $update2_sid"
+        fail "Did not receive update for session 2 ($s2)"
         return
     fi
 
@@ -718,19 +756,36 @@ test_workspace_resolution() {
         return
     fi
 
-    # The mock server echoes back the received cwd in receivedCwd
-    # The proxy should have translated the subdirectory to a container path relative to workspace root
-    local received_cwd
-    received_cwd=$(printf '%s' "$session_response" | jq -r '.result.receivedCwd // empty')
-
-    # Note: The proxy returns its own response, not the mock's raw response
-    # So receivedCwd won't be present in the proxy's response to the editor
-    # But we can verify session creation succeeded from a subdirectory
-
     # Verify session ID is a valid UUID (proxy generated)
     if [[ ${#session_id} -ne 36 ]] || [[ ! "$session_id" =~ ^[0-9a-f-]+$ ]]; then
         stop_interactive_proxy
         fail "Session ID is not a valid UUID: $session_id"
+        return
+    fi
+
+    # Check the mock server's stderr log for what cwd it received
+    # The proxy should normalize the subdirectory to the container workspace with relative path
+    # Expected format: /home/agent/workspace/src/components (container path with relative subdir)
+    local mock_log received_cwd
+    mock_log=$(get_proxy_stderr)
+    # Parse from log line like: "[mock-acp-server] Creating session: mock-session-1 (cwd=/home/agent/workspace/src/components)"
+    received_cwd=$(printf '%s' "$mock_log" | grep -o 'cwd=[^)]*' | head -1 | sed 's/cwd=//')
+
+    if [[ -z "$received_cwd" ]]; then
+        stop_interactive_proxy
+        fail "Could not find received cwd in mock server log"
+        info "Mock log: $mock_log"
+        return
+    fi
+
+    # The proxy should have translated the subdirectory to container workspace + relative path
+    # In test mode (direct spawn), the proxy calculates container cwd as:
+    # /home/agent/workspace + relative path from git root
+    # Since we're in direct spawn mode, it should have normalized to container path
+    local expected_container_cwd="/home/agent/workspace/src/components"
+    if [[ "$received_cwd" != "$expected_container_cwd" ]]; then
+        stop_interactive_proxy
+        fail "Workspace not normalized correctly: expected $expected_container_cwd, got $received_cwd"
         return
     fi
 
@@ -772,6 +827,8 @@ test_mcp_path_translation() {
     fi
 
     # Create session with mcpServers config containing absolute and relative paths
+    # The proxy should translate absolute paths (starting with $ws) to container paths
+    # but preserve relative paths unchanged
     local session_response session_id
     session_response=$(send_and_receive '{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'","mcpServers":{"test-server":{"command":"test-mcp","args":["--config","relative/path","--workspace","'"$ws"'","--data","'"$ws"'/data"]}}}}')
     session_id=$(printf '%s' "$session_response" | jq -r '.result.sessionId // empty')
@@ -787,6 +844,47 @@ test_mcp_path_translation() {
     if [[ ${#session_id} -ne 36 ]] || [[ ! "$session_id" =~ ^[0-9a-f-]+$ ]]; then
         stop_interactive_proxy
         fail "Session ID is not a valid UUID: $session_id"
+        return
+    fi
+
+    # Check the mock server's stderr log for what mcpServers it received
+    local mock_log received_mcp
+    mock_log=$(get_proxy_stderr)
+    # Parse from log line like: "[mock-acp-server] mcpServers: {...}"
+    received_mcp=$(printf '%s' "$mock_log" | grep 'mcpServers:' | head -1 | sed 's/.*mcpServers: //')
+
+    if [[ -z "$received_mcp" ]]; then
+        stop_interactive_proxy
+        fail "Could not find received mcpServers in mock server log"
+        info "Mock log: $mock_log"
+        return
+    fi
+
+    # Validate that relative paths are preserved
+    local relative_path
+    relative_path=$(printf '%s' "$received_mcp" | jq -r '."test-server".args[1] // empty')
+    if [[ "$relative_path" != "relative/path" ]]; then
+        stop_interactive_proxy
+        fail "Relative path was incorrectly modified: expected 'relative/path', got '$relative_path'"
+        return
+    fi
+
+    # Validate that absolute paths were translated to container paths
+    local workspace_path data_path
+    workspace_path=$(printf '%s' "$received_mcp" | jq -r '."test-server".args[3] // empty')
+    data_path=$(printf '%s' "$received_mcp" | jq -r '."test-server".args[5] // empty')
+
+    # In test mode, the proxy translates host paths to container paths
+    # Host path $ws should become /home/agent/workspace
+    if [[ "$workspace_path" != "/home/agent/workspace" ]]; then
+        stop_interactive_proxy
+        fail "Absolute path not translated: expected '/home/agent/workspace', got '$workspace_path'"
+        return
+    fi
+
+    if [[ "$data_path" != "/home/agent/workspace/data" ]]; then
+        stop_interactive_proxy
+        fail "Absolute path with subdir not translated: expected '/home/agent/workspace/data', got '$data_path'"
         return
     fi
 

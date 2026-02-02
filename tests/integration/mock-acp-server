@@ -71,6 +71,10 @@ while IFS= read -r line; do
             received_mcp=$(printf '%s' "$line" | jq -c '.params.mcpServers // null')
             session_id="mock-session-$session_counter"
             log "Creating session: $session_id (cwd=$received_cwd)"
+            # Log mcpServers if present (for test validation)
+            if [[ "$received_mcp" != "null" ]]; then
+                log "mcpServers: $received_mcp"
+            fi
             # Echo back the received cwd and mcpServers in the response for test validation
             # Use jq to build a valid JSON response
             response=$(jq -nc \
