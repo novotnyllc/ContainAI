@@ -273,14 +273,18 @@ _cai_iptables_available() {
 }
 
 # Run iptables with sudo if not root
-# Uses sudo only when EUID != 0, otherwise runs directly
+# Uses sudo only when EUID != 0 and sudo is available
+# Falls back to direct iptables for containers with CAP_NET_ADMIN but no sudo
 # Arguments: same as iptables
 # Returns: iptables exit code
 _cai_iptables() {
     if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
         iptables "$@"
-    else
+    elif command -v sudo >/dev/null 2>&1; then
         sudo iptables "$@"
+    else
+        # No sudo available - try direct (works with CAP_NET_ADMIN in containers)
+        iptables "$@"
     fi
 }
 
