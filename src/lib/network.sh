@@ -166,8 +166,9 @@ _cai_iptables_available() {
 # Check if we have permissions to run iptables
 # Returns: 0=have permissions, 1=no permissions
 _cai_iptables_can_run() {
-    # Try a read-only command with short output
-    iptables -n -L INPUT 1 >/dev/null 2>&1
+    # Try a read-only command - use -S which just lists rules
+    # Avoid -L with rule numbers since empty chains fail
+    iptables -S >/dev/null 2>&1
 }
 
 # Ensure DOCKER-USER chain exists
@@ -195,6 +196,61 @@ _cai_ensure_docker_user_chain() {
     fi
 
     _cai_step "Created DOCKER-USER chain"
+    return 0
+}
+
+# Find the position of the first RETURN rule in DOCKER-USER chain
+# Outputs: rule number (1-based) to stdout, or empty if no RETURN
+# Returns: 0=found, 1=not found
+# Note: Docker's DOCKER-USER chain ends with "RETURN" by default
+#       We need to insert our rules BEFORE this RETURN
+_cai_find_return_position() {
+    local line_num rule_num
+
+    # Use iptables -S to get rules in order, find first RETURN
+    # Format: -A DOCKER-USER -j RETURN
+    line_num=0
+    while IFS= read -r line; do
+        line_num=$((line_num + 1))
+        case "$line" in
+            *" -j RETURN"*)
+                printf '%d' "$line_num"
+                return 0
+                ;;
+        esac
+    done < <(iptables -S "$_CAI_IPTABLES_CHAIN" 2>/dev/null | tail -n +2)
+    # tail -n +2 skips the "-N DOCKER-USER" header line
+
+    return 1
+}
+
+# Insert a rule at the correct position in DOCKER-USER
+# Arguments:
+#   $@ = rule specification arguments (without -I/-A and chain name)
+# Returns: 0=success, 1=failure
+# Note: Inserts before RETURN if present, otherwise appends
+# shellcheck disable=SC2086
+_cai_insert_rule_before_return() {
+    local return_pos
+
+    # Check if rule already exists
+    if iptables -C "$_CAI_IPTABLES_CHAIN" "$@" 2>/dev/null; then
+        return 0  # Already exists
+    fi
+
+    # Find position of RETURN rule
+    if return_pos=$(_cai_find_return_position); then
+        # Insert at the position where RETURN is (pushes RETURN down)
+        if ! iptables -I "$_CAI_IPTABLES_CHAIN" "$return_pos" "$@"; then
+            return 1
+        fi
+    else
+        # No RETURN found, just append
+        if ! iptables -A "$_CAI_IPTABLES_CHAIN" "$@"; then
+            return 1
+        fi
+    fi
+
     return 0
 }
 
@@ -256,14 +312,17 @@ _cai_apply_network_rules() {
     fi
 
     # IMPORTANT: Rule order in DOCKER-USER chain matters!
-    # DOCKER-USER is processed BEFORE Docker's rules, so our ordering is:
+    # Docker's DOCKER-USER chain ends with a RETURN rule by default.
+    # We must insert our rules BEFORE this RETURN, otherwise they never execute.
+    #
+    # Ordering within our rules:
     # 1. ACCEPT gateway (must be first so host communication works)
     # 2. DROP metadata endpoints (specific IPs)
     # 3. DROP private ranges (broad blocks)
-    # 4. RETURN (implicit - continue to Docker's rules for allowed traffic)
+    # 4. RETURN (Docker's existing rule - continue to Docker's own rules)
     #
-    # We use -I (insert) for gateway to ensure it's first, then -A (append)
-    # for drops so they come after the gateway allow but before RETURN.
+    # We use -I (insert at top) for gateway to ensure it's always first,
+    # and _cai_insert_rule_before_return() for drops to place them before RETURN.
 
     # Step 1: Allow host gateway (insert at top of DOCKER-USER chain)
     # This ensures container can reach the Docker host
@@ -277,10 +336,10 @@ _cai_apply_network_rules() {
         _cai_debug "Gateway allow rule already exists"
     fi
 
-    # Step 2: Block specific cloud metadata endpoints
+    # Step 2: Block specific cloud metadata endpoints (insert before RETURN)
     for endpoint in $_CAI_METADATA_ENDPOINTS; do
         if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! iptables -A "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+            if ! _cai_insert_rule_before_return -i "$bridge_name" -d "$endpoint" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_error "Failed to add metadata block rule for $endpoint"
                 return 1
             fi
@@ -290,10 +349,10 @@ _cai_apply_network_rules() {
         fi
     done
 
-    # Step 3: Block private IP ranges
+    # Step 3: Block private IP ranges (insert before RETURN)
     for range in $_CAI_PRIVATE_RANGES; do
         if ! iptables -C "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT" 2>/dev/null; then
-            if ! iptables -A "$_CAI_IPTABLES_CHAIN" -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
+            if ! _cai_insert_rule_before_return -i "$bridge_name" -d "$range" -j DROP -m comment --comment "$_CAI_IPTABLES_COMMENT"; then
                 _cai_error "Failed to add private range block rule for $range"
                 return 1
             fi
