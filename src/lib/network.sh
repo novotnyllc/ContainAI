@@ -833,7 +833,13 @@ _cai_check_network_rules() {
 }
 
 # Get a summary of network security status for doctor output
-# Sets: _CAI_NETWORK_DOCTOR_STATUS with status ("ok", "missing", "partial", "error", "skipped")
+# Sets: _CAI_NETWORK_DOCTOR_STATUS with status:
+#   - "ok": All rules present
+#   - "skipped": Can't check (Sysbox isolation, permission denied)
+#   - "bridge_missing": Bridge not present (containai-docker not running)
+#   - "rules_missing": Bridge exists but rules missing
+#   - "partial": Some rules missing on bridge
+#   - "error": iptables not installed or other error
 # Sets: _CAI_NETWORK_DOCTOR_DETAIL with human-readable detail
 # Returns: 0 always (status is in globals, not return code)
 # Note: Call this function directly (not via command substitution) to preserve globals
