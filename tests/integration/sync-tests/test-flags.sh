@@ -100,9 +100,9 @@ run_flags_test() {
 
     # Run import and capture output/exit code
     if [[ ${#extra_import_args[@]} -gt 0 ]]; then
-        import_output=$(run_cai_import_from "${extra_import_args[@]}" 2>&1) || import_exit=$?
+        import_output=$(run_cai_import_from "${extra_import_args[@]}") || import_exit=$?
     else
-        import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+        import_output=$(run_cai_import_from) || import_exit=$?
     fi
     if [[ $import_exit -ne 0 ]]; then
         sync_test_fail "$test_name: import failed (exit=$import_exit)"
@@ -216,10 +216,10 @@ test_json_init_non_optional_assertions() {
 # Optional entries with j flag should NOT be created if source is missing.
 
 setup_json_init_optional_skipped_fixture() {
-    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     # Don't create any .gemini files
     # .gemini/settings.json is fjo (optional) in the manifest
-    # Gemini dir should not exist at all
+    # Gemini dir should not exist at all - empty fixture is intentional
+    :
 }
 
 test_json_init_optional_skipped_assertions() {
@@ -345,9 +345,9 @@ test_x_flag_excludes_system_assertions() {
 # Optional entries are completely skipped when source is missing.
 
 setup_optional_missing_no_target_fixture() {
-    local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
     # Don't create any Pi config (all entries are optional)
-    # Pi directory should not exist
+    # Pi directory should not exist - empty fixture is intentional
+    :
 }
 
 test_optional_missing_no_target_assertions() {
@@ -388,9 +388,20 @@ test_import_dry_run() {
         init_profile_home >/dev/null
     fi
 
-    # Run import with --dry-run
-    local output
-    output=$(run_cai_import_from --dry-run 2>&1) || true
+    # Run import with --dry-run and capture exit status
+    local output import_exit=0
+    output=$(run_cai_import_from --dry-run) || import_exit=$?
+
+    # dry-run should succeed (exit 0)
+    if [[ $import_exit -ne 0 ]]; then
+        sync_test_fail "import-dry-run: command failed with exit=$import_exit"
+        printf '%s\n' "[DEBUG] Output: $output" >&2
+        stop_test_container "test-dry-run-${SYNC_TEST_RUN_ID}"
+        "${DOCKER_CMD[@]}" rm -f "test-dry-run-${SYNC_TEST_RUN_ID}" 2>/dev/null || true
+        "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+        find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+        return
+    fi
 
     # Should show [DRY-RUN] markers
     if [[ "$output" != *"[DRY-RUN]"* ]]; then
@@ -535,7 +546,7 @@ test_export_basic() {
     fi
 
     local import_output
-    import_output=$(run_cai_import_from 2>&1) || {
+    import_output=$(run_cai_import_from) || {
         sync_test_fail "export-basic: import failed"
         printf '%s\n' "[DEBUG] Output: $import_output" >&2
         stop_test_container "test-export-basic-${SYNC_TEST_RUN_ID}"
@@ -646,7 +657,7 @@ EOF
     mkdir -p "$SYNC_TEST_FIXTURE_HOME/.bashrc.d"
     printf '%s\n' 'public' >"$SYNC_TEST_FIXTURE_HOME/.bashrc.d/public.sh"
     local import_output
-    import_output=$(run_cai_import_from 2>&1) || {
+    import_output=$(run_cai_import_from) || {
         sync_test_fail "export-config-excludes: import failed"
         printf '%s\n' "[DEBUG] Output: $import_output" >&2
         stop_test_container "test-export-excludes-${SYNC_TEST_RUN_ID}"
@@ -746,7 +757,7 @@ EOF
     mkdir -p "$SYNC_TEST_FIXTURE_HOME/.claude"
     printf '%s\n' '{}' >"$SYNC_TEST_FIXTURE_HOME/.claude/settings.json"
     local import_output
-    import_output=$(run_cai_import_from 2>&1) || {
+    import_output=$(run_cai_import_from) || {
         sync_test_fail "export-no-excludes: import failed"
         printf '%s\n' "[DEBUG] Output: $import_output" >&2
         stop_test_container "test-export-no-excludes-${SYNC_TEST_RUN_ID}"
