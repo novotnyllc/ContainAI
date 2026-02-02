@@ -391,3 +391,6 @@ GitHub Actions env vars set via GITHUB_ENV are only available in SUBSEQUENT step
 
 ## 2026-02-02 manual [pitfall]
 CI install tests that swallow failures (warning instead of exit 1) mask regressions - always fail if a tested path fails
+
+## 2026-02-02 manual [pitfall]
+When validating tar archives, use tar -tvf to check entry types and reject symlinks/hardlinks that can be used to overwrite files outside extraction directory
