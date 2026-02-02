@@ -1201,8 +1201,8 @@ _cai_doctor() {
                 fi
                 ;;
             rules_missing)
-                # Rules missing - need to run setup
-                printf '  %-44s %s\n' "Network Security:" "[ERROR] Not configured"
+                # Rules missing - warn but don't fail (can be added with 'cai setup')
+                printf '  %-44s %s\n' "Network Security:" "[WARN] missing"
                 printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
                 ;;
             error)
