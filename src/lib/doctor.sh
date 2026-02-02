@@ -949,35 +949,40 @@ _cai_doctor() {
     # === Network Security Section ===
     # Only check on Linux/WSL2 hosts (not macOS, not inside containers where outer rules apply)
     local network_security_ok="true"
-    local network_status=""
     if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
         if [[ "$in_container" == "false" ]]; then
             printf '%s\n' "Network Security"
 
-            network_status=$(_cai_network_doctor_status)
+            # Call function directly (not via command substitution) to preserve globals
+            _cai_network_doctor_status
+            local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+            local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
             case "$network_status" in
                 ok)
                     printf '  %-44s %s\n' "iptables rules:" "[OK]"
-                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 skipped)
+                    # Skipped is OK (e.g., Sysbox outer isolation, permission denied)
                     printf '  %-44s %s\n' "iptables rules:" "[SKIP]"
-                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 missing)
-                    network_security_ok="false"
-                    printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
-                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    # Missing bridge or rules - warn but don't fail exit code
+                    # User may not have run setup yet, or containai-docker isn't running
+                    printf '  %-44s %s\n' "iptables rules:" "[WARN] Not configured"
+                    printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 partial)
                     network_security_ok="false"
                     printf '  %-44s %s\n' "iptables rules:" "[WARN] Incomplete"
-                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    printf '  %-44s %s\n' "" "$network_detail"
                     ;;
                 error)
-                    network_security_ok="false"
-                    printf '  %-44s %s\n' "iptables rules:" "[ERROR]"
-                    printf '  %-44s %s\n' "" "${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    # Error status - treat as warning, not failure for exit code
+                    # (unprivileged users can't check iptables)
+                    printf '  %-44s %s\n' "iptables rules:" "[WARN]"
+                    printf '  %-44s %s\n' "" "$network_detail"
                     ;;
             esac
 
@@ -1173,12 +1178,24 @@ _cai_doctor() {
     # Network Security summary (Linux/WSL2 hosts only)
     if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
         if [[ "$in_container" == "false" ]]; then
-            if [[ "$network_security_ok" == "true" ]]; then
-                printf '  %-44s %s\n' "Network Security:" "[OK] Rules configured"
-            else
-                printf '  %-44s %s\n' "Network Security:" "[ERROR] Rules missing"
-                printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
-            fi
+            local network_summary_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+            case "$network_summary_status" in
+                ok)
+                    printf '  %-44s %s\n' "Network Security:" "[OK] Rules configured"
+                    ;;
+                skipped)
+                    printf '  %-44s %s\n' "Network Security:" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                    ;;
+                missing | error)
+                    # Warn but don't require action for exit code
+                    printf '  %-44s %s\n' "Network Security:" "[WARN] Not configured"
+                    printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to configure network rules"
+                    ;;
+                partial)
+                    printf '  %-44s %s\n' "Network Security:" "[ERROR] Incomplete"
+                    printf '  %-44s %s\n' "Recommended:" "Run 'cai setup' to fix network rules"
+                    ;;
+            esac
         fi
     fi
 
@@ -1527,21 +1544,52 @@ _cai_doctor_fix() {
                 printf '  %-50s %s\n' "iptables rules" "[SKIP] insufficient permissions"
                 ((skip_count++))
             else
-                local network_status
-                network_status=$(_cai_network_doctor_status)
+                # Call function directly to preserve globals
+                _cai_network_doctor_status
+                local network_status="${_CAI_NETWORK_DOCTOR_STATUS:-}"
+                local network_detail="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
                 case "$network_status" in
                     ok)
                         printf '  %-50s %s\n' "iptables rules" "[OK]"
                         ;;
                     skipped)
-                        printf '  %-50s %s\n' "iptables rules" "[SKIP] ${_CAI_NETWORK_DOCTOR_DETAIL:-}"
+                        printf '  %-50s %s\n' "iptables rules" "[SKIP] $network_detail"
                         ((skip_count++))
                         ;;
-                    missing | partial | error)
+                    missing)
+                        # Bridge may not exist yet - check and handle gracefully
                         printf '  %-50s' "Applying iptables rules"
                         if _cai_apply_network_rules "false" >/dev/null 2>&1; then
-                            printf '%s\n' "[FIXED]"
-                            ((fixed_count++))
+                            # Re-check status to verify rules were actually applied
+                            _cai_network_doctor_status
+                            if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
+                                printf '%s\n' "[FIXED]"
+                                ((fixed_count++))
+                            elif [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "missing" ]]; then
+                                # Bridge doesn't exist - rules will apply when bridge is created
+                                printf '%s\n' "[SKIP] bridge not present yet"
+                                ((skip_count++))
+                            else
+                                printf '%s\n' "[WARN] rules applied but status: ${_CAI_NETWORK_DOCTOR_STATUS:-unknown}"
+                                ((skip_count++))
+                            fi
+                        else
+                            printf '%s\n' "[FAIL]"
+                            ((fail_count++))
+                        fi
+                        ;;
+                    partial | error)
+                        printf '  %-50s' "Applying iptables rules"
+                        if _cai_apply_network_rules "false" >/dev/null 2>&1; then
+                            # Re-check status to verify rules were actually applied
+                            _cai_network_doctor_status
+                            if [[ "${_CAI_NETWORK_DOCTOR_STATUS:-}" == "ok" ]]; then
+                                printf '%s\n' "[FIXED]"
+                                ((fixed_count++))
+                            else
+                                printf '%s\n' "[WARN] $network_detail"
+                                ((skip_count++))
+                            fi
                         else
                             printf '%s\n' "[FAIL]"
                             ((fail_count++))
@@ -2787,14 +2835,22 @@ _cai_doctor_json() {
     if [[ "$platform" == "linux" ]] || [[ "$platform" == "wsl" ]]; then
         if [[ "$in_container" == "false" ]]; then
             network_applicable="true"
-            network_status_json=$(_cai_network_doctor_status)
+            # Call function directly to preserve globals (not via command substitution)
+            _cai_network_doctor_status
+            network_status_json="${_CAI_NETWORK_DOCTOR_STATUS:-}"
             network_detail_json="${_CAI_NETWORK_DOCTOR_DETAIL:-}"
             case "$network_status_json" in
-                ok | skipped)
+                ok | skipped | missing | error)
+                    # ok/skipped are fine; missing/error are warnings (not failures)
+                    # to keep doctor non-privileged-friendly
                     network_security_ok_json="true"
                     ;;
-                *)
+                partial)
+                    # Partial rules is a real problem that needs fixing
                     network_security_ok_json="false"
+                    ;;
+                *)
+                    network_security_ok_json="true"
                     ;;
             esac
         fi

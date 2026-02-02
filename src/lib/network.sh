@@ -833,11 +833,14 @@ _cai_check_network_rules() {
 }
 
 # Get a summary of network security status for doctor output
-# Returns: status string ("ok", "missing", "partial", "error", "skipped") via stdout
-# Outputs: Sets _CAI_NETWORK_DOCTOR_DETAIL with human-readable detail
+# Sets: _CAI_NETWORK_DOCTOR_STATUS with status ("ok", "missing", "partial", "error", "skipped")
+# Sets: _CAI_NETWORK_DOCTOR_DETAIL with human-readable detail
+# Returns: 0 always (status is in globals, not return code)
+# Note: Call this function directly (not via command substitution) to preserve globals
 _cai_network_doctor_status() {
     local config bridge_name env_label
 
+    _CAI_NETWORK_DOCTOR_STATUS=""
     _CAI_NETWORK_DOCTOR_DETAIL=""
 
     # Check nested container iptables support first
@@ -846,17 +849,17 @@ _cai_network_doctor_status() {
             case "${_CAI_NESTED_IPTABLES_STATUS:-}" in
                 sysbox_limited)
                     _CAI_NETWORK_DOCTOR_DETAIL="Sysbox container (network isolation at outer level)"
-                    printf '%s' "skipped"
+                    _CAI_NETWORK_DOCTOR_STATUS="skipped"
                     return 0
                     ;;
                 no_iptables)
                     _CAI_NETWORK_DOCTOR_DETAIL="Nested container missing iptables"
-                    printf '%s' "error"
+                    _CAI_NETWORK_DOCTOR_STATUS="error"
                     return 0
                     ;;
                 no_net_admin)
                     _CAI_NETWORK_DOCTOR_DETAIL="Nested container missing CAP_NET_ADMIN"
-                    printf '%s' "error"
+                    _CAI_NETWORK_DOCTOR_STATUS="error"
                     return 0
                     ;;
             esac
@@ -866,7 +869,7 @@ _cai_network_doctor_status() {
     # Get network configuration
     if ! config=$(_cai_get_network_config 2>/dev/null); then
         _CAI_NETWORK_DOCTOR_DETAIL="Failed to detect network configuration"
-        printf '%s' "error"
+        _CAI_NETWORK_DOCTOR_STATUS="error"
         return 0
     fi
 
@@ -880,13 +883,13 @@ _cai_network_doctor_status() {
     # Check iptables
     if ! _cai_iptables_available; then
         _CAI_NETWORK_DOCTOR_DETAIL="iptables not installed"
-        printf '%s' "error"
+        _CAI_NETWORK_DOCTOR_STATUS="error"
         return 0
     fi
 
     if ! _cai_iptables_can_run; then
         _CAI_NETWORK_DOCTOR_DETAIL="Cannot check iptables (permission denied)"
-        printf '%s' "error"
+        _CAI_NETWORK_DOCTOR_STATUS="skipped"
         return 0
     fi
 
@@ -897,27 +900,27 @@ _cai_network_doctor_status() {
         else
             _CAI_NETWORK_DOCTOR_DETAIL="Bridge $bridge_name not present (containai-docker not running?)"
         fi
-        printf '%s' "missing"
+        _CAI_NETWORK_DOCTOR_STATUS="missing"
         return 0
     fi
 
     # Check rules
     if _cai_check_network_rules "false"; then
         _CAI_NETWORK_DOCTOR_DETAIL="All rules present on $bridge_name${env_label}"
-        printf '%s' "ok"
+        _CAI_NETWORK_DOCTOR_STATUS="ok"
     else
         case "${_CAI_NETWORK_RULES_STATUS:-}" in
             partial)
                 _CAI_NETWORK_DOCTOR_DETAIL="Some rules missing on $bridge_name${env_label} (run cai setup to fix)"
-                printf '%s' "partial"
+                _CAI_NETWORK_DOCTOR_STATUS="partial"
                 ;;
             none | no_chain)
                 _CAI_NETWORK_DOCTOR_DETAIL="No rules on $bridge_name${env_label} (run cai setup)"
-                printf '%s' "missing"
+                _CAI_NETWORK_DOCTOR_STATUS="missing"
                 ;;
             *)
                 _CAI_NETWORK_DOCTOR_DETAIL="Unknown status on $bridge_name${env_label}"
-                printf '%s' "error"
+                _CAI_NETWORK_DOCTOR_STATUS="error"
                 ;;
         esac
     fi
