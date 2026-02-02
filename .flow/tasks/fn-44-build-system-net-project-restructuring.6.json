@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T15:09:30.895986Z",
+  "depends_on": [],
+  "epic": "fn-44-build-system-net-project-restructuring",
+  "id": "fn-44-build-system-net-project-restructuring.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-44-build-system-net-project-restructuring.6.md",
+  "status": "todo",
+  "title": "[DEFERRED] Documentation updates - separate epic",
+  "updated_at": "2026-02-02T15:36:44.152050Z"
+}

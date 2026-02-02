@@ -1,0 +1,18 @@
+{
+  "branch_name": "fn-44-build-system-net-project-restructuring",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
+  "created_at": "2026-02-02T15:08:49.661617Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
+  "depends_on_epics": [],
+  "id": "fn-44-build-system-net-project-restructuring",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-44-build-system-net-project-restructuring.md",
+  "status": "open",
+  "title": "Build System & .NET Project Restructuring",
+  "updated_at": "2026-02-02T15:44:17.043738Z"
+}

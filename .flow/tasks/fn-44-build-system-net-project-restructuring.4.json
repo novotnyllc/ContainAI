@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T15:09:24.092204Z",
+  "depends_on": [
+    "fn-44-build-system-net-project-restructuring.1"
+  ],
+  "epic": "fn-44-build-system-net-project-restructuring",
+  "id": "fn-44-build-system-net-project-restructuring.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-44-build-system-net-project-restructuring.4.md",
+  "status": "todo",
+  "title": "Enable sysbox in GitHub Actions for E2E tests",
+  "updated_at": "2026-02-02T15:15:26.079831Z"
+}
