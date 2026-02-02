@@ -568,11 +568,12 @@ test_ohmyzsh_custom_synced_assertions() {
 }
 
 # ==============================================================================
-# Test 10: R flag replaces existing directory on container restart
+# Test 10: R flag replaces existing directory via link-repair
 # ==============================================================================
-# The R flag means "remove existing first" - verifies that on restart,
-# a real directory at ~/.oh-my-zsh/custom is replaced by the symlink.
-# This is a two-phase test: create real dir after first start, restart container.
+# The R flag means "remove existing first" - verifies that link-repair.sh
+# replaces a real directory at ~/.oh-my-zsh/custom with the correct symlink.
+# This tests the repair mechanism directly (not restart-based, since repair
+# is triggered by link-watcher on import timestamp change, not by restart).
 
 setup_ohmyzsh_rflag_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
@@ -612,17 +613,20 @@ test_ohmyzsh_rflag_assertions() {
         return 1
     fi
 
-    # Phase 3: Stop and restart container - entrypoint should replace real dir with symlink
-    stop_test_container "$SYNC_TEST_CONTAINER"
-    start_test_container "$SYNC_TEST_CONTAINER"
+    # Phase 3: Explicitly trigger link-repair.sh to simulate repair mechanism
+    # This is how the R flag is applied - link-repair removes existing and recreates symlink
+    if ! exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/link-repair.sh --fix --quiet 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 3: link-repair.sh failed" >&2
+        return 1
+    fi
 
     # Phase 4: Verify R flag behavior - symlink should be restored, sentinel gone
     if ! actual_target=$(exec_in_container "$SYNC_TEST_CONTAINER" readlink "/home/agent/.oh-my-zsh/custom" 2>/dev/null); then
-        printf '%s\n' "[DEBUG] Phase 4: ~/.oh-my-zsh/custom is not a symlink after restart (R flag failed)" >&2
+        printf '%s\n' "[DEBUG] Phase 4: ~/.oh-my-zsh/custom is not a symlink after repair (R flag failed)" >&2
         return 1
     fi
     if [[ "$actual_target" != "/mnt/agent-data/shell/oh-my-zsh-custom" ]]; then
-        printf '%s\n' "[DEBUG] Phase 4: Symlink target='$actual_target' after restart, expected volume path" >&2
+        printf '%s\n' "[DEBUG] Phase 4: Symlink target='$actual_target' after repair, expected volume path" >&2
         return 1
     fi
 
@@ -634,7 +638,7 @@ test_ohmyzsh_rflag_assertions() {
 
     # Verify synced content still accessible
     if ! exec_in_container "$SYNC_TEST_CONTAINER" test -f "/home/agent/.oh-my-zsh/custom/synced.zsh" 2>/dev/null; then
-        printf '%s\n' "[DEBUG] Phase 4: Synced content not accessible after restart" >&2
+        printf '%s\n' "[DEBUG] Phase 4: Synced content not accessible after repair" >&2
         return 1
     fi
 
@@ -679,7 +683,7 @@ main() {
     # This test verifies content syncs correctly to the volume.
     run_shell_sync_test "ohmyzsh-custom" setup_ohmyzsh_custom_fixture test_ohmyzsh_custom_synced_assertions
 
-    # Test 10: R flag replaces existing directory on container restart
+    # Test 10: R flag replaces existing directory via link-repair
     run_shell_sync_test "ohmyzsh-rflag" setup_ohmyzsh_rflag_fixture test_ohmyzsh_rflag_assertions
 
     sync_test_section "Summary"
