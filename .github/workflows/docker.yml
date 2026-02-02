@@ -501,10 +501,12 @@ jobs:
             if "$ACP_PROXY" --help >/dev/null 2>&1; then
               echo "acp-proxy binary works"
             else
-              echo "::warning::acp-proxy binary failed to run (may be glibc incompatibility)"
+              echo "::error::acp-proxy binary failed to run (may be glibc incompatibility)"
+              exit 1
             fi
           else
-            echo "acp-proxy binary not found at $ACP_PROXY"
+            echo "::error::acp-proxy binary not found at $ACP_PROXY"
+            exit 1
           fi
 
       - name: Check kernel version
@@ -839,10 +841,12 @@ jobs:
             if "$ACP_PROXY" --help >/dev/null 2>&1; then
               echo "acp-proxy binary works"
             else
-              echo "::warning::acp-proxy binary failed to run (may be glibc incompatibility)"
+              echo "::error::acp-proxy binary failed to run (may be glibc incompatibility)"
+              exit 1
             fi
           else
-            echo "acp-proxy binary not found at $ACP_PROXY"
+            echo "::error::acp-proxy binary not found at $ACP_PROXY"
+            exit 1
           fi
 
       - name: Verify sysbox is pre-installed

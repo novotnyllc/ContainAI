@@ -513,37 +513,58 @@ download_and_extract() {
     fi
 
     # Security: Validate tarball contents before extraction
-    # Reject absolute paths, path traversal (..), and anything not under containai-*/
+    # Reject absolute paths, path traversal (..), symlinks, hardlinks, and anything not under containai-*/
     info "Validating tarball contents..."
-    local tar_contents
-    tar_contents=$(tar -tzf "$tarball_path" 2>/dev/null) || {
+
+    # Use tar -tvf to get detailed listing including file types
+    local tar_verbose
+    tar_verbose=$(tar -tvzf "$tarball_path" 2>/dev/null) || {
         error "Failed to list tarball contents"
         rm -rf "$temp_dir"
         return 1
     }
 
-    # Check for malicious paths
-    local bad_path
-    while IFS= read -r entry; do
+    # Check for malicious entries
+    local entry_type entry_path
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        # tar -tv format: permissions links owner/group size date time path
+        # First character indicates type: - regular, d directory, l symlink, h hardlink
+        entry_type="${line:0:1}"
+        # Extract path (last field)
+        entry_path="${line##* }"
+
+        # Reject symlinks and hardlinks
+        if [[ "$entry_type" == "l" ]]; then
+            error "Tarball contains symlink (security risk): $entry_path"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        if [[ "$entry_type" == "h" ]]; then
+            error "Tarball contains hardlink (security risk): $entry_path"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+
         # Reject absolute paths
-        if [[ "$entry" == /* ]]; then
-            error "Tarball contains absolute path: $entry"
+        if [[ "$entry_path" == /* ]]; then
+            error "Tarball contains absolute path: $entry_path"
             rm -rf "$temp_dir"
             return 1
         fi
         # Reject path traversal
-        if [[ "$entry" == *../* || "$entry" == ../* || "$entry" == */../* ]]; then
-            error "Tarball contains path traversal: $entry"
+        if [[ "$entry_path" == *../* || "$entry_path" == ../* || "$entry_path" == */../* ]]; then
+            error "Tarball contains path traversal: $entry_path"
             rm -rf "$temp_dir"
             return 1
         fi
         # Ensure all entries are under containai-*/
-        if [[ ! "$entry" =~ ^containai-[^/]+(/.*)?$ ]]; then
-            error "Tarball contains unexpected entry: $entry"
+        if [[ ! "$entry_path" =~ ^containai-[^/]+(/.*)?$ ]]; then
+            error "Tarball contains unexpected entry: $entry_path"
             rm -rf "$temp_dir"
             return 1
         fi
-    done <<< "$tar_contents"
+    done <<< "$tar_verbose"
 
     # Extract tarball (validated safe)
     info "Extracting tarball..."
@@ -563,14 +584,21 @@ download_and_extract() {
         return 1
     fi
 
-    # Re-run install.sh from extracted directory in local mode
-    info "Running local installer..."
+    # Additional security: verify critical files are regular files, not symlinks
     local install_script="$extracted_dir/install.sh"
     if [[ ! -f "$install_script" ]]; then
         error "install.sh not found in tarball"
         rm -rf "$temp_dir"
         return 1
     fi
+    if [[ -L "$install_script" ]]; then
+        error "install.sh is a symlink (security risk)"
+        rm -rf "$temp_dir"
+        return 1
+    fi
+
+    # Re-run install.sh from extracted directory in local mode
+    info "Running local installer..."
 
     chmod +x "$install_script"
 
