@@ -363,8 +363,14 @@ jobs:
             runner: ubuntu-24.04-arm
 
     steps:
+      # Always checkout repository - needed for build.sh and test scripts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
+
       # Try to download tarball artifact (from Task 5's PR artifact upload)
-      # Falls back gracefully if artifact doesn't exist yet
+      # This tests the install path; repo checkout above provides build/test scripts
       - name: Download tarball artifact
         id: download_tarball
         uses: actions/download-artifact@v4
@@ -387,24 +393,16 @@ jobs:
             echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
             echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::install.sh --local --yes failed, will fall back to repo checkout"
+            echo "::warning::install.sh --local --yes failed"
             echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
           fi
-
-      # Fallback: checkout repository if tarball not available or install failed
-      - name: Checkout repository (fallback)
-        if: steps.download_tarball.outcome != 'success' || steps.install.outputs.INSTALL_SUCCESS != 'true'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # CRITICAL for NBGV
 
       - name: Log install method
         run: |
           if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Installed from tarball artifact (Task 5 flow)"
+            echo "Tested install from tarball artifact (Task 5 flow)"
           else
-            echo "Using repo checkout (tarball artifact not available yet - Task 5 pending)"
-            echo "INSTALL_METHOD=checkout" >> "$GITHUB_ENV"
+            echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
           fi
 
       - name: Check kernel version
@@ -679,7 +677,14 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
+      # Always checkout repository - needed for build.sh and test scripts
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
+
       # Try to download tarball artifact (from Task 5's PR artifact upload)
+      # This tests the install path; repo checkout above provides build/test scripts
       - name: Download tarball artifact
         id: download_tarball
         uses: actions/download-artifact@v4
@@ -702,23 +707,16 @@ jobs:
             echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
             echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::install.sh --local --yes failed, will fall back to repo checkout"
+            echo "::warning::install.sh --local --yes failed"
             echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
           fi
-
-      # Fallback: checkout repository if tarball not available or install failed
-      - name: Checkout repository (fallback)
-        if: steps.download_tarball.outcome != 'success' || steps.install.outputs.INSTALL_SUCCESS != 'true'
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # CRITICAL for NBGV
 
       - name: Log install method
         run: |
           if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Installed from tarball artifact (Task 5 flow)"
+            echo "Tested install from tarball artifact (Task 5 flow)"
           else
-            echo "Using repo checkout (tarball artifact not available yet - Task 5 pending)"
+            echo "Tarball artifact not available yet (Task 5 pending) - skipping install test"
           fi
 
       - name: Verify sysbox is pre-installed
