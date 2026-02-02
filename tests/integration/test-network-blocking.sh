@@ -9,6 +9,10 @@
 # 4. Private IP ranges (10/8, 172.16/12, 192.168/16) are blocked
 # 5. Cloud metadata endpoints (169.254.169.254, etc.) are blocked
 # 6. Rules can be removed cleanly
+#
+# Environment variables:
+#   CAI_ALLOW_NETWORK_FAILURE=1  - Allow internet connectivity failures
+#   CAI_ALLOW_IPTABLES_SKIP=1    - Allow tests to pass without iptables verification
 # ==============================================================================
 
 set -euo pipefail
@@ -41,11 +45,14 @@ section() {
 
 FAILED=0
 
+# Track verification status for accurate summary
+IPTABLES_VERIFIED=false
+GATEWAY_VERIFIED=false
+
 # Context name for sysbox containers - use from lib/docker.sh (sourced via containai.sh)
 CONTEXT_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 
 # Timeouts
-DOCKERD_WAIT_TIMEOUT=60
 TEST_TIMEOUT=30
 CONTAINER_STOP_TIMEOUT=30
 
@@ -56,10 +63,9 @@ TEST_CONTAINER_NAME="containai-nettest-$$"
 # ContainAI base image for system container testing
 TEST_IMAGE="${CONTAINAI_TEST_IMAGE:-ghcr.io/novotnyllc/containai/base:latest}"
 
-# Network constants (from lib/network.sh)
-BRIDGE_NAME="${_CAI_CONTAINAI_DOCKER_BRIDGE:-cai0}"
-GATEWAY_IP="${_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR%%/*}"
-GATEWAY_IP="${GATEWAY_IP:-172.30.0.1}"
+# Network configuration - populated dynamically by init_network_config()
+BRIDGE_NAME=""
+GATEWAY_IP=""
 
 # Metadata endpoints to test
 METADATA_ENDPOINTS="169.254.169.254 169.254.170.2 100.100.100.200"
@@ -70,14 +76,34 @@ METADATA_ENDPOINTS="169.254.169.254 169.254.170.2 100.100.100.200"
 # 192.168.0.0/16 - test 192.168.1.1
 PRIVATE_RANGE_TEST_IPS="10.0.0.1 172.16.0.1 192.168.1.1"
 
+# Initialize network configuration dynamically using _cai_get_network_config
+init_network_config() {
+    local config
+    if config=$(_cai_get_network_config 2>/dev/null); then
+        BRIDGE_NAME="${config%% *}"
+        config="${config#* }"
+        GATEWAY_IP="${config%% *}"
+        return 0
+    else
+        # Fall back to constants if dynamic detection fails
+        BRIDGE_NAME="${_CAI_CONTAINAI_DOCKER_BRIDGE:-cai0}"
+        local bridge_addr="${_CAI_CONTAINAI_DOCKER_BRIDGE_ADDR:-172.30.0.1/16}"
+        GATEWAY_IP="${bridge_addr%%/*}"
+        return 1
+    fi
+}
+
 # Cleanup function
 cleanup() {
     info "Cleaning up test container..."
 
     # Stop and remove test container (ignore errors)
-    if docker --context "$CONTEXT_NAME" inspect --type container -- "$TEST_CONTAINER_NAME" >/dev/null 2>&1; then
-        docker --context "$CONTEXT_NAME" stop --time "$CONTAINER_STOP_TIMEOUT" -- "$TEST_CONTAINER_NAME" 2>/dev/null || true
-        docker --context "$CONTEXT_NAME" rm -f -- "$TEST_CONTAINER_NAME" 2>/dev/null || true
+    # Check docker is available before cleanup
+    if command -v docker >/dev/null 2>&1; then
+        if docker --context "$CONTEXT_NAME" inspect --type container -- "$TEST_CONTAINER_NAME" >/dev/null 2>&1; then
+            docker --context "$CONTEXT_NAME" stop --time "$CONTAINER_STOP_TIMEOUT" -- "$TEST_CONTAINER_NAME" 2>/dev/null || true
+            docker --context "$CONTEXT_NAME" rm -f -- "$TEST_CONTAINER_NAME" 2>/dev/null || true
+        fi
     fi
 }
 
@@ -90,31 +116,15 @@ run_with_timeout() {
     _cai_timeout "$secs" "$@"
 }
 
-# Wait for dockerd to be ready inside container
-wait_for_dockerd() {
-    local container="$1"
-    local timeout="${2:-$DOCKERD_WAIT_TIMEOUT}"
-    local elapsed=0
-    local interval=2
-
-    info "Waiting for inner dockerd to start (timeout: ${timeout}s)..."
-
-    while [[ $elapsed -lt $timeout ]]; do
-        if docker --context "$CONTEXT_NAME" exec -- "$container" docker info >/dev/null 2>&1; then
-            info "Inner dockerd is ready (took ${elapsed}s)"
-            return 0
-        fi
-
-        sleep "$interval"
-        elapsed=$((elapsed + interval))
-    done
-
-    return 1
-}
-
 # Execute command inside the system container
 exec_in_container() {
     docker --context "$CONTEXT_NAME" exec -- "$TEST_CONTAINER_NAME" "$@"
+}
+
+# Check if a command exists inside the container
+container_has_command() {
+    local cmd="$1"
+    exec_in_container sh -c "command -v $cmd >/dev/null 2>&1"
 }
 
 # Check if we can run iptables (requires root or CAP_NET_ADMIN)
@@ -135,6 +145,15 @@ can_run_iptables() {
 check_prerequisites() {
     section "Prerequisites"
 
+    # Initialize network configuration dynamically
+    if init_network_config; then
+        info "Network config detected dynamically"
+    else
+        warn "Using fallback network constants"
+    fi
+    info "  Bridge: $BRIDGE_NAME"
+    info "  Gateway: $GATEWAY_IP"
+
     # Check if context exists
     if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
         fail "Context '$CONTEXT_NAME' not found"
@@ -153,8 +172,15 @@ check_prerequisites() {
 
     # Check if we can run iptables
     if ! can_run_iptables; then
-        warn "Cannot run iptables (need root or CAP_NET_ADMIN)"
-        info "  Some tests will be skipped"
+        if [[ "${CAI_ALLOW_IPTABLES_SKIP:-}" == "1" ]]; then
+            warn "Cannot run iptables (need root or CAP_NET_ADMIN)"
+            warn "  Allowed by CAI_ALLOW_IPTABLES_SKIP=1 - iptables tests will be skipped"
+        else
+            fail "Cannot run iptables (need root or CAP_NET_ADMIN)"
+            info "  Remediation: Run tests as root or with sudo"
+            info "  Or set CAI_ALLOW_IPTABLES_SKIP=1 to skip iptables verification"
+            return 1
+        fi
     else
         pass "Can run iptables commands"
     fi
@@ -178,13 +204,19 @@ test_iptables_rules_present() {
     section "Test 1: Verify iptables rules are present"
 
     if ! can_run_iptables; then
-        warn "Skipping iptables rule check - cannot run iptables"
-        return 0
+        if [[ "${CAI_ALLOW_IPTABLES_SKIP:-}" == "1" ]]; then
+            warn "Skipping iptables rule check - cannot run iptables (allowed by CAI_ALLOW_IPTABLES_SKIP=1)"
+            return 0
+        fi
+        fail "Cannot verify iptables rules - insufficient permissions"
+        info "  Set CAI_ALLOW_IPTABLES_SKIP=1 to skip this check"
+        return 1
     fi
 
     # Use the network.sh function to check rules
     if _cai_check_network_rules "true"; then
         pass "All network security rules are present"
+        IPTABLES_VERIFIED=true
     else
         case "${_CAI_NETWORK_RULES_STATUS:-}" in
             partial)
@@ -258,6 +290,13 @@ test_start_container() {
 test_internet_connectivity() {
     section "Test 3: Container can reach internet"
 
+    # Verify wget is available in container
+    if ! container_has_command wget; then
+        fail "wget not available in container - cannot test internet connectivity"
+        info "  Container image may be missing required tools"
+        return 1
+    fi
+
     # Test connectivity to a public IP (using wget to github)
     info "Testing internet connectivity from container..."
 
@@ -302,6 +341,22 @@ test_internet_connectivity() {
 test_gateway_connectivity() {
     section "Test 4: Container can reach host gateway"
 
+    # Verify ping is available in container
+    if ! container_has_command ping; then
+        warn "ping not available in container - using route check instead"
+        # Check if we have a route to the gateway
+        local route_output
+        if route_output=$(exec_in_container ip route get "$GATEWAY_IP" 2>&1); then
+            if printf '%s' "$route_output" | grep -q "$GATEWAY_IP"; then
+                pass "Route to host gateway ($GATEWAY_IP) exists"
+                GATEWAY_VERIFIED=true
+                return 0
+            fi
+        fi
+        warn "Cannot verify gateway connectivity (ping missing, route check inconclusive)"
+        return 0
+    fi
+
     # The gateway should be reachable (this is allowed by our rules)
     info "Testing connectivity to host gateway ($GATEWAY_IP)..."
 
@@ -316,21 +371,24 @@ test_gateway_connectivity() {
     fi
 
     if [[ $ping_rc -eq 124 ]]; then
-        fail "Gateway connectivity test timed out"
-        return 1
+        warn "Gateway connectivity test timed out"
+        info "  Gateway may not respond to ICMP"
+        return 0
     fi
 
     if [[ $ping_rc -eq 0 ]]; then
         pass "Container can reach host gateway ($GATEWAY_IP)"
+        GATEWAY_VERIFIED=true
     else
         # Gateway might not respond to ICMP, try TCP connection to SSH port if available
         warn "Ping to gateway failed, trying TCP check..."
-        local tcp_output tcp_rc
-        # Use timeout (available in our base image) or nc
-        tcp_output=$(exec_in_container bash -c "timeout 5 bash -c 'echo >/dev/tcp/$GATEWAY_IP/22' 2>/dev/null") && tcp_rc=0 || tcp_rc=$?
+        local tcp_rc
+        # Use bash /dev/tcp for TCP check
+        exec_in_container bash -c "timeout 5 bash -c 'echo >/dev/tcp/$GATEWAY_IP/22' 2>/dev/null" && tcp_rc=0 || tcp_rc=$?
 
         if [[ $tcp_rc -eq 0 ]]; then
             pass "Container can reach host gateway via TCP ($GATEWAY_IP:22)"
+            GATEWAY_VERIFIED=true
         else
             warn "Cannot verify gateway connectivity (ICMP and TCP checks failed)"
             info "  This may be expected if gateway doesn't respond to probes"
@@ -344,6 +402,13 @@ test_gateway_connectivity() {
 # ==============================================================================
 test_metadata_blocked() {
     section "Test 5: Cloud metadata endpoints are blocked"
+
+    # Verify curl is available in container
+    if ! container_has_command curl; then
+        fail "curl not available in container - cannot test metadata blocking"
+        info "  Container image may be missing required tools"
+        return 1
+    fi
 
     local blocked_count=0
     local total_count=0
@@ -369,6 +434,7 @@ test_metadata_blocked() {
         #   7 = Failed to connect (connection refused/no route)
         #   28 = Operation timed out
         #   6 = Could not resolve host (DNS failure - also acceptable)
+        #   124 = timeout command killed it
         if [[ $curl_rc -eq 0 ]]; then
             fail "Metadata endpoint $endpoint is ACCESSIBLE (should be blocked)"
             info "  Response: $(printf '%s' "$curl_output" | head -1)"
@@ -376,18 +442,17 @@ test_metadata_blocked() {
             pass "Metadata endpoint $endpoint is blocked"
             blocked_count=$((blocked_count + 1))
         else
-            # Unexpected error code - could still be blocked
-            warn "Metadata endpoint $endpoint: unexpected curl exit code $curl_rc"
+            # Unexpected error code - treat as failure, not success
+            fail "Metadata endpoint $endpoint: unexpected curl exit code $curl_rc"
             info "  Output: $curl_output"
-            # Count as blocked if it wasn't reachable
-            blocked_count=$((blocked_count + 1))
+            info "  Expected exit codes: 7 (connection refused), 28 (timeout), 6 (DNS failure)"
         fi
     done
 
     if [[ $blocked_count -eq $total_count ]]; then
         pass "All $total_count metadata endpoints are blocked"
     else
-        fail "$((total_count - blocked_count)) of $total_count metadata endpoints are accessible"
+        fail "$((total_count - blocked_count)) of $total_count metadata endpoints had unexpected results"
     fi
 }
 
@@ -396,6 +461,13 @@ test_metadata_blocked() {
 # ==============================================================================
 test_private_ranges_blocked() {
     section "Test 6: Private IP ranges are blocked"
+
+    # Verify ping is available in container
+    if ! container_has_command ping; then
+        fail "ping not available in container - cannot test private range blocking"
+        info "  Container image may be missing required tools"
+        return 1
+    fi
 
     local blocked_count=0
     local total_count=0
@@ -419,25 +491,31 @@ test_private_ranges_blocked() {
         # Expected behavior: ping should fail
         # ping returns non-zero if no reply received
         if [[ $ping_rc -eq 0 ]]; then
-            # Check if we actually got a response or if it's our own machine
+            # Check if we actually got a response
             if printf '%s' "$ping_output" | grep -q "1 received"; then
                 fail "Private IP $test_ip is REACHABLE (should be blocked)"
                 info "  This may indicate the IP is on your local network"
             else
+                # ping returned 0 but no packets received - treat as blocked
                 pass "Private IP $test_ip is blocked"
                 blocked_count=$((blocked_count + 1))
             fi
-        else
-            # Non-zero exit means no response - this is expected
+        elif [[ $ping_rc -eq 1 ]] || [[ $ping_rc -eq 2 ]] || [[ $ping_rc -eq 124 ]]; then
+            # 1 = no reply, 2 = other error (e.g., network unreachable), 124 = timeout
             pass "Private IP $test_ip is blocked (no response)"
             blocked_count=$((blocked_count + 1))
+        else
+            # Unexpected exit code - report but don't count as blocked
+            warn "Private IP $test_ip: unexpected ping exit code $ping_rc"
+            info "  Output: $ping_output"
+            # Don't count unexpected errors as blocked - they need investigation
         fi
     done
 
     if [[ $blocked_count -eq $total_count ]]; then
         pass "All $total_count private IP test addresses are blocked"
     else
-        warn "$((total_count - blocked_count)) of $total_count private IPs were reachable"
+        warn "$((total_count - blocked_count)) of $total_count private IPs had unexpected results"
         info "  This may be expected if those IPs exist on your local network"
     fi
 }
@@ -447,6 +525,13 @@ test_private_ranges_blocked() {
 # ==============================================================================
 test_link_local_blocked() {
     section "Test 7: Link-local range (169.254.0.0/16) is blocked"
+
+    # Verify ping is available in container
+    if ! container_has_command ping; then
+        fail "ping not available in container - cannot test link-local blocking"
+        info "  Container image may be missing required tools"
+        return 1
+    fi
 
     # Test a link-local address that isn't a known metadata endpoint
     local test_ip="169.254.1.1"
@@ -463,8 +548,13 @@ test_link_local_blocked() {
 
     if [[ $ping_rc -eq 0 ]] && printf '%s' "$ping_output" | grep -q "1 received"; then
         fail "Link-local IP $test_ip is REACHABLE (should be blocked)"
-    else
+    elif [[ $ping_rc -eq 1 ]] || [[ $ping_rc -eq 2 ]] || [[ $ping_rc -eq 124 ]]; then
+        # Expected: no reply or network unreachable
         pass "Link-local IP $test_ip is blocked"
+    else
+        # Unexpected exit code
+        warn "Link-local IP $test_ip: unexpected ping exit code $ping_rc"
+        info "  Output: $ping_output"
     fi
 }
 
@@ -526,8 +616,12 @@ test_rules_cleanup_dry_run() {
     section "Test 9: Rules cleanup capability (dry-run)"
 
     if ! can_run_iptables; then
-        warn "Skipping cleanup test - cannot run iptables"
-        return 0
+        if [[ "${CAI_ALLOW_IPTABLES_SKIP:-}" == "1" ]]; then
+            warn "Skipping cleanup test - cannot run iptables (allowed by CAI_ALLOW_IPTABLES_SKIP=1)"
+            return 0
+        fi
+        fail "Cannot test rule cleanup - insufficient permissions"
+        return 1
     fi
 
     # Test the dry-run mode of rule removal
@@ -565,6 +659,9 @@ main() {
         printf '\n'
     fi
 
+    # Initialize network config before showing info
+    init_network_config || true
+
     info "Test image: $TEST_IMAGE"
     info "Test container: $TEST_CONTAINER_NAME"
     info "Bridge: $BRIDGE_NAME"
@@ -600,13 +697,21 @@ main() {
     if [[ "$FAILED" -eq 0 ]]; then
         printf '%s\n' "All network security tests passed!"
         printf '%s\n' ""
-        printf '%s\n' "Network security is working correctly:"
-        printf '%s\n' "  - iptables rules are applied"
-        printf '%s\n' "  - Internet access is allowed"
-        printf '%s\n' "  - Host gateway access is allowed"
-        printf '%s\n' "  - Private IP ranges are blocked"
-        printf '%s\n' "  - Cloud metadata endpoints are blocked"
-        printf '%s\n' "  - sshd forwarding is disabled"
+        printf '%s\n' "Network security verification status:"
+        if [[ "$IPTABLES_VERIFIED" == "true" ]]; then
+            printf '%s\n' "  - iptables rules: VERIFIED"
+        else
+            printf '%s\n' "  - iptables rules: NOT VERIFIED (skipped or unavailable)"
+        fi
+        printf '%s\n' "  - Internet access: allowed"
+        if [[ "$GATEWAY_VERIFIED" == "true" ]]; then
+            printf '%s\n' "  - Host gateway access: VERIFIED"
+        else
+            printf '%s\n' "  - Host gateway access: NOT VERIFIED (gateway may not respond to probes)"
+        fi
+        printf '%s\n' "  - Private IP ranges: blocked"
+        printf '%s\n' "  - Cloud metadata endpoints: blocked"
+        printf '%s\n' "  - sshd forwarding: disabled"
         exit 0
     else
         printf '%s\n' "Some network security tests failed!"
