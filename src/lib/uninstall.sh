@@ -442,13 +442,28 @@ _cai_uninstall_volumes_from_array() {
 # Arguments: $1 = dry_run ("true" to simulate)
 # Returns: 0=success or nothing to do, 1=failure
 # Note: Calls _cai_remove_network_rules from network.sh
+#       Only runs on Linux (iptables is Linux-specific)
 #       Handles cases where iptables is unavailable or permissions denied
 _cai_uninstall_network_rules() {
     local dry_run="${1:-false}"
 
+    # iptables rules are Linux-specific (not macOS)
+    # WSL2 and native Linux both use iptables
+    if _cai_is_macos; then
+        _cai_debug "Skipping network rules removal on macOS (not applicable)"
+        return 0
+    fi
+
     # Check if the remove function exists (network.sh loaded)
-    if ! command -v _cai_remove_network_rules >/dev/null 2>&1; then
+    if ! declare -F _cai_remove_network_rules >/dev/null 2>&1; then
         _cai_debug "Network rules function not available - skipping"
+        return 0
+    fi
+
+    # Pre-check iptables availability to avoid unnecessary warnings
+    # If iptables isn't installed, rules were never applied
+    if ! command -v iptables >/dev/null 2>&1; then
+        _cai_debug "iptables not installed - no rules to remove"
         return 0
     fi
 
@@ -605,7 +620,10 @@ _cai_uninstall() {
     # Step 2: Remove network security rules
     # Do this while Docker is still running (bridge exists)
     # Non-fatal: if rules don't exist or can't be removed, continue
-    _cai_uninstall_network_rules "$dry_run" || true
+    # But track failure in overall_status for accurate exit code
+    if ! _cai_uninstall_network_rules "$dry_run"; then
+        overall_status=1
+    fi
 
     # Step 3: Remove Docker context
     if ! _cai_uninstall_docker_context "$dry_run"; then
