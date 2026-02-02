@@ -200,11 +200,8 @@ _cai_resolve_update_mode() {
                 channel="${CAI_CHANNEL}"
                 ;;
             *)
-                _cai_warn "Invalid CAI_CHANNEL='$CAI_CHANNEL', falling back to config"
-                # Fall through to config system
-                if command -v _cai_config_channel >/dev/null 2>&1; then
-                    channel=$(_cai_config_channel)
-                fi
+                _cai_warn "Invalid CAI_CHANNEL='$CAI_CHANNEL', falling back to stable"
+                channel="stable"
                 ;;
         esac
     elif command -v _cai_config_channel >/dev/null 2>&1; then
