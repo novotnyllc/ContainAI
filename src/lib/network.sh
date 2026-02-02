@@ -763,6 +763,13 @@ _cai_remove_network_rules() {
     esac
     _cai_info "Removing network security rules from bridge: $bridge_name ($env_label)"
 
+    # Handle dry-run before iptables availability check
+    # Dry-run should not fail due to Lima VM not running
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would remove network security rules from bridge $bridge_name ($env_label)"
+        return 0
+    fi
+
     # Check iptables availability
     if ! _cai_iptables_available; then
         if [[ "${_CAI_NETWORK_CONFIG_ENV:-}" == "lima" ]]; then
@@ -776,11 +783,6 @@ _cai_remove_network_rules() {
             _cai_warn "iptables is not installed, no rules to remove"
             return 0
         fi
-    fi
-
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun "Would remove network security rules from bridge $bridge_name ($env_label)"
-        return 0
     fi
 
     # Check permissions

@@ -97,9 +97,8 @@ _cai_uninstall_network_rules() {
 - [ ] No errors if rules don't exist
 - [ ] No leftover rules after uninstall
 ## Done summary
-TBD
-
+Integrated network security rules with setup, doctor, and uninstall flows across all platforms (Linux, WSL2, macOS/Lima). Doctor now checks iptables rules on all platforms with appropriate recommendations. Uninstall properly removes rules from Lima VM with actionable warnings if VM is not running.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 93ca8409c7f4d58bc6f2a33e7cfc380ad424ce70, ebc12e4c5b5c3c6e15dd03b97dc74ad5ffc94c98, d4a48291850428c13dd8dd30d8b6531d2b496ba0
+- Tests: bash -n src/lib/uninstall.sh, bash -n src/lib/doctor.sh, bash -n src/lib/network.sh, shellcheck -x src/lib/*.sh
 - PRs:

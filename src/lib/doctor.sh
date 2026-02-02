@@ -975,9 +975,9 @@ _cai_doctor() {
                 printf '  %-44s %s\n' "" "$network_detail"
                 ;;
             rules_missing)
-                # Bridge exists but rules missing - this is a real problem
-                network_security_ok="false"
-                printf '  %-44s %s\n' "iptables rules:" "[ERROR] Not configured"
+                # Bridge exists but rules missing - warn user but don't fail doctor
+                # Rules can be added with 'cai setup'
+                printf '  %-44s %s\n' "iptables rules:" "[WARN] missing"
                 printf '  %-44s %s\n' "" "$network_detail"
                 ;;
             partial)
@@ -1211,7 +1211,7 @@ _cai_doctor() {
                 printf '  %-44s %s\n' "Network Security:" "[ERROR] ${detail:-Check failed}"
                 # Provide platform-appropriate recommendation based on the error detail
                 if [[ "$detail" == *"Lima VM not running"* ]]; then
-                    printf '  %-44s %s\n' "Recommended:" "Start Lima VM: limactl start containai-docker"
+                    printf '  %-44s %s\n' "Recommended:" "Start Lima VM: limactl start ${_CAI_LIMA_VM_NAME:-containai-docker}"
                 elif [[ "$detail" == *"iptables not installed"* ]]; then
                     printf '  %-44s %s\n' "Recommended:" "Install iptables package"
                 elif [[ "$detail" == *"CAP_NET_ADMIN"* ]]; then
