@@ -211,12 +211,18 @@ public static class Program
             session.ReaderTask = Task.Run(() => ReadAgentOutputAsync(session));
 
             // Build initialize request for agent (forward editor's params)
-            var initParams = new JsonObject
-            {
-                ["protocolVersion"] = "2025-01-01"
-            };
+            var initParams = new JsonObject();
             if (CachedInitializeParams is JsonObject cachedParams)
             {
+                // Forward protocolVersion from editor (or default)
+                if (cachedParams.TryGetPropertyValue("protocolVersion", out var pv))
+                {
+                    initParams["protocolVersion"] = pv?.DeepClone();
+                }
+                else
+                {
+                    initParams["protocolVersion"] = "2025-01-01";
+                }
                 // Forward clientInfo if present
                 if (cachedParams.TryGetPropertyValue("clientInfo", out var clientInfo))
                 {
@@ -228,6 +234,10 @@ public static class Program
                     initParams["capabilities"] = caps?.DeepClone();
                 }
             }
+            else
+            {
+                initParams["protocolVersion"] = "2025-01-01";
+            }
 
             var initRequestId = "init-" + session.ProxySessionId;
             var initRequest = new JsonRpcMessage
@@ -236,10 +246,10 @@ public static class Program
                 Method = "initialize",
                 Params = initParams
             };
-            await session.WriteToAgentAsync(initRequest);
 
             // Wait for initialize response (with timeout)
-            var initResponse = await session.WaitForResponseAsync(initRequestId, TimeSpan.FromSeconds(30));
+            // IMPORTANT: Register pending request BEFORE writing to avoid race condition
+            var initResponse = await session.SendAndWaitForResponseAsync(initRequest, initRequestId, TimeSpan.FromSeconds(30));
             if (initResponse == null)
             {
                 throw new Exception("Agent did not respond to initialize");
@@ -266,10 +276,10 @@ public static class Program
                 ["cwd"] = containerCwd
             };
 
-            // Translate MCP server args if provided
-            if (mcpServersNode is JsonObject mcpServers)
+            // Translate MCP server args if provided (handle both object and array forms)
+            if (mcpServersNode != null)
             {
-                var translatedMcp = TranslateMcpServers(mcpServers, workspace);
+                var translatedMcp = TranslateMcpServersNode(mcpServersNode, workspace);
                 sessionNewParams["mcpServers"] = translatedMcp;
             }
 
@@ -280,10 +290,10 @@ public static class Program
                 Method = "session/new",
                 Params = sessionNewParams
             };
-            await session.WriteToAgentAsync(sessionNewRequest);
 
             // Wait for session/new response
-            var sessionNewResponse = await session.WaitForResponseAsync(sessionNewRequestId, TimeSpan.FromSeconds(30));
+            // IMPORTANT: Register pending request BEFORE writing to avoid race condition
+            var sessionNewResponse = await session.SendAndWaitForResponseAsync(sessionNewRequest, sessionNewRequestId, TimeSpan.FromSeconds(30));
             if (sessionNewResponse == null)
             {
                 throw new Exception("Agent did not respond to session/new");
@@ -635,7 +645,62 @@ public static class Program
         return cwd;
     }
 
-    private static JsonObject TranslateMcpServers(JsonObject mcpServers, string hostWorkspace)
+    /// <summary>
+    /// Translates MCP servers config, handling both object and array formats.
+    /// Object format: { "server-name": { "command": "...", "args": [...] } }
+    /// Array format: [ { "name": "...", "command": "...", "args": [...] } ]
+    /// </summary>
+    private static JsonNode TranslateMcpServersNode(JsonNode mcpServersNode, string hostWorkspace)
+    {
+        if (mcpServersNode is JsonObject mcpObj)
+        {
+            return TranslateMcpServersObject(mcpObj, hostWorkspace);
+        }
+        else if (mcpServersNode is JsonArray mcpArray)
+        {
+            return TranslateMcpServersArray(mcpArray, hostWorkspace);
+        }
+        // Unknown format - pass through unchanged
+        return mcpServersNode.DeepClone();
+    }
+
+    private static JsonArray TranslateMcpServersArray(JsonArray mcpServers, string hostWorkspace)
+    {
+        var containerPath = "/home/agent/workspace";
+        var normalizedWorkspace = Path.GetFullPath(hostWorkspace).TrimEnd(Path.DirectorySeparatorChar);
+
+        var result = new JsonArray();
+
+        foreach (var serverConfig in mcpServers)
+        {
+            if (serverConfig is not JsonObject serverObj)
+            {
+                result.Add(serverConfig?.DeepClone());
+                continue;
+            }
+
+            var translatedServer = new JsonObject();
+
+            foreach (var (key, value) in serverObj)
+            {
+                if (key == "args" && value is JsonArray argsArray)
+                {
+                    translatedServer[key] = TranslateArgsArray(argsArray, normalizedWorkspace, containerPath);
+                }
+                else
+                {
+                    translatedServer[key] = value?.DeepClone();
+                }
+            }
+
+            // Cast to JsonNode to avoid generic Add<T> warnings with AOT
+            result.Add((JsonNode)translatedServer);
+        }
+
+        return result;
+    }
+
+    private static JsonObject TranslateMcpServersObject(JsonObject mcpServers, string hostWorkspace)
     {
         var containerPath = "/home/agent/workspace";
         var normalizedWorkspace = Path.GetFullPath(hostWorkspace).TrimEnd(Path.DirectorySeparatorChar);
@@ -656,21 +721,7 @@ public static class Program
             {
                 if (key == "args" && value is JsonArray argsArray)
                 {
-                    // Translate args
-                    var translatedArgs = new JsonArray();
-                    foreach (var arg in argsArray)
-                    {
-                        if (arg is JsonValue argValue && argValue.TryGetValue<string>(out var argStr))
-                        {
-                            // Cast to JsonNode to avoid generic Add<T> warnings with AOT
-                            translatedArgs.Add((JsonNode)JsonValue.Create(TranslatePath(argStr, normalizedWorkspace, containerPath))!);
-                        }
-                        else
-                        {
-                            translatedArgs.Add(arg?.DeepClone());
-                        }
-                    }
-                    translatedServer[key] = translatedArgs;
+                    translatedServer[key] = TranslateArgsArray(argsArray, normalizedWorkspace, containerPath);
                 }
                 else
                 {
@@ -682,6 +733,24 @@ public static class Program
         }
 
         return result;
+    }
+
+    private static JsonArray TranslateArgsArray(JsonArray argsArray, string normalizedWorkspace, string containerPath)
+    {
+        var translatedArgs = new JsonArray();
+        foreach (var arg in argsArray)
+        {
+            if (arg is JsonValue argValue && argValue.TryGetValue<string>(out var argStr))
+            {
+                // Cast to JsonNode to avoid generic Add<T> warnings with AOT
+                translatedArgs.Add((JsonNode)JsonValue.Create(TranslatePath(argStr, normalizedWorkspace, containerPath))!);
+            }
+            else
+            {
+                translatedArgs.Add(arg?.DeepClone());
+            }
+        }
+        return translatedArgs;
     }
 
     private static string TranslatePath(string arg, string normalizedWorkspace, string containerPath)
@@ -756,13 +825,23 @@ public class Session : IDisposable
         }
     }
 
-    public async Task<JsonRpcMessage?> WaitForResponseAsync(string requestId, TimeSpan timeout)
+    /// <summary>
+    /// Registers a pending request, sends it, then waits for the response.
+    /// This avoids race conditions where the response arrives before WaitForResponseAsync is called.
+    /// </summary>
+    public async Task<JsonRpcMessage?> SendAndWaitForResponseAsync(JsonRpcMessage request, string requestId, TimeSpan timeout)
     {
         var tcs = new TaskCompletionSource<JsonRpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Register BEFORE sending to avoid race condition
         _pendingRequests[requestId] = tcs;
 
         try
         {
+            // Send the request
+            await WriteToAgentAsync(request);
+
+            // Wait for response with timeout
             using var cts = new CancellationTokenSource(timeout);
             var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(Timeout.Infinite, cts.Token));
             if (completedTask == tcs.Task)
