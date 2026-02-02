@@ -566,8 +566,9 @@ install_containai() {
                     ;;
                 stable)
                     # Stable: checkout latest semver tag
+                    # Use git's built-in version sorting (works on macOS which lacks sort -V)
                     local latest_tag
-                    latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
+                    latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
                     if [[ -n "$latest_tag" ]]; then
                         git checkout "$latest_tag"
                     else
@@ -607,9 +608,10 @@ install_containai() {
                     ;;
                 stable)
                     # Stable: fetch tags and checkout latest
+                    # Use git's built-in version sorting (works on macOS which lacks sort -V)
                     git fetch --tags origin
                     local latest_tag
-                    latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
+                    latest_tag=$(git tag -l 'v*' --sort=v:refname | tail -1)
                     if [[ -n "$latest_tag" ]]; then
                         git checkout "$latest_tag"
                     else

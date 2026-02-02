@@ -1925,6 +1925,17 @@ _cai_update() {
         _cai_info ""
     fi
 
+    # Parse config to get channel setting (ensures _CAI_IMAGE_CHANNEL is set)
+    # This is needed before _cai_update_code so [image].channel is respected
+    local config_file
+    config_file=$(_containai_find_config "$PWD" 2>/dev/null) || config_file=""
+    if [[ -n "$config_file" ]]; then
+        _containai_parse_config "$config_file" "$PWD" "" 2>/dev/null || true
+    else
+        # Clear channel from any previous parse to avoid stale values
+        _CAI_IMAGE_CHANNEL=""
+    fi
+
     # Dispatch based on platform for infrastructure updates
     local overall_status=0
 

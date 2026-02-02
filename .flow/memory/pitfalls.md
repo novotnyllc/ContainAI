@@ -370,3 +370,6 @@ Use env vars instead of shell interpolation when passing strings to Python - quo
 
 ## 2026-02-02 manual [pitfall]
 Codex impl-review may cache file content; verify fixes are in working tree before re-running review
+
+## 2026-02-02 manual [pitfall]
+sort -V is unavailable on macOS; use git tag --sort=v:refname for semver tag sorting

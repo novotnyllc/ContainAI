@@ -226,6 +226,37 @@ _cai_resolve_update_mode() {
     return 0
 }
 
+# Check if current HEAD has local commits ahead of or diverged from remote
+# Arguments: $1 = install_dir, $2 = remote_ref (e.g., "origin/main")
+# Returns: 0 if safe to update (not ahead/diverged), 1 if local commits would be lost
+# Outputs: warning message to stderr if returning 1
+_cai_check_local_commits() {
+    local install_dir="$1"
+    local remote_ref="$2"
+
+    # Get counts of commits ahead/behind
+    local counts
+    counts=$(cd -- "$install_dir" && git rev-list --left-right --count "HEAD...$remote_ref" 2>/dev/null) || {
+        # If rev-list fails (detached HEAD not on branch), it's safe to proceed
+        return 0
+    }
+
+    local ahead behind
+    ahead=$(printf '%s' "$counts" | cut -f1)
+    behind=$(printf '%s' "$counts" | cut -f2)
+
+    if [[ "$ahead" -gt 0 ]]; then
+        _cai_warn "Local installation has $ahead commit(s) not in remote"
+        _cai_warn "Updating would discard these local changes"
+        _cai_warn ""
+        _cai_warn "To see local commits: cd $install_dir && git log --oneline $remote_ref..HEAD"
+        _cai_warn "To force update anyway: git -C $install_dir checkout -B <branch> $remote_ref"
+        return 1
+    fi
+
+    return 0
+}
+
 # Update ContainAI code distribution (git-based CLI code)
 # Supports channel-aware updates:
 #   - CAI_BRANCH: explicit branch override (highest precedence)
@@ -349,6 +380,12 @@ _cai_update_code() {
                 return 0
             fi
 
+            # Check for local commits that would be lost
+            if ! _cai_check_local_commits "$install_dir" "origin/$update_branch"; then
+                _cai_error "Refusing to update: local commits would be lost"
+                return 1
+            fi
+
             # Perform the update
             # Use checkout -B to handle both existing and new local branches
             _cai_info "Updating to latest on branch $update_branch..."
@@ -381,6 +418,12 @@ _cai_update_code() {
                 return 0
             fi
 
+            # Check for local commits that would be lost
+            if ! _cai_check_local_commits "$install_dir" "origin/main"; then
+                _cai_error "Refusing to update: local commits would be lost"
+                return 1
+            fi
+
             # Perform the update
             # Use checkout -B to handle both existing and detached states
             _cai_info "Updating to latest nightly..."
@@ -392,8 +435,9 @@ _cai_update_code() {
 
         stable)
             # Stable channel - checkout latest semver tag
+            # Use git's built-in version sorting (works on macOS which lacks sort -V)
             local latest_tag
-            latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' | sort -V | tail -1)
+            latest_tag=$(cd -- "$install_dir" && git tag -l 'v*' --sort=v:refname | tail -1)
 
             if [[ -z "$latest_tag" ]]; then
                 # Gracefully handle no tags - warn and switch to main (per spec)
@@ -441,16 +485,16 @@ _cai_update_code() {
         after_ref=$(cd -- "$install_dir" && git rev-parse --short HEAD 2>/dev/null) || after_ref="unknown"
     fi
 
-    # Show what changed
+    # Show what changed (before -> after for all modes)
     case "$_CAI_UPDATE_MODE" in
         branch)
             _cai_ok "Updated branch $CAI_BRANCH: $before_ref -> $after_ref"
             ;;
         nightly)
-            _cai_ok "Updated to latest nightly: $after_ref (version: $new_version)"
+            _cai_ok "Updated nightly: $before_ref -> $after_ref (version: $new_version)"
             ;;
         stable)
-            _cai_ok "Updated to stable release: $after_ref"
+            _cai_ok "Updated stable: $before_ref -> $after_ref"
             ;;
     esac
 
