@@ -261,7 +261,50 @@ Created comprehensive edge case test file `tests/integration/sync-tests/test-edg
 - Uses sync-test-helpers.sh infrastructure
 - Passes shellcheck -x validation
 - Full cleanup via trap (containers + volumes)
+## Edge Case Tests Implementation
+
+Created comprehensive edge case test file `tests/integration/sync-tests/test-edge-cases.sh` covering 8 test scenarios:
+
+### Tests Implemented
+
+1. **No Pollution (Optional Agent Roots)** - `test_no_pollution_optional_agents_assertions`
+   - Verifies optional agents (Pi, Kimi, Cursor, etc.) don't create directories when source missing
+   - Checks both container paths and volume entries
+
+2. **Partial Config (Non-Optional)** - `test_partial_config_non_optional_assertions`
+   - Verifies placeholder created for missing fs entries (.credentials.json)
+   - Confirms 600 permissions on secret placeholders
+
+3. **Partial Config (Optional)** - `test_partial_config_optional_agent_assertions`
+   - Verifies optional files NOT created when source missing
+   - Tests Pi with partial settings.json but missing models.json/keybindings.json
+
+4. **Pi Volume Path Mapping** - `test_pi_path_mapping_assertions`
+   - Verifies .pi/agent/X → pi/X path translation
+   - Confirms source "agent" subdir stripped from target
+
+5. **Large Fonts Directory** - `test_large_fonts_directory_assertions`
+   - Creates 50-file fonts directory
+   - Verifies all files sync completely
+
+6. **Unicode Content Preserved** - `test_unicode_content_assertions`
+   - Tests emoji (🚀) and CJK characters (你好世界)
+   - Verifies byte-level preservation
+
+7. **Internal Absolute Symlinks** - `test_internal_symlink_assertions`
+   - Tests symlinks pointing to host absolute paths
+   - Verifies handled correctly (either relinked or dereferenced)
+
+8. **Concurrent Containers** - `test_concurrent_containers`
+   - Creates two containers with separate volumes
+   - Verifies modifications to one don't affect the other
+
+### Quality
+- Follows existing test patterns (run_edge_test harness)
+- Uses sync-test-helpers.sh infrastructure
+- Passes shellcheck -x validation
+- Full cleanup via trap (containers + volumes)
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 81c9769 test(sync): add edge case tests for sync system
+- Tests: tests/integration/sync-tests/test-edge-cases.sh - shellcheck passes
 - PRs:

@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-01-29T07:06:15.930224Z",
   "depends_on": [
     "fn-39-ua0.1"
@@ -12,5 +9,5 @@
   "spec_path": ".flow/tasks/fn-39-ua0.6.md",
   "status": "todo",
   "title": "Edge case tests",
-  "updated_at": "2026-01-29T07:07:32.952795Z"
+  "updated_at": "2026-02-02T00:53:28.693302Z"
 }
