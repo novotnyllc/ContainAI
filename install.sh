@@ -32,7 +32,9 @@
 # Environment variables:
 #   CAI_INSTALL_DIR  - Installation directory (default: ~/.local/share/containai)
 #   CAI_BIN_DIR      - Binary directory (default: ~/.local/bin)
-#   CAI_CHANNEL      - Release channel: "stable" (default) or "nightly"
+#
+# Note: Standalone download mode only supports Linux. macOS users should use
+# local mode from a manually downloaded tarball, or install via git clone.
 #
 # ==============================================================================
 set -euo pipefail
@@ -77,7 +79,6 @@ error() { printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$1" >&2; }
 GITHUB_REPO="novotnyllc/containai"
 INSTALL_DIR="${CAI_INSTALL_DIR:-$HOME/.local/share/containai}"
 BIN_DIR="${CAI_BIN_DIR:-$HOME/.local/bin}"
-CHANNEL="${CAI_CHANNEL:-stable}"
 
 # Path to bash 4+ (set by bootstrap_bash if needed)
 BASH4_PATH=""
@@ -139,10 +140,21 @@ detect_os() {
     esac
 }
 
-# Detect architecture for downloads
+# Detect architecture for downloads (Linux only - macOS not supported for standalone)
 detect_arch() {
-    local machine
+    local os machine
+    os="$(uname -s)"
     machine="$(uname -m)"
+
+    # Only Linux is supported for standalone tarball downloads
+    # macOS users should use local mode or git clone
+    if [[ "$os" != "Linux" ]]; then
+        error "Standalone download only supports Linux."
+        error "macOS users: Download tarball manually and run: ./install.sh --local"
+        error "Or install from source: git clone https://github.com/$GITHUB_REPO"
+        exit 1
+    fi
+
     case "$machine" in
         x86_64|amd64)
             echo "linux-x64"
@@ -477,7 +489,6 @@ get_download_url() {
 
 download_and_extract() {
     local url="$1"
-    local dest_dir="$2"
 
     info "Downloading tarball..."
     info "  URL: $url"
@@ -501,7 +512,40 @@ download_and_extract() {
         fi
     fi
 
-    # Extract tarball
+    # Security: Validate tarball contents before extraction
+    # Reject absolute paths, path traversal (..), and anything not under containai-*/
+    info "Validating tarball contents..."
+    local tar_contents
+    tar_contents=$(tar -tzf "$tarball_path" 2>/dev/null) || {
+        error "Failed to list tarball contents"
+        rm -rf "$temp_dir"
+        return 1
+    }
+
+    # Check for malicious paths
+    local bad_path
+    while IFS= read -r entry; do
+        # Reject absolute paths
+        if [[ "$entry" == /* ]]; then
+            error "Tarball contains absolute path: $entry"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        # Reject path traversal
+        if [[ "$entry" == *../* || "$entry" == ../* || "$entry" == */../* ]]; then
+            error "Tarball contains path traversal: $entry"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        # Ensure all entries are under containai-*/
+        if [[ ! "$entry" =~ ^containai-[^/]+(/.*)?$ ]]; then
+            error "Tarball contains unexpected entry: $entry"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+    done <<< "$tar_contents"
+
+    # Extract tarball (validated safe)
     info "Extracting tarball..."
     if ! tar -xzf "$tarball_path" -C "$temp_dir"; then
         error "Extraction failed"
@@ -558,12 +602,16 @@ install_from_local() {
             IS_RERUN="true"
         fi
         info "Updating existing installation at $INSTALL_DIR"
+
+        # For updates, wipe the runtime directories to remove stale files
+        # Keep the install dir itself but remove subdirs we manage
+        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" 2>/dev/null || true
     else
         IS_FRESH_INSTALL="true"
         info "Installing to $INSTALL_DIR"
     fi
 
-    # Create installation directory
+    # Create installation directory structure
     mkdir -p "$INSTALL_DIR"
     mkdir -p "$INSTALL_DIR/lib"
     mkdir -p "$INSTALL_DIR/scripts"
@@ -1024,7 +1072,7 @@ main() {
             exit 1
         fi
 
-        download_and_extract "$download_url" "$INSTALL_DIR"
+        download_and_extract "$download_url"
         # Note: download_and_extract runs the local installer which handles
         # setup_path and post_install
     fi

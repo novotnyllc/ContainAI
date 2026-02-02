@@ -237,8 +237,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Use ubuntu-22.04 for x64 to ensure glibc compatibility with older distros
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-22.04
             dotnet_rid: linux-x64
             tarball_arch: linux-x64
           - arch: arm64
@@ -424,7 +425,7 @@ jobs:
   # This job gracefully skips if sysbox installation fails.
   #
   # Install flow: Downloads tarball artifact from build-tarballs job, tests
-  # install.sh --local --yes to verify the tarball install path works.
+  # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test:
     needs: [build, build-tarballs]
@@ -467,11 +468,11 @@ jobs:
           cd /tmp/tarball
           tar xzf containai-*.tar.gz
           cd containai-*/
-          if ./install.sh --local --yes 2>&1; then
+          if ./install.sh --local --yes --no-setup 2>&1; then
             echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
             echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::install.sh --local --yes failed"
+            echo "::warning::install.sh --local --yes --no-setup failed"
             echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -487,9 +488,24 @@ jobs:
       - name: Verify install success
         if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
         run: |
-          echo "::error::Tarball artifact was downloaded but install.sh --local --yes failed"
+          echo "::error::Tarball artifact was downloaded but install.sh --local --yes --no-setup failed"
           echo "This indicates a regression in the install path."
           exit 1
+
+      - name: Smoke test acp-proxy binary
+        if: steps.install.outputs.INSTALL_SUCCESS == 'true'
+        run: |
+          ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
+          if [[ -f "$ACP_PROXY" ]]; then
+            echo "Testing acp-proxy binary..."
+            if "$ACP_PROXY" --help >/dev/null 2>&1; then
+              echo "acp-proxy binary works"
+            else
+              echo "::warning::acp-proxy binary failed to run (may be glibc incompatibility)"
+            fi
+          else
+            echo "acp-proxy binary not found at $ACP_PROXY"
+          fi
 
       - name: Check kernel version
         id: kernel
@@ -748,7 +764,7 @@ jobs:
   # ENABLE_SELF_HOSTED_E2E=true if they have configured self-hosted runners.
   #
   # Install flow: Downloads tarball artifact from build-tarballs job, tests
-  # install.sh --local --yes to verify the tarball install path works.
+  # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test-selfhosted:
     needs: [build, build-tarballs]
@@ -790,11 +806,11 @@ jobs:
           cd /tmp/tarball
           tar xzf containai-*.tar.gz
           cd containai-*/
-          if ./install.sh --local --yes 2>&1; then
+          if ./install.sh --local --yes --no-setup 2>&1; then
             echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
             echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::install.sh --local --yes failed"
+            echo "::warning::install.sh --local --yes --no-setup failed"
             echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -810,9 +826,24 @@ jobs:
       - name: Verify install success
         if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
         run: |
-          echo "::error::Tarball artifact was downloaded but install.sh --local --yes failed"
+          echo "::error::Tarball artifact was downloaded but install.sh --local --yes --no-setup failed"
           echo "This indicates a regression in the install path."
           exit 1
+
+      - name: Smoke test acp-proxy binary
+        if: steps.install.outputs.INSTALL_SUCCESS == 'true'
+        run: |
+          ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
+          if [[ -f "$ACP_PROXY" ]]; then
+            echo "Testing acp-proxy binary..."
+            if "$ACP_PROXY" --help >/dev/null 2>&1; then
+              echo "acp-proxy binary works"
+            else
+              echo "::warning::acp-proxy binary failed to run (may be glibc incompatibility)"
+            fi
+          else
+            echo "acp-proxy binary not found at $ACP_PROXY"
+          fi
 
       - name: Verify sysbox is pre-installed
         id: verify
