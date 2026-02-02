@@ -373,3 +373,6 @@ Codex impl-review may cache file content; verify fixes are in working tree befor
 
 ## 2026-02-02 manual [pitfall]
 sort -V is unavailable on macOS; use git tag --sort=v:refname for semver tag sorting
+
+## 2026-02-02 manual [pitfall]
+git checkout -B can discard local commits without warning; prefer checkout + pull --ff-only for safe updates
