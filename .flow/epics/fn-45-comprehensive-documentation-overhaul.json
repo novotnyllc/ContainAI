@@ -7,7 +7,7 @@
   "default_review": null,
   "default_sync": null,
   "depends_on_epics": [
-    "fn-46-cli-ux-audit-and-simplification"
+    "fn-47-extensibility-agent-integration"
   ],
   "id": "fn-45-comprehensive-documentation-overhaul",
   "next_task": 1,
@@ -16,5 +16,5 @@
   "spec_path": ".flow/specs/fn-45-comprehensive-documentation-overhaul.md",
   "status": "open",
   "title": "Comprehensive Documentation Overhaul",
-  "updated_at": "2026-02-02T16:59:29.259310Z"
+  "updated_at": "2026-02-02T18:20:00.390460Z"
 }

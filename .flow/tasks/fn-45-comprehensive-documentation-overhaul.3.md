@@ -16,6 +16,42 @@ Create three persona-based landing pages that provide tailored entry points for 
    - Quick path: quickstart → usage patterns → configuration
    - Highlight: preferences sync, ephemeral/persistent modes
    - Link to troubleshooting
+   - **Include**: Visual navigation map showing doc relationships
+
+2. **For Contributors** (`docs/for-contributors.md`):
+   - "You want to improve ContainAI"
+   - Quick path: CONTRIBUTING.md → architecture (summary) → testing
+   - Highlight: code structure, conventions, good first issues
+   - Link to `.flow/memory/conventions.md` patterns
+   - **Include**: Visual map of code/docs structure
+
+3. **For Security Auditors** (`docs/for-security-auditors.md`):
+   - "You want to evaluate ContainAI's security"
+   - Quick path: SECURITY.md → threat model → security-scenarios
+   - Highlight: isolation guarantees, non-goals, attack surface
+   - Link to Sysbox documentation
+   - **Include**: Security documentation hierarchy diagram
+
+4. Follow patterns from:
+   - Diataxis framework (orientation-first content)
+   - GitBook personas guide
+   - coder/coder docs structure (user-guides/, admin/)
+
+5. **Each landing page should have a Mermaid flowchart** showing the recommended reading path and how docs relate to each other.
+
+## Key context
+
+Current docs assume users will navigate themselves. Research shows personas need curated paths:
+- Users care about "how fast can I be productive"
+- Contributors care about "how do I not break things"
+- Auditors care about "what are the assumptions and limits"
+## Approach
+
+1. **For Users** (`docs/for-users.md`):
+   - "You want to run AI agents safely"
+   - Quick path: quickstart → usage patterns → configuration
+   - Highlight: preferences sync, ephemeral/persistent modes
+   - Link to troubleshooting
 
 2. **For Contributors** (`docs/for-contributors.md`):
    - "You want to improve ContainAI"
@@ -48,6 +84,7 @@ Current docs assume users will navigate themselves. Research shows personas need
 - [ ] Cross-links between personas where relevant
 - [ ] README updated to link to these pages
 - [ ] No duplicate content - pages curate, not copy
+- [ ] **Each page has a Mermaid navigation/reading path diagram** (use standard dark theme)
 ## Done summary
 TBD
 

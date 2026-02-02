@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T17:44:31.561644Z",
+  "depends_on": [],
+  "epic": "fn-47-extensibility-agent-integration",
+  "id": "fn-47-extensibility-agent-integration.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-47-extensibility-agent-integration.2.md",
+  "status": "todo",
+  "title": "Startup Hooks - Implement .containai/hooks/startup.d/ support",
+  "updated_at": "2026-02-02T17:44:31.561660Z"
+}

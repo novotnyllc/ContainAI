@@ -1,0 +1,19 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T17:44:31.909692Z",
+  "depends_on": [
+    "fn-47-extensibility-agent-integration.1",
+    "fn-47-extensibility-agent-integration.2",
+    "fn-47-extensibility-agent-integration.3",
+    "fn-47-extensibility-agent-integration.4"
+  ],
+  "epic": "fn-47-extensibility-agent-integration",
+  "id": "fn-47-extensibility-agent-integration.6",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-47-extensibility-agent-integration.6.md",
+  "status": "todo",
+  "title": "Documentation - Update docs for extensibility features",
+  "updated_at": "2026-02-02T17:46:29.309054Z"
+}
