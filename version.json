@@ -14,8 +14,9 @@
   "pathFilters": [
     ".",
     ":!.github/",
+    ":!.flow/",
     ":!docs/",
-    ":!*.md"
+    ":!**/*.md"
   ],
   "release": {
     "branchName": "rel/v{version}",

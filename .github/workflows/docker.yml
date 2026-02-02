@@ -118,6 +118,7 @@ jobs:
         run: |
           ./src/build.sh \
             --image-prefix containai \
+            --version "${{ steps.nbgv.outputs.SemVer2 }}" \
             --platforms linux/amd64 \
             --load
 
@@ -257,6 +258,7 @@ jobs:
           echo "Building containai image for testing..."
           ./src/build.sh \
             --image-prefix containai \
+            --version "$NBGV_SemVer2" \
             --platforms linux/amd64 \
             --load
 
@@ -291,12 +293,17 @@ jobs:
           dotnet tool restore
           echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
-      - name: Run .NET unit tests
+      - name: Run .NET unit tests (if test projects exist)
         run: |
           echo "============================================="
           echo "Running .NET unit tests (MTP runner)"
           echo "============================================="
-          dotnet test --configuration Release
+          # Only run tests if test projects exist
+          if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
+            dotnet test --configuration Release
+          else
+            echo "No test projects found, skipping dotnet test"
+          fi
 
       - name: Build ACP Proxy
         run: |

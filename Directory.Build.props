@@ -3,7 +3,7 @@
   <PropertyGroup>
     <!-- ArtifactsOutput: Output goes to artifacts/ directory -->
     <UseArtifactsOutput>true</UseArtifactsOutput>
-    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts/</ArtifactsPath>
   </PropertyGroup>
 
   <PropertyGroup>

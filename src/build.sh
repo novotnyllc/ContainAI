@@ -8,6 +8,7 @@ set -euo pipefail
 #   --dotnet-channel CHANNEL  .NET SDK channel (default: 10.0)
 #   --layer LAYER             Build only specific layer (base|sdks|agents|all)
 #   --image-prefix PREFIX     Image name prefix (default: ghcr.io/novotnyllc/containai)
+#   --version VERSION         Version for OCI labels (default: from NBGV or "unknown")
 #   --platforms PLATFORMS     Build with buildx for platforms (e.g., linux/amd64,linux/arm64)
 #   --builder NAME            Use a specific buildx builder
 #   --build-setup             Configure buildx builder + binfmt if required
@@ -47,6 +48,7 @@ BUILDX_REQUESTED=0
 HAS_OUTPUT=0
 DOCKER_CONTEXT=""
 DOCKER_CMD=(docker)
+BUILD_VERSION=""  # Set via --version or NBGV_SemVer2 env var
 
 # Parse options
 DOCKER_ARGS=()
@@ -151,6 +153,22 @@ while [[ $# -gt 0 ]]; do
             IMAGE_PREFIX="${1#*=}"
             if [[ -z "$IMAGE_PREFIX" ]]; then
                 echo "ERROR: --image-prefix requires a value" >&2
+                exit 1
+            fi
+            shift
+            ;;
+        --version)
+            if [[ -z "${2-}" ]]; then
+                echo "ERROR: --version requires a value" >&2
+                exit 1
+            fi
+            BUILD_VERSION="$2"
+            shift 2
+            ;;
+        --version=*)
+            BUILD_VERSION="${1#*=}"
+            if [[ -z "$BUILD_VERSION" ]]; then
+                echo "ERROR: --version requires a value" >&2
                 exit 1
             fi
             shift
@@ -376,6 +394,18 @@ fi
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
+# Determine VERSION for OCI labels
+# Priority: --version flag > NBGV_SemVer2 env var > dotnet nbgv > "unknown"
+if [[ -z "$BUILD_VERSION" ]]; then
+    if [[ -n "${NBGV_SemVer2:-}" ]]; then
+        BUILD_VERSION="$NBGV_SemVer2"
+    elif command -v dotnet >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/../version.json" ]]; then
+        BUILD_VERSION="$(dotnet nbgv get-version -v SemVer2 2>/dev/null || echo 'unknown')"
+    else
+        BUILD_VERSION="unknown"
+    fi
+fi
+
 # Helper to check if a local image exists in current Docker context
 # Returns 0 if exists, 1 otherwise
 local_image_exists() {
@@ -471,6 +501,7 @@ build_layer() {
         -t "${repo}:${DATE_TAG}" \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VCS_REF="$VCS_REF" \
+        --build-arg VERSION="$BUILD_VERSION" \
         ${extra_args[@]+"${extra_args[@]}"} \
         ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
         -f "${SCRIPT_DIR}/container/${dockerfile}" \
@@ -583,6 +614,7 @@ case "$BUILD_LAYER" in
             -t "${IMAGE_MAIN}:${DATE_TAG}" \
             --build-arg BUILD_DATE="$BUILD_DATE" \
             --build-arg VCS_REF="$VCS_REF" \
+            --build-arg VERSION="$BUILD_VERSION" \
             "${final_args[@]}" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/container/Dockerfile" \
