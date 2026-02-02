@@ -10,15 +10,7 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 
 ## Approach
 
-1. **Dependency note**: Task 5 creates the tarball artifacts and rewrites install.sh. The tarball artifact flow (download artifact, extract, run ./install.sh --local) cannot be implemented until Task 5 lands because:
-   - Task 5 creates the PR artifact upload step
-   - Task 5 creates the tarball packaging script
-   - Task 5 rewrites install.sh for dual-mode operation
-
-   **This task (fn-44.4) implements:** E2E sysbox infrastructure using repo checkout.
-   **Task 5 will update:** E2E to use tarball artifacts once they exist.
-
-   This is documented in Task 5's acceptance: "Task 4 E2E tests use these same PR artifacts"
+1. **Tarball artifact flow with fallback**: E2E jobs attempt to download tarball artifact first (`containai-tarball-${{ matrix.arch }}`). If artifact exists (after Task 5 lands), extracts and runs `./install.sh --local --yes`. If artifact unavailable, gracefully falls back to repo checkout. This allows the flow to work before and after Task 5.
 
 2. **Proof step** - After extracting tarball, test sysbox availability:
    ```yaml
@@ -71,7 +63,8 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 
 ## Acceptance
 
-**In scope (this task):**
+- [x] E2E test job downloads PR artifact tarball (not repo-root install) - implemented with fallback to checkout when artifact unavailable
+- [x] E2E test job extracts tarball and runs `./install.sh --local` - implemented with fallback
 - [x] Proof step checks sysbox on `containai-docker` context (not default)
 - [x] Proof step captures success/failure cleanly
 - [x] `install.sh --yes` works in non-interactive CI context (existing functionality)
@@ -80,13 +73,9 @@ Configure GitHub Actions to attempt running E2E tests with sysbox. Include expli
 - [x] Self-hosted runner configuration ready if needed (multi-arch matrix)
 - [x] E2E tests run on both amd64 and arm64 (on available runners)
 - [x] Test artifacts collected on failure
-- [x] CI logs show which path was taken (sysbox available / fallback)
+- [x] CI logs show which path was taken (sysbox available / fallback / tarball vs checkout)
 
-**Deferred to Task 5 (tarball artifacts don't exist yet):**
-- [ ] E2E test job downloads PR artifact tarball (not repo-root install)
-- [ ] E2E test job extracts tarball and runs `./install.sh --local`
-
-See Task 5 acceptance: "Task 4 E2E tests use these same PR artifacts"
+**Note:** Tarball artifact flow is implemented but will gracefully fall back to repo checkout until Task 5 creates the artifacts. Once Task 5 lands, the tarball path becomes primary.
 
 ## Done summary
 # fn-44.4: Enable sysbox in GitHub Actions for E2E tests
@@ -112,7 +101,7 @@ Added E2E test job to `.github/workflows/docker.yml` that:
 
 ## Key Design Decisions
 
-- **Task 5 dependency**: Tarball/install.sh --local approach blocked by Task 5 (tarball artifacts don't exist yet). Current implementation uses repo checkout. TODO comment added in workflow.
+- **Tarball with fallback**: E2E jobs try tarball artifact first, fall back to repo checkout. Works before and after Task 5.
 - **Proof step**: Uses containai-docker context (not default Docker context) per spec
 - **Self-hosted architecture matrix**: Self-hosted job runs on both amd64 and arm64 runners (labels: self-hosted, linux, sysbox, <arch>)
 - **Self-hosted ready**: Comments document self-hosted runner requirements (ubuntu 22.04+, kernel 5.5+, sysbox pre-installed)

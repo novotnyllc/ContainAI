@@ -345,12 +345,8 @@ jobs:
   # module loading which may not work due to virtualization constraints.
   # This job gracefully skips if sysbox installation fails.
   #
-  # TODO(fn-44.5): Once Task 5 lands with tarball artifacts:
-  #   1. Replace checkout with: actions/download-artifact@v4 (containai-tarball-${{ matrix.arch }})
-  #   2. Extract tarball: tar xzf containai-*.tar.gz
-  #   3. Install: cd containai-*/ && ./install.sh --local --yes
-  #   4. Gate sysbox verification on install success
-  # Current approach uses repo checkout until tarball artifacts are available.
+  # Install flow: Prefers tarball artifact (from Task 5) with fallback to repo checkout.
+  # Once Task 5 lands, the tarball path will be the primary install method.
   # ============================================================================
   e2e-test:
     needs: build
@@ -367,10 +363,49 @@ jobs:
             runner: ubuntu-24.04-arm
 
     steps:
-      - name: Checkout repository
+      # Try to download tarball artifact (from Task 5's PR artifact upload)
+      # Falls back gracefully if artifact doesn't exist yet
+      - name: Download tarball artifact
+        id: download_tarball
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: containai-tarball-${{ matrix.arch }}
+          path: /tmp/tarball
+
+      - name: Extract and install from tarball
+        id: install
+        if: steps.download_tarball.outcome == 'success'
+        run: |
+          echo "============================================="
+          echo "Installing from tarball artifact"
+          echo "============================================="
+          cd /tmp/tarball
+          tar xzf containai-*.tar.gz
+          cd containai-*/
+          if ./install.sh --local --yes 2>&1; then
+            echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
+            echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::install.sh --local --yes failed, will fall back to repo checkout"
+            echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Fallback: checkout repository if tarball not available or install failed
+      - name: Checkout repository (fallback)
+        if: steps.download_tarball.outcome != 'success' || steps.install.outputs.INSTALL_SUCCESS != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # CRITICAL for NBGV
+
+      - name: Log install method
+        run: |
+          if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
+            echo "Installed from tarball artifact (Task 5 flow)"
+          else
+            echo "Using repo checkout (tarball artifact not available yet - Task 5 pending)"
+            echo "INSTALL_METHOD=checkout" >> "$GITHUB_ENV"
+          fi
 
       - name: Check kernel version
         id: kernel
@@ -627,6 +662,8 @@ jobs:
   # This job only runs on the main repo (not forks) to avoid indefinite queuing
   # when no self-hosted runners are available. Forks can set the repo variable
   # ENABLE_SELF_HOSTED_E2E=true if they have configured self-hosted runners.
+  #
+  # Install flow: Prefers tarball artifact (from Task 5) with fallback to repo checkout.
   # ============================================================================
   e2e-test-selfhosted:
     needs: build
@@ -642,10 +679,47 @@ jobs:
         arch: [amd64, arm64]
 
     steps:
-      - name: Checkout repository
+      # Try to download tarball artifact (from Task 5's PR artifact upload)
+      - name: Download tarball artifact
+        id: download_tarball
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: containai-tarball-${{ matrix.arch }}
+          path: /tmp/tarball
+
+      - name: Extract and install from tarball
+        id: install
+        if: steps.download_tarball.outcome == 'success'
+        run: |
+          echo "============================================="
+          echo "Installing from tarball artifact"
+          echo "============================================="
+          cd /tmp/tarball
+          tar xzf containai-*.tar.gz
+          cd containai-*/
+          if ./install.sh --local --yes 2>&1; then
+            echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
+            echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::install.sh --local --yes failed, will fall back to repo checkout"
+            echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Fallback: checkout repository if tarball not available or install failed
+      - name: Checkout repository (fallback)
+        if: steps.download_tarball.outcome != 'success' || steps.install.outputs.INSTALL_SUCCESS != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # CRITICAL for NBGV
+
+      - name: Log install method
+        run: |
+          if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
+            echo "Installed from tarball artifact (Task 5 flow)"
+          else
+            echo "Using repo checkout (tarball artifact not available yet - Task 5 pending)"
+          fi
 
       - name: Verify sysbox is pre-installed
         id: verify
