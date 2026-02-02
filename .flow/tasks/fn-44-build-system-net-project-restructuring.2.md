@@ -135,5 +135,5 @@ Set up modern .NET project infrastructure with:
 8. **Updated acp-proxy.csproj**: Removed hardcoded version, uses CPM for package versions, added PackageReferences for System.CommandLine, StreamJsonRpc, CliWrap
 ## Evidence
 - Commits:
-- Tests: dotnet build ContainAI.slnx, dotnet nbgv get-version -v SemVer2
+- Tests:
 - PRs:

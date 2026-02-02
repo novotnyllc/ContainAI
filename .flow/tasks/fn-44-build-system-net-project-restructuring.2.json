@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-02-02T15:09:17.161665Z",
   "depends_on": [],
   "epic": "fn-44-build-system-net-project-restructuring",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-44-build-system-net-project-restructuring.2.md",
   "status": "todo",
   "title": "Set up .NET project infrastructure (CPM, NBGV, ArtifactsOutput, slnx)",
-  "updated_at": "2026-02-02T19:10:24.296439Z"
+  "updated_at": "2026-02-02T19:50:47.995798Z"
 }
