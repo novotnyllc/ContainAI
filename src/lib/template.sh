@@ -851,6 +851,7 @@ _cai_template_needs_upgrade() {
 
     # Check if Dockerfile has ARG BASE_IMAGE pattern before FROM
     local has_arg_base_image="false"
+    local from_uses_base_image="false"
     local from_line=""
     local line
 
@@ -863,8 +864,9 @@ _cai_template_needs_upgrade() {
         [[ -z "$line" ]] && continue
         [[ "$line" == \#* ]] && continue
 
-        # Check for ARG BASE_IMAGE
-        if [[ "$line" =~ ^[Aa][Rr][Gg][[:space:]]+BASE_IMAGE ]]; then
+        # Check for ARG BASE_IMAGE (match whole token with = or whitespace after)
+        # Matches: "ARG BASE_IMAGE", "ARG BASE_IMAGE=...", but not "ARG BASE_IMAGE_VERSION"
+        if [[ "$line" =~ ^[Aa][Rr][Gg][[:space:]]+BASE_IMAGE([[:space:]=]|$) ]]; then
             has_arg_base_image="true"
         fi
 
@@ -879,23 +881,72 @@ _cai_template_needs_upgrade() {
         return 2
     fi
 
-    # If has ARG BASE_IMAGE, template is already upgraded
-    if [[ "$has_arg_base_image" == "true" ]]; then
-        return 1
+    # Check if FROM uses $BASE_IMAGE or ${BASE_IMAGE} (including ${BASE_IMAGE:-...})
+    # Match: $BASE_IMAGE, ${BASE_IMAGE}, ${BASE_IMAGE:-default}, ${BASE_IMAGE:+value}
+    if [[ "$from_line" =~ \$BASE_IMAGE ]] || [[ "$from_line" =~ \$\{BASE_IMAGE[}:-] ]]; then
+        from_uses_base_image="true"
     fi
 
-    # Check if FROM uses a variable ($BASE_IMAGE or ${BASE_IMAGE})
-    # This is an edge case - user manually added variable but forgot ARG
-    # We can't safely upgrade this (would create self-referential ARG)
-    if [[ "$from_line" =~ \$BASE_IMAGE ]] || [[ "$from_line" =~ \$\{BASE_IMAGE\} ]]; then
-        # Treat as already upgraded (return 1) - manual fix needed
-        # The build will handle this via Docker's --build-arg
-        return 1
+    # Template is fully upgraded only if BOTH conditions are met:
+    # 1. ARG BASE_IMAGE exists before FROM
+    # 2. FROM uses ${BASE_IMAGE}
+    if [[ "$has_arg_base_image" == "true" ]] && [[ "$from_uses_base_image" == "true" ]]; then
+        return 1  # Already upgraded
     fi
 
-    # Hardcoded image - needs upgrade
+    # If FROM uses BASE_IMAGE but no ARG, we need to insert ARG only
+    # Output marker to indicate insert-arg-only mode
+    if [[ "$from_uses_base_image" == "true" ]] && [[ "$has_arg_base_image" == "false" ]]; then
+        printf 'INSERT_ARG_ONLY:%s' "$from_line"
+        return 0
+    fi
+
+    # Has ARG but FROM doesn't use it - rewrite FROM only (preserve existing ARG)
+    # Output marker to indicate rewrite-from-only mode
+    if [[ "$has_arg_base_image" == "true" ]] && [[ "$from_uses_base_image" == "false" ]]; then
+        printf 'REWRITE_FROM_ONLY:%s' "$from_line"
+        return 0
+    fi
+
+    # Hardcoded image - needs full upgrade (insert ARG and rewrite FROM)
     printf '%s' "$from_line"
     return 0
+}
+
+# Rewrite a FROM line to use ${BASE_IMAGE}
+# Args: from_line
+# Outputs: Rewritten FROM line
+_cai_rewrite_from_line() {
+    local line="$1"
+    local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
+    from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"  # trim leading
+
+    local new_from="FROM"
+    local token found_image="false" as_clause=""
+
+    while [[ -n "$from_tokens" ]]; do
+        token="${from_tokens%%[[:space:]]*}"
+        from_tokens="${from_tokens#"$token"}"
+        from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+
+        if [[ "$token" == --* ]]; then
+            new_from+=" $token"
+            continue
+        fi
+        if [[ "$found_image" == "false" ]]; then
+            new_from+=' ${BASE_IMAGE}'
+            found_image="true"
+            continue
+        fi
+        # After image - likely "AS stage" clause
+        as_clause+=" $token"
+    done
+
+    if [[ -n "$as_clause" ]]; then
+        new_from+="$as_clause"
+    fi
+
+    printf '%s' "$new_from"
 }
 
 # Upgrade a template Dockerfile to use ARG BASE_IMAGE pattern
@@ -912,22 +963,53 @@ _cai_template_upgrade_file() {
     fi
 
     # Check if needs upgrade
-    local needs_upgrade_info
-    if ! needs_upgrade_info=$(_cai_template_needs_upgrade "$dockerfile_path"); then
-        _cai_info "Template already uses ARG BASE_IMAGE pattern: $dockerfile_path"
-        return 1
+    local needs_upgrade_info rc
+    needs_upgrade_info=$(_cai_template_needs_upgrade "$dockerfile_path")
+    rc=$?
+
+    case $rc in
+        1)  # Already upgraded
+            _cai_info "Template already uses ARG BASE_IMAGE pattern: $dockerfile_path"
+            return 1
+            ;;
+        2)  # Parse error
+            _cai_error "Failed to parse Dockerfile: $dockerfile_path"
+            return 2
+            ;;
+        0)  # Needs upgrade
+            ;;
+    esac
+
+    # Check upgrade mode from marker prefix
+    local upgrade_mode="full"  # full, insert_arg_only, rewrite_from_only
+    if [[ "$needs_upgrade_info" == INSERT_ARG_ONLY:* ]]; then
+        upgrade_mode="insert_arg_only"
+        needs_upgrade_info="${needs_upgrade_info#INSERT_ARG_ONLY:}"
+    elif [[ "$needs_upgrade_info" == REWRITE_FROM_ONLY:* ]]; then
+        upgrade_mode="rewrite_from_only"
+        needs_upgrade_info="${needs_upgrade_info#REWRITE_FROM_ONLY:}"
     fi
 
     _cai_info "Upgrading template: $dockerfile_path"
     _cai_info "Current: $needs_upgrade_info"
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun "Would add ARG BASE_IMAGE before FROM line"
+        case "$upgrade_mode" in
+            insert_arg_only)
+                _cai_dryrun "Would add ARG BASE_IMAGE before FROM line (FROM already uses \${BASE_IMAGE})"
+                ;;
+            rewrite_from_only)
+                _cai_dryrun "Would rewrite FROM to use \${BASE_IMAGE} (ARG already exists)"
+                ;;
+            *)
+                _cai_dryrun "Would add ARG BASE_IMAGE and rewrite FROM line"
+                ;;
+        esac
         return 0
     fi
 
     # Read the file and transform
-    local content new_content in_from_block="false"
+    local content new_content
     content=$(cat "$dockerfile_path") || return 2
 
     # Process line by line, inserting ARG before first FROM
@@ -936,69 +1018,87 @@ _cai_template_upgrade_file() {
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Check for FROM line (first one only)
-        if [[ "$inserted" == "false" ]] && [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
-            # Extract the image from FROM line
-            local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
-            from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"  # trim leading
+        # Allow optional leading whitespace before FROM
+        if [[ "$inserted" == "false" ]] && [[ "$line" =~ ^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            if [[ "$upgrade_mode" == "insert_arg_only" ]]; then
+                # FROM already uses ${BASE_IMAGE}, insert ARG without default
+                # to preserve ${BASE_IMAGE:-custom} semantics in FROM
+                new_content+="ARG BASE_IMAGE"$'\n'
+                new_content+="$line"$'\n'
+                inserted="true"
+            elif [[ "$upgrade_mode" == "rewrite_from_only" ]]; then
+                # ARG already exists, just rewrite FROM to use variable
+                # (no new ARG insertion - preserve user's existing ARG default)
+                local new_from
+                new_from=$(_cai_rewrite_from_line "$line")
+                new_content+="$new_from"$'\n'
+                inserted="true"
+            else
+                # Full upgrade: insert ARG and rewrite FROM
 
-            # Skip flags (--platform, etc.) to find the image
-            local token image=""
-            while [[ -n "$from_tokens" ]]; do
-                token="${from_tokens%%[[:space:]]*}"
-                from_tokens="${from_tokens#"$token"}"
-                from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+                # Extract the image from FROM line
+                local from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
+                from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"  # trim leading
 
-                if [[ "$token" == --* ]]; then
-                    continue
-                fi
-                if [[ "$token" == [Aa][Ss] ]]; then
+                # Skip flags (--platform, etc.) to find the image
+                local token image=""
+                while [[ -n "$from_tokens" ]]; do
+                    token="${from_tokens%%[[:space:]]*}"
+                    from_tokens="${from_tokens#"$token"}"
+                    from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
+
+                    if [[ "$token" == --* ]]; then
+                        continue
+                    fi
+                    if [[ "$token" == [Aa][Ss] ]]; then
+                        break
+                    fi
+                    image="$token"
                     break
+                done
+
+                # Default to ContainAI latest if image extraction fails or is a variable
+                if [[ -z "$image" ]] || [[ "$image" == \$* ]]; then
+                    image="ghcr.io/novotnyllc/containai:latest"
                 fi
-                image="$token"
-                break
-            done
 
-            # Default to ContainAI latest if image extraction fails or is a variable
-            if [[ -z "$image" ]] || [[ "$image" == \$* ]]; then
-                image="ghcr.io/novotnyllc/containai:latest"
-            fi
+                # Insert ARG line
+                new_content+="ARG BASE_IMAGE=${image}"$'\n'
 
-            # Insert ARG line
-            new_content+="ARG BASE_IMAGE=${image}"$'\n'
+                # Rewrite FROM to use variable
+                # Handle: FROM image, FROM --platform=x image, FROM image AS stage
+                local new_from="FROM"
 
-            # Rewrite FROM to use variable
-            # Handle: FROM image, FROM --platform=x image, FROM image AS stage
-            local new_from="FROM"
-
-            # Re-parse to handle flags properly
-            from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
-            from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
-
-            local found_image="false" as_clause=""
-            while [[ -n "$from_tokens" ]]; do
-                token="${from_tokens%%[[:space:]]*}"
-                from_tokens="${from_tokens#"$token"}"
+                # Re-parse to handle flags properly
+                from_tokens="${line#*[Ff][Rr][Oo][Mm]}"
                 from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
 
-                if [[ "$token" == --* ]]; then
-                    new_from+=" $token"
-                    continue
-                fi
-                if [[ "$found_image" == "false" ]]; then
-                    new_from+=' ${BASE_IMAGE}'
-                    found_image="true"
-                    continue
-                fi
-                # After image - likely "AS stage" clause
-                as_clause+=" $token"
-            done
+                local found_image="false" as_clause=""
+                while [[ -n "$from_tokens" ]]; do
+                    token="${from_tokens%%[[:space:]]*}"
+                    from_tokens="${from_tokens#"$token"}"
+                    from_tokens="${from_tokens#"${from_tokens%%[![:space:]]*}"}"
 
-            if [[ -n "$as_clause" ]]; then
-                new_from+="$as_clause"
+                    if [[ "$token" == --* ]]; then
+                        new_from+=" $token"
+                        continue
+                    fi
+                    if [[ "$found_image" == "false" ]]; then
+                        new_from+=' ${BASE_IMAGE}'
+                        found_image="true"
+                        continue
+                    fi
+                    # After image - likely "AS stage" clause
+                    as_clause+=" $token"
+                done
+
+                if [[ -n "$as_clause" ]]; then
+                    new_from+="$as_clause"
+                fi
+
+                new_content+="$new_from"$'\n'
+                inserted="true"
             fi
-
-            new_content+="$new_from"$'\n'
-            inserted="true"
         else
             new_content+="$line"$'\n'
         fi

@@ -89,6 +89,12 @@ Options:
 
 What Gets Updated:
 
+  CLI Code (git-based installations):
+    - Updates based on release channel configuration
+    - CAI_BRANCH env var: explicit branch override (highest precedence)
+    - CAI_CHANNEL=nightly or [image].channel=nightly: pulls latest main
+    - CAI_CHANNEL=stable (default): checks out latest v* tag
+
   Linux/WSL2:
     - Systemd unit file (if template changed)
     - Docker service restart
@@ -115,6 +121,12 @@ Container Handling (Linux/WSL2):
   - --force: Also skips prompt and stops containers automatically
   - --dry-run: Shows what would be stopped without stopping
 
+Channel Selection (for CLI code updates):
+  1. CAI_BRANCH env var - explicit branch override (power users)
+  2. CAI_CHANNEL env var - channel override
+  3. [image].channel in config file
+  4. Default: stable (checkout latest v* tag)
+
 Notes:
   - Template changes are detected by comparing SHA-256 hashes
   - VM recreation only occurs when template changes or --lima-recreate is used
@@ -124,11 +136,13 @@ Notes:
   - Use 'cai doctor' after update to verify installation
 
 Examples:
-  cai update                       Update (prompts if containers running)
-  cai update --dry-run             Preview what would be updated
-  cai update --stop-containers     Stop containers without prompting (for CI)
-  cai update --force               Update without confirmation prompts
-  cai update --lima-recreate       Force VM recreation (macOS)
+  cai update                           Update (prompts if containers running)
+  cai update --dry-run                 Preview what would be updated
+  cai update --stop-containers         Stop containers without prompting (for CI)
+  cai update --force                   Update without confirmation prompts
+  cai update --lima-recreate           Force VM recreation (macOS)
+  CAI_CHANNEL=nightly cai update       Update code to latest nightly
+  CAI_BRANCH=feature-x cai update      Update code to specific branch
 EOF
 }
 
@@ -1911,7 +1925,7 @@ _cai_update() {
         _cai_info ""
     fi
 
-    # Dispatch based on platform
+    # Dispatch based on platform for infrastructure updates
     local overall_status=0
 
     if _cai_is_macos; then
@@ -1921,6 +1935,55 @@ _cai_update() {
         # Linux or WSL2
         _cai_update_linux_wsl2 "$dry_run" "$verbose" "$force" "$stop_containers"
         overall_status=$?
+    fi
+
+    # Update CLI code (channel-aware git checkout)
+    # Only proceed if infrastructure update succeeded (or was dry-run)
+    if [[ $overall_status -eq 0 ]] || [[ "$dry_run" == "true" ]]; then
+        _cai_info ""
+        _cai_step "Updating ContainAI CLI code"
+
+        # Check if we have a git-based installation
+        local install_dir=""
+        if [[ -d "$_CAI_SCRIPT_DIR/../.git" ]]; then
+            install_dir="$(cd -- "$_CAI_SCRIPT_DIR/.." 2>/dev/null && pwd)"
+        elif [[ -n "${CAI_INSTALL_DIR:-}" ]] && [[ -d "${CAI_INSTALL_DIR}/.git" ]]; then
+            install_dir="$CAI_INSTALL_DIR"
+        fi
+
+        if [[ -n "$install_dir" ]] && [[ -d "$install_dir/.git" ]]; then
+            # Call the code update function from version.sh
+            if command -v _cai_update_code >/dev/null 2>&1; then
+                local code_rc=0
+                if [[ "$dry_run" == "true" ]]; then
+                    # For dry-run, resolve mode and show what would happen
+                    _cai_resolve_update_mode
+                    _cai_dryrun "Would update CLI code ($_CAI_UPDATE_DISPLAY)"
+                    case "$_CAI_UPDATE_MODE" in
+                        branch)
+                            _cai_dryrun "Would checkout and pull branch: $_CAI_UPDATE_TARGET"
+                            ;;
+                        nightly)
+                            _cai_dryrun "Would checkout main and pull latest"
+                            ;;
+                        stable)
+                            _cai_dryrun "Would fetch tags and checkout latest v* tag"
+                            ;;
+                    esac
+                else
+                    _cai_update_code && code_rc=0 || code_rc=$?
+                    if [[ $code_rc -ne 0 ]]; then
+                        _cai_warn "CLI code update had issues (exit: $code_rc)"
+                        # Don't fail overall update for code update issues
+                    fi
+                fi
+            else
+                _cai_warn "_cai_update_code not available (version.sh not loaded?)"
+            fi
+        else
+            _cai_info "Non-git installation - skipping CLI code update"
+            _cai_info "Re-run install.sh to update CLI code"
+        fi
     fi
 
     # Summary

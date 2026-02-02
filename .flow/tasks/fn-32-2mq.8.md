@@ -140,6 +140,43 @@ Add to `cai doctor`:
 
 ## Implementation Summary
 
+Added release channel configuration (`stable`/`nightly`) with full precedence chain and template integration.
+
+### Config Layer (config.sh)
+- `_CAI_IMAGE_CHANNEL` global variable at line 76
+- `[image].channel` parsing in `_containai_parse_config()` (lines 545-557)
+- `_cai_config_channel()` helper function with precedence: CLI > env > config > default
+- Validation with warning on invalid values, stable fallback
+
+### CLI Layer (containai.sh)
+- `--channel <value>` flag for run/shell/exec commands
+- Sets `_CAI_CHANNEL_OVERRIDE` global for precedence override
+- Shell completion for `--channel` (completes `stable` and `nightly`)
+- Updated help messages for all relevant commands
+
+### Template Layer (template.sh)
+- default.Dockerfile uses `ARG BASE_IMAGE=ghcr.io/novotnyllc/containai:latest`
+- `_cai_build_template()` passes `--build-arg BASE_IMAGE="$(_cai_base_image)"`
+- `cai template upgrade` command with subcommand handler
+- `_cai_template_needs_upgrade()` detects hardcoded FROM lines
+- `_cai_template_upgrade_file()` rewrites individual templates
+
+### Doctor Integration (doctor.sh)
+- Channel support check in text output (`[OK] Uses ARG BASE_IMAGE` or `[WARN] Hardcoded base image`)
+- `channel_support` field in JSON output
+- Warns users to run `cai template upgrade` when templates use hardcoded base
+
+### Registry/Update Integration
+- `_cai_base_image()` in registry.sh calls `_cai_config_channel()` for precedence
+- Freshness check in container.sh uses `_cai_base_image()`
+- Refresh command in update.sh uses `_cai_base_image()`
+
+## Verification
+- All bash syntax checks pass
+- shellcheck passes on modified files
+- All acceptance criteria satisfied
+## Implementation Summary
+
 Added release channel configuration (`stable`/`nightly`) with full precedence chain and template integration:
 
 ### Config Layer (config.sh)

@@ -73,9 +73,8 @@ The `_cai_build_template` function already accepts `docker_context` as its secon
 - [ ] Clears registry cache for refreshed image after pull
 
 ## Done summary
-TBD
-
+Implemented `cai --refresh` (and `cai refresh`) command to pull the latest base image and optionally rebuild the default template, using the same Docker context selection as container creation.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 2c160a8, 0cb78bc, 6adaaac
+- Tests: shellcheck -x src/lib/update.sh src/containai.sh
 - PRs:

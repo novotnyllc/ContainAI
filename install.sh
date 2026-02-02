@@ -26,7 +26,13 @@
 # Environment variables:
 #   CAI_INSTALL_DIR  - Installation directory (default: ~/.local/share/containai)
 #   CAI_BIN_DIR      - Binary directory (default: ~/.local/bin)
-#   CAI_BRANCH       - Git branch to install (default: main)
+#   CAI_BRANCH       - Git branch to install (explicit override, takes precedence over CAI_CHANNEL)
+#   CAI_CHANNEL      - Release channel: "stable" (default, installs latest tag) or "nightly" (tracks main)
+#
+# Channel Behavior:
+#   CAI_BRANCH set:       Checkout specified branch (ignores channel)
+#   CAI_CHANNEL=nightly:  Checkout/track main branch
+#   CAI_CHANNEL=stable:   Checkout latest v* tag (default)
 #
 # ==============================================================================
 set -euo pipefail
@@ -70,7 +76,10 @@ error() { printf '%b[ERROR]%b %s\n' "$RED" "$NC" "$1" >&2; }
 REPO_URL="https://github.com/novotnyllc/containai.git"
 INSTALL_DIR="${CAI_INSTALL_DIR:-$HOME/.local/share/containai}"
 BIN_DIR="${CAI_BIN_DIR:-$HOME/.local/bin}"
-BRANCH="${CAI_BRANCH:-main}"
+# CAI_BRANCH is explicit branch override (takes precedence over channel)
+BRANCH="${CAI_BRANCH:-}"
+# CAI_CHANNEL controls release channel (stable/nightly)
+CHANNEL="${CAI_CHANNEL:-stable}"
 
 # Path to bash 4+ (set by bootstrap_bash if needed)
 BASH4_PATH=""
@@ -488,16 +497,38 @@ check_prerequisites() {
 # Installation
 # ==============================================================================
 install_containai() {
-    info "Installing ContainAI to $INSTALL_DIR..."
+    # Determine checkout strategy based on BRANCH vs CHANNEL
+    # BRANCH takes precedence (power users, testing specific branch)
+    # CHANNEL controls stable (tags) vs nightly (main)
+    local checkout_mode checkout_target
+
+    if [[ -n "$BRANCH" ]]; then
+        # CAI_BRANCH set - explicit branch override
+        # Validate branch name (reject option-like values)
+        if [[ "$BRANCH" == -* ]]; then
+            error "Invalid branch name: '$BRANCH'"
+            return 1
+        fi
+        checkout_mode="branch"
+        checkout_target="$BRANCH"
+        info "Installing ContainAI to $INSTALL_DIR..."
+        info "Branch override: $BRANCH (CAI_BRANCH)"
+    elif [[ "$CHANNEL" == "nightly" ]]; then
+        # Nightly channel - track main branch
+        checkout_mode="nightly"
+        checkout_target="main"
+        info "Installing ContainAI to $INSTALL_DIR..."
+        info "Channel: nightly (main branch)"
+    else
+        # Stable channel (default) - will checkout latest tag after clone
+        checkout_mode="stable"
+        checkout_target=""
+        info "Installing ContainAI to $INSTALL_DIR..."
+        info "Channel: stable (latest release)"
+    fi
 
     # Create parent directory
     mkdir -p "$(dirname "$INSTALL_DIR")"
-
-    # Validate branch name (reject empty or option-like values)
-    if [[ -z "$BRANCH" ]] || [[ "$BRANCH" == -* ]]; then
-        error "Invalid branch name: '$BRANCH'"
-        return 1
-    fi
 
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         # Existing installation - update
@@ -510,10 +541,32 @@ install_containai() {
         info "Existing installation found, updating..."
         (
             cd -- "$INSTALL_DIR"
-            # Use refspec to avoid branch name being parsed as option
-            git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-            # Use -B to create/reset local branch tracking remote (handles missing local branch)
-            git checkout -B "$BRANCH" "origin/$BRANCH"
+            git fetch --tags origin
+
+            case "$checkout_mode" in
+                branch)
+                    # Explicit branch override
+                    git fetch origin "refs/heads/$checkout_target:refs/remotes/origin/$checkout_target"
+                    git checkout -B "$checkout_target" "origin/$checkout_target"
+                    ;;
+                nightly)
+                    # Nightly: track main branch
+                    git checkout main
+                    git pull origin main
+                    ;;
+                stable)
+                    # Stable: checkout latest semver tag
+                    local latest_tag
+                    latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
+                    if [[ -n "$latest_tag" ]]; then
+                        git checkout "$latest_tag"
+                    else
+                        warn "No release tags found, staying on main"
+                        git checkout main
+                        git pull origin main
+                    fi
+                    ;;
+            esac
         )
         success "Updated to latest version"
     else
@@ -524,17 +577,70 @@ install_containai() {
             warn "Removing and re-cloning..."
             rm -rf "$INSTALL_DIR"
         fi
-        # Clone with explicit refspec to avoid branch name being parsed as option
-        git clone --branch "$BRANCH" --depth 1 -- "$REPO_URL" "$INSTALL_DIR"
+
+        # Clone repo (always start with main for fresh clone, then checkout target)
+        git clone --depth 1 -- "$REPO_URL" "$INSTALL_DIR"
+
+        # Fetch tags and checkout based on mode
+        (
+            cd -- "$INSTALL_DIR"
+
+            case "$checkout_mode" in
+                branch)
+                    # Explicit branch override - fetch the specific branch
+                    git fetch origin "refs/heads/$checkout_target:refs/remotes/origin/$checkout_target" --depth 1
+                    git checkout -B "$checkout_target" "origin/$checkout_target"
+                    ;;
+                nightly)
+                    # Nightly: already on main from clone
+                    :
+                    ;;
+                stable)
+                    # Stable: fetch tags and checkout latest
+                    git fetch --tags origin
+                    local latest_tag
+                    latest_tag=$(git tag -l 'v*' | sort -V | tail -1)
+                    if [[ -n "$latest_tag" ]]; then
+                        git checkout "$latest_tag"
+                    else
+                        warn "No release tags found, staying on main"
+                    fi
+                    ;;
+            esac
+        )
         success "Cloned ContainAI repository"
     fi
 
-    # Show installed version
+    # Show installed version and checkout info
     if [[ -f "$INSTALL_DIR/VERSION" ]]; then
         local version
         version=$(tr -d '[:space:]' <"$INSTALL_DIR/VERSION")
         info "Installed version: $version"
     fi
+
+    # Show checkout state
+    (
+        cd -- "$INSTALL_DIR"
+        local current_ref
+        current_ref=$(git describe --tags --exact-match 2>/dev/null || git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+        case "$checkout_mode" in
+            branch)
+                success "Checked out branch: $checkout_target (CAI_BRANCH override)"
+                ;;
+            nightly)
+                local short_sha
+                short_sha=$(git rev-parse --short HEAD 2>/dev/null)
+                success "Checked out nightly channel (main branch, $short_sha)"
+                ;;
+            stable)
+                if [[ "$current_ref" == v* ]]; then
+                    success "Checked out stable release: $current_ref"
+                else
+                    warn "On branch $current_ref (no release tags found)"
+                fi
+                ;;
+        esac
+    )
 }
 
 setup_path() {
