@@ -1,0 +1,42 @@
+{
+  "name": "containai-skills",
+  "version": "1.0.0",
+  "description": "Skills for using ContainAI sandboxed containers with AI coding agents",
+  "skills": [
+    {
+      "name": "containai-overview",
+      "path": "skills/containai-overview.md",
+      "description": "What is ContainAI and when to use it"
+    },
+    {
+      "name": "containai-quickstart",
+      "path": "skills/containai-quickstart.md",
+      "description": "Start a sandbox, run commands, stop"
+    },
+    {
+      "name": "containai-lifecycle",
+      "path": "skills/containai-lifecycle.md",
+      "description": "Container lifecycle: run, shell, exec, stop, status, gc"
+    },
+    {
+      "name": "containai-sync",
+      "path": "skills/containai-sync.md",
+      "description": "Import, export, and sync operations"
+    },
+    {
+      "name": "containai-setup",
+      "path": "skills/containai-setup.md",
+      "description": "Doctor, setup, and validation commands"
+    },
+    {
+      "name": "containai-customization",
+      "path": "skills/containai-customization.md",
+      "description": "Templates, startup hooks, and network configuration"
+    },
+    {
+      "name": "containai-troubleshooting",
+      "path": "skills/containai-troubleshooting.md",
+      "description": "Common errors and solutions"
+    }
+  ]
+}
