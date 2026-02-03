@@ -11,7 +11,7 @@
 
 1. **REC-001:** Add `template` command to main help (hidden feature, high user impact)
 2. **REC-002:** Improve error actionability for "requires a value" messages (127 callsites)
-3. **REC-003:** Normalize `--name` to `--container` in `cai links` (consistency)
+3. **REC-003:** Move `acp` to main subcommand list (editor integration is key feature)
 
 ### Overall Assessment
 
@@ -31,7 +31,7 @@
 **Priority:** 5 × 4 = 20 (Impact × Frequency)
 **Effort:** Low (add one line to `_containai_help()`)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Current:** `template` command exists and works but is not listed in `cai help`
 **Proposed:** Add to Configuration Commands section in main help
@@ -63,7 +63,7 @@
 **Priority:** 4 × 3 = 12 (editor integration is key feature)
 **Effort:** Low (reorder help text)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Current:** `acp` is buried after "Run Options" section, not with other subcommands
 **Proposed:** Move to main "Subcommands" section alongside shell, run, exec
@@ -79,7 +79,7 @@
 **Priority:** 3 × 3 = 9
 **Effort:** Low (add alias)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** already planned (fn-36-rb7 scope)
+**Owner epic:** fn-36-rb7 | **Status:** already planned
 
 **Current:** `status` is only command missing `-w` for `--workspace`
 **Proposed:** Add `-w` alias to match run, shell, exec, import, export, doctor, config, links
@@ -145,7 +145,7 @@
 **Priority:** 3 × 3 = 9
 **Effort:** Medium (new help function)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Current:** `cai docker --help` shows Docker's own help, not ContainAI's context behavior
 **Proposed:** Add `_containai_docker_help()` explaining context injection and `-u agent`
@@ -161,7 +161,7 @@
 **Priority:** 3 × 3 = 9 (scripting users need this)
 **Effort:** Medium (research + document)
 **Breaking:** No
-**Owner epic:** fn-45 | **Status:** planned (CLI reference documentation)
+**Owner epic:** fn-45 | **Status:** already planned
 
 **Current:** Only shell, exec, links, doctor document exit codes
 **Proposed:** Add exit codes section to all command help
@@ -177,7 +177,7 @@
 **Priority:** 2 × 3 = 6
 **Effort:** Medium (research + document)
 **Breaking:** No
-**Owner epic:** fn-45 | **Status:** planned (CLI reference documentation)
+**Owner epic:** fn-45 | **Status:** already planned
 
 **Current:** Only `update` mentions `CAI_CHANNEL`, `CAI_BRANCH`; `CONTAINAI_VERBOSE` not in command help
 **Proposed:** Add "Environment Variables" section to relevant command help
@@ -225,7 +225,7 @@
 **Priority:** 3 × 2 = 6
 **Effort:** Medium (warning + removal after 2 releases)
 **Breaking:** Yes (after deprecation period)
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Migration path:**
 1. Release N: Add `--container` alias (REC-005)
@@ -246,7 +246,7 @@
 **Priority:** 2 × 2 = 4
 **Effort:** Low (add warning, schedule removal)
 **Breaking:** Yes (after deprecation period)
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Migration path:**
 1. Release N: Warn when `--restart` used
@@ -287,7 +287,7 @@
 **Priority:** 2 × 2 = 4
 **Effort:** Medium (docs + help text)
 **Breaking:** No
-**Owner epic:** fn-45 | **Status:** new (documentation)
+**Owner epic:** fn-45 | **Status:** new
 
 **Current:** Both commands check system; distinction not obvious
 **Proposed:** Add help text: "`validate` checks isolation requirements (read-only); `doctor` diagnoses and fixes issues"
@@ -341,7 +341,7 @@
 **Priority:** 3 × 2 = 6
 **Effort:** Medium (add --help-full pattern)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task
+**Owner epic:** fn-36-rb7 | **Status:** new
 
 **Current:** `cai setup --help` shows 100+ lines of platform-specific detail
 **Proposed:** Default `--help` shows summary; `--help-full` shows all detail
@@ -357,7 +357,7 @@
 **Priority:** 2 × 2 = 4
 **Effort:** Low (add description or alias)
 **Breaking:** No
-**Owner epic:** fn-45 | **Status:** new (documentation)
+**Owner epic:** fn-45 | **Status:** new
 
 **Current:** `gc` (garbage collection) may be jargon for novices
 **Proposed:** Add description in help: "gc - Clean up unused containers and resources"
@@ -433,7 +433,7 @@
 **Priority:** 2 × 2 = 4
 **Effort:** Medium (documentation + deprecation plan)
 **Breaking:** Potentially (if positional deprecated)
-**Owner epic:** fn-45 | **Status:** new (documentation priority)
+**Owner epic:** fn-45 | **Status:** new
 
 **Current:** Commands accept workspace as both positional AND flag:
 - `cai run /path` OR `cai run --workspace /path`
@@ -549,25 +549,25 @@
 
 | Recommendation | Owner Epic | Status |
 |----------------|------------|--------|
-| REC-001 | fn-36-rb7 | new task |
+| REC-001 | fn-36-rb7 | new |
 | REC-002 | NEW | new |
-| REC-003 | fn-36-rb7 | new task |
+| REC-003 | fn-36-rb7 | new |
 | REC-004 | fn-36-rb7 | already planned |
 | REC-005 | fn-36-rb7 | partially planned |
 | REC-006 | NEW | new |
 | REC-007 | NEW | new |
-| REC-008 | fn-36-rb7 | new task |
-| REC-009 | fn-45 | planned |
-| REC-010 | fn-45 | planned |
+| REC-008 | fn-36-rb7 | new |
+| REC-009 | fn-45 | already planned |
+| REC-010 | fn-45 | already planned |
 | REC-011 | fn-42 | partially planned |
 | REC-012 | NEW | new |
-| REC-013 | fn-36-rb7 | new task |
-| REC-014 | fn-36-rb7 | new task |
+| REC-013 | fn-36-rb7 | new |
+| REC-014 | fn-36-rb7 | new |
 | REC-015 | fn-36-rb7 | partially planned |
 | REC-016 | fn-45 | new |
 | REC-017 | NEW | new |
 | REC-018 | NEW | new |
-| REC-019 | fn-36-rb7 | new task |
+| REC-019 | fn-36-rb7 | new |
 | REC-020 | fn-45 | new |
 | REC-021 | NEW (RFC) | new |
 | REC-022 | fn-45 | new |

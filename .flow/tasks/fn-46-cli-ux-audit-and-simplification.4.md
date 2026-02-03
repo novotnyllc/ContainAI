@@ -125,16 +125,16 @@ Synthesized findings from tasks .1-.3 into prioritized recommendations document.
 ## Key Deliverables
 
 - Created `.flow/specs/cli-ux-recommendations.md` with 25 prioritized recommendations
-- Categorized: 10 quick wins, 10 medium effort, 5 breaking changes
-- Top 3 priorities identified: template discoverability, error actionability, flag consistency
+- Categorized: 7 quick wins, 13 medium effort, 5 breaking changes
+- Top 3 priorities identified: template discoverability, error actionability, acp discoverability
 - Cross-referenced all recommendations with owner epics (fn-36-rb7, fn-42, fn-45, NEW)
 - Included full audit data appendices (heuristic scores, flag matrix, error templates)
 
 ## Document Structure
 
 1. Executive Summary with metrics
-2. Quick Wins (10 recommendations, implement now)
-3. Medium Effort (10 recommendations, next release)
+2. Quick Wins (7 recommendations, implement now)
+3. Medium Effort (13 recommendations, next release)
 4. Breaking Changes (5 recommendations, requires RFC)
 5. Appendix A: Full Audit Data
 6. Appendix B: Epic Cross-Reference
