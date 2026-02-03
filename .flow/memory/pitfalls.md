@@ -397,3 +397,6 @@ When validating tar archives, use tar -tvf to check entry types and reject symli
 
 ## 2026-02-03 manual [pitfall]
 Codex impl-review may make factually incorrect claims about code behavior - always verify reviewer assertions against actual source code before accepting NEEDS_WORK verdicts
+
+## 2026-02-03 manual [pitfall]
+When auditing code patterns, always run grep with exact patterns and wc -l to get accurate counts before writing reports - manual estimates are unreliable
