@@ -425,3 +425,6 @@ Codex impl-review may return stale findings if diff base doesn't include recent 
 
 ## 2026-02-03 manual [pitfall]
 Mermaid flowchart edges cannot link to subgraph IDs directly - link to actual nodes inside subgraphs instead (e.g., A --> NodeInB, not A --> SubgraphB)
+
+## 2026-02-03 manual [pitfall]
+Link validation scripts must verify normalized paths stay within repo root to prevent false-positive validation of escaped paths (../../etc/passwd)
