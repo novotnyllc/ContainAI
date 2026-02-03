@@ -2315,11 +2315,16 @@ _containai_start_container() {
                 fi
             fi
             # Apply per-container network policy on attach (policies may have changed)
-            # Pass template network.conf path if using templates
+            # Pass template network.conf path - use default template in --image-tag mode
+            # (matches mount logic at container creation)
+            local policy_template_name="$template_name"
+            if [[ "$use_template" != "true" ]]; then
+                policy_template_name="default"
+            fi
             local template_network_conf=""
-            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
+            if [[ -n "$policy_template_name" ]]; then
                 local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
-                template_network_conf="${templates_root}/${template_name}/network.conf"
+                template_network_conf="${templates_root}/${policy_template_name}/network.conf"
                 [[ ! -f "$template_network_conf" ]] && template_network_conf=""
             fi
             _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"
@@ -2454,11 +2459,16 @@ _containai_start_container() {
             fi
 
             # Apply per-container network policy if configured
-            # Pass template network.conf path if using templates
+            # Pass template network.conf path - use default template in --image-tag mode
+            # (matches mount logic at container creation)
+            local policy_template_name="$template_name"
+            if [[ "$use_template" != "true" ]]; then
+                policy_template_name="default"
+            fi
             local template_network_conf=""
-            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
+            if [[ -n "$policy_template_name" ]]; then
                 local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
-                template_network_conf="${templates_root}/${template_name}/network.conf"
+                template_network_conf="${templates_root}/${policy_template_name}/network.conf"
                 [[ ! -f "$template_network_conf" ]] && template_network_conf=""
             fi
             _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"
@@ -2746,11 +2756,11 @@ _containai_start_container() {
             fi
 
             # Apply per-container network policy if configured
-            # Pass template network.conf path if using templates
+            # Pass template network.conf path - use mount_template_name (same as hooks mount above)
+            # In --image-tag mode, this is "default"; otherwise it's the specified template
             local template_network_conf=""
-            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
-                local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
-                template_network_conf="${templates_root}/${template_name}/network.conf"
+            if [[ -n "$mount_template_name" ]]; then
+                template_network_conf="${template_path}/network.conf"
                 [[ ! -f "$template_network_conf" ]] && template_network_conf=""
             fi
             _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"

@@ -16,7 +16,7 @@ cd /path/to/project && cai   # Agent starts in isolated container
 
 | | Docker Sandbox | Plain Containers | ContainAI |
 |---|---|---|---|
-| User namespace isolation | No | Manual | Automatic |
+| User namespace isolation | No (by default) | Manual | Automatic |
 | Docker-in-Docker | Host socket only | Requires `--privileged` | Unprivileged via Sysbox |
 | Your dotfiles/preferences | No | No | Synced automatically |
 | systemd/services | No | No | Full init system |
@@ -32,7 +32,7 @@ See the [full security comparison](docs/security-comparison.md) for Docker ECI, 
 
 **2. Your preferences, synced** - Git config, shell aliases, and editor settings carry into the container. The environment feels like your local machine, not a sterile sandbox.
 
-**3. Ephemeral or persistent - your choice** - Spin up disposable containers for untrusted code, or keep a long-lived dev environment with persistent volumes. Switch modes with a flag.
+**3. Ephemeral or persistent - your choice** - Spin up disposable containers for untrusted code, or keep a long-lived dev environment with persistent volumes. Use `--reset` for a fresh volume, or just `cai` for persistent (see [Lifecycle](docs/lifecycle.md)).
 
 ## Quick Start
 
