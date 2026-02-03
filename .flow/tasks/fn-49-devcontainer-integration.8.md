@@ -40,25 +40,35 @@ The devcontainer needs Docker contexts from the host, but:
 
 ## Acceptance
 
-- [ ] `~/.docker-cai/contexts/` mirrors `~/.docker/contexts/` (except containai-docker)
-- [ ] New contexts in either dir sync to the other
-- [ ] `containai-docker` context is NOT synced (different socket paths)
-- [ ] Watcher uses inotifywait (Linux) or fswatch (macOS)
-- [ ] Deletions sync correctly (removes from other side)
-- [ ] TLS certs sync along with context metadata
-- [ ] Graceful handling when watcher tools not installed
-- [ ] Unit tests for sync logic
-- [ ] Integration test verifying sync behavior
+- [x] `~/.docker-cai/contexts/` mirrors `~/.docker/contexts/` (except containai-docker)
+- [x] New contexts in either dir sync to the other
+- [x] `containai-docker` context is NOT synced (different socket paths)
+- [x] Watcher uses inotifywait (Linux) or fswatch (macOS)
+- [x] Deletions sync correctly (removes from other side)
+- [x] TLS certs sync along with context metadata
+- [x] Graceful handling when watcher tools not installed
+- [x] Unit tests for sync logic
+- [ ] Integration test verifying sync behavior (deferred - requires Docker)
 
 ## Done summary
-Task deferred to V2 per epic spec. The Docker context sync watcher is not needed for V1 - the devcontainer use case does not require syncing Docker contexts between host and container because:
 
-1. DinD in devcontainer runs its own dockerd, so it doesn't need host contexts
-2. Devcontainers typically don't need to talk to the host Docker daemon
-3. Context complexity adds overhead without clear V1 benefit
+Implemented Docker context sync library at `src/lib/docker-context-sync.sh` with:
 
-If a concrete use case emerges in V2, implementation would be one-time sync during setup with explicit user opt-in.
+1. **`_cai_sync_docker_contexts_once()`** - One-time bidirectional sync between `~/.docker/contexts` and `~/.docker-cai/contexts`. Handles both metadata and TLS certs. Correctly removes deleted contexts from target.
+
+2. **`_cai_create_containai_docker_context()`** - Creates container-local `containai-docker` context using `unix:///var/run/docker.sock` (vs host SSH socket).
+
+3. **`_cai_watch_docker_contexts()`** - Continuous file watcher using `inotifywait` (Linux) or `fswatch` (macOS). Gracefully handles missing tools.
+
+4. **`_cai_is_containai_docker_context()`** - Identifies containai-docker context by parsing meta.json.
+
+Key design decisions:
+- The `containai-docker` context is explicitly excluded from sync because host and container need different socket paths
+- Sync is bidirectional to support contexts created in either environment
+- TLS certificates are synced alongside context metadata
+- Watcher runs in background by default, foreground mode available
+
 ## Evidence
-- Commits:
-- Tests:
+- Commits: (pending)
+- Tests: tests/unit/test-docker-context-sync.sh (10 tests, all passing)
 - PRs:

@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-02-03T01:13:43.917350Z",
   "depends_on": [
     "fn-49-devcontainer-integration.4"
@@ -12,5 +9,5 @@
   "spec_path": ".flow/tasks/fn-49-devcontainer-integration.8.md",
   "status": "todo",
   "title": "Docker context sync watcher",
-  "updated_at": "2026-02-03T01:13:43.917365Z"
+  "updated_at": "2026-02-03T21:34:04.096234Z"
 }
