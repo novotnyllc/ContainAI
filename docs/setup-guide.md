@@ -41,7 +41,7 @@ Before running `cai setup`, ensure you have:
 |-------------|---------|---------------|
 | WSL2 kernel | 5.5+ | `uname -r` |
 | systemd | Enabled | `ps -p 1 -o comm=` (should show `systemd`) |
-| Ubuntu/Debian | 22.04+ / 11+ | `lsb_release -a` |
+| Ubuntu/Debian | Any supported release | `lsb_release -a` |
 
 **Enable systemd in WSL2** (if not already enabled):
 
@@ -65,7 +65,7 @@ wsl --shutdown
 |-------------|---------|---------------|
 | Kernel | 5.5+ | `uname -r` |
 | systemd | Running | `systemctl --version` |
-| Ubuntu/Debian | 22.04+ / 11+ | For auto-install; manual install for others |
+| Ubuntu/Debian | Any supported release | For auto-install; manual install for others |
 
 ### macOS
 
@@ -363,7 +363,7 @@ macOS uses Lima to run a Linux VM with Docker and Sysbox. This provides the same
 
 1. **Installs Lima** via Homebrew (if not present)
 2. **Creates Lima VM** `containai-docker` with:
-   - Ubuntu 24.04 LTS
+- Ubuntu 24.04 LTS
    - Docker Engine
    - Sysbox runtime
 3. **Waits for Docker socket** to be ready

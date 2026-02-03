@@ -404,7 +404,7 @@ build_sysbox_deb() {
     log_info "Patching version to: $full_version"
     printf '%s' "$full_version" > "$sysbox_dir/VERSION"
 
-    # Build the generic deb package (ubuntu-jammy based, works across distros)
+    # Build the generic deb package (works across distros)
     log_info "Building deb package for $ARCH (this may take 10-20 minutes)..."
     cd -- "$pkgr_dir"
 

@@ -3809,7 +3809,7 @@ _cai_setup_linux() {
     else
         _cai_error "Kernel $kernel_version is too old. Sysbox requires kernel 5.5+"
         _cai_error "  Upgrade your kernel to 5.5+ to use Sysbox."
-        _cai_error "  Most modern distros (Ubuntu 22.04+, Debian 12+) include 5.15+."
+        _cai_error "  Most modern distros include 5.15+."
         return 1
     fi
 
@@ -3821,8 +3821,8 @@ _cai_setup_linux() {
         _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
 _cai_spacing
         _cai_info "Supported distributions for auto-install:"
-        _cai_info "  - Ubuntu 22.04, 24.04"
-        _cai_info "  - Debian 11, 12"
+        _cai_info "  - Ubuntu (LTS)"
+        _cai_info "  - Debian (stable)"
 _cai_spacing
         _cai_info "For other distributions, install Sysbox manually:"
         _cai_info "  Fedora/RHEL: Build from source"
@@ -4669,7 +4669,7 @@ What It Does (macOS):
   7. Installs shell completions for bash and zsh
 
 Requirements (Linux native):
-  - Ubuntu 22.04/24.04 or Debian 11/12 (auto-install)
+  - Ubuntu/Debian (auto-install)
   - Other distros: Manual Sysbox installation required
   - systemd-based init system
   - Docker Engine installed

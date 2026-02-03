@@ -170,8 +170,9 @@ printf '%s\n' "$VERSION" > "$PACKAGE_DIR/VERSION"
 printf '  Copying LICENSE...\n'
 cp "$REPO_ROOT/LICENSE" "$PACKAGE_DIR/LICENSE"
 
-# Create output directory
+# Create output directory and resolve to absolute path (tar runs from staging dir)
 mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
 # Create tarball
 TARBALL_PATH="$OUTPUT_DIR/${TARBALL_NAME}.tar.gz"
