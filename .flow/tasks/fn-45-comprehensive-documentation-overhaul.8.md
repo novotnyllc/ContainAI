@@ -86,9 +86,23 @@ Current link validation suggestion in epic is just `grep -r '\[.*\](docs/' READM
 - [ ] Example output shown in script header comments
 
 ## Done summary
-TBD
+# Task fn-45.8 Summary: Create documentation link validation script
 
+Created `scripts/check-doc-links.sh` that validates all internal documentation links:
+
+## Features Implemented
+- Validates ALL relative markdown links (prefixed and bare paths like `SECURITY.md`, `LICENSE`)
+- Validates same-file anchors (`#section-name`) for TOC/in-page links
+- Validates cross-file anchors (`docs/foo.md#section`)
+- Handles duplicate headings correctly (GitHub-style: `-1`, `-2` suffix)
+- Excludes external URLs (http, https, mailto, ftp, data)
+- Handles directory links (validates if directory exists, uses README.md for anchor checks)
+- Reports file:line for each broken link
+- Returns non-zero exit code on broken links
+- Passes shellcheck with no warnings
+- Documented in script header with usage examples
+- Added to CONTRIBUTING.md testing section
 ## Evidence
 - Commits:
-- Tests:
+- Tests: scripts/check-doc-links.sh runs successfully (exit 0), Script detects broken file links, Script detects broken same-file anchors, Script detects broken cross-file anchors, Script handles duplicate headings correctly, Script handles directory links, shellcheck passes with no warnings
 - PRs:

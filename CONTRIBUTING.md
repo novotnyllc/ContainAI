@@ -213,6 +213,16 @@ Integration tests are located in `tests/integration/`:
 | `test-secure-engine.sh` | Verifies Sysbox runtime and Docker context setup |
 | `test-sync-integration.sh` | Tests dotfile sync, config parsing, container lifecycle |
 
+### Documentation Validation
+
+Before submitting docs changes, validate internal links:
+
+```bash
+./scripts/check-doc-links.sh
+```
+
+This script validates all internal markdown links (relative paths and anchors) in `docs/` and root markdown files. It catches broken links, invalid anchors, and handles GitHub's duplicate heading behavior.
+
 ### Running Tests
 
 ```bash
