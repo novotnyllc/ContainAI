@@ -184,8 +184,6 @@ cai
 
 ```mermaid
 flowchart TD
-    accTitle: ContainAI Usage Pattern Decision Tree
-    accDescr: A decision flowchart to help users choose between three usage patterns based on their container and volume persistence needs.
 
     A[Start: New Session] --> B{Do you need<br/>container persistence?}
     B -->|Yes| C[Long-lived]

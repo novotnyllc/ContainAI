@@ -95,8 +95,6 @@ cai doctor
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Runtime Decision Tree
-accDescr: Decision flow from cai doctor check to either ready state (Sysbox OK) or install instructions for WSL2, macOS, or native Linux.
 flowchart TD
     doctor["cai doctor"]
     doctor --> sysbox["Sysbox<br/>[OK]"]
@@ -169,8 +167,6 @@ When you ran `cai`, ContainAI:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Sandbox Architecture Overview
-accDescr: Nested view showing host machine containing Sysbox runtime, which contains ContainAI sandbox with workspace mount, persistent data volume, and running AI agent.
 flowchart TB
     subgraph host["Your Host Machine"]
         subgraph runtime["Sysbox Runtime"]

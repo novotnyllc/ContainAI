@@ -51,8 +51,6 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 ```mermaid
 %%{init: {'theme': 'base'}}%%
 flowchart TB
-    accTitle: ContainAI CLI Command Hierarchy
-    accDescr: Diagram showing the structure of cai commands organized by category - Lifecycle, Data, Diagnostics, Configuration, and Maintenance.
 
     cai[cai]
 

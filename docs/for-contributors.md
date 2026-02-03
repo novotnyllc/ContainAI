@@ -34,8 +34,6 @@
 ```mermaid
 %%{init: {'theme': 'base'}}%%
 flowchart TD
-    accTitle: Contributor documentation navigation
-    accDescr: Flowchart showing the recommended reading path for ContainAI contributors, from contributing guide through architecture and testing.
 
     START["Start Here"]
     CONTRIB["CONTRIBUTING.md"]

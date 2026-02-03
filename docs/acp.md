@@ -45,8 +45,6 @@ Configure your editor to use `cai --acp <agent>`:
   'noteTextColor': '#ffffff',
   'noteBorderColor': '#16213e'
 }}}%%
-accTitle: ACP Protocol Flow
-accDescr: Sequence diagram showing editor communication through ACP stdio to proxy, then cai exec to container where agent runs with MCP server connections.
 sequenceDiagram
     participant Editor
     participant Proxy as cai --acp (Proxy)

@@ -23,8 +23,6 @@
 ```mermaid
 %%{init: {'theme': 'base'}}%%
 flowchart TD
-    accTitle: Security documentation hierarchy
-    accDescr: Flowchart showing the structure of ContainAI security documentation, from high-level threat model down to implementation details.
 
     START["Start Here"]
     SM["SECURITY.md<br/>Threat Model"]

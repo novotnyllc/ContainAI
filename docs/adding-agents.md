@@ -17,8 +17,6 @@ Adding an agent involves six steps:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Six-Step Agent Addition Workflow
-accDescr: Sequential workflow from research through Dockerfile, manifest, import map, generators, to final testing in container.
 flowchart LR
     S1["1. Research<br/>Installation & config"]
     S2["2. Dockerfile<br/>Add to Dockerfile.agents"]

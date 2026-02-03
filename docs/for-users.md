@@ -34,8 +34,6 @@
 ```mermaid
 %%{init: {'theme': 'base'}}%%
 flowchart TD
-    accTitle: User documentation navigation
-    accDescr: Flowchart showing the recommended reading path for ContainAI users, starting from quickstart through configuration to troubleshooting.
 
     START["Start Here"]
     QS["Quickstart Guide"]

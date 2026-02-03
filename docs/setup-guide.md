@@ -94,8 +94,6 @@ The `cai setup` command installs and configures multiple components. Here's what
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Component Installation Stack
-accDescr: Layered view of installed components from Docker daemon and Sysbox runtime up through context configuration, SSH infrastructure, and user config files.
 flowchart TB
     subgraph Docker["Docker Layer"]
         Daemon["containai-docker.service<br/>/var/run/containai-docker.sock"]
@@ -208,8 +206,6 @@ Updates are applied atomically by swapping symlinks and restarting the `containa
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Platform Selection Decision Tree
-accDescr: Decision flowchart for choosing installation path based on operating system - WSL2 for Windows, native for Linux, Lima VM for macOS.
 flowchart TD
     Start["What OS?"]
     Start -->|Windows| WSL["Use WSL2<br/>Ubuntu/Debian distro"]

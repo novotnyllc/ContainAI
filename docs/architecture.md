@@ -57,8 +57,6 @@ Sysbox automatically maps container root (UID 0) to an unprivileged host user. N
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Sysbox User Namespace Mapping
-accDescr: Shows how Sysbox maps container UIDs (root=0, agent=1000) to unprivileged host UIDs (100000+, 101000+) through user namespace isolation.
 flowchart LR
     subgraph Container["System Container"]
         CRoot["root (UID 0)"]
@@ -113,8 +111,6 @@ ContainAI uses a dedicated Docker installation separate from Docker Desktop:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: ContainAI Architecture Layers
-accDescr: Three-tier architecture showing host system with dedicated docker-ce, system container running systemd services (SSH, Docker, init), and inner containers for Docker-in-Docker builds and runs.
 flowchart TB
     subgraph Host["Host System"]
         DD["Docker Desktop<br/>(if present, NOT used)"]
@@ -189,8 +185,6 @@ The dedicated docker-ce instance (`/etc/containai/docker/daemon.json`):
   'activationBorderColor': '#0f3460',
   'sequenceNumberColor': '#1a1a2e'
 }}}%%
-accTitle: Container Lifecycle Sequence
-accDescr: Complete lifecycle from cai run through container creation, systemd service startup, SSH key injection, agent session, and graceful shutdown via cai stop.
 sequenceDiagram
     participant User
     participant CLI as cai CLI
@@ -304,8 +298,6 @@ All container access uses SSH instead of `docker attach` or direct execution. Th
   'activationBorderColor': '#0f3460',
   'sequenceNumberColor': '#1a1a2e'
 }}}%%
-accTitle: SSH Connection Flow
-accDescr: Sequence showing cai shell allocating a port, injecting SSH keys, writing SSH config, and establishing connection for interactive shell or VS Code Remote-SSH.
 sequenceDiagram
     participant User
     participant CLI as cai shell
@@ -361,8 +353,6 @@ sequenceDiagram
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Systemd Service Dependencies
-accDescr: Dependency graph showing how ContainAI services (ssh-keygen, ssh, docker, containai-init) depend on systemd targets and each other for proper startup ordering.
 flowchart TD
     subgraph Targets["Systemd Targets"]
         LocalFS["local-fs.target"]
@@ -419,8 +409,6 @@ Sysbox enables secure Docker-in-Docker without `--privileged`:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Docker-in-Docker Architecture
-accDescr: Shows secure DinD with Sysbox where host Docker creates system containers with isolated inner Docker daemon, NOT mounting the host socket for security.
 flowchart TB
     subgraph Host["Host System"]
         HostDocker["ContainAI docker-ce<br/>Runtime: sysbox-runc"]
@@ -483,8 +471,6 @@ Inside the system container (`/etc/docker/daemon.json`):
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Component Architecture
-accDescr: Three-layer architecture showing CLI layer (containai.sh, commands), library layer (core, ssh, container, config, doctor), and container runtime (entrypoint, systemd, Dockerfile).
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
@@ -549,8 +535,6 @@ The CLI sources modular shell libraries from `src/lib/`:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Module Dependencies
-accDescr: Source order of shell library modules from containai.sh through core, platform, docker, doctor, config, container, import, export, setup, ssh, env, to version.
 flowchart TD
     Main["containai.sh"] --> Core["core.sh"]
     Core --> Platform["platform.sh"]
@@ -594,8 +578,6 @@ flowchart TD
   'activationBorderColor': '#0f3460',
   'sequenceNumberColor': '#1a1a2e'
 }}}%%
-accTitle: CLI to Container Data Flow
-accDescr: Data flow from cai run through config parsing, doctor context selection, container creation with sysbox, SSH setup, and final agent session establishment.
 sequenceDiagram
     participant User
     participant CLI as containai.sh
@@ -634,8 +616,6 @@ sequenceDiagram
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Volume Architecture
-accDescr: Shows workspace bind mount and data volume mount in container, with host configs imported via cai import to the persistent data volume containing credentials, shell config, and VS Code settings.
 flowchart LR
     subgraph Host["Host System"]
         Workspace["Workspace<br/>(/path/to/project)"]
@@ -712,8 +692,6 @@ Sysbox provides multiple isolation layers:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Sysbox Security Isolation Model
-accDescr: Security boundaries showing trusted host (kernel, Docker, sysbox components) separated by isolation layer from untrusted container with virtualized /proc and /sys.
 flowchart TB
     subgraph Host["Host (TRUSTED)"]
         HostKernel["Kernel"]

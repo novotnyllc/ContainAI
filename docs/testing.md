@@ -17,8 +17,6 @@ ContainAI uses a tiered testing strategy:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Test Tier Hierarchy
-accDescr: Three-tier testing pyramid from Tier 1 linting (shellcheck, manifest) through Tier 2 integration (Docker runtime) to Tier 3 E2E (Sysbox required).
 flowchart TB
     subgraph T1["Tier 1: Linting (CI)"]
         Shell["shellcheck"]

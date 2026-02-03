@@ -15,8 +15,6 @@ This document describes the config synchronization system between the host and c
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Config Sync Data Flow
-accDescr: Shows how host configs flow via rsync to Docker volume, then appear in container via symlinks from home directories to /mnt/agent-data paths.
 flowchart LR
     subgraph Host["Host System"]
         HostConfigs["~/.claude<br/>~/.config/gh<br/>~/.gitconfig"]
@@ -60,8 +58,6 @@ The import/sync system has three main components that must stay synchronized:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Three-Component Sync System
-accDescr: The sync system requires alignment between import.sh (host sync), Dockerfile.agents (build-time symlinks), and containai-init.sh (runtime directory creation).
 flowchart TB
     subgraph Source["Single Source of Truth"]
         Manifest["sync-manifest.toml"]
