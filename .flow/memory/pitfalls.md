@@ -403,3 +403,6 @@ When auditing code patterns, always run grep with exact patterns and wc -l to ge
 
 ## 2026-02-03 manual [pitfall]
 When task specs define allowed status values (e.g., 'already planned / partially planned / new'), use ONLY those exact values - do not add variants like 'new task' or 'planned' or parenthetical notes
+
+## 2026-02-03 manual [pitfall]
+bash -lc (login shell) sources profile files that can emit stdout, corrupting protocol streams like JSON-RPC; use bash -c instead

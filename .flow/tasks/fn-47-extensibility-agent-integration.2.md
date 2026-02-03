@@ -134,9 +134,8 @@ pip install -r requirements.txt
 - [ ] Integration test added
 
 ## Done summary
-TBD
-
+Implemented startup hooks support in containai-init.sh with run_hooks() function that executes .sh scripts from template-level (/etc/containai/template-hooks/startup.d/) and workspace-level (.containai/hooks/startup.d/) directories in sorted order. Changed systemd drop-ins from Wants= to Requires= for fail-fast behavior when hooks fail.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 4ae492ee2c16ad0dcf2f7a6cd89172e2a72c5193, d7b836d1c307c089a561ba382ad4970db88380ef
+- Tests: bash tests/integration/test-startup-hooks.sh
 - PRs:
