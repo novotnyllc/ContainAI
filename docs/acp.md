@@ -129,10 +129,42 @@ The translation is path-aware and only applies to absolute paths that are descen
 
 ## Supported Agents
 
-| Agent | Command | Status |
-|-------|---------|--------|
-| Claude Code | `cai --acp claude` | Supported |
-| Gemini CLI | `cai --acp gemini` | Supported |
+ContainAI supports **any agent** that implements the ACP protocol. The agent binary must be installed in the container and support the `--acp` flag.
+
+### Built-in Agents
+
+| Agent | Command | Notes |
+|-------|---------|-------|
+| Claude Code | `cai --acp claude` | Pre-installed in default images |
+| Gemini CLI | `cai --acp gemini` | Pre-installed in default images |
+
+### Custom Agents
+
+Any ACP-compatible agent can be used:
+
+```bash
+# Use a custom agent
+cai --acp myagent
+
+# The agent must:
+# 1. Be installed in the container (in $PATH)
+# 2. Support the --acp flag for ACP protocol mode
+```
+
+**Installing custom agents:** Add them to your template Dockerfile:
+
+```dockerfile
+# In your custom template Dockerfile
+RUN npm install -g @mycompany/myagent
+# or
+RUN pip install myagent
+```
+
+Or install at runtime via shell:
+```bash
+cai shell
+npm install -g @mycompany/myagent
+```
 
 ## Editor Configuration
 
@@ -191,11 +223,19 @@ With an ACP-compatible extension, add to `settings.json`:
 Verify the agent is installed in the container:
 ```bash
 cai shell
-which claude  # or which gemini
+command -v claude  # or command -v myagent
 claude --help | grep -i acp  # Verify ACP support
 ```
 
-If not installed, your container image may be missing the agent. Check your template configuration.
+If the agent is not found, you'll see an error like:
+```
+Agent 'myagent' not found in container
+```
+
+**Solutions:**
+- Check the agent name spelling matches the binary name
+- Install the agent in your template Dockerfile
+- Install at runtime: `cai shell` then `npm install -g myagent`
 
 ### MCP server not found
 

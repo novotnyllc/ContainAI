@@ -170,6 +170,10 @@ flowchart TB
 
 ContainAI supports user templates to customize your container environment. Templates let you install additional tools, languages, or startup scripts that persist across container recreations.
 
+For quick customizations that don't require rebuilding images, see:
+- **[Startup Hooks](configuration.md#startup-hooks-runtime-mounts)** - Run scripts at container start
+- **[Network Policies](configuration.md#network-policy-files-runtime-mounts)** - Control egress traffic
+
 ### Template Location
 
 Templates are stored in `~/.config/containai/templates/`. The default template is installed during first use:

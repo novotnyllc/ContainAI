@@ -346,7 +346,7 @@ cai --fresh
 - `--template <name>` builds a user-customized Dockerfile before container creation
 - `--image-tag <tag>` overrides the base image (advanced/debugging use)
 - If both are specified, `--template` takes priority and `--image-tag` is ignored
-- `--image-tag` without `--template` bypasses templates entirely (no Dockerfile build)
+- `--image-tag` without `--template` bypasses template Dockerfile build, but default template hooks and network.conf are still mounted if present
 
 #### Template Container Labels
 
@@ -354,9 +354,132 @@ When a container is created from a template, ContainAI stores the template name 
 - Template mismatch detection when reconnecting to existing containers
 - Guidance to use `--fresh` when switching templates
 
-#### Creating Startup Scripts in Templates
+#### Startup Hooks (Runtime Mounts)
 
-To run scripts when the container starts, create a systemd service in your template Dockerfile.
+The easiest way to run scripts at container startup is using startup hooks. These are shell scripts that run during container initialization - no Dockerfile modification or rebuild required.
+
+**Hook locations (both executed in order):**
+
+| Level | Location | Container Path |
+|-------|----------|----------------|
+| Template | `~/.config/containai/templates/<name>/hooks/startup.d/` | `/etc/containai/template-hooks/startup.d/` |
+| Workspace | `.containai/hooks/startup.d/` | (via workspace mount) |
+
+**Execution order:**
+1. Template hooks first (shared across all workspaces using the template)
+2. Workspace hooks second (project-specific)
+
+Within each directory, scripts run in sorted order (LC_ALL=C sort). Use numeric prefixes for ordering:
+
+```bash
+# Template-level hooks (shared across projects)
+mkdir -p ~/.config/containai/templates/default/hooks/startup.d
+cat > ~/.config/containai/templates/default/hooks/startup.d/10-common.sh << 'HOOK'
+#!/bin/bash
+echo "Common setup for all projects"
+HOOK
+chmod +x ~/.config/containai/templates/default/hooks/startup.d/10-common.sh
+
+# Workspace-level hooks (project-specific)
+mkdir -p .containai/hooks/startup.d
+cat > .containai/hooks/startup.d/30-project.sh << 'HOOK'
+#!/bin/bash
+echo "Project-specific setup"
+npm install
+HOOK
+chmod +x .containai/hooks/startup.d/30-project.sh
+```
+
+**Hook requirements:**
+- Files must have `.sh` extension
+- Files must be executable (`chmod +x`)
+- Non-executable files are skipped with a warning
+- Non-zero exit code fails container startup
+
+**Benefits over systemd services:**
+- No rebuild needed - just restart the container
+- Simple shell scripts - no service file syntax
+- Clear ordering with numeric prefixes
+- Template hooks shared across workspaces
+
+#### Network Policy Files (Runtime Mounts)
+
+Network policy configuration controls egress traffic from containers. This is an opt-in feature - without a config file, all egress is allowed (except hard-blocked ranges).
+
+**Policy locations (merged at runtime):**
+
+| Level | Location | Container Path |
+|-------|----------|----------------|
+| Template | `~/.config/containai/templates/<name>/network.conf` | `/etc/containai/template-network.conf` |
+| Workspace | `.containai/network.conf` | (via workspace mount) |
+
+**Config format (INI, one value per line):**
+
+```ini
+# .containai/network.conf
+[egress]
+preset = package-managers
+preset = git-hosts
+allow = api.anthropic.com
+allow = example.com
+default_deny = true
+```
+
+**Important:** Use one preset/allow per line. Comma-separated values are not supported.
+
+**Config semantics:**
+
+| Setting | Behavior |
+|---------|----------|
+| No `network.conf` | Allow all egress (default) |
+| `network.conf` without `default_deny` | Informational only, no blocking |
+| `default_deny = true` | Enforce allowlist, block everything else |
+
+**Available presets:**
+
+| Preset | Domains |
+|--------|---------|
+| `package-managers` | registry.npmjs.org, pypi.org, files.pythonhosted.org, crates.io, rubygems.org |
+| `git-hosts` | github.com, api.github.com, gitlab.com, bitbucket.org |
+| `ai-apis` | api.anthropic.com, api.openai.com |
+
+**Merge behavior:** Template config provides base policy, workspace config extends it.
+
+**Hard blocks (always applied):**
+- Private ranges (RFC 1918): 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+- Link-local: 169.254.0.0/16
+- Cloud metadata: 169.254.169.254
+
+These ranges cannot be overridden via `allow` entries.
+
+**Example configurations:**
+
+Allow package managers only:
+```ini
+[egress]
+preset = package-managers
+default_deny = true
+```
+
+Allow specific domains:
+```ini
+[egress]
+allow = api.mycompany.com
+allow = auth.mycompany.com
+default_deny = true
+```
+
+Development mode (allow all, log allowed):
+```ini
+[egress]
+preset = package-managers
+preset = git-hosts
+# default_deny omitted = allow all, informational only
+```
+
+#### Creating Startup Scripts in Templates (systemd services)
+
+For more complex startup requirements (long-running daemons, dependencies, restart policies), create a systemd service in your template Dockerfile.
 
 **Important:** Use the symlink pattern, NOT `systemctl enable`. The `systemctl` command fails during docker build because systemd is not running as PID 1.
 

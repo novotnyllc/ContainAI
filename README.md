@@ -75,6 +75,16 @@ Supports agent forwarding and port tunneling for development workflows.
 
 Sysbox maps container root to an unprivileged host user automatically. No manual UID/GID configuration required.
 
+### Extensibility
+
+Customize containers without deep Docker knowledge:
+
+- **Startup hooks** - Drop scripts in `.containai/hooks/startup.d/` to run at container start
+- **Network policies** - Configure egress rules in `.containai/network.conf`
+- **Templates** - Customize Dockerfiles for different project needs
+
+See [Configuration](docs/configuration.md) for details.
+
 ### RFC 1123 Hostnames
 
 Containers receive RFC 1123 compliant hostnames derived from their names. This ensures compatibility with network tools and DNS. Container names with underscores become hyphens in the hostname (e.g., `my_project-main` → `my-project-main`).
