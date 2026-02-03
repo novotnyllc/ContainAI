@@ -416,3 +416,6 @@ When matching iptables rules by comment, use exact pattern with quotes (--commen
 
 ## 2026-02-03 manual [pitfall]
 TOML keys after [table] header become nested - place top-level keys before any table headers
+
+## 2026-02-03 manual [pitfall]
+flowctl codex impl-review uses git diff base..HEAD - changes must be committed before review sees them
