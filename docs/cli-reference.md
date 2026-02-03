@@ -6,13 +6,15 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 **Single source of truth**: The `cai --help` and `cai <subcommand> --help` output is the authoritative reference for CLI options. This documentation provides extended examples, cross-references, and context that cannot fit in inline help.
 
+**Scope**: This document covers ALL implemented commands, including some that may be intentionally hidden from `cai --help` output (e.g., `acp`, `template`). The main help displays commonly-used commands; this reference is comprehensive.
+
 **When to update this document:**
 - After adding or removing CLI commands or subcommands
 - After adding, removing, or changing flags
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Run `cai --help` to verify current options if anything seems inconsistent.
+**Verification**: Run `cai --help` and `cai <subcommand> --help` to verify current options. Some advanced commands may only appear in subcommand help or this documentation.
 
 ## Quick Reference
 
@@ -146,7 +148,8 @@ containai [subcommand] [options]
 
 **Notes:**
 - `cai` and `containai` are aliases
-- Must be sourced into shell: `source src/containai.sh`
+- **Installed usage:** The `install.sh` script creates a wrapper at `~/.local/bin/cai` that sources automatically
+- **Development usage:** Source directly with `source src/containai.sh`
 - Requires Bash 4.0+
 
 ---
@@ -182,9 +185,15 @@ cai [path] [options] [-- <agent-args>]
 | `-d`, `--detached` | Run in background |
 | `-q`, `--quiet` | Suppress verbose output |
 | `--verbose` | Enable verbose output |
+| `-D`, `--debug` | Enable debug output |
 | `--dry-run` | Show what would happen without executing |
 | `-e`, `--env <VAR=val>` | Set environment variable (repeatable) |
+| `--credentials <mode>` | Credential mode (currently only `none` supported) |
+| `--allow-host-credentials` | Allow host credential access (dangerous, requires acknowledgment) |
+| `--allow-host-docker-socket` | Mount host Docker socket (dangerous, requires acknowledgment) |
 | `-- <args>` | Pass arguments to agent |
+
+**Security flags:** The `--allow-host-credentials` and `--allow-host-docker-socket` flags require explicit acknowledgment flags (`--i-understand-this-exposes-host-credentials` or `--i-understand-this-grants-root-access`) for safety. See [SECURITY.md](../SECURITY.md) for implications.
 
 **Examples:**
 ```bash
@@ -601,6 +610,13 @@ cai import --from backup.tgz
 - `~/.ssh` is NOT imported by default (use agent forwarding instead)
 - Use `--dry-run` to preview what will be synced
 
+**`--no-secrets` Caveats:**
+- Only affects built-in sync entries (OAuth tokens, API keys from known paths)
+- Does NOT affect user-specified `[import].additional_paths` - those are always synced
+- Has no effect with `--from archive.tgz` (archive restore bypasses sync filtering)
+- Does NOT affect the `--credentials` flag behavior
+- Use `--dry-run --no-secrets` to preview which secrets would be skipped
+
 **Related:** [Configuration Reference](configuration.md#import-section), [Sync Architecture](sync-architecture.md)
 
 ---
@@ -956,6 +972,7 @@ Remove setting.
 - `ssh.port_range_start` - SSH port range start
 - `ssh.port_range_end` - SSH port range end
 - `import.auto_prompt` - Prompt for import on new volume
+- `import.exclude_priv` - Filter out `*.priv.*` files from `.bashrc.d/` (default: true)
 
 **Source Column Values:**
 
@@ -1303,19 +1320,38 @@ ContainAI now uses Sysbox for container isolation instead of Docker Desktop sand
 
 ## Environment Variables
 
-Environment variables that affect CLI behavior.
+Environment variables that affect CLI behavior. This is a selection of commonly-used variables; see [Configuration Reference](configuration.md#environment-variables) for the canonical list.
+
+### Configuration Overrides
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CONTAINAI_VERBOSE` | Enable verbose output | `0` (disabled) |
 | `CONTAINAI_DATA_VOLUME` | Override data volume name | (from config) |
 | `CONTAINAI_AGENT` | Override default agent | `claude` |
-| `CONTAINAI_CREDENTIALS` | Credential mode | `none` |
+| `CONTAINAI_CREDENTIALS` | Credential mode (only `none` currently supported) | `none` |
 | `CONTAINAI_SECURE_ENGINE_CONTEXT` | Docker context for secure engine | (auto-detected) |
+
+### Update and Channel
+
+| Variable | Description | Default |
+|----------|-------------|---------|
 | `CAI_UPDATE_CHECK_INTERVAL` | Update check interval: `hourly`, `daily`, `weekly`, `never` | `daily` |
 | `CAI_CHANNEL` | Release channel: `stable` or `nightly` | `stable` |
-| `CAI_BRANCH` | Explicit git branch override | (none) |
+| `CAI_BRANCH` | Explicit git branch override (for development) | (none) |
 | `CAI_NO_UPDATE_CHECK` | Disable update checks | `0` |
+
+### Installation and Paths
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CAI_INSTALL_DIR` | Override installation directory detection | (auto-detected) |
+
+### Debugging and Testing
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CONTAINAI_DEBUG` | Enable debug logging to stderr | `0` |
 | `CAI_YES` | Auto-confirm prompts (for scripts) | `0` |
 | `CAI_ACP_TEST_MODE` | Allow any agent name in ACP (testing) | `0` |
 | `CAI_ACP_DIRECT_SPAWN` | Bypass containers in ACP (testing) | `0` |
@@ -1326,6 +1362,8 @@ Environment variables that affect CLI behavior.
 3. Workspace config
 4. Global config
 5. Built-in defaults (lowest)
+
+**Note on `CONTAINAI_CREDENTIALS`:** Currently only `none` is supported. Setting `host` via environment variable is blocked for security reasons - host credential access requires explicit CLI flag (`--allow-host-credentials`).
 
 **Related:** [Configuration Reference](configuration.md#environment-variables)
 
