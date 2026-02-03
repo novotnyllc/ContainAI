@@ -1,7 +1,4 @@
 {
-  "assignee": null,
-  "claim_note": "",
-  "claimed_at": null,
   "created_at": "2026-02-02T15:58:23.771703Z",
   "depends_on": [],
   "epic": "fn-45-comprehensive-documentation-overhaul",
@@ -10,5 +7,5 @@
   "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.5.md",
   "status": "todo",
   "title": "Create configuration examples cookbook",
-  "updated_at": "2026-02-02T15:59:48.370409Z"
+  "updated_at": "2026-02-03T12:04:55.210454Z"
 }

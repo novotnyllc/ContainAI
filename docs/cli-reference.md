@@ -4,9 +4,9 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 ## Maintenance Policy
 
-**Single source of truth**: The `cai --help` and `cai <subcommand> --help` output is the authoritative reference for CLI options. This documentation provides extended examples, cross-references, and context that cannot fit in inline help.
+**Source of truth**: The CLI implementation (`src/containai.sh`) is the authoritative source. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output (e.g., `-D/--debug`, `--credentials`).
 
-**Scope**: This document covers ALL implemented commands, including some that may be intentionally hidden from `cai --help` output (e.g., `acp`, `template`). The main help displays commonly-used commands; this reference is comprehensive.
+**Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell completion scripts also support these advanced flags.
 
 **When to update this document:**
 - After adding or removing CLI commands or subcommands
@@ -14,7 +14,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Run `cai --help` and `cai <subcommand> --help` to verify current options. Some advanced commands may only appear in subcommand help or this documentation.
+**Verification**: Check `src/containai.sh` for the canonical flag definitions. The completion flags (search for `run_flags=`, `shell_flags=`, etc.) list all supported options.
 
 ## Quick Reference
 

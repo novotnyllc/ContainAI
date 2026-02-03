@@ -115,9 +115,8 @@ Create comprehensive CLI reference documentation covering ALL `cai` subcommands,
 - [ ] **Deprecated Commands section** with migration paths
 
 ## Done summary
-TBD
-
+Created comprehensive CLI reference documentation (docs/cli-reference.md) covering all 25 cai subcommands with synopses, options, examples, and exit codes. Includes command hierarchy Mermaid diagram with accessibility attributes, quick reference table, maintenance policy, environment variables, and deprecated commands section with migration paths.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 398c9f0, 536cccb, 81f759a, 0e3c9bc, b8d85b5, f9dce13
+- Tests: shellcheck -x src/*.sh src/lib/*.sh
 - PRs:

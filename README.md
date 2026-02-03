@@ -23,7 +23,7 @@ cd /path/to/project && cai   # Agent starts in isolated container
 
 See the [full security comparison](docs/security-comparison.md) for Docker ECI, Anthropic SRT, gVisor, and microVMs.
 
-**Jump to:** [Users](docs/quickstart.md) | [Contributors](CONTRIBUTING.md) | [Security Auditors](SECURITY.md)
+**Jump to:** [Users](docs/for-users.md) | [Contributors](docs/for-contributors.md) | [Security Auditors](docs/for-security-auditors.md)
 
 ## What Makes ContainAI Different
 

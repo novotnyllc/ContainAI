@@ -1,0 +1,146 @@
+# Team Shared Configuration
+# =============================================================================
+# Use case: Configuration checked into a repository to standardize ContainAI
+# settings across a team. Place this at .containai/config.toml in your repo.
+#
+# Key features:
+# - Consistent settings across team members
+# - Project-specific network policies
+# - Startup hooks for project setup
+# - Safe defaults that don't expose secrets
+# =============================================================================
+
+# =============================================================================
+# Top-level keys (must appear before any [table] headers)
+# =============================================================================
+
+# Exclusions for team consistency
+default_excludes = [
+    # Don't sync personal editor settings
+    "vscode-server",
+    "vscode-server-insiders",
+
+    # Don't sync personal agent customizations
+    "claude/skills",
+    "codex/skills",
+
+    # Common temp files
+    "*.log",
+    "*.tmp",
+    "node_modules.cache",
+]
+
+# =============================================================================
+# Agent configuration
+# =============================================================================
+
+[agent]
+# Let team members use their preferred agent
+# Override with CONTAINAI_AGENT env var
+default = "claude"
+
+# Use a project-specific volume name to isolate from other work
+# Override with --data-volume flag or CONTAINAI_DATA_VOLUME env var
+data_volume = "myproject-team-data"
+
+[credentials]
+# Credentials are synced via cai import, not shared at runtime
+# Keep this as "none" for security
+mode = "none"
+
+[env]
+# Only import non-sensitive, project-relevant variables
+# API keys should come from personal config or env vars
+import = [
+    "NODE_ENV",
+    "LOG_LEVEL",
+]
+from_host = true
+
+# Load project-specific env file (gitignored)
+env_file = ".env.local"
+
+# =============================================================================
+# Template configuration
+# =============================================================================
+
+[template]
+# If your team uses custom base images, suppress the warning
+# Only set this if you intentionally use non-ContainAI base images
+suppress_base_warning = false
+
+# =============================================================================
+# SSH configuration for the team
+# =============================================================================
+
+[ssh]
+# Standard port range works for most teams
+port_range_start = 2300
+port_range_end = 2500
+
+# Disable agent forwarding by default (security)
+# Team members can enable via their personal config
+forward_agent = false
+
+# Common dev server ports
+local_forward = [
+    "3000:localhost:3000",   # Frontend
+    "8080:localhost:8080",   # Backend API
+]
+
+# =============================================================================
+# Recommended companion files:
+#
+# 1. .containai/network.conf - Network egress policy
+#
+#    [egress]
+#    preset = package-managers
+#    preset = git-hosts
+#    allow = api.mycompany.com
+#    default_deny = true
+#
+# 2. .containai/hooks/startup.d/10-setup.sh - Project setup script
+#
+#    #!/bin/bash
+#    # Install project dependencies
+#    npm install
+#
+#    # Start background services
+#    redis-server --daemonize yes
+#
+# 3. .gitignore additions:
+#
+#    # Environment file with secrets
+#    .env.local
+# =============================================================================
+
+# =============================================================================
+# Team member workflow:
+#
+#   # Clone the repo (includes this shared config)
+#   git clone git@github.com:myorg/myproject.git
+#   cd myproject
+#
+#   # Create local env file (gitignored)
+#   cp .env.example .env.local
+#   # Edit .env.local with your API keys
+#
+#   # Start container - uses shared config automatically
+#   cai shell .
+#
+#   # Inside container, project is ready to develop
+#   npm run dev
+# =============================================================================
+
+# =============================================================================
+# Overriding shared settings:
+#
+# Workspace config (.containai/config.toml) is used when present.
+# Team members can override specific settings via:
+# - CLI flags: --data-volume (always wins)
+# - Environment variables: CONTAINAI_AGENT, CONTAINAI_DATA_VOLUME
+# - Pass --config to use a different config file entirely
+#
+# Note: User-global config (~/.config/containai/config.toml) is not read when
+# workspace config exists. Use CLI flags or env vars for personal preferences.
+# =============================================================================

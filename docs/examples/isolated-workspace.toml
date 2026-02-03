@@ -1,0 +1,100 @@
+# Isolated Workspace Configuration
+# =============================================================================
+# Use case: Security-sensitive projects requiring minimal config sync and
+# strong isolation from host and other workspaces.
+#
+# Key features:
+# - Dedicated volume per project
+# - No SSH keys synced
+# - No secrets imported
+# - Network egress restrictions
+# - Minimal dotfile sync
+# =============================================================================
+
+# =============================================================================
+# Top-level keys (must appear before any [table] headers)
+# =============================================================================
+
+# Exclude most synced content - only essential configs
+default_excludes = [
+    # Exclude all agent config directories
+    "claude/skills",
+    "claude/plugins",
+    "codex/skills",
+    "gemini",
+
+    # Exclude editor state
+    "vscode-server",
+    "vscode-server-insiders",
+
+    # Exclude shell history (prevents command leakage)
+    "*.history",
+    "*_history",
+
+    # Exclude caches
+    "*.cache",
+    "*.log",
+]
+
+# =============================================================================
+# Agent configuration
+# =============================================================================
+
+[agent]
+default = "claude"
+# Each sensitive project gets its own isolated volume
+data_volume = "isolated-sensitive-project"
+
+[credentials]
+# Never use host credentials for sensitive work
+mode = "none"
+
+[env]
+# Don't import environment variables from host
+# Pass secrets via explicit env vars at runtime instead
+import = []
+from_host = false
+
+# =============================================================================
+# Network restrictions (optional)
+# =============================================================================
+
+# Create .containai/network.conf in your project for egress control:
+#
+#   [egress]
+#   # Only allow package managers and your company's services
+#   preset = package-managers
+#   allow = api.mycompany.com
+#   allow = auth.mycompany.com
+#   default_deny = true
+
+# =============================================================================
+# Usage workflow:
+#
+#   # Create project-specific config
+#   mkdir -p /path/to/sensitive-project/.containai
+#   cp docs/examples/isolated-workspace.toml .containai/config.toml
+#
+#   # Start container with --no-secrets to skip OAuth tokens, API keys, etc.
+#   cd /path/to/sensitive-project
+#   cai import --no-secrets
+#   cai shell .
+#
+#   # Pass secrets explicitly at runtime (not persisted)
+#   # Option 1: Environment variable for cai run
+#   ANTHROPIC_API_KEY="your-key-here" cai -- "Your task"
+#
+#   # Option 2: Use env_file in config (gitignored)
+#   echo 'ANTHROPIC_API_KEY=your-key-here' >> .env.local
+#   # Then add to config: env_file = ".env.local"
+# =============================================================================
+
+# =============================================================================
+# What this achieves:
+#
+# 1. Project data stays in its own volume (not shared with other projects)
+# 2. No host SSH keys in container (use agent forwarding if needed)
+# 3. No OAuth tokens or API keys synced from host
+# 4. Minimal shell config reduces attack surface
+# 5. Network policies can restrict egress if configured
+# =============================================================================

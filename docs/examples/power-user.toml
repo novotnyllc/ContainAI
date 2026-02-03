@@ -1,0 +1,108 @@
+# Power User Configuration
+# =============================================================================
+# Use case: Developers using VS Code Remote-SSH who need SSH agent forwarding,
+# port forwarding for web servers, and custom SSH ports.
+#
+# Key features:
+# - SSH agent forwarding for git operations
+# - Port forwarding for web development
+# - Custom SSH port range
+# - Multiple workspace configurations
+# =============================================================================
+
+[agent]
+default = "claude"
+data_volume = "power-user-data"
+
+[ssh]
+# Custom SSH port range (default: 2300-2500)
+# Useful if you run multiple ContainAI instances or have port conflicts
+port_range_start = 2300
+port_range_end = 2400
+
+# SSH agent forwarding - allows git push/pull using your host SSH keys
+# without copying keys into the container
+#
+# SECURITY NOTE: Only enable if you trust the container environment.
+# An attacker with root access could use your forwarded agent.
+forward_agent = true
+
+# Port forwarding for development servers
+# Format: "local_port:remote_host:remote_port"
+local_forward = [
+    # Web development
+    "3000:localhost:3000",   # React/Next.js dev server
+    "5173:localhost:5173",   # Vite dev server
+    "8000:localhost:8000",   # Django/FastAPI
+    "8080:localhost:8080",   # General web server
+
+    # Databases (access container DBs from host tools)
+    "5432:localhost:5432",   # PostgreSQL
+    "6379:localhost:6379",   # Redis
+
+    # Documentation/previews
+    "4000:localhost:4000",   # MkDocs/Docusaurus
+]
+
+# =============================================================================
+# Environment variables
+# =============================================================================
+
+[env]
+import = [
+    # Git credentials for HTTPS remotes
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+
+    # Cloud credentials
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_DEFAULT_REGION",
+]
+from_host = true
+
+# =============================================================================
+# Workspace-specific port configs
+# =============================================================================
+
+# Web project workspace with frontend ports
+[workspace."/home/user/projects/web"]
+data_volume = "web-projects-data"
+# Note: port forwarding is global, not per-workspace
+
+# Backend API workspace
+[workspace."/home/user/projects/api"]
+data_volume = "api-projects-data"
+
+# =============================================================================
+# VS Code Remote-SSH setup:
+#
+#   1. Start a container:
+#      cai shell /path/to/project
+#
+#   2. Note the container name from output (e.g., containai-a1b2c3d4)
+#
+#   3. In VS Code:
+#      - Open Command Palette (Cmd/Ctrl+Shift+P)
+#      - "Remote-SSH: Connect to Host..."
+#      - Select the container name
+#
+#   4. SSH config is auto-generated at ~/.ssh/containai.d/<container>.conf
+#
+#   5. Port forwarding works automatically - access localhost:3000 on host
+#      to reach your dev server in the container
+# =============================================================================
+
+# =============================================================================
+# SSH agent forwarding workflow:
+#
+#   # Ensure your SSH agent is running on host
+#   eval "$(ssh-agent -s)"
+#   ssh-add ~/.ssh/id_ed25519
+#
+#   # Start container (agent forwarding enabled via config)
+#   cai shell /path/to/project
+#
+#   # Inside container - git operations use your host SSH key
+#   git clone git@github.com:user/repo.git  # Works without container keys
+# =============================================================================

@@ -2,6 +2,8 @@
 
 Complete reference for ContainAI's TOML configuration system.
 
+> **Looking for examples?** See [Configuration Examples](examples/README.md) for copy-paste configs covering multi-agent setups, custom sync, isolated workspaces, VS Code Remote-SSH, CI/CD, and team shared configs.
+
 ## Config File Locations
 
 ContainAI searches for configuration in this order:
@@ -864,6 +866,7 @@ For full details on synced paths, see [Sync Architecture](sync-architecture.md).
 
 ## See Also
 
+- [Configuration Examples](examples/) - Copy-paste configs for common scenarios
 - [Quickstart Guide](quickstart.md) - Getting started with ContainAI
 - [Technical README](../src/README.md) - Full CLI documentation
 - [SECURITY.md](../SECURITY.md) - Security model and guarantees

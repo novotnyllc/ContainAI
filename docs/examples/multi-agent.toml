@@ -1,0 +1,66 @@
+# Multi-Agent Configuration
+# =============================================================================
+# Use case: Teams or individuals switching between different AI agents
+# (Claude, Gemini, Codex, etc.) with isolated data volumes.
+#
+# Key features:
+# - Separate volumes per workspace prevent config/state conflicts
+# - Environment variables import API keys for different providers
+# - Per-workspace volume isolation (agent selection via CONTAINAI_AGENT env var)
+# =============================================================================
+
+[agent]
+# Default agent when CONTAINAI_AGENT env var is not set
+default = "claude"
+
+# Shared fallback volume (used when no workspace match)
+data_volume = "shared-agent-data"
+
+[credentials]
+# Keep "none" here - credentials are synced via cai import, not shared at runtime
+mode = "none"
+
+[env]
+# Import API keys from host environment
+# Each provider's CLI looks for its specific variable
+import = [
+    "ANTHROPIC_API_KEY",    # Claude
+    "GOOGLE_API_KEY",       # Gemini
+    "OPENAI_API_KEY",       # OpenAI/Codex
+]
+from_host = true
+
+# Optionally load from a local env file (gitignored)
+# env_file = ".env.local"
+
+# =============================================================================
+# Workspace-specific settings
+# Assign different volumes to projects by path
+# =============================================================================
+
+[workspace."/home/user/claude-projects"]
+# All Claude projects share this volume
+data_volume = "claude-agent-data"
+
+[workspace."/home/user/gemini-projects"]
+# Gemini projects get a separate volume
+data_volume = "gemini-agent-data"
+
+[workspace."/home/user/openai-experiments"]
+# Codex/OpenAI work is isolated
+data_volume = "codex-agent-data"
+
+# =============================================================================
+# Usage examples:
+#
+#   # Uses claude by default (from [agent].default)
+#   cd ~/claude-projects/webapp && cai shell .
+#
+#   # Override agent via environment variable
+#   cd ~/gemini-projects/ml-model && CONTAINAI_AGENT=gemini cai shell .
+#
+#   # Volume isolation means agent state doesn't conflict:
+#   # - Claude state in claude-agent-data volume
+#   # - Gemini state in gemini-agent-data volume
+#   # - Codex state in codex-agent-data volume
+# =============================================================================

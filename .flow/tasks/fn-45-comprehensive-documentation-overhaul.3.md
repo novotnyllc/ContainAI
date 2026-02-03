@@ -57,8 +57,27 @@ Current docs assume users will navigate themselves. Research shows personas need
 - [ ] **Each page has a Mermaid navigation/reading path diagram** (include `accTitle`/`accDescr`)
 
 ## Done summary
-TBD
+Created three persona-based landing pages that provide tailored entry points for different audiences:
 
+1. **docs/for-users.md** - "You want to run AI agents safely"
+   - 3-step "Start Here" section for quick onboarding
+   - Reading order: quickstart → configuration → lifecycle → CLI reference → troubleshooting
+   - Highlights: preferences sync, ephemeral/persistent modes, multiple agents
+   - Mermaid diagram with accTitle/accDescr for accessibility
+
+2. **docs/for-contributors.md** - "You want to improve ContainAI"
+   - 3-step "Start Here" for forking and environment setup
+   - Reading order: CONTRIBUTING → architecture → testing → config → CLI → sync
+   - Highlights: code structure, shell conventions, testing tiers, good first issues
+   - Links to conventions.md and pitfalls.md
+
+3. **docs/for-security-auditors.md** - "You want to evaluate ContainAI's security"
+   - 3-step "Start Here" for threat model review
+   - Reading order: SECURITY → scenarios → comparison → architecture → base image contract
+   - Highlights: isolation model, non-goals, attack surface, key implementation files
+   - Links to Sysbox docs and relevant CVEs
+
+Updated README.md "Jump to:" links to point to new persona pages.
 ## Evidence
 - Commits:
 - Tests:

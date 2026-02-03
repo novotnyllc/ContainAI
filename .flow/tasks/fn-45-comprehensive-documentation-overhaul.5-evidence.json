@@ -1,0 +1,29 @@
+{
+  "files_created": [
+    "docs/examples/README.md",
+    "docs/examples/multi-agent.toml",
+    "docs/examples/custom-sync.toml",
+    "docs/examples/isolated-workspace.toml",
+    "docs/examples/power-user.toml",
+    "docs/examples/ci-ephemeral.toml",
+    "docs/examples/team-shared.toml"
+  ],
+  "files_modified": [
+    "docs/configuration.md"
+  ],
+  "validation": {
+    "toml_valid": true,
+    "all_examples_have_comments": true,
+    "cross_references_added": true
+  },
+  "acceptance_criteria": {
+    "directory_created": true,
+    "readme_index": true,
+    "example_count": 6,
+    "example_minimum": 5,
+    "comments_included": true,
+    "schema_validated": true,
+    "cross_references": true,
+    "no_secrets": true
+  }
+}

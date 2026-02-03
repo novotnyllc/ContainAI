@@ -1,0 +1,123 @@
+# CI/CD Ephemeral Configuration
+# =============================================================================
+# Use case: Continuous integration environments where containers are short-lived,
+# volumes are not persisted, and configuration comes from environment variables.
+#
+# Key features:
+# - Minimal config (most settings via environment)
+# - No persistence assumptions
+# - Network restrictions for security
+# - Designed for GitHub Actions, GitLab CI, etc.
+# =============================================================================
+
+# =============================================================================
+# Top-level keys (must appear before any [table] headers)
+# =============================================================================
+
+# Minimal excludes for CI (nothing to preserve)
+default_excludes = [
+    # Skip all caches - CI should have cold cache behavior
+    "*.cache",
+    "*.log",
+
+    # Skip VS Code - not used in CI
+    "vscode-server",
+    "vscode-server-insiders",
+
+    # Skip editor configs
+    "editors",
+    "config/nvim",
+]
+
+# =============================================================================
+# Agent configuration
+# =============================================================================
+
+[agent]
+default = "claude"
+# Use a unique volume name per CI run to avoid conflicts
+# Override via CONTAINAI_DATA_VOLUME env var in CI
+data_volume = "ci-ephemeral"
+
+[credentials]
+mode = "none"
+
+[env]
+# CI environments typically pass secrets via env vars
+# List the variables your CI provides
+import = [
+    # GitHub Actions
+    "GITHUB_TOKEN",
+    "GITHUB_ACTIONS",
+    "GITHUB_RUN_ID",
+
+    # Claude API (set in CI secrets)
+    "ANTHROPIC_API_KEY",
+
+    # Common CI variables
+    "CI",
+    "CI_COMMIT_SHA",
+    "CI_PIPELINE_ID",
+]
+from_host = true
+
+# =============================================================================
+# Example GitHub Actions workflow:
+#
+#   jobs:
+#     agent-task:
+#       runs-on: ubuntu-latest
+#       steps:
+#         - uses: actions/checkout@v4
+#
+#         - name: Set up ContainAI
+#           run: |
+#             # Install ContainAI
+#             ./install.sh
+#             source src/containai.sh
+#
+#         - name: Run agent task
+#           env:
+#             ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#             CONTAINAI_DATA_VOLUME: "ci-${{ github.run_id }}"
+#           run: |
+#             cai -- "Review the PR changes"
+#
+#         - name: Cleanup
+#           if: always()
+#           run: |
+#             cai docker volume rm "ci-${{ github.run_id }}" || true
+# =============================================================================
+
+# =============================================================================
+# Example GitLab CI pipeline:
+#
+#   agent-review:
+#     image: docker:latest
+#     services:
+#       - docker:dind
+#     variables:
+#       CONTAINAI_DATA_VOLUME: "ci-${CI_PIPELINE_ID}"
+#     script:
+#       - ./install.sh
+#       - source src/containai.sh
+#       - cai -- "Review changes since $CI_MERGE_REQUEST_DIFF_BASE_SHA"
+#     after_script:
+#       - cai docker volume rm "ci-${CI_PIPELINE_ID}" || true
+# =============================================================================
+
+# =============================================================================
+# Network policy for CI (.containai/network.conf):
+#
+#   [egress]
+#   preset = package-managers
+#   preset = git-hosts
+#   preset = ai-apis
+#   default_deny = true
+#
+# This allows:
+# - npm, pip, etc. for installing dependencies
+# - GitHub/GitLab for git operations
+# - Claude/OpenAI APIs for agent work
+# - Blocks everything else (security best practice for CI)
+# =============================================================================

@@ -1,0 +1,88 @@
+# Custom Sync Configuration
+# =============================================================================
+# Use case: Sync additional dotfiles and tool configurations beyond the
+# built-in sync map (shell, git, editors, etc.).
+#
+# Key features:
+# - Add custom tool configs via additional_paths
+# - Control privacy filtering for sensitive scripts
+# - Exclude specific patterns from sync
+# =============================================================================
+
+# =============================================================================
+# Top-level keys (must appear before any [table] headers)
+# =============================================================================
+
+# Global excludes applied to all import/export operations
+default_excludes = [
+    # Large/temporary files
+    "*.log",
+    "*.tmp",
+    "*.cache",
+
+    # Agent-specific exclusions
+    "claude/skills",           # Don't sync Claude skills (use plugins instead)
+    "vscode-server/extensions", # VS Code downloads extensions automatically
+]
+
+# =============================================================================
+# Agent configuration
+# =============================================================================
+
+[agent]
+default = "claude"
+data_volume = "myproject-data"
+
+# =============================================================================
+# Custom files to sync
+# =============================================================================
+
+[import]
+# Add paths beyond the built-in sync map
+# Paths must start with ~/ or be absolute paths under $HOME
+additional_paths = [
+    # Custom tool configurations (non-secret examples)
+    "~/.aws/config",           # AWS CLI config (profiles, regions - no credentials)
+
+    # Personal scripts directory
+    "~/.local/bin/",           # Custom scripts and binaries
+
+    # Tool-specific configs not in default sync
+    "~/.ripgreprc",            # ripgrep configuration
+    "~/.fdignore",             # fd ignore patterns
+    "~/.ctags",                # ctags configuration
+    "~/.tool-versions",        # asdf version manager
+]
+
+# SECURITY NOTE: Avoid syncing credential files like ~/.aws/credentials,
+# ~/.kube/config, ~/.pgpass, or ~/.my.cnf. Instead:
+# - Use environment variables (ANTHROPIC_API_KEY, AWS_ACCESS_KEY_ID, etc.)
+# - Use [env].env_file with a gitignored file
+# - Use SSH agent forwarding for git operations
+# additional_paths are NOT affected by --no-secrets flag
+
+# Privacy filter: exclude *.priv.* files from ~/.bashrc.d/
+# Set to false only if you intentionally want to sync private scripts
+exclude_priv = true  # default
+
+# =============================================================================
+# Security notes:
+#
+# 1. additional_paths are always synced (--no-secrets doesn't skip them)
+# 2. Review workspace configs before syncing (malicious repos could add paths)
+# 3. Use `cai import --dry-run` to preview what will be synced
+# 4. Symlinks are rejected for security
+# =============================================================================
+
+# =============================================================================
+# Usage:
+#
+#   # Preview what additional_paths will sync
+#   cai import --dry-run
+#
+#   # Import including your custom paths
+#   cai import
+#
+#   # Verify files are in the volume (via exec or inside shell)
+#   cai exec -- ls -la /mnt/agent-data/
+# =============================================================================

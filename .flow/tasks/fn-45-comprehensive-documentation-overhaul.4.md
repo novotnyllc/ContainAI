@@ -85,9 +85,36 @@ Key insight from lifecycle.md: containers are "persistent workspaces" by default
 - [ ] Diagram renders correctly on GitHub
 
 ## Done summary
-TBD
+# Summary: Document ephemeral vs persistent usage patterns
 
+Created comprehensive usage patterns guide (`docs/usage-patterns.md`) documenting THREE primary ContainAI usage modes:
+
+## Patterns Documented
+
+1. **Disposable Container, Persistent Preferences (Default)**
+   - Container removed on `cai stop --remove`, volume preserved
+   - Credentials and config persist across sessions
+   - Recommended for regular development
+
+2. **Fully Ephemeral (True Isolation)**
+   - Both container AND volume deleted
+   - Manual volume deletion: `docker volume rm "$(cai config get data_volume | cut -f1)"`
+   - For untrusted code, CI, reproducibility
+
+3. **Long-lived Persistent Environment**
+   - Both container and volume preserved with `cai stop`
+   - In-container state (installed packages) persists
+   - For heavily customized environments
+
+## Key Deliverables
+
+- Three-column comparison table showing all patterns
+- Mermaid decision flowchart with `accTitle`/`accDescr` for accessibility
+- Four migration scenarios with concrete commands
+- Cross-references to lifecycle.md and sync-architecture.md
+- Data flow diagram showing host→volume→container sync
+- Best practices for each pattern
 ## Evidence
 - Commits:
-- Tests:
+- Tests: N/A - documentation only
 - PRs:

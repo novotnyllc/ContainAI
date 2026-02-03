@@ -412,3 +412,7 @@ DOCKER-USER chain has RETURN at end; rules appended with -A are unreachable - mu
 
 ## 2026-02-03 manual [pitfall]
 When matching iptables rules by comment, use exact pattern with quotes (--comment "prefix:name") to prevent prefix collisions (e.g., foo matching foo2)
+
+
+## 2026-02-03 manual [pitfall]
+TOML keys after [table] header become nested - place top-level keys before any table headers
