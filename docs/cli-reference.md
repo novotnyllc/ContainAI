@@ -188,12 +188,10 @@ cai [path] [options] [-- <agent-args>]
 | `-D`, `--debug` | Enable debug output |
 | `--dry-run` | Show what would happen without executing |
 | `-e`, `--env <VAR=val>` | Set environment variable (repeatable) |
-| `--credentials <mode>` | Credential mode (currently only `none` supported) |
-| `--allow-host-credentials` | Allow host credential access (dangerous, requires acknowledgment) |
-| `--allow-host-docker-socket` | Mount host Docker socket (dangerous, requires acknowledgment) |
+| `--credentials <mode>` | Credential mode (only `none` supported with Sysbox isolation) |
 | `-- <args>` | Pass arguments to agent |
 
-**Security flags:** The `--allow-host-credentials` and `--allow-host-docker-socket` flags require explicit acknowledgment flags (`--i-understand-this-exposes-host-credentials` or `--i-understand-this-grants-root-access`) for safety. See [SECURITY.md](../SECURITY.md) for implications.
+**Note on host access flags:** The `--allow-host-credentials`, `--allow-host-docker-socket`, and `--mount-docker-socket` flags are parsed for backward compatibility but result in an error. Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
 
 **Examples:**
 ```bash
@@ -1320,7 +1318,7 @@ ContainAI now uses Sysbox for container isolation instead of Docker Desktop sand
 
 ## Environment Variables
 
-Environment variables that affect CLI behavior. This is a selection of commonly-used variables; see [Configuration Reference](configuration.md#environment-variables) for the canonical list.
+Environment variables that affect CLI behavior.
 
 ### Configuration Overrides
 
@@ -1329,8 +1327,10 @@ Environment variables that affect CLI behavior. This is a selection of commonly-
 | `CONTAINAI_VERBOSE` | Enable verbose output | `0` (disabled) |
 | `CONTAINAI_DATA_VOLUME` | Override data volume name | (from config) |
 | `CONTAINAI_AGENT` | Override default agent | `claude` |
-| `CONTAINAI_CREDENTIALS` | Credential mode (only `none` currently supported) | `none` |
+| `CONTAINAI_AGENT_TAG` | Override agent image tag | (agent-specific) |
+| `CONTAINAI_CREDENTIALS` | Credential mode (only `none` supported with Sysbox) | `none` |
 | `CONTAINAI_SECURE_ENGINE_CONTEXT` | Docker context for secure engine | (auto-detected) |
+| `CONTAINAI_REQUIRE_ISOLATION` | Fail if isolation unavailable (`1` to enable) | `0` |
 
 ### Update and Channel
 
@@ -1338,6 +1338,7 @@ Environment variables that affect CLI behavior. This is a selection of commonly-
 |----------|-------------|---------|
 | `CAI_UPDATE_CHECK_INTERVAL` | Update check interval: `hourly`, `daily`, `weekly`, `never` | `daily` |
 | `CAI_CHANNEL` | Release channel: `stable` or `nightly` | `stable` |
+| `CONTAINAI_CHANNEL` | Alias for `CAI_CHANNEL` | `stable` |
 | `CAI_BRANCH` | Explicit git branch override (for development) | (none) |
 | `CAI_NO_UPDATE_CHECK` | Disable update checks | `0` |
 
@@ -1346,6 +1347,16 @@ Environment variables that affect CLI behavior. This is a selection of commonly-
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CAI_INSTALL_DIR` | Override installation directory detection | (auto-detected) |
+
+### Setup (Advanced)
+
+These variables are used during `cai setup` for advanced configuration.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CAI_SYSBOX_URL` | Override Sysbox download URL | (ContainAI release) |
+| `CAI_SYSBOX_VERSION` | Pin specific Sysbox version | (bundled version) |
+| `CAI_WSL_SSH_PORT` | SSH port for WSL2 setup | `2222` |
 
 ### Debugging and Testing
 
@@ -1363,7 +1374,7 @@ Environment variables that affect CLI behavior. This is a selection of commonly-
 4. Global config
 5. Built-in defaults (lowest)
 
-**Note on `CONTAINAI_CREDENTIALS`:** Currently only `none` is supported. Setting `host` via environment variable is blocked for security reasons - host credential access requires explicit CLI flag (`--allow-host-credentials`).
+**Note on `CONTAINAI_CREDENTIALS`:** Only `none` is supported with Sysbox isolation. Host credential sharing is not available - use `cai import` to copy credentials into containers.
 
 **Related:** [Configuration Reference](configuration.md#environment-variables)
 
