@@ -1206,14 +1206,25 @@ test_generic_agent_missing_error() {
 }
 
 # ==============================================================================
-# Test 18: Generic Agent Support - No Shell Injection
+# Test 18: Generic Agent Support - No Shell Injection (Direct Spawn)
 # ==============================================================================
 
 test_generic_agent_no_injection() {
-    section "Test 18: Generic agent support - no shell injection"
+    section "Test 18: Generic agent support - no shell injection (direct spawn)"
 
     # Test that agent names with shell metacharacters don't cause injection.
     # We use a carefully crafted agent name that would cause issues if improperly quoted.
+    #
+    # NOTE: This test runs with CAI_ACP_DIRECT_SPAWN=1 (direct spawn mode), which uses
+    # Process.Start() with ArgumentList (safe from injection by design).
+    #
+    # The containerized path (bash -c wrapper via cai exec) is protected by:
+    # 1. Process.Start() with ArgumentList for cai exec invocation
+    # 2. Agent passed as positional parameter $1, not interpolated into shell string
+    # 3. 'exec -- "$1"' uses -- to handle agent names starting with dash
+    #
+    # Testing containerized injection would require a full container environment;
+    # the wrapper design is audited in code review instead.
 
     local ws
     ws=$(make_temp_dir)

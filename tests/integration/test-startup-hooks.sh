@@ -434,21 +434,40 @@ HOOKEOF
     fi
     pass "Test container started"
 
-    # Wait for container to initialize
-    sleep 5
+    # Wait for container to initialize (poll instead of fixed sleep)
+    local wait_timeout=30
+    local wait_elapsed=0
+    local container_status=""
 
-    # Check container is running
-    local container_status
-    container_status=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_status=""
+    info "Waiting for container initialization (timeout: ${wait_timeout}s)..."
+    while [[ $wait_elapsed -lt $wait_timeout ]]; do
+        container_status=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_status=""
 
-    if [[ "$container_status" != "running" ]]; then
-        fail "Container not running (status: $container_status)"
-        # Get logs for debugging
-        info "Container logs:"
-        docker --context "$CONTEXT_NAME" logs "$container_name" 2>&1 | tail -20 || true
+        if [[ "$container_status" != "running" ]]; then
+            fail "Container not running (status: $container_status)"
+            info "Container logs:"
+            docker --context "$CONTEXT_NAME" logs "$container_name" 2>&1 | tail -20 || true
+            return
+        fi
+
+        # Check if init service completed (deterministic wait)
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active containai-init.service >/dev/null 2>&1; then
+            break
+        fi
+
+        sleep 2
+        wait_elapsed=$((wait_elapsed + 2))
+    done
+
+    if [[ $wait_elapsed -ge $wait_timeout ]]; then
+        fail "Timeout waiting for containai-init.service"
+        info "Service status:"
+        docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl status containai-init.service --no-pager 2>&1 | head -20 || true
         return
     fi
-    pass "Container is running"
+    pass "Container is running and init completed"
 
     # Check if hooks ran (look for output file)
     local hook_output

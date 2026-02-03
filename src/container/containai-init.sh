@@ -326,6 +326,15 @@ run_hooks() {
     # Set working directory for hooks
     cd -- /home/agent/workspace || cd -- /home/agent || true
 
+    # Discover hooks with find, capturing errors for diagnosability
+    local find_output find_rc
+    find_output=$(find "$hooks_dir" -maxdepth 1 -name '*.sh' -type f 2>&1) && find_rc=0 || find_rc=$?
+
+    if [[ $find_rc -ne 0 ]]; then
+        log "[WARN] Failed to discover hooks in $hooks_dir: $find_output"
+        return 0
+    fi
+
     # Deterministic ordering with LC_ALL=C
     local hook
     local hooks_found=0
@@ -341,7 +350,7 @@ run_hooks() {
             log "[ERROR] Startup hook failed: $hook"
             exit 1
         fi
-    done < <(find "$hooks_dir" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)
+    done < <(printf '%s\n' "$find_output" | LC_ALL=C sort)
 
     if [[ $hooks_found -eq 1 ]]; then
         log "[INFO] Completed hooks from: $hooks_dir"

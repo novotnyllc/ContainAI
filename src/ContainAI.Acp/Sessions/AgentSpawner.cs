@@ -87,9 +87,12 @@ public sealed class AgentSpawner
             psi.ArgumentList.Add("--quiet");
             psi.ArgumentList.Add("--");
             psi.ArgumentList.Add("bash");
-            psi.ArgumentList.Add("-lc");
+            // Use -c (not -lc) to avoid login shell sourcing profile files that could
+            // emit output to stdout and corrupt the ACP JSON-RPC stream
+            psi.ArgumentList.Add("-c");
             // Safe: agent passed as $1, not interpolated into shell string
-            psi.ArgumentList.Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec \"$1\" --acp");
+            // Use 'exec --' to safely handle agent names that start with '-'
+            psi.ArgumentList.Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec -- \"$1\" --acp");
             psi.ArgumentList.Add("--");  // End of bash -c options
             psi.ArgumentList.Add(agent); // $1 for the script
 

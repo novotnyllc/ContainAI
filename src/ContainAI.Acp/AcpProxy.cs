@@ -19,7 +19,6 @@ public sealed class AcpProxy : IDisposable
     private readonly OutputWriter _output;
     private readonly CancellationTokenSource _cts = new();
     private readonly string _agent;
-    private readonly bool _testMode;
     private readonly bool _directSpawn;
     private readonly TextWriter _stderr;
 
@@ -32,19 +31,16 @@ public sealed class AcpProxy : IDisposable
     /// <param name="agent">The agent binary name (any agent supporting --acp flag).</param>
     /// <param name="stdout">Stream for JSON-RPC output.</param>
     /// <param name="stderr">Stream for diagnostic output.</param>
-    /// <param name="testMode">If true, skips container-side preflight checks.</param>
     /// <param name="directSpawn">If true, spawns agent directly without cai exec.</param>
     public AcpProxy(
         string agent,
         Stream stdout,
         TextWriter stderr,
-        bool testMode = false,
         bool directSpawn = false)
     {
         _agent = agent;
         _output = new OutputWriter(stdout);
         _stderr = stderr;
-        _testMode = testMode;
         _directSpawn = directSpawn;
 
         // No validation - any agent name is accepted.

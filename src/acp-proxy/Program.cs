@@ -35,7 +35,6 @@ public static class Program
         proxyCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             var agent = parseResult.GetValue(agentArgument) ?? "claude";
-            var testMode = Environment.GetEnvironmentVariable("CAI_ACP_TEST_MODE") == "1";
             var directSpawn = Environment.GetEnvironmentVariable("CAI_ACP_DIRECT_SPAWN") == "1";
 
             try
@@ -44,7 +43,6 @@ public static class Program
                     agent,
                     Console.OpenStandardOutput(),
                     Console.Error,
-                    testMode,
                     directSpawn);
 
                 // Set up console cancel handler for graceful shutdown
