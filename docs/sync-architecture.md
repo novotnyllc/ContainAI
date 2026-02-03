@@ -4,10 +4,93 @@ This document describes the config synchronization system between the host and c
 
 ## Overview
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Config Sync Data Flow
+accDescr: Shows how host configs flow via rsync to Docker volume, then appear in container via symlinks from home directories to /mnt/agent-data paths.
+flowchart LR
+    subgraph Host["Host System"]
+        HostConfigs["~/.claude<br/>~/.config/gh<br/>~/.gitconfig"]
+    end
+
+    subgraph Sync["cai import (rsync)"]
+        SyncMap["_IMPORT_SYNC_MAP"]
+    end
+
+    subgraph Volume["Docker Volume"]
+        VolData["/mnt/agent-data<br/>/claude<br/>/config/gh<br/>/config/git"]
+    end
+
+    subgraph Container["Container Home"]
+        Symlinks["~/.claude → /mnt/agent-data/claude<br/>~/.config/gh → /mnt/agent-data/config/gh"]
+    end
+
+    HostConfigs -->|"rsync"| Sync
+    Sync -->|"to volume"| VolData
+    VolData -->|"symlinks"| Symlinks
+
+    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Sync fill:#0f3460,stroke:#16213e,color:#fff
+    style Volume fill:#16213e,stroke:#0f3460,color:#fff
+    style Container fill:#0f3460,stroke:#16213e,color:#fff
+```
+
 The import/sync system has three main components that must stay synchronized:
 1. **Host-side sync** (`src/lib/import.sh`): Uses `_IMPORT_SYNC_MAP` to define source->target mappings for rsync
 2. **Container image symlinks** (`src/container/Dockerfile.agents`): Creates build-time symlinks from home directories to `/mnt/agent-data`
 3. **Runtime init** (`src/container/containai-init.sh`): Ensures volume directory structure exists on first boot
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Three-Component Sync System
+accDescr: The sync system requires alignment between import.sh (host sync), Dockerfile.agents (build-time symlinks), and containai-init.sh (runtime directory creation).
+flowchart TB
+    subgraph Source["Single Source of Truth"]
+        Manifest["sync-manifest.toml"]
+    end
+
+    subgraph Components["Generated Components"]
+        Import["import.sh<br/>_IMPORT_SYNC_MAP"]
+        Dockerfile["Dockerfile.agents<br/>Symlink creation"]
+        Init["containai-init.sh<br/>Directory structure"]
+    end
+
+    subgraph Artifacts["Container Artifacts"]
+        SymlinksScript["generated/symlinks.sh"]
+        InitDirs["generated/init-dirs.sh"]
+        LinkSpec["generated/link-spec.json"]
+    end
+
+    Manifest -->|"gen-dockerfile-symlinks.sh"| SymlinksScript
+    Manifest -->|"gen-init-dirs.sh"| InitDirs
+    Manifest -->|"gen-container-link-spec.sh"| LinkSpec
+    Manifest -->|"manual sync"| Import
+
+    SymlinksScript --> Dockerfile
+    InitDirs --> Init
+
+    style Source fill:#e94560,stroke:#16213e,color:#fff
+    style Components fill:#0f3460,stroke:#16213e,color:#fff
+    style Artifacts fill:#16213e,stroke:#0f3460,color:#fff
+```
 
 ## Component Analysis
 

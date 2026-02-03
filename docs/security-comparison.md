@@ -55,6 +55,8 @@ Before comparing solutions, it helps to understand what each isolation mechanism
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Isolation Layers Hierarchy
+accDescr: Four isolation layers from weakest (process isolation with chroot/namespaces) to strongest (kernel-level isolation with user-space kernel or VM).
 flowchart TB
     subgraph Layers["Isolation Layers (weakest to strongest)"]
         direction TB
@@ -123,6 +125,8 @@ flowchart TB
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Docker Desktop Sandbox Architecture
+accDescr: Docker Desktop sandbox using standard runc without user namespaces, providing basic isolation only with Docker CLI talking to host daemon.
 flowchart LR
     subgraph Host["Host System"]
         DD["Docker Desktop"]
@@ -170,6 +174,8 @@ flowchart LR
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Docker Desktop ECI Architecture
+accDescr: Docker Desktop Business with Sysbox runtime providing user namespaces and procfs virtualization for ECI containers with systemd and inner Docker daemon.
 flowchart LR
     subgraph Host["Host System"]
         DD["Docker Desktop Business"]
@@ -224,6 +230,8 @@ flowchart LR
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: ContainAI Sysbox Architecture
+accDescr: ContainAI using dedicated docker-ce with Sysbox runtime providing full system containers with systemd, SSH, inner Docker, and AI agent.
 flowchart LR
     subgraph Host["Host System"]
         CAI["ContainAI docker-ce"]
@@ -277,6 +285,8 @@ flowchart LR
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Anthropic SRT Process Sandbox
+accDescr: Anthropic SRT using bubblewrap on Linux or sandbox-exec on macOS to provide process-level isolation with filesystem allowlist and network proxy.
 flowchart LR
     subgraph Host["Host System"]
         SRT["SRT Runtime"]
@@ -346,6 +356,8 @@ flowchart LR
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: gVisor User-Space Kernel Architecture
+accDescr: gVisor runtime with Sentry user-space kernel intercepting syscalls, Gofer handling file I/O, only passing safe syscalls to host kernel.
 flowchart TB
     subgraph Host["Host System"]
         Kernel["Linux Kernel"]
@@ -400,6 +412,8 @@ flowchart TB
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Firecracker/Kata MicroVM Architecture
+accDescr: MicroVM with separate guest kernel isolated via KVM hypervisor, providing hardware-level isolation with ~125ms startup time.
 flowchart TB
     subgraph Host["Host System"]
         HostKernel["Host Linux Kernel"]
@@ -514,6 +528,8 @@ ContainAI provides all of this with strong isolation through Sysbox.
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Solution Selection Decision Tree
+accDescr: Decision flowchart for choosing sandboxing solution based on Docker-in-Docker needs, cost constraints, and isolation requirements.
 flowchart TD
     Start["Does your agent need<br/>Docker-in-Docker?"]
 

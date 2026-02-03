@@ -6,6 +6,41 @@ This guide explains how to add support for a new AI coding agent to ContainAI.
 
 Adding an agent involves six steps:
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Six-Step Agent Addition Workflow
+accDescr: Sequential workflow from research through Dockerfile, manifest, import map, generators, to final testing in container.
+flowchart LR
+    S1["1. Research<br/>Installation & config"]
+    S2["2. Dockerfile<br/>Add to Dockerfile.agents"]
+    S3["3. Manifest<br/>sync-manifest.toml"]
+    S4["4. Import Map<br/>_IMPORT_SYNC_MAP"]
+    S5["5. Generators<br/>Run & check consistency"]
+    S6["6. Test<br/>Verify in container"]
+
+    S1 --> S2
+    S2 --> S3
+    S3 --> S4
+    S4 --> S5
+    S5 --> S6
+
+    style S1 fill:#1a1a2e,stroke:#16213e,color:#fff
+    style S2 fill:#0f3460,stroke:#16213e,color:#fff
+    style S3 fill:#1a1a2e,stroke:#16213e,color:#fff
+    style S4 fill:#0f3460,stroke:#16213e,color:#fff
+    style S5 fill:#1a1a2e,stroke:#16213e,color:#fff
+    style S6 fill:#0f3460,stroke:#16213e,color:#fff
+```
+
 1. **Research** - Understand the agent's installation and configuration
 2. **Dockerfile** - Add installation to `Dockerfile.agents`
 3. **Manifest** - Add config entries to `sync-manifest.toml`

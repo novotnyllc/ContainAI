@@ -6,6 +6,45 @@ This document describes how to run ContainAI tests locally and in CI.
 
 ContainAI uses a tiered testing strategy:
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Test Tier Hierarchy
+accDescr: Three-tier testing pyramid from Tier 1 linting (shellcheck, manifest) through Tier 2 integration (Docker runtime) to Tier 3 E2E (Sysbox required).
+flowchart TB
+    subgraph T1["Tier 1: Linting (CI)"]
+        Shell["shellcheck"]
+        Manifest["manifest consistency"]
+    end
+
+    subgraph T2["Tier 2: Integration (CI)"]
+        Sync["test-sync-integration.sh"]
+        Docker["Standard Docker runtime"]
+    end
+
+    subgraph T3["Tier 3: E2E (Manual)"]
+        DinD["test-dind.sh"]
+        Secure["test-secure-engine.sh"]
+        Full["test-containai.sh"]
+        Sysbox["Requires Sysbox"]
+    end
+
+    T1 -->|"Pass"| T2
+    T2 -->|"Pass"| T3
+
+    style T1 fill:#0f3460,stroke:#16213e,color:#fff
+    style T2 fill:#1a1a2e,stroke:#16213e,color:#fff
+    style T3 fill:#16213e,stroke:#0f3460,color:#fff
+```
+
 ### Tier 1: Linting (CI - ubuntu-latest)
 
 Host-side checks that don't require Docker:

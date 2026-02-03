@@ -83,50 +83,55 @@ The `cai setup` command installs and configures multiple components. Here's what
 
 ### Installation Summary
 
-```
-+------------------------------------------------------------------+
-|                    ContainAI Installation                         |
-+------------------------------------------------------------------+
-|                                                                    |
-|  Host System                                                       |
-|  +------------------------------------------------------------+   |
-|  |                                                             |   |
-|  |  Docker Configuration (WSL2/Linux only)                    |   |
-|  |  +---------------------------------------------------------+|   |
-|  |  | - Socket: /var/run/containai-docker.sock (isolated)     ||   |
-|  |  | - Config: /etc/containai/docker/daemon.json             ||   |
-|  |  | - Service: containai-docker.service (dedicated)         ||   |
-|  |  | - Runtime: sysbox-runc (default for isolated daemon)    ||   |
-|  |  +---------------------------------------------------------+|   |
-|  |                                                             |   |
-|  |  Sysbox Runtime                                             |   |
-|  |  +---------------------------------------------------------+|   |
-|  |  | - sysbox-runc: Container runtime with userns isolation  ||   |
-|  |  | - sysbox-mgr: Manager service                           ||   |
-|  |  | - sysbox-fs: Filesystem virtualization                  ||   |
-|  |  +---------------------------------------------------------+|   |
-|  |                                                             |   |
-|  |  Docker Context                                             |   |
-|  |  +---------------------------------------------------------+|   |
-|  |  | - Name: containai-docker                                ||   |
-|  |  | - Points to: appropriate socket for platform            ||   |
-|  |  +---------------------------------------------------------+|   |
-|  |                                                             |   |
-|  |  SSH Infrastructure                                         |   |
-|  |  +---------------------------------------------------------+|   |
-|  |  | - Key: ~/.config/containai/id_containai (ed25519)       ||   |
-|  |  | - Config dir: ~/.ssh/containai.d/                       ||   |
-|  |  | - Include in: ~/.ssh/config                             ||   |
-|  |  | - Known hosts: ~/.config/containai/known_hosts          ||   |
-|  |  +---------------------------------------------------------+|   |
-|  |                                                             |   |
-|  |  User Configuration                                         |   |
-|  |  +---------------------------------------------------------+|   |
-|  |  | - Config: ~/.config/containai/config.toml               ||   |
-|  |  +---------------------------------------------------------+|   |
-|  |                                                             |   |
-|  +------------------------------------------------------------+   |
-+------------------------------------------------------------------+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Component Installation Stack
+accDescr: Layered view of installed components from Docker daemon and Sysbox runtime up through context configuration, SSH infrastructure, and user config files.
+flowchart TB
+    subgraph Docker["Docker Layer"]
+        Daemon["containai-docker.service<br/>/var/run/containai-docker.sock"]
+        DaemonCfg["/etc/containai/docker/daemon.json"]
+    end
+
+    subgraph Sysbox["Sysbox Layer"]
+        Runtime["sysbox-runc"]
+        Mgr["sysbox-mgr"]
+        FS["sysbox-fs"]
+    end
+
+    subgraph Context["Docker Context"]
+        Ctx["containai-docker context<br/>Points to isolated socket"]
+    end
+
+    subgraph SSH["SSH Infrastructure"]
+        Key["~/.config/containai/id_containai"]
+        SSHCfg["~/.ssh/containai.d/*.conf"]
+        Known["~/.config/containai/known_hosts"]
+    end
+
+    subgraph User["User Configuration"]
+        Config["~/.config/containai/config.toml"]
+    end
+
+    Docker --> Sysbox
+    Sysbox --> Context
+    Context --> SSH
+    SSH --> User
+
+    style Docker fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Sysbox fill:#0f3460,stroke:#16213e,color:#fff
+    style Context fill:#16213e,stroke:#0f3460,color:#fff
+    style SSH fill:#0f3460,stroke:#16213e,color:#fff
+    style User fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 ### Platform Comparison
@@ -189,6 +194,39 @@ Updates are applied atomically by swapping symlinks and restarting the `containa
 **Note:** On macOS, ContainAI uses a Lima VM with its own Docker installation. The dockerd bundle is not used on macOS.
 
 ---
+
+## Platform Selection
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Platform Selection Decision Tree
+accDescr: Decision flowchart for choosing installation path based on operating system - WSL2 for Windows, native for Linux, Lima VM for macOS.
+flowchart TD
+    Start["What OS?"]
+    Start -->|Windows| WSL["Use WSL2<br/>Ubuntu/Debian distro"]
+    Start -->|Linux| Linux{"Ubuntu/Debian?"}
+    Start -->|macOS| Mac["Lima VM<br/>(auto-installed)"]
+
+    Linux -->|Yes| Native["Native install<br/>cai setup"]
+    Linux -->|No| Manual["Manual Sysbox<br/>See Sysbox docs"]
+
+    WSL --> Setup["cai setup"]
+    Native --> Setup
+    Mac --> Setup
+
+    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Setup fill:#0f3460,stroke:#16213e,color:#fff
+    style Manual fill:#e94560,stroke:#16213e,color:#fff
+```
 
 ## Platform-Specific Setup
 

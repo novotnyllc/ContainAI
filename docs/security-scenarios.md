@@ -46,6 +46,8 @@ An AI agent runs `npm install` on a project. Unknown to anyone, a dependency thr
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Malicious Package Attack Chain
+accDescr: Flow from npm install through postinstall exploit, showing outcome difference with and without user namespaces - root on host vs unprivileged.
 flowchart LR
     A["npm install"] --> B["postinstall script runs"]
     B --> C["Script exploits container"]
@@ -144,6 +146,8 @@ Note: The `<!-- ... -->` HTML comment above is **invisible** when rendered - tha
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Prompt Injection Attack Chain
+accDescr: Flow showing agent reading hidden instructions, executing commands, with different outcomes based on container isolation - host data vs container-only data.
 flowchart TD
     A["Agent reads file"] --> B["Hidden instructions parsed"]
     B --> C["Agent executes commands"]
@@ -225,6 +229,8 @@ Note: The exact file descriptor number (`<N>`) varies by environment; the attack
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Container Escape CVE-2024-21626 Attack Chain
+accDescr: Leaky Vessels exploit flow from malicious Dockerfile through fd leak to host filesystem, mitigated by user namespaces limiting privileges.
 flowchart LR
     A["Malicious Dockerfile"] --> B["Exploits fd leak"]
     B --> C["Accesses host filesystem"]
@@ -317,6 +323,8 @@ docker run --privileged ...
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Privileged Container Attack Chain
+accDescr: Escalation from compromised code in privileged container through device mount to full host filesystem access and persistent compromise.
 flowchart TD
     A["Compromised code in<br/>privileged container"] --> B["mount /dev/sda1 /mnt"]
     B --> C["Full host filesystem access"]
@@ -408,6 +416,8 @@ The Docker socket is not just "access to run containers." It is **root access to
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Docker Socket Mount Attack Chain
+accDescr: One-liner attack from container with socket access to host root via docker run with host mount and chroot.
 flowchart LR
     A["Container with<br/>socket access"] --> B["docker run -v /:/host alpine"]
     B --> C["chroot /host"]
@@ -483,6 +493,8 @@ Security is not about finding the one perfect solution. It is about **layering d
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Defense in Depth Layers
+accDescr: Five defense layers from code review through network segmentation, each blocking 90% of attacks, collectively blocking 99.999% before reaching host.
 flowchart TD
     subgraph Layers["Defense Layers"]
         L1["Code Review & Dependency Scanning"]

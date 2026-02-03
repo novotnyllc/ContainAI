@@ -29,10 +29,38 @@ Configure your editor to use `cai --acp <agent>`:
 
 ## How It Works
 
-```
-Editor --> ACP stdio --> Proxy (cai --acp) --> cai exec --> Container --> Agent (claude --acp)
-                                                                    |
-                                                                    +--> MCP Servers
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'background': '#f5f5f5',
+  'actorBkg': '#1a1a2e',
+  'actorTextColor': '#ffffff',
+  'actorBorder': '#16213e',
+  'actorLineColor': '#606060',
+  'signalColor': '#606060',
+  'signalTextColor': '#1a1a2e',
+  'labelBoxBkgColor': '#0f3460',
+  'labelBoxBorderColor': '#16213e',
+  'labelTextColor': '#ffffff',
+  'noteBkgColor': '#0f3460',
+  'noteTextColor': '#ffffff',
+  'noteBorderColor': '#16213e'
+}}}%%
+accTitle: ACP Protocol Flow
+accDescr: Sequence diagram showing editor communication through ACP stdio to proxy, then cai exec to container where agent runs with MCP server connections.
+sequenceDiagram
+    participant Editor
+    participant Proxy as cai --acp<br/>(Proxy)
+    participant Exec as cai exec
+    participant Container
+    participant Agent as Agent<br/>(claude --acp)
+    participant MCP as MCP Servers
+
+    Editor->>Proxy: ACP stdio (NDJSON)
+    Proxy->>Exec: Spawn container exec
+    Exec->>Container: SSH/exec
+    Container->>Agent: Run agent --acp
+    Agent->>MCP: Connect to MCP servers
+    Agent-->>Editor: Response via proxy
 ```
 
 1. Editor spawns `cai --acp claude`

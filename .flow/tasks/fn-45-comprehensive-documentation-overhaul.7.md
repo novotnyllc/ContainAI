@@ -112,8 +112,22 @@ accDescr: <description of what diagram shows>
 - [ ] No diagram exceeds 30 nodes (split if larger)
 
 ## Done summary
-TBD
+Added accessibility attributes (accTitle/accDescr) to all existing Mermaid diagrams and added new diagrams to documentation files that lacked visual aids.
 
+Phase 1 - Retrofitted existing diagrams with accessibility:
+- docs/architecture.md: 12 diagrams
+- docs/lifecycle.md: 1 diagram
+- docs/quickstart.md: 2 diagrams
+- docs/security-comparison.md: 8 diagrams
+- docs/security-scenarios.md: 6 diagrams
+
+Phase 2 - Added new diagrams:
+- docs/sync-architecture.md: 2 diagrams (data flow, 3-component system)
+- docs/setup-guide.md: 2 diagrams (platform selection, component stack)
+- docs/configuration.md: 2 diagrams (precedence hierarchy, config discovery)
+- docs/adding-agents.md: 1 diagram (6-step workflow)
+- docs/acp.md: 1 sequence diagram (converted ASCII art)
+- docs/testing.md: 1 diagram (test tier hierarchy)
 ## Evidence
 - Commits:
 - Tests:

@@ -22,6 +22,37 @@ ContainAI searches for configuration in this order:
 5. If no workspace config found, check user config at `XDG_CONFIG_HOME/containai/config.toml`
 6. If `XDG_CONFIG_HOME` is not set, defaults to `~/.config`
 
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Config Discovery Flowchart
+accDescr: Decision flow showing config file search from cwd upward, stopping at git root or finding .containai/config.toml, with fallback to user XDG config.
+flowchart TD
+    Start["Start at cwd"]
+    Start --> Check{"Check for<br/>.containai/config.toml"}
+    Check -->|Found| Use["Use workspace config"]
+    Check -->|Not found| Git{"At git root<br/>(.git exists)?"}
+    Git -->|Yes| Fallback["Check user config<br/>~/.config/containai/config.toml"]
+    Git -->|No| Parent{"At filesystem root?"}
+    Parent -->|Yes| Fallback
+    Parent -->|No| Up["Go to parent directory"]
+    Up --> Check
+    Fallback -->|Found| UseUser["Use user config"]
+    Fallback -->|Not found| Defaults["Use built-in defaults"]
+
+    style Use fill:#0f3460,stroke:#16213e,color:#fff
+    style UseUser fill:#0f3460,stroke:#16213e,color:#fff
+    style Defaults fill:#1a1a2e,stroke:#16213e,color:#fff
+```
+
 ```
 /home/user/projects/myapp/src/  <- workspace (cwd)
 /home/user/projects/myapp/.containai/config.toml  <- found first (wins)
@@ -34,6 +65,38 @@ ContainAI searches for configuration in this order:
 ## Precedence
 
 Configuration values are resolved with this precedence (highest to lowest):
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+accTitle: Configuration Precedence Hierarchy
+accDescr: Vertical hierarchy showing config resolution order from CLI flags (highest) through environment variables, workspace config, global config, to built-in defaults (lowest).
+flowchart TB
+    CLI["1. CLI Flags<br/>--data-volume, --agent"]
+    ENV["2. Environment Variables<br/>CONTAINAI_DATA_VOLUME"]
+    Workspace["3. Workspace Config Section<br/>[workspace./path]"]
+    Global["4. Global Config Section<br/>[agent], [credentials]"]
+    Default["5. Built-in Defaults<br/>sandbox-agent-data, claude"]
+
+    CLI -->|overrides| ENV
+    ENV -->|overrides| Workspace
+    Workspace -->|overrides| Global
+    Global -->|overrides| Default
+
+    style CLI fill:#e94560,stroke:#16213e,color:#fff
+    style ENV fill:#0f3460,stroke:#16213e,color:#fff
+    style Workspace fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Global fill:#16213e,stroke:#0f3460,color:#fff
+    style Default fill:#0f3460,stroke:#16213e,color:#fff
+```
 
 1. **CLI flags** - `--data-volume`, `--agent`, `--credentials`, `--config`
 2. **Environment variables** - `CONTAINAI_DATA_VOLUME`, `CONTAINAI_AGENT`, etc.

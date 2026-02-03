@@ -17,6 +17,8 @@ ContainAI containers are designed to be persistent workspaces for AI coding agen
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
+accTitle: Container State Machine
+accDescr: State diagram showing container transitions between Running and Stopped states via cai run and cai stop commands, with volume preserved unless --remove is used.
 stateDiagram-v2
     [*] --> Running: cai run (first use)
     Running --> Running: cai run (attach)
