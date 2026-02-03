@@ -3,8 +3,8 @@
 ## Executive Summary
 
 - **Total recommendations:** 25
-- **Quick wins:** 10 (implement now)
-- **Medium effort:** 10 (next release)
+- **Quick wins:** 7 (implement now)
+- **Medium effort:** 13 (next release)
 - **Breaking changes:** 5 (requires RFC/deprecation)
 
 ### Top 3 Priorities
@@ -31,7 +31,7 @@
 **Priority:** 5 × 4 = 20 (Impact × Frequency)
 **Effort:** Low (add one line to `_containai_help()`)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task needed
+**Owner epic:** fn-36-rb7 | **Status:** new task
 
 **Current:** `template` command exists and works but is not listed in `cai help`
 **Proposed:** Add to Configuration Commands section in main help
@@ -63,7 +63,7 @@
 **Priority:** 4 × 3 = 12 (editor integration is key feature)
 **Effort:** Low (reorder help text)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task needed
+**Owner epic:** fn-36-rb7 | **Status:** new task
 
 **Current:** `acp` is buried after "Run Options" section, not with other subcommands
 **Proposed:** Move to main "Subcommands" section alongside shell, run, exec
@@ -121,23 +121,7 @@
 
 ---
 
-### REC-007: Add `cai docker --help` text
-
-**Category:** Quick win
-**Priority:** 3 × 3 = 9
-**Effort:** Medium (new help function)
-**Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task needed
-
-**Current:** `cai docker --help` shows Docker's own help, not ContainAI's context behavior
-**Proposed:** Add `_containai_docker_help()` explaining context injection and `-u agent`
-**Rationale:** Experts need to understand how ContainAI wraps docker. Learnability score 3/5.
-
-**Source:** Heuristic evaluation fn-46.1 - "`docker` has no dedicated help"
-
----
-
-### REC-008: Standardize build.sh error format
+### REC-007: Standardize build.sh error format
 
 **Category:** Quick win
 **Priority:** 2 × 2 = 4
@@ -153,9 +137,27 @@
 
 ---
 
+## Medium Effort (next release)
+
+### REC-008: Add `cai docker --help` text
+
+**Category:** Medium effort
+**Priority:** 3 × 3 = 9
+**Effort:** Medium (new help function)
+**Breaking:** No
+**Owner epic:** fn-36-rb7 | **Status:** new task
+
+**Current:** `cai docker --help` shows Docker's own help, not ContainAI's context behavior
+**Proposed:** Add `_containai_docker_help()` explaining context injection and `-u agent`
+**Rationale:** Experts need to understand how ContainAI wraps docker. Learnability score 3/5.
+
+**Source:** Heuristic evaluation fn-46.1 - "`docker` has no dedicated help"
+
+---
+
 ### REC-009: Document exit codes in more command help
 
-**Category:** Quick win
+**Category:** Medium effort
 **Priority:** 3 × 3 = 9 (scripting users need this)
 **Effort:** Medium (research + document)
 **Breaking:** No
@@ -171,7 +173,7 @@
 
 ### REC-010: Document environment variables in help text
 
-**Category:** Quick win
+**Category:** Medium effort
 **Priority:** 2 × 3 = 6
 **Effort:** Medium (research + document)
 **Breaking:** No
@@ -184,8 +186,6 @@
 **Source:** Heuristic evaluation fn-46.1 - "Environment variables rarely documented"
 
 ---
-
-## Medium Effort (next release)
 
 ### REC-011: Add `--json` output to more commands
 
@@ -225,7 +225,7 @@
 **Priority:** 3 × 2 = 6
 **Effort:** Medium (warning + removal after 2 releases)
 **Breaking:** Yes (after deprecation period)
-**Owner epic:** fn-36-rb7 | **Status:** new task needed (after REC-005)
+**Owner epic:** fn-36-rb7 | **Status:** new task
 
 **Migration path:**
 1. Release N: Add `--container` alias (REC-005)
@@ -246,7 +246,7 @@
 **Priority:** 2 × 2 = 4
 **Effort:** Low (add warning, schedule removal)
 **Breaking:** Yes (after deprecation period)
-**Owner epic:** fn-36-rb7 | **Status:** new task needed
+**Owner epic:** fn-36-rb7 | **Status:** new task
 
 **Migration path:**
 1. Release N: Warn when `--restart` used
@@ -341,7 +341,7 @@
 **Priority:** 3 × 2 = 6
 **Effort:** Medium (add --help-full pattern)
 **Breaking:** No
-**Owner epic:** fn-36-rb7 | **Status:** new task needed
+**Owner epic:** fn-36-rb7 | **Status:** new task
 
 **Current:** `cai setup --help` shows 100+ lines of platform-specific detail
 **Proposed:** Default `--help` shows summary; `--help-full` shows all detail
@@ -555,13 +555,13 @@
 | REC-004 | fn-36-rb7 | already planned |
 | REC-005 | fn-36-rb7 | partially planned |
 | REC-006 | NEW | new |
-| REC-007 | fn-36-rb7 | new task |
-| REC-008 | NEW | new |
+| REC-007 | NEW | new |
+| REC-008 | fn-36-rb7 | new task |
 | REC-009 | fn-45 | planned |
 | REC-010 | fn-45 | planned |
 | REC-011 | fn-42 | partially planned |
 | REC-012 | NEW | new |
-| REC-013 | fn-36-rb7 | new task (after REC-005) |
+| REC-013 | fn-36-rb7 | new task |
 | REC-014 | fn-36-rb7 | new task |
 | REC-015 | fn-36-rb7 | partially planned |
 | REC-016 | fn-45 | new |
@@ -579,10 +579,10 @@
 
 | Epic | Recommendations |
 |------|-----------------|
-| fn-36-rb7 (CLI UX Consistency) | 10 (REC-001, 003, 004, 005, 007, 013, 014, 015, 019) |
+| fn-36-rb7 (CLI UX Consistency) | 9 (REC-001, 003, 004, 005, 008, 013, 014, 015, 019) |
 | fn-42 (CLI UX Fixes) | 1 (REC-011) |
-| fn-45 (Documentation) | 7 (REC-009, 010, 016, 020, 022, 024) |
-| NEW epic needed | 7 (REC-002, 006, 008, 012, 017, 018, 021, 023, 025) |
+| fn-45 (Documentation) | 6 (REC-009, 010, 016, 020, 022, 024) |
+| NEW epic needed | 9 (REC-002, 006, 007, 012, 017, 018, 021, 023, 025) |
 
 ---
 
