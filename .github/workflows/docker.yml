@@ -248,17 +248,12 @@ jobs:
           dotnet tool restore
           echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build test images (${{ matrix.arch }})
         run: |
-          echo "Building containai images for ${{ matrix.platform }}..."
+          echo "Building containai images for ${{ matrix.arch }}..."
           ./src/build.sh \
             --image-prefix containai \
-            --version "$NBGV_SemVer2" \
-            --platforms ${{ matrix.platform }} \
-            --load
+            --version "$NBGV_SemVer2"
 
       - name: Save images to artifact
         run: |

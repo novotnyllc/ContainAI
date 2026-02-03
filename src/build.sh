@@ -17,7 +17,7 @@ set -euo pipefail
 #   --context NAME            Docker context (default: containai-docker if present)
 #   --help                    Show this help
 #
-# Defaults: buildx is preferred; platform defaults to linux/<host-arch>
+# Defaults: docker build; buildx is used only when requested
 #
 # Build order: base -> sdks -> agents -> containai (alias)
 #
@@ -42,7 +42,7 @@ PLATFORMS=""
 BUILDX_BUILDER=""
 BUILDX_PUSH=0
 BUILDX_LOAD=0
-USE_BUILDX=1
+USE_BUILDX=0
 BUILD_SETUP=0
 BUILDX_REQUESTED=0
 HAS_OUTPUT=0
@@ -318,6 +318,28 @@ IMAGE_SDKS="${IMAGE_PREFIX}/sdks"
 IMAGE_AGENTS="${IMAGE_PREFIX}/agents"
 IMAGE_MAIN="${IMAGE_PREFIX}"
 
+# Use buildx only when requested (multi-arch/push/load/output/builder/build-setup)
+if [[ "$BUILDX_REQUESTED" -eq 1 ]]; then
+    USE_BUILDX=1
+fi
+
+# Docker availability and context selection (applies to buildx and docker build)
+if ! command -v docker >/dev/null 2>&1; then
+    printf 'ERROR: docker is not installed or not in PATH.\n' >&2
+    exit 1
+fi
+if [[ -n "$DOCKER_CONTEXT" ]]; then
+    if ! docker context inspect "$DOCKER_CONTEXT" >/dev/null 2>&1; then
+        printf 'ERROR: docker context "%s" not found.\n' "$DOCKER_CONTEXT" >&2
+        exit 1
+    fi
+    DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
+else
+    if docker context inspect containai-docker >/dev/null 2>&1; then
+        DOCKER_CMD=(docker --context containai-docker)
+    fi
+fi
+
 if [[ "$USE_BUILDX" -eq 1 ]]; then
     HAS_OUTPUT=0
     HAS_REGISTRY_OUTPUT=0
@@ -329,21 +351,6 @@ if [[ "$USE_BUILDX" -eq 1 ]]; then
         fi
     fi
 
-    if ! command -v docker >/dev/null 2>&1; then
-        printf 'ERROR: docker is not installed or not in PATH.\n' >&2
-        exit 1
-    fi
-    if [[ -n "$DOCKER_CONTEXT" ]]; then
-        if ! docker context inspect "$DOCKER_CONTEXT" >/dev/null 2>&1; then
-            printf 'ERROR: docker context "%s" not found.\n' "$DOCKER_CONTEXT" >&2
-            exit 1
-        fi
-        DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
-    else
-        if docker context inspect containai-docker >/dev/null 2>&1; then
-            DOCKER_CMD=(docker --context containai-docker)
-        fi
-    fi
     if ! "${DOCKER_CMD[@]}" buildx version >/dev/null 2>&1; then
         if [[ "$BUILDX_REQUESTED" -eq 1 ]]; then
             printf 'ERROR: docker buildx is not available. Install the buildx plugin.\n' >&2
