@@ -3531,31 +3531,37 @@ _containai_docker_cmd() {
     # Silent repair - cai docker is a pass-through and shouldn't be verbose
     _cai_auto_repair_containai_context "false" || true
 
-    # On WSL2, use ~/.docker-cai/ config directory to get Unix socket context
+    # On WSL2, check if ~/.docker-cai/ contains the context with Unix socket
     # This avoids the SSH endpoint in ~/.docker/ which is shared with Windows
+    # Track which config directory the context was actually found in
     local docker_config_dir=""
-    if _cai_is_wsl2 && [[ -d "$HOME/.docker-cai" ]]; then
-        docker_config_dir="$HOME/.docker-cai"
-    fi
-
     local context=""
+
     if _cai_is_container; then
         context=""
-    elif [[ -n "$docker_config_dir" ]] && DOCKER_CONFIG="$docker_config_dir" docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
-        # WSL2: Use context from ~/.docker-cai/
+    elif _cai_is_wsl2 && [[ -d "$HOME/.docker-cai" ]] && DOCKER_CONFIG="$HOME/.docker-cai" docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        # WSL2: Context found in ~/.docker-cai/ (Unix socket)
+        docker_config_dir="$HOME/.docker-cai"
         context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        # Context found in default config (non-WSL2 or WSL2 fallback)
         context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     else
         echo "[ERROR] ContainAI Docker context not found. Run 'cai setup'." >&2
         return 1
     fi
 
+    # Handle explicit --context flag - pass through but preserve DOCKER_CONFIG for WSL2
     local arg
     for arg in "$@"; do
         case "$arg" in
             --context|--context=*)
-                docker "$@"
+                # On WSL2, preserve DOCKER_CONFIG so user can use contexts from ~/.docker-cai/
+                if [[ -n "$docker_config_dir" ]]; then
+                    DOCKER_CONFIG="$docker_config_dir" docker "$@"
+                else
+                    docker "$@"
+                fi
                 return $?
                 ;;
         esac
@@ -3615,11 +3621,20 @@ _containai_docker_cmd() {
 
         if [[ "$has_user" != "true" && -n "$container_name" ]]; then
             local managed_label image_name is_containai="false"
-            managed_label=$(DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
+            # Only set DOCKER_CONFIG if we're using ~/.docker-cai/ (WSL2)
+            if [[ -n "$docker_config_dir" ]]; then
+                managed_label=$(DOCKER_CONFIG="$docker_config_dir" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
+            else
+                managed_label=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
+            fi
             if [[ "$managed_label" == "true" ]]; then
                 is_containai="true"
             else
-                image_name=$(DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+                if [[ -n "$docker_config_dir" ]]; then
+                    image_name=$(DOCKER_CONFIG="$docker_config_dir" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+                else
+                    image_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+                fi
                 if [[ "$image_name" == "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                     is_containai="true"
                 fi
@@ -3633,7 +3648,12 @@ _containai_docker_cmd() {
 
     # Execute docker with appropriate config directory
     # On WSL2, DOCKER_CONFIG points to ~/.docker-cai/ to use Unix socket context
-    DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
+    # Otherwise, don't override user's DOCKER_CONFIG
+    if [[ -n "$docker_config_dir" ]]; then
+        DOCKER_CONFIG="$docker_config_dir" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
+    else
+        DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
+    fi
 }
 
 # ==============================================================================
