@@ -36,6 +36,28 @@ Enable easy customization of ContainAI containers without requiring users to und
 
 ## Architecture
 
+### ACP Generic Agent Support
+
+**Actual Code Locations (verified):**
+- **`src/ContainAI.Acp/AcpProxy.cs:51-54`** - Constructor validation: `if (!testMode && agent != "claude" && agent != "gemini")`
+- **`src/ContainAI.Acp/Sessions/AgentSpawner.cs:32`** - Agent spawn logic (uses `cai exec` for containerized spawn)
+- **`src/lib/container.sh:95-99`** - `_CONTAINAI_AGENT_TAGS` array (used for default image tags, not validation)
+- **`src/lib/container.sh:116-119`** - `_containai_resolve_image()` validation (should be relaxed)
+
+**Runtime Validation Challenge:**
+When using containerized spawn (`cai exec -- <agent> --acp`), `Process.Start()` succeeds (it starts `cai`), but the agent may be missing *inside the container*. The process exits with an error code/stderr, not a start exception.
+
+**Solution:** Container-side preflight check using positional parameters (safe from injection):
+```bash
+# Safe: agent passed as $1, not interpolated into shell string
+bash -lc 'command -v -- "$1" >/dev/null 2>&1 || { printf "Agent '\''%s'\'' not found in container\n" "$1" >&2; exit 127; }; exec "$1" --acp' -- <agent>
+```
+
+**Image/Agent Decoupling (current state):**
+- ACP agent selection is already independent of `--image-tag` (ACP spawns via `cai exec` into whatever container exists for the workspace)
+- `_containai_resolve_image()` does validate agent names but this is only called when `--acp` flag used for image resolution
+- The coupling that needs fixing: AcpProxy constructor and CLI help text
+
 ### Startup Hooks (Two-Level)
 
 Hooks can be defined at two levels, merged at runtime:
@@ -72,6 +94,14 @@ project/
 - Workspace hooks accessed via existing workspace mount
 - `containai-init.sh` runs both in order
 - Scripts run as agent user with sudo available
+- Working directory: `/home/agent/workspace`
+- Deterministic ordering: `LC_ALL=C sort`
+- Non-executable files logged as warnings, skipped
+
+**Fail-Fast Mechanism:**
+Current `containai-init.service` is `Type=oneshot` and dependent services use `Wants=` (advisory). For hooks to fail container start:
+- Change ssh.service.d/containai.conf and docker.service.d/containai.conf from `Wants=` to `Requires=containai-init.service`
+- This makes dependent services fail if init fails, preventing the container from being usable
 
 ### Network Policy Files (Two-Level, Opt-In)
 
@@ -86,12 +116,22 @@ Same two-level approach for network policies. **Important:** This is opt-in - th
 ```ini
 # Template: ~/.config/containai/templates/my-template/network.conf
 [egress]
-preset = package-managers  # All projects using this template get package managers
-default_deny = true        # REQUIRED to enable blocking
+preset = package-managers
+default_deny = true
 
 # Workspace: .containai/network.conf
 [egress]
-allow = api.mycompany.com  # Project-specific additions
+allow = api.mycompany.com
+```
+
+**Config Format:** One value per line (no comma-separated lists):
+```ini
+[egress]
+preset = package-managers
+preset = git-hosts
+allow = api.anthropic.com
+allow = example.com
+default_deny = true
 ```
 
 **Config Semantics:**
@@ -103,16 +143,43 @@ allow = api.mycompany.com  # Project-specific additions
 
 **Merge behavior:** Template config provides base, workspace config adds to it.
 
+**Per-Container Rule Scoping:**
+Existing network enforcement is host-side iptables on the ContainAI bridge (`DOCKER-USER` chain). Multiple containers can share the same bridge. Rules must be scoped per-container:
+- Use `-s <container_ip>` to scope ACCEPT rules to specific container
+- Apply rules on container start/attach (not just creation)
+- Remove rules when container stops/is removed
+- All stop paths must clean up rules (not just `_containai_stop_all`)
+
+**Getting container IP reliably:**
+```bash
+# Handle multi-network setups
+docker inspect --format '{{range $k, $v := .NetworkSettings.Networks}}{{if eq $k "bridge"}}{{$v.IPAddress}}{{end}}{{end}}' <container>
+```
+
 **Implementation approach:**
-- New function in `network.sh` to parse network.conf
+- New function in `network.sh` to parse network.conf (one value per line)
 - Resolve domain names to IPs at container start
 - Only generate blocking rules if `default_deny = true`
 - Hard blocks (private ranges, metadata) always apply regardless of config
-- Presets: `package-managers`, `git-hosts`, `ai-apis`
+- Rules use `-s <container_ip>` and `-m comment --comment "cai:<container>"` for cleanup
+- Lifecycle: add rules on start/attach, remove on stop (all stop paths)
+
+**Presets (with full domains):**
+
+| Preset | Domains/CIDRs |
+|--------|---------------|
+| `package-managers` | registry.npmjs.org, pypi.org, files.pythonhosted.org, crates.io, dl.crates.io, static.crates.io, rubygems.org |
+| `git-hosts` | github.com, api.github.com, codeload.github.com, raw.githubusercontent.com, objects.githubusercontent.com, media.githubusercontent.com, gitlab.com, registry.gitlab.com, bitbucket.org |
+| `ai-apis` | api.anthropic.com, api.openai.com |
+
+**Conflict handling:** Hard blocks (private ranges, metadata) cannot be overridden. If `allow` conflicts with hard block, log warning and ignore the allow entry.
 
 ### Runtime Mounts (Not Build-Time)
 
-Files are mounted at runtime, not copied during build:
+Files are mounted at runtime, not copied during build.
+
+**Actual Code Location:** `src/lib/container.sh:_containai_start_container()` (line 1452+)
+**Template Resolution:** `_CAI_TEMPLATE_DIR` is templates ROOT, must build `${templates_root}/${template_name}`
 
 | Source | Container Path |
 |--------|---------------|
@@ -125,6 +192,8 @@ Files are mounted at runtime, not copied during build:
 - Change hooks, restart container - no rebuild
 - Same template image, different customizations per workspace
 - Clear separation: template provides base, workspace overrides
+
+**Note:** Mounts work for both "built template image" and "--image-tag (no template build)" flows.
 
 ### Skills Plugin Structure
 
@@ -153,13 +222,13 @@ echo '#!/bin/bash
 echo "Hello from startup hook"' > .containai/hooks/startup.d/10-hello.sh
 chmod +x .containai/hooks/startup.d/10-hello.sh
 
-# Create network policy
-cat > .containai/network.conf << 'EOF'
+# Create network policy (one value per line)
+cat > .containai/network.conf << 'CONF'
 [egress]
 preset = package-managers
 allow = github.com
 default_deny = true
-EOF
+CONF
 
 # Rebuild container with new config
 cai stop && cai run
@@ -188,10 +257,15 @@ cai stop && cai run
 
 ## References
 
-- `src/acp-proxy/Program.cs:31` - Hardcoded agent check to remove
-- `src/containai.sh:3628-3634` - Shell wrapper agent validation
+- `src/ContainAI.Acp/AcpProxy.cs:51-54` - Hardcoded agent check to remove (constructor)
+- `src/ContainAI.Acp/Sessions/AgentSpawner.cs:32` - Agent spawn logic
 - `src/lib/container.sh:95-99` - `_CONTAINAI_AGENT_TAGS` array
+- `src/lib/container.sh:116-119` - `_containai_resolve_image()` validation
+- `src/lib/container.sh:1452` - `_containai_start_container()` - mount logic
 - `src/container/containai-init.sh` - Init script to extend
+- `src/services/containai-init.service` - Init service unit
+- `src/services/ssh.service.d/containai.conf` - Wants= to change to Requires=
+- `src/services/docker.service.d/containai.conf` - Wants= to change to Requires=
 - `src/lib/network.sh:551-714` - Existing iptables implementation
-- `src/templates/example-ml.Dockerfile:32-66` - Startup service example pattern
+- `src/lib/template.sh` - Template directory resolution
 - `docs/configuration.md:359-389` - Existing template documentation

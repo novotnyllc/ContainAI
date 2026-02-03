@@ -103,29 +103,28 @@ _CONTAINAI_AGENT_TAGS=(
 # ==============================================================================
 
 # Resolve the image to use based on agent and optional tag override
-# Arguments: $1 = agent name (claude, gemini), $2 = optional image tag override
+# Arguments: $1 = agent name (any agent binary name), $2 = optional image tag override
 # Outputs: Full image name (repo:tag)
-# Returns: 0 on success, 1 on invalid agent
+# Returns: 0 on success
+# Note: Any agent name is accepted. Runtime validation happens when the agent
+# binary is executed inside the container.
 _containai_resolve_image() {
     local agent="${1:-$_CONTAINAI_DEFAULT_AGENT}"
     local explicit_tag="${2:-}"
     local repo="$_CONTAINAI_DEFAULT_REPO"
     local tag
 
-    # Validate agent and get default tag
-    if [[ -z "${_CONTAINAI_AGENT_TAGS[$agent]:-}" ]]; then
-        _cai_error "Unknown agent: $agent"
-        _cai_error "  Supported agents: claude, gemini"
-        return 1
-    fi
-
-    # Tag precedence: --image-tag > CONTAINAI_AGENT_TAG > agent default
+    # Tag precedence: --image-tag > CONTAINAI_AGENT_TAG > agent-specific default > "latest"
     if [[ -n "$explicit_tag" ]]; then
         tag="$explicit_tag"
     elif [[ -n "${CONTAINAI_AGENT_TAG:-}" ]]; then
         tag="$CONTAINAI_AGENT_TAG"
-    else
+    elif [[ -n "${_CONTAINAI_AGENT_TAGS[$agent]:-}" ]]; then
+        # Use agent-specific tag if defined (e.g., claude, gemini)
         tag="${_CONTAINAI_AGENT_TAGS[$agent]}"
+    else
+        # Default to "latest" for any unknown agent
+        tag="latest"
     fi
 
     printf '%s:%s' "$repo" "$tag"

@@ -1,4 +1,5 @@
 // Agent process spawning using System.Diagnostics.Process
+using System.ComponentModel;
 using System.Diagnostics;
 
 namespace ContainAI.Acp.Sessions;
@@ -27,8 +28,11 @@ public sealed class AgentSpawner
     /// Sets up stdin/stdout pipes and starts the stderr forwarding task.
     /// </summary>
     /// <param name="session">The session to spawn the agent for.</param>
-    /// <param name="agent">The agent name (e.g., "claude", "gemini").</param>
+    /// <param name="agent">The agent binary name (any agent supporting --acp flag).</param>
     /// <returns>The spawned process.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the agent binary cannot be found or started.
+    /// </exception>
     public Process SpawnAgent(AcpSession session, string agent)
     {
         Process? process;
@@ -44,10 +48,29 @@ public sealed class AgentSpawner
                 CreateNoWindow = true,
             };
             psi.ArgumentList.Add("--acp");
-            process = Process.Start(psi);
+
+            try
+            {
+                process = Process.Start(psi);
+            }
+            catch (Win32Exception ex)
+            {
+                // Binary not found or not executable
+                throw new InvalidOperationException(
+                    $"Agent '{agent}' not found. Ensure the agent binary is installed and in PATH.",
+                    ex);
+            }
         }
         else
         {
+            // Container-side preflight check: wrap the agent command to detect missing binaries
+            // and provide a clear error message. Agent is passed as a positional parameter ($1)
+            // to avoid shell injection risks.
+            //
+            // The wrapper script:
+            // 1. Checks if the agent binary exists in the container (command -v)
+            // 2. If not found, prints a clear error and exits with code 127
+            // 3. If found, exec's the agent with --acp
             var psi = new ProcessStartInfo
             {
                 FileName = "cai",
@@ -63,8 +86,12 @@ public sealed class AgentSpawner
             psi.ArgumentList.Add(session.Workspace);
             psi.ArgumentList.Add("--quiet");
             psi.ArgumentList.Add("--");
-            psi.ArgumentList.Add(agent);
-            psi.ArgumentList.Add("--acp");
+            psi.ArgumentList.Add("bash");
+            psi.ArgumentList.Add("-lc");
+            // Safe: agent passed as $1, not interpolated into shell string
+            psi.ArgumentList.Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec \"$1\" --acp");
+            psi.ArgumentList.Add("--");  // End of bash -c options
+            psi.ArgumentList.Add(agent); // $1 for the script
 
             // Prevent stdout pollution from child cai processes
             psi.Environment["CAI_NO_UPDATE_CHECK"] = "1";

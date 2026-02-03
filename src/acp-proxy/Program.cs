@@ -24,7 +24,7 @@ public static class Program
     {
         var agentArgument = new Argument<string>("agent")
         {
-            Description = "The agent to proxy (claude, gemini)",
+            Description = "The agent binary to proxy (any agent supporting --acp flag)",
             Arity = ArgumentArity.ZeroOrOne,
             DefaultValueFactory = _ => "claude"
         };

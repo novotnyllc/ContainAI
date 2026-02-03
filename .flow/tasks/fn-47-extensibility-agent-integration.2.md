@@ -44,14 +44,24 @@ This allows templates to set up common infrastructure, while workspaces add proj
    run_hooks() {
        local hooks_dir="$1"
        [[ -d "$hooks_dir" ]] || return 0
-       for hook in "$hooks_dir"/*.sh; do
-           [[ -e "$hook" && -x "$hook" ]] || continue
+
+       # Set working directory
+       cd /home/agent/workspace || true
+
+       # Deterministic ordering with LC_ALL=C
+       local hook
+       while IFS= read -r hook; do
+           [[ -z "$hook" ]] && continue
+           if [[ ! -x "$hook" ]]; then
+               log "WARNING: Skipping non-executable hook: $hook"
+               continue
+           fi
            log "Running startup hook: $hook"
            if ! "$hook"; then
                log "ERROR: Startup hook failed: $hook"
                exit 1
            fi
-       done
+       done < <(find "$hooks_dir" -maxdepth 1 -name '*.sh' -type f | LC_ALL=C sort)
    }
 
    # Template hooks first, then workspace hooks
@@ -59,18 +69,25 @@ This allows templates to set up common infrastructure, while workspaces add proj
    run_hooks "/home/agent/workspace/.containai/hooks/startup.d"
    ```
 
-2. **Mount paths (handled by Task 4):**
+2. **Fail-Fast Mechanism** - Update systemd dependencies:
+   Change from `Wants=` to `Requires=` in:
+   - `src/services/ssh.service.d/containai.conf:9` - Change `Wants=containai-init.service` to `Requires=containai-init.service`
+   - `src/services/docker.service.d/containai.conf:9` - Change `Wants=containai-init.service` to `Requires=containai-init.service`
+
+   This ensures that if containai-init.service fails (hook failure), dependent services won't start, making the container effectively unusable.
+
+3. **Mount paths (handled by Task 4):**
    - Template hooks mounted to `/etc/containai/template-hooks/`
    - Workspace hooks accessed directly at workspace path
 
-3. **Execution context:**
-   - Scripts run as agent user (not root)
+4. **Execution context:**
+   - Scripts run as agent user (not root) - via `User=agent` in containai-init.service
    - `sudo` available if needed
-   - Working directory: `/home/agent/workspace`
+   - Working directory: `/home/agent/workspace` (explicit cd in run_hooks)
    - stdout/stderr logged to container journal
 
-4. **Error handling:**
-   - Non-zero exit from any hook fails container start
+5. **Error handling:**
+   - Non-zero exit from any hook fails container start (service fails, dependents fail)
    - Clear error message identifying which hook failed
    - Hooks should be idempotent (safe to re-run)
 
@@ -98,18 +115,22 @@ pip install -r requirements.txt
 - Create test with hooks at both template and workspace levels
 - Verify template hooks run before workspace hooks
 - Verify hooks run as agent user
-- Verify failed hook stops container start
+- Verify failed hook stops container start (dependent services fail)
+- Verify non-executable files are skipped with warning
 
 ## Acceptance
 
 - [ ] Template hooks at `~/.config/containai/templates/<name>/hooks/startup.d/*.sh` supported
 - [ ] Workspace hooks at `.containai/hooks/startup.d/*.sh` supported
 - [ ] Template hooks run before workspace hooks
-- [ ] Scripts run in sorted (lexicographic) order within each level
+- [ ] Scripts run in deterministic sorted order (`LC_ALL=C sort`)
 - [ ] Scripts run as agent user with sudo available
-- [ ] Non-executable files skipped with warning
+- [ ] Working directory is `/home/agent/workspace`
+- [ ] Non-executable files skipped with warning (logged)
 - [ ] Failed script (non-zero exit) fails container start
 - [ ] Clear error message shows which hook failed
+- [ ] ssh.service.d/containai.conf uses `Requires=containai-init.service`
+- [ ] docker.service.d/containai.conf uses `Requires=containai-init.service`
 - [ ] Integration test added
 
 ## Done summary

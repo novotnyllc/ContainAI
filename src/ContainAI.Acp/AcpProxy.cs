@@ -29,10 +29,10 @@ public sealed class AcpProxy : IDisposable
     /// <summary>
     /// Creates a new ACP proxy.
     /// </summary>
-    /// <param name="agent">The agent name (e.g., "claude", "gemini").</param>
+    /// <param name="agent">The agent binary name (any agent supporting --acp flag).</param>
     /// <param name="stdout">Stream for JSON-RPC output.</param>
     /// <param name="stderr">Stream for diagnostic output.</param>
-    /// <param name="testMode">If true, allows any agent name.</param>
+    /// <param name="testMode">If true, skips container-side preflight checks.</param>
     /// <param name="directSpawn">If true, spawns agent directly without cai exec.</param>
     public AcpProxy(
         string agent,
@@ -47,11 +47,10 @@ public sealed class AcpProxy : IDisposable
         _testMode = testMode;
         _directSpawn = directSpawn;
 
-        // Validate agent (unless test mode)
-        if (!testMode && agent != "claude" && agent != "gemini")
-        {
-            throw new ArgumentException($"Unsupported agent: {agent}", nameof(agent));
-        }
+        // No validation - any agent name is accepted.
+        // Validation happens at runtime when the agent binary is executed.
+        // - For direct spawn: Process.Start() will fail if binary doesn't exist
+        // - For containerized: cai exec wraps with preflight check for clear error
     }
 
     /// <summary>

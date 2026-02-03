@@ -1095,6 +1095,162 @@ test_unknown_method() {
 }
 
 # ==============================================================================
+# Test 16: Generic Agent Support - Accepts Any Agent Name
+# ==============================================================================
+
+test_generic_agent_accepts_any_name() {
+    section "Test 16: Generic agent support - accepts any name"
+
+    # The proxy should accept any agent name without hardcoded validation.
+    # In test mode with direct spawn, the proxy will try to run the agent binary.
+    # We use "my-custom-agent" which doesn't exist to verify:
+    # 1. The proxy ACCEPTS the agent name (no ArgumentException)
+    # 2. Session creation fails gracefully with a clear error message
+
+    local tmpfile
+    tmpfile=$(mktemp)
+    TEMP_FILES+=("$tmpfile")
+
+    local tmpstderr
+    tmpstderr=$(mktemp)
+    TEMP_FILES+=("$tmpstderr")
+
+    # Try a custom agent name - proxy should accept it
+    # Note: we're testing that it doesn't reject the name upfront
+    local exit_code=0
+    (printf '%s\n' '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}'; sleep 0.1) \
+        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "my-custom-agent" 2>"$tmpstderr" > "$tmpfile" || exit_code=$?
+
+    local response
+    response=$(< "$tmpfile")
+
+    # The proxy should start and respond to initialize (not reject the agent name)
+    if [[ -z "$response" ]]; then
+        # Check if it failed with "Unsupported agent" - that means validation wasn't removed
+        local stderr_output
+        stderr_output=$(< "$tmpstderr")
+        if printf '%s' "$stderr_output" | grep -q "Unsupported agent"; then
+            fail "Proxy still has hardcoded agent validation: $stderr_output"
+            return
+        fi
+        fail "No response from proxy with custom agent"
+        return
+    fi
+
+    # Should be valid JSON
+    if ! printf '%s' "$response" | jq -e . >/dev/null 2>&1; then
+        fail "Response is not valid JSON: $response"
+        return
+    fi
+
+    # Should be an initialize response (proxy accepted the agent name)
+    if printf '%s' "$response" | jq -e '.result.protocolVersion' >/dev/null 2>&1; then
+        pass "Proxy accepts any agent name (custom agent 'my-custom-agent' allowed)"
+    else
+        fail "Unexpected response: $response"
+    fi
+}
+
+# ==============================================================================
+# Test 17: Generic Agent Support - Clear Error for Missing Agent
+# ==============================================================================
+
+test_generic_agent_missing_error() {
+    section "Test 17: Generic agent support - clear error for missing agent"
+
+    # Test that when session/new is called with a nonexistent agent,
+    # the error message clearly indicates the agent is not found.
+
+    local ws
+    ws=$(make_temp_dir)
+
+    local tmpfile
+    tmpfile=$(mktemp)
+    TEMP_FILES+=("$tmpfile")
+
+    local tmpstderr
+    tmpstderr=$(mktemp)
+    TEMP_FILES+=("$tmpstderr")
+
+    # Initialize and create session with nonexistent agent
+    local input
+    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
+{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}'
+
+    (printf '%s\n' "$input"; sleep 0.5) \
+        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "nonexistent-agent-xyz" 2>"$tmpstderr" > "$tmpfile" || true
+
+    # Check stderr for the error message
+    local stderr_output
+    stderr_output=$(< "$tmpstderr")
+
+    # The error should mention the agent name clearly
+    # It could be from direct spawn (Win32Exception) or container preflight check
+    if printf '%s' "$stderr_output" | grep -qi "nonexistent-agent-xyz"; then
+        pass "Missing agent produces clear error mentioning agent name"
+    else
+        # Also check if session/new response has a clear error
+        local output
+        output=$(< "$tmpfile")
+        local session_response
+        session_response=$(printf '%s' "$output" | sed -n '2p')
+
+        if printf '%s' "$session_response" | jq -e '.error.message' 2>/dev/null | grep -qi "nonexistent-agent-xyz\|not found"; then
+            pass "Missing agent produces clear error in JSON-RPC response"
+        else
+            info "stderr: $stderr_output"
+            info "stdout: $output"
+            fail "Error message doesn't clearly indicate missing agent"
+        fi
+    fi
+}
+
+# ==============================================================================
+# Test 18: Generic Agent Support - No Shell Injection
+# ==============================================================================
+
+test_generic_agent_no_injection() {
+    section "Test 18: Generic agent support - no shell injection"
+
+    # Test that agent names with shell metacharacters don't cause injection.
+    # We use a carefully crafted agent name that would cause issues if improperly quoted.
+
+    local ws
+    ws=$(make_temp_dir)
+
+    local tmpfile
+    tmpfile=$(mktemp)
+    TEMP_FILES+=("$tmpfile")
+
+    local tmpstderr
+    tmpstderr=$(mktemp)
+    TEMP_FILES+=("$tmpstderr")
+
+    # Agent name with shell metacharacters
+    # If improperly handled, this could execute "touch /tmp/pwned"
+    local malicious_agent='agent; touch /tmp/test-injection-pwned; #'
+
+    # Initialize and try to create session
+    local input
+    input='{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}
+{"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}'
+
+    rm -f /tmp/test-injection-pwned 2>/dev/null || true
+
+    (printf '%s\n' "$input"; sleep 0.5) \
+        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "$malicious_agent" 2>"$tmpstderr" > "$tmpfile" || true
+
+    # Check that the injection file was NOT created
+    if [[ -f /tmp/test-injection-pwned ]]; then
+        rm -f /tmp/test-injection-pwned
+        fail "Shell injection vulnerability detected!"
+        return
+    fi
+
+    pass "Shell metacharacters in agent name are safely handled (no injection)"
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 
@@ -1121,6 +1277,9 @@ main() {
     test_error_session_not_found
     test_numeric_ids
     test_unknown_method
+    test_generic_agent_accepts_any_name
+    test_generic_agent_missing_error
+    test_generic_agent_no_injection
 
     # Summary
     # TEST_COUNT includes prerequisites as a section, subtract 1 for actual test count

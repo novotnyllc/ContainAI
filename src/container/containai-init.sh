@@ -316,6 +316,38 @@ setup_workspace_symlink() {
     log "[INFO] Workspace symlink created: $host_path -> $mount_path"
 }
 
+# Run startup hooks from a directory
+# Hooks are executable .sh files, run in sorted order (LC_ALL=C sort)
+# Non-executable files are skipped with warning, non-zero exit fails container start
+run_hooks() {
+    local hooks_dir="$1"
+    [[ -d "$hooks_dir" ]] || return 0
+
+    # Set working directory for hooks
+    cd -- /home/agent/workspace || cd -- /home/agent || true
+
+    # Deterministic ordering with LC_ALL=C
+    local hook
+    local hooks_found=0
+    while IFS= read -r hook; do
+        [[ -z "$hook" ]] && continue
+        hooks_found=1
+        if [[ ! -x "$hook" ]]; then
+            log "[WARN] Skipping non-executable hook: $hook"
+            continue
+        fi
+        log "[INFO] Running startup hook: $hook"
+        if ! "$hook"; then
+            log "[ERROR] Startup hook failed: $hook"
+            exit 1
+        fi
+    done < <(find "$hooks_dir" -maxdepth 1 -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)
+
+    if [[ $hooks_found -eq 1 ]]; then
+        log "[INFO] Completed hooks from: $hooks_dir"
+    fi
+}
+
 # Main initialization
 main() {
     log "[INFO] ContainAI initialization starting..."
@@ -326,6 +358,10 @@ main() {
     _migrate_git_config
     _setup_git_config
     setup_workspace_symlink
+
+    # Run startup hooks: template hooks first, then workspace hooks
+    run_hooks "/etc/containai/template-hooks/startup.d"
+    run_hooks "/home/agent/workspace/.containai/hooks/startup.d"
 
     log "[INFO] ContainAI initialization complete"
 }

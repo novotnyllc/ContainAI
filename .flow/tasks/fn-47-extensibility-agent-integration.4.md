@@ -21,31 +21,44 @@ Update container startup to automatically mount hook directories and network con
 
 ### Implementation
 
-1. **`src/lib/container.sh`** - Add mount logic in `_containai_run_container()`:
+1. **`src/lib/container.sh:_containai_start_container()`** (line 1452+) - Add mount logic:
+
+   **IMPORTANT:** `_CAI_TEMPLATE_DIR` is the templates ROOT directory, not the selected template path. Must build full path with template name:
+
    ```bash
-   # Get current template name from config
-   template_name=$(_cai_get_config "template" "default")
-   template_dir="$HOME/.config/containai/templates/$template_name"
+   # Get selected template name from container start context
+   # (passed via CLI --template, config, or default "default")
+   local template_name="${selected_template:-default}"
+
+   # Build full template directory path
+   local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+   local template_path="${templates_root}/${template_name}"
 
    # Mount template hooks if present
-   if [[ -d "$template_dir/hooks" ]]; then
-       EXTRA_MOUNTS+=("-v" "$template_dir/hooks:/etc/containai/template-hooks:ro")
+   if [[ -d "$template_path/hooks" ]]; then
+       EXTRA_MOUNTS+=("-v" "$template_path/hooks:/etc/containai/template-hooks:ro")
    fi
 
    # Mount template network.conf if present
-   if [[ -f "$template_dir/network.conf" ]]; then
-       EXTRA_MOUNTS+=("-v" "$template_dir/network.conf:/etc/containai/template-network.conf:ro")
+   if [[ -f "$template_path/network.conf" ]]; then
+       EXTRA_MOUNTS+=("-v" "$template_path/network.conf:/etc/containai/template-network.conf:ro")
    fi
 
    # Workspace files accessed directly - no extra mount needed
    # (workspace already mounted at /home/agent/workspace)
    ```
 
-2. **`src/container/containai-init.sh`** - Check both paths (from Task 2):
+2. **Template name resolution:**
+   - From CLI `--template` flag if provided
+   - From workspace config if set
+   - Fallback to "default"
+   - For `--image-tag` flow (no template build), still check for default template hooks
+
+3. **`src/container/containai-init.sh`** - Check both paths (from Task 2):
    - Template hooks: `/etc/containai/template-hooks/startup.d/`
    - Workspace hooks: `/home/agent/workspace/.containai/hooks/startup.d/`
 
-3. **`src/templates/default.Dockerfile`** - Create directory structure:
+4. **`src/templates/default.Dockerfile`** - Create directory structure:
    ```dockerfile
    RUN mkdir -p /etc/containai/template-hooks/startup.d
    ```
@@ -56,10 +69,10 @@ Update container startup to automatically mount hook directories and network con
 ```bash
 # Create hooks in template directory
 mkdir -p ~/.config/containai/templates/my-template/hooks/startup.d
-cat > ~/.config/containai/templates/my-template/hooks/startup.d/10-common.sh << 'EOF'
+cat > ~/.config/containai/templates/my-template/hooks/startup.d/10-common.sh << 'HOOK'
 #!/bin/bash
 echo "Common setup for all projects using this template"
-EOF
+HOOK
 chmod +x ~/.config/containai/templates/my-template/hooks/startup.d/10-common.sh
 ```
 
@@ -67,11 +80,11 @@ chmod +x ~/.config/containai/templates/my-template/hooks/startup.d/10-common.sh
 ```bash
 # Create hooks in project
 mkdir -p .containai/hooks/startup.d
-cat > .containai/hooks/startup.d/30-project.sh << 'EOF'
+cat > .containai/hooks/startup.d/30-project.sh << 'HOOK'
 #!/bin/bash
 echo "Project-specific setup"
 npm install
-EOF
+HOOK
 chmod +x .containai/hooks/startup.d/30-project.sh
 
 # Run - hooks from both levels execute
@@ -85,8 +98,9 @@ cai run
 - [ ] Workspace hooks accessible via existing workspace mount
 - [ ] Mounts are read-only
 - [ ] Missing directories don't cause errors
+- [ ] Template path is `${templates_root}/${template_name}`, not just `${templates_root}`
 - [ ] Works with default and custom templates
-- [ ] Template name resolved from config (default: "default")
+- [ ] Works with `--image-tag` flow (checks default template)
 - [ ] Documented in docs/configuration.md
 
 ## Done summary
