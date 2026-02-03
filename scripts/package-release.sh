@@ -188,7 +188,7 @@ if [[ -f "$TARBALL_PATH" ]]; then
 
     # Show contents
     printf '\nPackage contents:\n'
-    tar -tzf "$TARBALL_PATH" | head -20
+    tar -tzf "$TARBALL_PATH" | sed -n '1,20p'
     printf '...\n'
 else
     printf 'ERROR: Failed to create tarball\n' >&2
