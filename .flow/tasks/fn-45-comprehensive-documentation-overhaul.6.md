@@ -62,8 +62,30 @@ fn-43: Container network security hardens against SSRF and cloud metadata attack
 - [ ] No outdated screenshots or output examples
 
 ## Done summary
-TBD
+## Summary
 
+Updated documentation to reflect recent CLI and security changes:
+
+### SECURITY.md Corrections (Critical)
+- Removed incorrect ECI mode claims and references to non-existent `src/lib/eci.sh`
+- Updated isolation model documentation to accurately describe Sysbox/containai-docker implementation
+- Documented the actual architecture: dedicated Docker daemon with `sysbox-runc` runtime
+- Added comprehensive Network Security section documenting fn-43 changes:
+  - Cloud metadata endpoint blocking (169.254.169.254, etc.)
+  - Private IP range blocking (RFC 1918)
+  - Link-local address blocking
+- Updated Security Architecture references to correct files
+- Added links to security-comparison.md and security-scenarios.md
+
+### docs/quickstart.md Updates (fn-41)
+- Added "CLI Output Behavior" section explaining silent-by-default behavior
+- Documented `--verbose` flag and `CONTAINAI_VERBOSE` environment variable
+- Documented `--quiet` flag and precedence rules
+- Noted exceptions (doctor, help, version commands)
+
+### docs/cli-reference.md Verification
+- Confirmed existing documentation already covers verbosity flags and env vars correctly
+- No changes needed (already comprehensive)
 ## Evidence
 - Commits:
 - Tests:

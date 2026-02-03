@@ -44,6 +44,29 @@ cai --help | head -3
 
 > **Note:** You must source the script (not execute it) to add the `cai` command to your shell. Add this to your `~/.bashrc` for persistence.
 
+## CLI Output Behavior
+
+ContainAI follows the Unix Rule of Silence: commands produce no output on success by default.
+
+| Output Type | Default | `--verbose` | `--quiet` |
+|-------------|---------|-------------|-----------|
+| Info/step messages | Hidden | Shown | Hidden |
+| Warnings | Shown (stderr) | Shown | Hidden |
+| Errors | Shown (stderr) | Shown | Shown |
+
+**Enable verbose output:**
+```bash
+# Per-command flag
+cai --verbose
+
+# Environment variable (persistent)
+export CONTAINAI_VERBOSE=1
+```
+
+**Precedence**: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE` environment variable.
+
+**Exceptions**: `cai doctor`, `cai help`, and `cai version` always produce output regardless of verbosity settings.
+
 ## Step 3: Check Your Environment
 
 Run the doctor command to detect your system's capabilities:
