@@ -1,0 +1,5 @@
+{
+  "commits": [],
+  "tests": ["shellcheck -x src/lib/container.sh", "bash tests/unit/test-container-naming.sh"],
+  "prs": []
+}

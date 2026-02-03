@@ -8,7 +8,7 @@
 # ------------------
 # 1. DO NOT override ENTRYPOINT - systemd is the init system and must be PID 1
 # 2. DO NOT override CMD - it's set to start systemd properly
-# 3. DO NOT change the USER - agent user (UID 1000) is required for permissions
+# 3. The FINAL USER must be agent - you may use USER root temporarily for installs
 #
 # To reset to default, reinstall the template from the repo:
 #   cp /path/to/containai/src/templates/default.Dockerfile \
@@ -85,6 +85,22 @@ FROM ${BASE_IMAGE}
 #
 # ENV MY_VAR=value
 # ENV PATH="/custom/path:${PATH}"
+
+# =============================================================================
+# TEMPLATE HOOKS DIRECTORY
+# =============================================================================
+# This creates the target directory for runtime-mounted template hooks.
+# When you add files to ~/.config/containai/templates/<name>/hooks/startup.d/,
+# they are mounted here at container start (no rebuild needed).
+#
+# Hook execution order:
+# 1. Template hooks: /etc/containai/template-hooks/startup.d/*.sh (shared)
+# 2. Workspace hooks: /home/agent/workspace/.containai/hooks/startup.d/*.sh (project-specific)
+#
+# See docs/configuration.md for details on hook naming and ordering.
+USER root
+RUN mkdir -p /etc/containai/template-hooks/startup.d
+USER agent
 
 # =============================================================================
 # YOUR CUSTOMIZATIONS BELOW

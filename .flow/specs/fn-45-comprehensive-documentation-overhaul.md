@@ -28,6 +28,8 @@ Users don't quickly understand **why ContainAI vs alternatives** (Docker sandbox
 - Update docs for fn-41 (silent CLI), fn-43 (network security)
 - Sync architecture visualization
 - **Add Mermaid diagrams to existing docs** (sync-architecture, setup-guide, configuration, adding-agents, acp, testing)
+- **Retrofit existing diagrams** with `accTitle`/`accDescr` for accessibility compliance
+- **Add link validation script** for CI/pre-commit checks
 
 ### Out of Scope
 - **Documentation website** (no MkDocs, Docusaurus, GitHub Pages, or hosted docs site)
@@ -37,14 +39,16 @@ Users don't quickly understand **why ContainAI vs alternatives** (Docker sandbox
 
 **Note:** All documentation remains as markdown files in the repo (`docs/`, `README.md`). A hosted docs website is a separate future epic if ever needed.
 
-**Guidelines:**
+## Mermaid Diagram Guidelines
+
 - Use `flowchart LR/TB/TD` for architecture, data flows, decision trees
 - Use `sequenceDiagram` for multi-component interactions over time
 - Use `stateDiagram-v2` for state machines (container lifecycle)
 - Keep diagrams under 30 nodes for readability
 - Use subgraphs to group related elements
-- Include `accTitle` and `accDescr` for accessibility
+- **REQUIRED**: Include `accTitle` and `accDescr` in EVERY diagram for accessibility
 - Test diagrams render correctly on GitHub before merging
+- **No mandatory theme** - use whatever renders well on GitHub (dark/light compatible)
 
 **Existing examples to follow:**
 - `docs/architecture.md:49-83` (Flowchart with subgraphs)
@@ -56,13 +60,12 @@ Users don't quickly understand **why ContainAI vs alternatives** (Docker sandbox
 ```bash
 # Verify docs build/lint
 shellcheck -x src/*.sh  # Check code examples work
-markdownlint docs/**/*.md  # If linter available
 
 # Preview changes
 cat README.md | head -50  # Check value prop section
 
-# Validate internal links
-grep -r '\[.*\](docs/' README.md docs/
+# Validate internal links (use scripts/check-doc-links.sh after task creates it)
+scripts/check-doc-links.sh
 
 # Test Mermaid syntax (use Mermaid Live Editor)
 # https://mermaid.live/
@@ -70,17 +73,20 @@ grep -r '\[.*\](docs/' README.md docs/
 
 ## Acceptance Criteria
 
-- [ ] README first 10 lines answer "why ContainAI vs alternatives"
+- [ ] README first paragraph (after badges/title) answers "why ContainAI vs alternatives"
 - [ ] Three persona landing pages exist with clear entry points
-- [ ] CLI reference covers all `cai` subcommands with flags and examples
-- [ ] Usage patterns guide explains ephemeral vs persistent workflows
+- [ ] CLI reference covers ALL `cai` subcommands including: run, shell, exec, doctor, setup, validate, docker, import, export, sync, stop, status, gc, ssh, links, config, completion, version, update, refresh, uninstall, help, acp, template, **sandbox (deprecated)**
+- [ ] CLI reference documents subcommands: `doctor fix`, `ssh cleanup`, `config list/get/set/unset`, `links check/fix`, `gc`, `template upgrade`, `acp proxy`
+- [ ] Usage patterns guide documents THREE modes: (1) disposable container with persistent volume, (2) fully ephemeral including volume deletion, (3) long-lived persistent environment
 - [ ] Config examples directory with 5+ real-world configurations
 - [ ] Silent CLI behavior (--verbose) documented in quickstart and CLI ref
 - [ ] Network security (private IP blocking) documented in SECURITY.md
+- [ ] SECURITY.md isolation claims corrected to match implementation (Sysbox + containai-docker, not ECI)
 - [ ] Sync architecture has visual diagram (mermaid)
-- [ ] All internal doc links validated (no broken links)
+- [ ] All internal doc links validated via `scripts/check-doc-links.sh`
 - [ ] No duplicate content across docs (single source of truth)
-- [ ] **All docs with flows/states/relationships have Mermaid diagrams**
+- [ ] **All NEW diagrams include `accTitle`/`accDescr` for accessibility**
+- [ ] **All EXISTING diagrams retrofitted with `accTitle`/`accDescr`** (architecture.md, lifecycle.md, quickstart.md, security-comparison.md, security-scenarios.md)
 - [ ] **Diagrams render correctly on GitHub**
 
 ## Dependencies
@@ -106,6 +112,8 @@ grep -r '\[.*\](docs/' README.md docs/
 
 ## Open Questions
 
-1. Should "Why ContainAI" be a new page or evolved from `security-comparison.md`?
-2. Primary persona ordering for landing pages?
-3. Should CLI reference be auto-generated from --help or manually maintained?
+~~1. Should "Why ContainAI" be a new page or evolved from `security-comparison.md`?~~ **Resolved**: Keep security-comparison.md as technical comparison; README provides value prop.
+
+~~2. Primary persona ordering for landing pages?~~ **Resolved**: User > Contributor > Security Auditor (by audience size).
+
+~~3. Should CLI reference be auto-generated from --help or manually maintained?~~ **Resolved**: Manually maintained with a maintenance policy documented in the CLI reference file itself. Single-source-of-truth is `--help` output; docs provide extended examples/explanations.

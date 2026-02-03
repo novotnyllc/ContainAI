@@ -87,9 +87,8 @@ cai stop --all             # Stop all containers
 - [ ] README explains installation and usage
 
 ## Done summary
-TBD
-
+Created containai-skills Claude Code plugin with 7 skills covering all major CLI commands. Plugin includes overview, quickstart, lifecycle, sync, setup, customization, and troubleshooting skills with clear trigger phrases, realistic examples, and common gotchas.
 ## Evidence
-- Commits:
+- Commits: fd800b8, c890053, f953621, a07293e, e9f2be5
 - Tests:
 - PRs:

@@ -1,41 +1,44 @@
 # ContainAI
 
-**Secure system containers for AI coding agents.**
-
 [![Build](https://github.com/novotnyllc/containai/actions/workflows/docker.yml/badge.svg)](https://github.com/novotnyllc/containai/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-ContainAI runs AI agents in **system containers** - VM-like Docker containers with systemd, multiple services, and Docker-in-Docker support. Unlike application containers, system containers provide full init systems and service management while maintaining strong isolation through Sysbox.
+AI coding agents need to build containers, run services, and operate freely - but without risking your host system. ContainAI gives them **VM-like isolation without `--privileged`**, **your shell preferences synced in**, and **ephemeral or persistent environments** - all for free, using the same Sysbox technology that powers Docker Desktop's paid Enhanced Container Isolation.
 
-## Why System Containers?
+```bash
+# Install and run in 30 seconds
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
+cai setup    # One-time isolation setup
+cd /path/to/project && cai   # Agent starts in isolated container
+```
 
-Traditional Docker containers run a single process. System containers run like lightweight VMs:
+**Why ContainAI vs alternatives?**
 
-| Capability | App Container | System Container |
-|------------|---------------|------------------|
-| Init system | No | systemd as PID 1 |
-| Multiple services | No | Yes (SSH, Docker, etc.) |
-| Docker-in-Docker | Requires `--privileged` | Works unprivileged via Sysbox |
-| User namespace isolation | Manual | Automatic |
-| SSH access | Port mapping only | VS Code Remote-SSH compatible |
+| | Docker Sandbox | Plain Containers | ContainAI |
+|---|---|---|---|
+| User namespace isolation | No | Manual | Automatic |
+| Docker-in-Docker | Host socket only | Requires `--privileged` | Unprivileged via Sysbox |
+| Your dotfiles/preferences | No | No | Synced automatically |
+| systemd/services | No | No | Full init system |
+| Cost | Free | Free | Free |
 
-This makes them ideal for AI coding agents that need to build containers, run services, and access the environment via SSH.
+See the [full security comparison](docs/security-comparison.md) for Docker ECI, Anthropic SRT, gVisor, and microVMs.
+
+**Jump to:** [Users](docs/quickstart.md) | [Contributors](CONTRIBUTING.md) | [Security Auditors](SECURITY.md)
+
+## What Makes ContainAI Different
+
+**1. VM-like isolation without `--privileged`** - Sysbox maps container root to an unprivileged host user automatically. Agents can run `docker build`, `systemctl`, and root commands safely - a container escape still lands in an unprivileged context.
+
+**2. Your preferences, synced** - Git config, shell aliases, and editor settings carry into the container. The environment feels like your local machine, not a sterile sandbox.
+
+**3. Ephemeral or persistent - your choice** - Spin up disposable containers for untrusted code, or keep a long-lived dev environment with persistent volumes. Switch modes with a flag.
 
 ## Quick Start
 
-```bash
-# Install
-curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
+After installation (see above), run `cai` in your project directory. First run? Authenticate inside the container with `claude login`.
 
-# Set up isolation runtime (one-time)
-cai setup
-
-# Run in your project
-cd /path/to/your/project
-cai
-```
-
-First run? Authenticate inside the container with `claude login`.
+For detailed setup with environment checks, see the [Quickstart Guide](docs/quickstart.md).
 
 ## Key Capabilities
 

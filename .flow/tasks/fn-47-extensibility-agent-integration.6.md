@@ -89,9 +89,8 @@ Presets expand to:
 - [ ] No duplicate content with skills plugin
 
 ## Done summary
-TBD
-
+Updated documentation for all extensibility features: generic ACP agent support in docs/acp.md, complete Startup Hooks and Network Policies sections in docs/configuration.md with working examples matching the spec, extensibility section in README.md, and links to customization docs in quickstart.md.
 ## Evidence
-- Commits:
+- Commits: 49d0403, a881f39, 9cb3dda
 - Tests:
 - PRs:

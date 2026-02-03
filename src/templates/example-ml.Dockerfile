@@ -12,12 +12,16 @@
 # ------------------
 # 1. DO NOT override ENTRYPOINT - systemd is the init system and must be PID 1
 # 2. DO NOT override CMD - it's set to start systemd properly
-# 3. DO NOT change the USER - agent user (UID 1000) is required for permissions
+# 3. The FINAL USER must be agent - you may use USER root temporarily for installs
 #
 FROM ghcr.io/novotnyllc/containai:latest
 
-# Install CUDA toolkit (if you have NVIDIA GPU)
+# Create template hooks directory for runtime-mounted hooks
+# (no rebuild needed for hook changes - just restart container)
 USER root
+RUN mkdir -p /etc/containai/template-hooks/startup.d
+
+# Install CUDA toolkit (if you have NVIDIA GPU)
 RUN apt-get update && apt-get install -y \
     nvidia-cuda-toolkit \
     && rm -rf /var/lib/apt/lists/*

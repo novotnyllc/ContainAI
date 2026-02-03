@@ -1,0 +1,11 @@
+{
+  "type": "impl_review",
+  "id": "fn-47-extensibility-agent-integration.5",
+  "mode": "codex",
+  "base": "a9b3fe22b22ba442e4e25a06ec99f8da939584ef",
+  "verdict": "SHIP",
+  "session_id": "019c225d-cbda-77b2-b787-d38992d77a08",
+  "timestamp": "2026-02-03T07:35:59.947066Z",
+  "review": "- **Severity: Minor**  \n  **File:Line**: `plugins/containai-skills/skills/containai-customization.md:198`  \n  **Problem**: The \u201cHard Blocks\u201d list omits metadata endpoints that are actually blocked by the implementation (e.g., `169.254.170.2`, `100.100.100.200`). The doc currently lists only `169.254.169.254`.  \n  **Suggestion**: Add the missing metadata IPs or refer to \u201ccloud metadata endpoints (e.g., 169.254.169.254, 169.254.170.2, 100.100.100.200)\u201d to match behavior.\n\n<verdict>SHIP</verdict>\n",
+  "iteration": 16
+}

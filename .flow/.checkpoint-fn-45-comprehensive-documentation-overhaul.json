@@ -1,0 +1,167 @@
+{
+  "created_at": "2026-02-03T07:55:16.560638Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-45-comprehensive-documentation-overhaul",
+      "completion_review_status": "unknown",
+      "completion_reviewed_at": null,
+      "created_at": "2026-02-02T15:57:50.633911Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [
+        "fn-47-extensibility-agent-integration"
+      ],
+      "id": "fn-45-comprehensive-documentation-overhaul",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-45-comprehensive-documentation-overhaul.md",
+      "status": "open",
+      "title": "Comprehensive Documentation Overhaul",
+      "updated_at": "2026-02-02T18:20:00.390460Z"
+    },
+    "spec": "# Comprehensive Documentation Overhaul\n\n## Overview\n\nRestructure and enhance ContainAI documentation to serve three distinct personas (users, contributors, security auditors) with clear value proposition and differentiated positioning. Current documentation is technically thorough but scattered; this epic consolidates it into a persona-driven, Diataxis-aligned structure.\n\n**Visual Documentation Standard**: All documentation must use Mermaid diagrams wherever flows, states, relationships, or decision trees would aid comprehension.\n\n### Core Problem\nUsers don't quickly understand **why ContainAI vs alternatives** (Docker sandbox, SRT). The value prop\u2014VM-like isolation with container convenience, preferences sync, \"feels like home\"\u2014is buried across 13+ docs files.\n\n### Goals\n1. **Clear value proposition** in first 30 seconds of README\n2. **Persona-based entry points** for quick orientation\n3. **Unified CLI reference** (currently scattered)\n4. **Document recent changes** (silent CLI, network security)\n5. **Ephemeral vs long-lived patterns** explicitly documented\n6. **Visual diagrams** wherever flows, states, or relationships exist\n\n## Scope\n\n### In Scope\n- README overhaul with differentiated value prop\n- Persona landing pages (user, contributor, security auditor)\n- CLI reference documentation (all commands, flags, env vars)\n- Usage patterns guide (ephemeral vs persistent)\n- Config examples cookbook\n- Update docs for fn-41 (silent CLI), fn-43 (network security)\n- Sync architecture visualization\n- **Add Mermaid diagrams to existing docs** (sync-architecture, setup-guide, configuration, adding-agents, acp, testing)\n\n### Out of Scope\n- **Documentation website** (no MkDocs, Docusaurus, GitHub Pages, or hosted docs site)\n- Video content\n- Internationalization\n- fn-44 changes (defer until that epic completes)\n\n**Note:** All documentation remains as markdown files in the repo (`docs/`, `README.md`). A hosted docs website is a separate future epic if ever needed.\n\n**Guidelines:**\n- Use `flowchart LR/TB/TD` for architecture, data flows, decision trees\n- Use `sequenceDiagram` for multi-component interactions over time\n- Use `stateDiagram-v2` for state machines (container lifecycle)\n- Keep diagrams under 30 nodes for readability\n- Use subgraphs to group related elements\n- Include `accTitle` and `accDescr` for accessibility\n- Test diagrams render correctly on GitHub before merging\n\n**Existing examples to follow:**\n- `docs/architecture.md:49-83` (Flowchart with subgraphs)\n- `docs/architecture.md:168-229` (Sequence diagram)\n- `docs/lifecycle.md:9-30` (State diagram)\n\n## Quick commands\n\n```bash\n# Verify docs build/lint\nshellcheck -x src/*.sh  # Check code examples work\nmarkdownlint docs/**/*.md  # If linter available\n\n# Preview changes\ncat README.md | head -50  # Check value prop section\n\n# Validate internal links\ngrep -r '\\[.*\\](docs/' README.md docs/\n\n# Test Mermaid syntax (use Mermaid Live Editor)\n# https://mermaid.live/\n```\n\n## Acceptance Criteria\n\n- [ ] README first 10 lines answer \"why ContainAI vs alternatives\"\n- [ ] Three persona landing pages exist with clear entry points\n- [ ] CLI reference covers all `cai` subcommands with flags and examples\n- [ ] Usage patterns guide explains ephemeral vs persistent workflows\n- [ ] Config examples directory with 5+ real-world configurations\n- [ ] Silent CLI behavior (--verbose) documented in quickstart and CLI ref\n- [ ] Network security (private IP blocking) documented in SECURITY.md\n- [ ] Sync architecture has visual diagram (mermaid)\n- [ ] All internal doc links validated (no broken links)\n- [ ] No duplicate content across docs (single source of truth)\n- [ ] **All docs with flows/states/relationships have Mermaid diagrams**\n- [ ] **Diagrams render correctly on GitHub**\n\n## Dependencies\n\n### Runs After\n- **fn-46** (CLI UX Audit): CLI reference should incorporate audit findings\n- **fn-47** (Extensibility): Documentation should cover new extensibility features (hooks, network policies)\n\n**Execution order:** fn-46 \u2192 fn-47 \u2192 fn-45\n\n### Informs\n- Future docs website epic (if ever needed) will build on this structure\n\n## References\n\n- Diataxis framework: https://diataxis.fr/\n- Best-README-Template: https://github.com/othneildrew/Best-README-Template\n- Existing docs: `docs/`, `README.md`, `SECURITY.md`, `CONTRIBUTING.md`\n- Memory conventions: `.flow/memory/conventions.md` (doc accuracy requirements)\n- Memory pitfalls: `.flow/memory/pitfalls.md` (doc drift warnings)\n- Mermaid accessibility: https://mermaid.js.org/config/accessibility.html\n- GitHub Mermaid support: https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/creating-diagrams\n\n## Open Questions\n\n1. Should \"Why ContainAI\" be a new page or evolved from `security-comparison.md`?\n2. Primary persona ordering for landing pages?\n3. Should CLI reference be auto-generated from --help or manually maintained?\n"
+  },
+  "epic_id": "fn-45-comprehensive-documentation-overhaul",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:16.024785Z",
+        "depends_on": [],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.1.md",
+        "status": "todo",
+        "title": "README value proposition overhaul",
+        "updated_at": "2026-02-02T18:10:04.540024Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.1",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.1 README value proposition overhaul\n\n## Description\nRewrite README.md to clearly communicate ContainAI's differentiated value proposition in the first 10 lines. Users should immediately understand why ContainAI vs Docker sandbox, SRT, or plain containers.\n\n**Size:** M\n**Files:** `README.md`\n\n## Approach\n\n1. Study existing value props in:\n   - `README.md:8-22` (current capabilities table)\n   - `docs/security-comparison.md` (competitor analysis)\n   - `docs/architecture.md:41-98` (Sysbox benefits)\n\n2. Craft messaging around three differentiators:\n   - **VM-like isolation** without `--privileged` (Sysbox)\n   - **Preferences sync** - feels like your local machine\n   - **Ephemeral OR persistent** - your choice\n\n3. Follow patterns from:\n   - Best-README-Template: https://github.com/othneildrew/Best-README-Template\n   - SWE-agent README structure (18k stars, similar tool)\n\n4. Structure:\n   - Hero line: Problem statement + solution\n   - 30-second code demo\n   - Three key differentiators with icons/emojis (only if existing style uses them)\n   - Links to persona entry points\n   - **Optional**: Simple architecture overview diagram (mermaid) if it aids quick comprehension\n\n## Key context\n\nCurrent README starts with \"ContainAI provides secure system containers for AI coding agents\" - this describes WHAT not WHY.\n\nCompetitors:\n- Docker sandbox (Docker Desktop built-in) - less isolation, no sync\n- SRT (Software Running Tool) - similar but different architecture\n- Plain containers - no systemd, no DinD, no sync\n## Approach\n\n1. Study existing value props in:\n   - `README.md:8-22` (current capabilities table)\n   - `docs/security-comparison.md` (competitor analysis)\n   - `docs/architecture.md:41-98` (Sysbox benefits)\n\n2. Craft messaging around three differentiators:\n   - **VM-like isolation** without `--privileged` (Sysbox)\n   - **Preferences sync** - feels like your local machine\n   - **Ephemeral OR persistent** - your choice\n\n3. Follow patterns from:\n   - Best-README-Template: https://github.com/othneildrew/Best-README-Template\n   - SWE-agent README structure (18k stars, similar tool)\n\n4. Structure:\n   - Hero line: Problem statement + solution\n   - 30-second code demo\n   - Three key differentiators with icons/emojis (only if existing style uses them)\n   - Links to persona entry points\n\n## Key context\n\nCurrent README starts with \"ContainAI provides secure system containers for AI coding agents\" - this describes WHAT not WHY.\n\nCompetitors:\n- Docker sandbox (Docker Desktop built-in) - less isolation, no sync\n- SRT (Software Running Tool) - similar but different architecture\n- Plain containers - no systemd, no DinD, no sync\n## Acceptance\n- [ ] First 10 lines answer \"why ContainAI vs alternatives\"\n- [ ] 30-second code demo appears above the fold\n- [ ] Three differentiators clearly stated\n- [ ] Links to persona landing pages (placeholder links OK until .3 completes)\n- [ ] No duplicate content with docs/ files\n- [ ] Existing section structure preserved where still valid\n- [ ] Optional: Simple architecture diagram if it aids comprehension (use standard dark theme)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:23.535048Z",
+        "depends_on": [],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.2.md",
+        "status": "todo",
+        "title": "Create CLI reference documentation",
+        "updated_at": "2026-02-02T18:10:17.069461Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.2",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.2 Create CLI reference documentation\n\n## Description\nCreate comprehensive CLI reference documentation covering all `cai` subcommands, flags, environment variables, and exit codes. Currently this info is scattered across README.md, lifecycle.md, and --help output.\n\n**Size:** M\n**Files:** `docs/cli-reference.md` (new)\n\n## Approach\n\n1. Extract commands from:\n   - `src/containai.sh` (main CLI entry point)\n   - `src/lib/*.sh` (command implementations)\n   - Existing `--help` output\n\n2. Document for each command:\n   - Synopsis\n   - Description\n   - Options/flags\n   - Environment variables\n   - Exit codes\n   - Examples\n\n3. Follow patterns from:\n   - `docs/configuration.md` (table-based reference style)\n   - shellcheck README (CLI tool reference structure)\n   - Docker CLI reference\n\n4. Structure:\n   ```\n   # CLI Reference\n   ## Quick Reference (table of all commands)\n   ## Command Hierarchy (mermaid diagram)\n   ## Commands\n   ### cai\n   ### cai shell\n   ### cai import\n   ### cai export\n   ...\n   ## Environment Variables\n   ## Exit Codes\n   ```\n\n5. **Add Mermaid diagram** showing command hierarchy/relationships:\n   - Main `cai` command as root\n   - Subcommands branching from root\n   - Show which commands relate to container lifecycle vs data sync vs diagnostics\n\n## Key context\n\nKnown commands from codebase:\n- `cai` (main entry, starts container)\n- `cai shell` (attach to running container)\n- `cai import` / `cai export` (data sync)\n- `cai update` (update check)\n- `cai doctor` (health check)\n- `cai stop` (stop container)\n- `cai exec` (run command in container)\n- `--acp` mode (Agent Client Protocol)\n\nKey flags: `--restart`, `--agent`, `--credentials`, `--config`, `--data-volume`, `--force`, `--verbose`, `--quiet`, `--fresh`, `--reset`\n\nKey env vars: `CONTAINAI_VERBOSE`, `CONTAINAI_DATA_VOLUME`, `CAI_NO_UPDATE_CHECK`\n## Approach\n\n1. Extract commands from:\n   - `src/containai.sh` (main CLI entry point)\n   - `src/lib/*.sh` (command implementations)\n   - Existing `--help` output\n\n2. Document for each command:\n   - Synopsis\n   - Description\n   - Options/flags\n   - Environment variables\n   - Exit codes\n   - Examples\n\n3. Follow patterns from:\n   - `docs/configuration.md` (table-based reference style)\n   - shellcheck README (CLI tool reference structure)\n   - Docker CLI reference\n\n4. Structure:\n   ```\n   # CLI Reference\n   ## Quick Reference (table of all commands)\n   ## Commands\n   ### cai\n   ### cai shell\n   ### cai import\n   ### cai export\n   ...\n   ## Environment Variables\n   ## Exit Codes\n   ```\n\n## Key context\n\nKnown commands from codebase:\n- `cai` (main entry, starts container)\n- `cai shell` (attach to running container)\n- `cai import` / `cai export` (data sync)\n- `cai update` (update check)\n- `cai doctor` (health check)\n- `cai stop` (stop container)\n- `cai exec` (run command in container)\n- `--acp` mode (Agent Client Protocol)\n\nKey flags: `--restart`, `--agent`, `--credentials`, `--config`, `--data-volume`, `--force`, `--verbose`, `--quiet`, `--fresh`, `--reset`\n\nKey env vars: `CONTAINAI_VERBOSE`, `CONTAINAI_DATA_VOLUME`, `CAI_NO_UPDATE_CHECK`\n## Acceptance\n- [ ] All cai subcommands documented with synopsis\n- [ ] All flags documented with descriptions and defaults\n- [ ] Environment variables table with precedence notes\n- [ ] Exit codes documented with meanings\n- [ ] At least 2 examples per major command\n- [ ] Cross-references to related docs (configuration.md, lifecycle.md)\n- [ ] Quick reference table at top for fast lookup\n- [ ] **Mermaid diagram showing command hierarchy/categories** (use standard dark theme)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:23.613294Z",
+        "depends_on": [
+          "fn-45-comprehensive-documentation-overhaul.1"
+        ],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.3.md",
+        "status": "todo",
+        "title": "Create persona-based landing pages",
+        "updated_at": "2026-02-02T18:10:30.148681Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.3",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.3 Create persona-based landing pages\n\n## Description\nCreate three persona-based landing pages that provide tailored entry points for different audiences. Each page curates existing docs with persona-specific context and recommended reading order.\n\n**Size:** M\n**Files:**\n- `docs/for-users.md` (new)\n- `docs/for-contributors.md` (new)\n- `docs/for-security-auditors.md` (new)\n\n## Approach\n\n1. **For Users** (`docs/for-users.md`):\n   - \"You want to run AI agents safely\"\n   - Quick path: quickstart \u2192 usage patterns \u2192 configuration\n   - Highlight: preferences sync, ephemeral/persistent modes\n   - Link to troubleshooting\n   - **Include**: Visual navigation map showing doc relationships\n\n2. **For Contributors** (`docs/for-contributors.md`):\n   - \"You want to improve ContainAI\"\n   - Quick path: CONTRIBUTING.md \u2192 architecture (summary) \u2192 testing\n   - Highlight: code structure, conventions, good first issues\n   - Link to `.flow/memory/conventions.md` patterns\n   - **Include**: Visual map of code/docs structure\n\n3. **For Security Auditors** (`docs/for-security-auditors.md`):\n   - \"You want to evaluate ContainAI's security\"\n   - Quick path: SECURITY.md \u2192 threat model \u2192 security-scenarios\n   - Highlight: isolation guarantees, non-goals, attack surface\n   - Link to Sysbox documentation\n   - **Include**: Security documentation hierarchy diagram\n\n4. Follow patterns from:\n   - Diataxis framework (orientation-first content)\n   - GitBook personas guide\n   - coder/coder docs structure (user-guides/, admin/)\n\n5. **Each landing page should have a Mermaid flowchart** showing the recommended reading path and how docs relate to each other.\n\n## Key context\n\nCurrent docs assume users will navigate themselves. Research shows personas need curated paths:\n- Users care about \"how fast can I be productive\"\n- Contributors care about \"how do I not break things\"\n- Auditors care about \"what are the assumptions and limits\"\n## Approach\n\n1. **For Users** (`docs/for-users.md`):\n   - \"You want to run AI agents safely\"\n   - Quick path: quickstart \u2192 usage patterns \u2192 configuration\n   - Highlight: preferences sync, ephemeral/persistent modes\n   - Link to troubleshooting\n\n2. **For Contributors** (`docs/for-contributors.md`):\n   - \"You want to improve ContainAI\"\n   - Quick path: CONTRIBUTING.md \u2192 architecture (summary) \u2192 testing\n   - Highlight: code structure, conventions, good first issues\n   - Link to `.flow/memory/conventions.md` patterns\n\n3. **For Security Auditors** (`docs/for-security-auditors.md`):\n   - \"You want to evaluate ContainAI's security\"\n   - Quick path: SECURITY.md \u2192 threat model \u2192 security-scenarios\n   - Highlight: isolation guarantees, non-goals, attack surface\n   - Link to Sysbox documentation\n\n4. Follow patterns from:\n   - Diataxis framework (orientation-first content)\n   - GitBook personas guide\n   - coder/coder docs structure (user-guides/, admin/)\n\n## Key context\n\nCurrent docs assume users will navigate themselves. Research shows personas need curated paths:\n- Users care about \"how fast can I be productive\"\n- Contributors care about \"how do I not break things\"\n- Auditors care about \"what are the assumptions and limits\"\n## Acceptance\n- [ ] Three landing pages created with persona-specific intros\n- [ ] Each page has recommended reading order (numbered list)\n- [ ] Each page links to 5-8 relevant existing docs\n- [ ] Each page has \"Start here\" section with 2-3 steps\n- [ ] Cross-links between personas where relevant\n- [ ] README updated to link to these pages\n- [ ] No duplicate content - pages curate, not copy\n- [ ] **Each page has a Mermaid navigation/reading path diagram** (use standard dark theme)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:23.691875Z",
+        "depends_on": [],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.4.md",
+        "status": "todo",
+        "title": "Document ephemeral vs persistent usage patterns",
+        "updated_at": "2026-02-02T18:10:42.295793Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.4",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.4 Document ephemeral vs persistent usage patterns\n\n## Description\nCreate a usage patterns guide that explicitly documents the two primary usage modes: ephemeral (disposable sandbox) and persistent (long-lived dev environment). Users currently have to piece this together from lifecycle.md and various hints.\n\n**Size:** M\n**Files:** `docs/usage-patterns.md` (new)\n\n## Approach\n\n1. **Ephemeral Pattern** section:\n   - When to use: quick experiments, untrusted code, CI\n   - Workflow: `cai` \u2192 work \u2192 `cai stop --remove`\n   - Data handling: nothing persists, fresh each time\n   - Flags: `--fresh`, `--reset`\n\n2. **Persistent Pattern** section:\n   - When to use: ongoing projects, customized environments\n   - Workflow: `cai` \u2192 work \u2192 `cai stop` \u2192 resume later\n   - Data handling: volumes persist, `cai import`/`cai export`\n   - Flags: default behavior, `--data-volume`\n\n3. **Comparison table**: Side-by-side of both patterns\n\n4. **Mermaid decision flowchart** (REQUIRED):\n   - Help users choose between ephemeral and persistent\n   - Decision tree based on use case questions\n   - Use standard dark theme from epic spec\n\n5. **Migration scenarios**:\n   - \"I started ephemeral but want to keep this work\"\n   - \"I want to reset a persistent container\"\n\n6. Reference existing content:\n   - `docs/lifecycle.md:1-30` (container states)\n   - `docs/sync-architecture.md` (what syncs)\n\n## Key context\n\nThe term \"VM-like\" implies persistence. Users coming from Docker expect ephemeral. This doc bridges that gap.\n\nKey insight from lifecycle.md: containers are \"persistent workspaces\" by default, but can be used ephemerally with flags.\n## Approach\n\n1. **Ephemeral Pattern** section:\n   - When to use: quick experiments, untrusted code, CI\n   - Workflow: `cai` \u2192 work \u2192 `cai stop --remove`\n   - Data handling: nothing persists, fresh each time\n   - Flags: `--fresh`, `--reset`\n\n2. **Persistent Pattern** section:\n   - When to use: ongoing projects, customized environments\n   - Workflow: `cai` \u2192 work \u2192 `cai stop` \u2192 resume later\n   - Data handling: volumes persist, `cai import`/`cai export`\n   - Flags: default behavior, `--data-volume`\n\n3. **Comparison table**: Side-by-side of both patterns\n\n4. **Migration scenarios**:\n   - \"I started ephemeral but want to keep this work\"\n   - \"I want to reset a persistent container\"\n\n5. Reference existing content:\n   - `docs/lifecycle.md:1-30` (container states)\n   - `docs/sync-architecture.md` (what syncs)\n\n## Key context\n\nThe term \"VM-like\" implies persistence. Users coming from Docker expect ephemeral. This doc bridges that gap.\n\nKey insight from lifecycle.md: containers are \"persistent workspaces\" by default, but can be used ephemerally with flags.\n## Acceptance\n- [ ] Ephemeral pattern documented with complete workflow\n- [ ] Persistent pattern documented with complete workflow\n- [ ] Comparison table showing key differences\n- [ ] **Mermaid decision flowchart** for choosing pattern (REQUIRED, use standard dark theme)\n- [ ] Migration scenarios covered (ephemeral\u2192persistent, reset persistent)\n- [ ] Cross-references to lifecycle.md and sync-architecture.md\n- [ ] Examples using actual cai commands\n- [ ] Diagram renders correctly on GitHub\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:23.771703Z",
+        "depends_on": [],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.5.md",
+        "status": "todo",
+        "title": "Create configuration examples cookbook",
+        "updated_at": "2026-02-02T15:59:48.370409Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.5",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.5 Create configuration examples cookbook\n\n## Description\nCreate a configuration examples cookbook with real-world scenarios. Current configuration.md is comprehensive reference but lacks practical examples users can copy-paste and adapt.\n\n**Size:** M\n**Files:**\n- `docs/examples/` directory (new)\n- `docs/examples/README.md` (index)\n- 5+ example config files\n\n## Approach\n\n1. Create `docs/examples/` directory structure\n\n2. Example scenarios to cover:\n   - **multi-agent.toml**: Multiple agents (Claude + Gemini) with separate credentials\n   - **custom-sync.toml**: Adding custom dotfiles to sync\n   - **isolated-workspace.toml**: Minimal sync for security-sensitive work\n   - **power-user.toml**: VS Code Remote-SSH + port forwarding + custom ports\n   - **ci-ephemeral.toml**: CI/CD usage with no persistence\n\n3. Each example includes:\n   - The TOML config file\n   - Brief explanation of use case\n   - How to apply it\n   - What it enables/disables\n\n4. Follow patterns from:\n   - `docs/configuration.md` (existing schema)\n   - `src/sync-manifest.toml` (sync mappings)\n   - Terraform module examples structure\n\n## Key context\n\nUsers ask \"how do I configure X?\" - examples answer faster than reference docs.\n\nReal sync paths from `src/sync-manifest.toml`: shell configs, editor configs, git config, SSH.\n## Acceptance\n- [ ] docs/examples/ directory created\n- [ ] README.md index listing all examples with descriptions\n- [ ] At least 5 example configs covering different scenarios\n- [ ] Each example has explanation comments\n- [ ] Examples validated against actual TOML schema\n- [ ] Cross-references from configuration.md to examples\n- [ ] No secrets or real credentials in examples\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T15:58:23.855867Z",
+        "depends_on": [
+          "fn-45-comprehensive-documentation-overhaul.2"
+        ],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.6.md",
+        "status": "todo",
+        "title": "Document recent CLI and security changes",
+        "updated_at": "2026-02-02T16:00:01.242242Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.6",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.6 Document recent CLI and security changes\n\n## Description\nUpdate documentation to reflect recent CLI and security changes from fn-41 (silent by default) and fn-43 (network security). These changes landed but docs haven't fully caught up.\n\n**Size:** S\n**Files:**\n- `docs/quickstart.md`\n- `docs/cli-reference.md` (created in .2)\n- `SECURITY.md`\n- `README.md` (if needed)\n\n## Approach\n\n1. **Silent CLI (fn-41)** updates:\n   - Add verbosity section to quickstart explaining default behavior\n   - Document `--verbose` flag and `CONTAINAI_VERBOSE` in CLI reference\n   - Update any examples that rely on verbose output\n\n2. **Network Security (fn-43)** updates:\n   - Add section to SECURITY.md documenting:\n     - Private IP blocking (RFC 1918, link-local)\n     - Metadata endpoint blocking (169.254.169.254)\n     - How to verify it's working\n   - Update security-scenarios.md if relevant\n\n3. Verify changes against:\n   - CHANGELOG.md entries for fn-41 and fn-43\n   - Actual implementation in src/\n\n## Key context\n\nfn-41: CLI is now silent by default. `--verbose` or `CONTAINAI_VERBOSE=1` enables info output. `--quiet` suppresses warnings. Precedence: --quiet > --verbose > env var.\n\nfn-43: Container network security hardens against SSRF and cloud metadata attacks. Private IPs and metadata endpoints blocked by default.\n## Acceptance\n- [ ] Quickstart mentions silent default and --verbose flag\n- [ ] CLI reference documents verbosity flags and env vars\n- [ ] SECURITY.md documents network blocking policy\n- [ ] Any examples expecting verbose output updated\n- [ ] Changes verified against actual CLI behavior\n- [ ] No outdated screenshots or output examples\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T18:10:48.002613Z",
+        "depends_on": [],
+        "epic": "fn-45-comprehensive-documentation-overhaul",
+        "id": "fn-45-comprehensive-documentation-overhaul.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-45-comprehensive-documentation-overhaul.7.md",
+        "status": "todo",
+        "title": "Add Mermaid diagrams to existing documentation",
+        "updated_at": "2026-02-02T18:11:13.110871Z"
+      },
+      "id": "fn-45-comprehensive-documentation-overhaul.7",
+      "runtime": null,
+      "spec": "# fn-45-comprehensive-documentation-overhaul.7 Add Mermaid diagrams to existing documentation\n\n## Description\nAdd Mermaid diagrams to existing documentation files that currently lack visual aids for complex flows, states, or relationships. These files have dense text/tables that would benefit significantly from visual diagrams.\n\n**Size:** M\n**Files:**\n- `docs/sync-architecture.md` (HIGH priority)\n- `docs/setup-guide.md` (HIGH priority)\n- `docs/configuration.md` (HIGH priority)\n- `docs/adding-agents.md` (MEDIUM priority)\n- `docs/acp.md` (MEDIUM priority - convert ASCII art)\n- `docs/testing.md` (MEDIUM priority)\n\n## Approach\n\n### HIGH PRIORITY Files\n\n1. **sync-architecture.md** (currently 0 diagrams):\n   - Add **data flow diagram** showing: Host configs \u2192 rsync \u2192 Volume \u2192 Container symlinks\n   - Show the 3-component sync system: import.sh \u2192 Dockerfile.agents \u2192 containai-init.sh\n   - Visualize sync map relationships (source \u2192 target \u2192 container_link)\n   - Follow pattern at `docs/architecture.md:561-600` (data flow diagram)\n\n2. **setup-guide.md** (currently 0 diagrams):\n   - Add **installation decision tree** for platform selection (WSL2 vs Linux vs macOS/Lima)\n   - Show component stack: What gets installed and in what order\n   - Follow pattern at `docs/quickstart.md:64-100` (doctor check flowchart)\n\n3. **configuration.md** (currently 0 diagrams):\n   - Add **precedence hierarchy flowchart**: CLI flags > env vars > workspace config > global config > defaults\n   - Add **config discovery flowchart**: How config file is located (walk up tree, stop at git root)\n   - Follow pattern at `docs/architecture.md:103-130` (architecture layers)\n\n### MEDIUM PRIORITY Files\n\n4. **adding-agents.md** (currently 0 diagrams):\n   - Add **6-step workflow diagram** showing agent addition process\n   - Visualize path mapping: source \u2192 target \u2192 container_link conventions\n\n5. **acp.md** (currently has ASCII art at line 33):\n   - **Convert ASCII diagram** to Mermaid sequence diagram\n   - Current ASCII: `Editor \u2192 ACP stdio \u2192 Proxy \u2192 cai exec \u2192 Container \u2192 Agent`\n   - Follow pattern at `docs/architecture.md:281-340` (SSH connection sequence)\n\n6. **testing.md** (currently 0 diagrams):\n   - Add **test tier diagram** showing Tier 1 (lint) \u2192 Tier 2 (integration) \u2192 Tier 3 (E2E)\n   - Add **CI workflow diagram** showing job dependencies\n\n## Key context\n\n**Theme requirement**: All diagrams MUST use the standard dark theme from the epic spec:\n```\n%%{init: {'theme': 'base', 'themeVariables': {\n  'primaryColor': '#1a1a2e',\n  'primaryTextColor': '#ffffff',\n  'primaryBorderColor': '#16213e',\n  'secondaryColor': '#0f3460',\n  'tertiaryColor': '#1a1a2e',\n  'lineColor': '#a0a0a0',\n  'textColor': '#ffffff',\n  'background': '#0d1117'\n}}}%%\n```\n\n**Accessibility**: Include `accTitle` and `accDescr` in each diagram for screen readers.\n\n**Existing examples to follow**:\n- `docs/architecture.md:49-83` (Flowchart with subgraphs)\n- `docs/architecture.md:168-229` (Sequence diagram)\n- `docs/lifecycle.md:9-30` (State diagram)\n\n**Test diagrams** at https://mermaid.live/ before committing to ensure GitHub renders correctly.\n## Acceptance\n### HIGH PRIORITY (must complete)\n- [ ] sync-architecture.md has data flow diagram showing host \u2192 rsync \u2192 volume \u2192 symlink\n- [ ] sync-architecture.md has 3-component sync system diagram\n- [ ] setup-guide.md has platform decision tree (WSL2 vs Linux vs macOS)\n- [ ] setup-guide.md has component installation stack diagram\n- [ ] configuration.md has precedence hierarchy flowchart\n- [ ] configuration.md has config discovery flowchart\n\n### MEDIUM PRIORITY (should complete)\n- [ ] adding-agents.md has 6-step workflow diagram\n- [ ] acp.md ASCII art converted to Mermaid sequence diagram\n- [ ] testing.md has test tier hierarchy diagram\n\n### Quality Requirements\n- [ ] All diagrams use standard dark theme from epic spec\n- [ ] All diagrams include `accTitle` and `accDescr` for accessibility\n- [ ] All diagrams render correctly on GitHub (test before merge)\n- [ ] Diagrams are placed immediately after relevant section headings\n- [ ] No diagram exceeds 30 nodes (split if larger)\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

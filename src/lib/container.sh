@@ -2663,6 +2663,31 @@ _containai_start_container() {
             args+=("${vol_args[@]}")
             args+=(-v "$workspace_resolved:/home/agent/workspace")
 
+            # Template hooks and network.conf mounts (runtime mounts for fast iteration)
+            # These are separate from template build - even --image-tag flow can use default template hooks
+            # Template name is resolved earlier: $template_name (from --template or default)
+            # For --image-tag without --template: use default template for hooks/network.conf
+            local mount_template_name="$template_name"
+            if [[ "$use_template" != "true" ]]; then
+                # --image-tag mode bypasses template build, but still check default template for hooks
+                mount_template_name="default"
+            fi
+
+            local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+            local template_path="${templates_root}/${mount_template_name}"
+
+            # Mount template hooks directory if present (read-only)
+            if [[ -d "$template_path/hooks" ]]; then
+                args+=(-v "$template_path/hooks:/etc/containai/template-hooks:ro")
+                _cai_debug "Mounting template hooks: $template_path/hooks"
+            fi
+
+            # Mount template network.conf if present (read-only)
+            if [[ -f "$template_path/network.conf" ]]; then
+                args+=(-v "$template_path/network.conf:/etc/containai/template-network.conf:ro")
+                _cai_debug "Mounting template network.conf: $template_path/network.conf"
+            fi
+
             local env_var
             for vol in "${extra_volumes[@]}"; do
                 args+=(-v "$vol")
