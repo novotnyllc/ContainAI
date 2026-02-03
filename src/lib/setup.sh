@@ -1242,7 +1242,7 @@ _cai_install_sysbox_wsl2() {
         deb_file="$tmpdir/sysbox-ce.deb"
 
         echo "[STEP] Downloading Sysbox from: $download_url"
-        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+        if ! wget -q -O "$deb_file" "$download_url"; then
             echo "[ERROR] Failed to download Sysbox package" >&2
             exit 1
         fi
@@ -1411,7 +1411,7 @@ _cai_install_dockerd_bundle() {
 
         echo "[STEP] Downloading Docker $latest_version"
         # Use timeouts per spec: --connect-timeout=5 --timeout=120
-        if ! wget -q --show-progress --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
+        if ! wget -q --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
             echo "[ERROR] Failed to download Docker bundle" >&2
             exit 1
         fi
@@ -3897,7 +3897,7 @@ _cai_install_sysbox_linux() {
         deb_file="$tmpdir/sysbox-ce.deb"
 
         echo "[STEP] Downloading Sysbox from: $download_url"
-        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+        if ! wget -q -O "$deb_file" "$download_url"; then
             echo "[ERROR] Failed to download Sysbox package" >&2
             exit 1
         fi
@@ -3915,18 +3915,6 @@ _cai_install_sysbox_linux() {
 
     if [[ $install_rc -ne 0 ]]; then
         return 1
-    fi
-
-    # Verify Sysbox didn't modify /etc/docker/daemon.json (spec requirement)
-    # Some Sysbox versions may auto-configure the system Docker, which we must prevent
-    if [[ -f /etc/docker/daemon.json ]]; then
-        if grep -q "sysbox-runc" /etc/docker/daemon.json 2>/dev/null; then
-            _cai_warn "Sysbox may have modified /etc/docker/daemon.json"
-            _cai_warn "  ContainAI uses an isolated daemon - system config should remain unchanged"
-            _cai_warn "  You may want to remove sysbox-runc from /etc/docker/daemon.json"
-            _cai_warn "  to keep system Docker unmodified."
-            # Not fatal - user may want sysbox available in system Docker too
-        fi
     fi
 
     # Verbose-only: verify openat2 fix is present in sysbox-fs
@@ -4096,22 +4084,6 @@ _cai_spacing
         _cai_info "  Docker Desktop configuration will NOT be modified"
         _cai_info "  Use --context $_CAI_CONTAINAI_DOCKER_CONTEXT to access Sysbox isolation"
 _cai_spacing
-    fi
-
-    # Check for active system Docker service (potential iptables conflicts)
-    if systemctl is-active docker.service >/dev/null 2>&1; then
-        printf '\n' >&2
-        _cai_warn "System docker.service is currently active"
-        _cai_warn "  Running two Docker daemons can cause iptables/networking conflicts"
-        _cai_warn "  ContainAI uses a separate bridge (cai0) and subnet (172.30.0.0/16)"
-        _cai_warn "  to minimize conflicts, but issues may still occur."
-        printf '\n' >&2
-        _cai_warn "  Options to avoid conflicts:"
-        _cai_warn "    1. Stop system Docker while using ContainAI:"
-        _cai_warn "       sudo systemctl stop docker.service"
-        _cai_warn "    2. Or continue and monitor for networking issues"
-        printf '\n' >&2
-        # Not a fatal error - user may want to run both carefully
     fi
 
     # Step 2: Clean up legacy paths (support upgrades from old installation)

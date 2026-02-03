@@ -852,7 +852,7 @@ _cai_update_dockerd_bundle() {
         trap 'rm -rf "$tmpdir"' EXIT
 
         printf '%s\n' "[STEP] Downloading Docker $latest_version"
-        if ! wget -q --show-progress --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
+        if ! wget -q --connect-timeout=5 --timeout=120 -O "$tmpdir/docker.tgz" "$download_url"; then
             printf '%s\n' "[ERROR] Failed to download Docker bundle" >&2
             exit 1
         fi
@@ -1789,7 +1789,7 @@ _cai_update_lima_sysbox() {
         deb_file="$tmpdir/sysbox-ce.deb"
 
         echo "[STEP] Downloading sysbox..."
-        if ! wget -q --show-progress -O "$deb_file" "$download_url"; then
+        if ! wget -q -O "$deb_file" "$download_url"; then
             echo "[ERROR] Failed to download sysbox package" >&2
             exit 1
         fi

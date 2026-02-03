@@ -7,7 +7,7 @@ set -euo pipefail
 # Usage: ./src/scripts/build-cai-tarballs.sh [options]
 #   --platforms PLATFORMS   Target platforms (default: linux/<host-arch>)
 #                           e.g., linux/amd64,linux/arm64
-#   --version VERSION       Version string (default: NBGV_SemVer2 or "unknown")
+#   --version VERSION       Version string (default: from NBGV)
 #   --output-dir DIR        Output directory (default: artifacts/cai-tarballs)
 #   --help                  Show this help
 #
@@ -132,9 +132,17 @@ if [[ -z "$BUILD_VERSION" ]]; then
     if [[ -n "${NBGV_SemVer2:-}" ]]; then
         BUILD_VERSION="$NBGV_SemVer2"
     elif command -v dotnet >/dev/null 2>&1 && [[ -f "$REPO_ROOT/version.json" ]]; then
-        BUILD_VERSION="$(dotnet nbgv get-version -v SemVer2 2>/dev/null || echo 'unknown')"
+        # Restore dotnet tools (includes nbgv) if not already available
+        if ! dotnet nbgv get-version -v SemVer2 >/dev/null 2>&1; then
+            dotnet tool restore --verbosity quiet >/dev/null 2>&1 || true
+        fi
+        BUILD_VERSION="$(dotnet nbgv get-version -v SemVer2 2>/dev/null)" || {
+            printf 'ERROR: Failed to get version from NBGV. Ensure version.json is valid.\n' >&2
+            exit 1
+        }
     else
-        BUILD_VERSION="unknown"
+        printf 'ERROR: Cannot determine version. Install dotnet SDK or provide --version flag.\n' >&2
+        exit 1
     fi
 fi
 

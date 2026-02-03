@@ -48,28 +48,14 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # CRITICAL for NBGV
 
       - name: Convert repository name to lowercase
         run: |
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Set up .NET for NBGV
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Install and run NBGV
-        id: nbgv
+      - name: Set version from build-tarballs
         run: |
-          dotnet tool restore
-          echo "SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
-          echo "SimpleVersion=$(dotnet nbgv get-version -v SimpleVersion)" >> "$GITHUB_OUTPUT"
-          echo "GitCommitId=$(dotnet nbgv get-version -v GitCommitId)" >> "$GITHUB_OUTPUT"
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
-          echo "NBGV_SimpleVersion=$(dotnet nbgv get-version -v SimpleVersion)" >> "$GITHUB_ENV"
-          echo "NBGV_GitCommitId=$(dotnet nbgv get-version -v GitCommitId)" >> "$GITHUB_ENV"
+          echo "NBGV_SemVer2=${{ needs.build-tarballs.outputs.version }}" >> "$GITHUB_ENV"
 
       - name: Download Linux amd64 tarball
         uses: actions/download-artifact@v4
@@ -145,7 +131,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
+            VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -163,7 +149,7 @@ jobs:
             BASE_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/base:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
+            VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=sdks
           cache-to: type=gha,mode=max,scope=sdks
 
@@ -190,7 +176,7 @@ jobs:
             SDKS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
+            VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=full-v2
           cache-to: type=gha,mode=max,scope=full-v2
 
@@ -227,7 +213,7 @@ jobs:
             AGENTS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/agents:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ steps.nbgv.outputs.SemVer2 }}
+            VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=main
           cache-to: type=gha,mode=max,scope=main
 
@@ -254,17 +240,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # CRITICAL for NBGV
+          fetch-depth: 0
 
-      - name: Set up .NET for NBGV
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Install and run NBGV
+      - name: Set version from build-tarballs
         run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+          echo "NBGV_SemVer2=${{ needs.build-tarballs.outputs.version }}" >> "$GITHUB_ENV"
 
       - name: Download CLI tarball (${{ matrix.arch }})
         uses: actions/download-artifact@v4
@@ -314,6 +294,8 @@ jobs:
     needs: lint
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.nbgv.outputs.SemVer2 }}
 
     strategy:
       fail-fast: false
@@ -336,7 +318,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # CRITICAL for NBGV
+          fetch-depth: 0
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -420,18 +402,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # CRITICAL for NBGV
 
-      - name: Set up .NET for NBGV
+      - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-
-      - name: Install and run NBGV
-        run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
       - name: Download image artifact (${{ matrix.arch }})
         uses: actions/download-artifact@v4
@@ -525,7 +500,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # CRITICAL for NBGV
+          fetch-depth: 0
 
       - name: Download tarball artifact
         uses: actions/download-artifact@v4
@@ -740,7 +715,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # CRITICAL for NBGV
+          fetch-depth: 0
 
       # Try to download tarball artifact (from Task 5's PR artifact upload)
       # This tests the install path; repo checkout above provides build/test scripts

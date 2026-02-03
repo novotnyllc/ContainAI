@@ -8,7 +8,7 @@ set -euo pipefail
 #   --dotnet-channel CHANNEL  .NET SDK channel (default: 10.0)
 #   --layer LAYER             Build only specific layer (base|sdks|agents|all)
 #   --image-prefix PREFIX     Image name prefix (default: ghcr.io/novotnyllc/containai)
-#   --version VERSION         Version for OCI labels (default: from NBGV or "unknown")
+#   --version VERSION         Version for OCI labels (default: from NBGV)
 #   --platforms PLATFORMS     Build with buildx for platforms (e.g., linux/amd64,linux/arm64)
 #   --builder NAME            Use a specific buildx builder
 #   --build-setup             Configure buildx builder + binfmt if required
@@ -404,16 +404,27 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
 # Determine VERSION for OCI labels
-# Priority: --version flag > NBGV_SemVer2 env var > dotnet nbgv > "unknown"
+# Priority: --version flag > NBGV_SemVer2 env var > dotnet nbgv
 if [[ -z "$BUILD_VERSION" ]]; then
     if [[ -n "${NBGV_SemVer2:-}" ]]; then
         BUILD_VERSION="$NBGV_SemVer2"
     elif command -v dotnet >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/../version.json" ]]; then
-        BUILD_VERSION="$(dotnet nbgv get-version -v SemVer2 2>/dev/null || echo 'unknown')"
+        # Restore dotnet tools (includes nbgv) if not already available
+        if ! dotnet nbgv get-version -v SemVer2 >/dev/null 2>&1; then
+            dotnet tool restore --verbosity quiet >/dev/null 2>&1 || true
+        fi
+        BUILD_VERSION="$(dotnet nbgv get-version -v SemVer2 2>/dev/null)" || {
+            echo "ERROR: Failed to get version from NBGV. Ensure version.json is valid." >&2
+            exit 1
+        }
     else
-        BUILD_VERSION="unknown"
+        echo "ERROR: Cannot determine version. Install dotnet SDK or provide --version flag." >&2
+        exit 1
     fi
 fi
+
+# Export for child processes (e.g., build-cai-tarballs.sh)
+export NBGV_SemVer2="$BUILD_VERSION"
 
 # Helper to check if a local image exists in current Docker context
 # Returns 0 if exists, 1 otherwise
