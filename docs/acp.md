@@ -223,19 +223,19 @@ With an ACP-compatible extension, add to `settings.json`:
 Verify the agent is installed in the container:
 ```bash
 cai shell
-command -v claude  # or command -v myagent
-claude --help | grep -i acp  # Verify ACP support
+command -v <agent>  # e.g., command -v claude or command -v myagent
+<agent> --help | grep -i acp  # Verify ACP support
 ```
 
 If the agent is not found, you'll see an error like:
 ```
-Agent 'myagent' not found in container
+Agent '<agent>' not found in container
 ```
 
 **Solutions:**
 - Check the agent name spelling matches the binary name
 - Install the agent in your template Dockerfile
-- Install at runtime: `cai shell` then `npm install -g myagent`
+- Install at runtime: `cai shell` then install the agent (e.g., `npm install -g @mycompany/myagent`)
 
 ### MCP server not found
 

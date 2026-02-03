@@ -363,7 +363,7 @@ The easiest way to run scripts at container startup is using startup hooks. Thes
 | Level | Location | Container Path |
 |-------|----------|----------------|
 | Template | `~/.config/containai/templates/<name>/hooks/startup.d/` | `/etc/containai/template-hooks/startup.d/` |
-| Workspace | `.containai/hooks/startup.d/` | (via workspace mount) |
+| Workspace | `.containai/hooks/startup.d/` | `/home/agent/workspace/.containai/hooks/startup.d/` |
 
 **Execution order:**
 1. Template hooks first (shared across all workspaces using the template)
@@ -396,6 +396,11 @@ chmod +x .containai/hooks/startup.d/30-project.sh
 - Non-executable files are skipped with a warning
 - Non-zero exit code fails container startup
 
+**Execution context:**
+- Hooks run as the `agent` user (UID 1000)
+- Working directory: `/home/agent/workspace`
+- `sudo` is available for operations requiring root privileges
+
 **Benefits over systemd services:**
 - No rebuild needed - just restart the container
 - Simple shell scripts - no service file syntax
@@ -411,7 +416,7 @@ Network policy configuration controls egress traffic from containers. This is an
 | Level | Location | Container Path |
 |-------|----------|----------------|
 | Template | `~/.config/containai/templates/<name>/network.conf` | `/etc/containai/template-network.conf` |
-| Workspace | `.containai/network.conf` | (via workspace mount) |
+| Workspace | `.containai/network.conf` | `/home/agent/workspace/.containai/network.conf` |
 
 **Config format (INI, one value per line):**
 
@@ -448,7 +453,7 @@ default_deny = true
 **Hard blocks (always applied):**
 - Private ranges (RFC 1918): 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
 - Link-local: 169.254.0.0/16
-- Cloud metadata: 169.254.169.254
+- Cloud metadata endpoints (e.g., 169.254.169.254)
 
 These ranges cannot be overridden via `allow` entries.
 
