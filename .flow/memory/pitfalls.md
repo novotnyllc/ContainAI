@@ -409,3 +409,6 @@ bash -lc (login shell) sources profile files that can emit stdout, corrupting pr
 
 ## 2026-02-03 manual [pitfall]
 DOCKER-USER chain has RETURN at end; rules appended with -A are unreachable - must insert before RETURN
+
+## 2026-02-03 manual [pitfall]
+When matching iptables rules by comment, use exact pattern with quotes (--comment "prefix:name") to prevent prefix collisions (e.g., foo matching foo2)
