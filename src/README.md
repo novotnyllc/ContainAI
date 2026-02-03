@@ -306,9 +306,11 @@ docker --context containai-docker run --rm -u agent containai:latest bash -lc "n
 ```bash
 ./build.sh                    # Standard build
 ./build.sh --no-cache         # Force rebuild all layers
+./build.sh --platforms linux/amd64,linux/arm64 --push  # Multi-arch publish (uses buildx)
 ```
 
 The build script tags the image as both `containai:latest` and `containai:<YYYY-MM-DD>` for reproducibility.
+By default, `./build.sh` uses plain `docker build` for local, single-arch builds. Buildx is used only when buildx options (like `--platforms`, `--push`, or `--load`) are supplied.
 
 ## Testing with Dockerfile.test
 
