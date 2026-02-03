@@ -168,6 +168,41 @@ Define in `src/lib/network.sh`:
 ## Done summary
 ## Implementation Summary
 
+Verified existing implementation of opt-in network egress control via `.containai/network.conf` parsing.
+
+### Changes Already Committed
+
+1. **src/lib/network.sh** - Added per-container network policy functions:
+   - `_cai_parse_network_conf()` - Parse INI-style config file
+   - `_cai_expand_preset()` - Expand preset names to domain lists (package-managers, git-hosts, ai-apis)
+   - `_cai_resolve_domain_to_ips()` - DNS resolution with fallbacks (getent, dig, host)
+   - `_cai_ip_conflicts_with_hard_block()` - Check for conflicts with hard blocks (private ranges, metadata)
+   - `_cai_get_container_ip()` - Get container IP from Docker
+   - `_cai_apply_container_network_policy()` - Apply iptables rules per-container
+   - `_cai_remove_container_network_rules()` - Remove per-container rules
+   - `_cai_cleanup_container_network()` - Cleanup helper for stop paths
+
+2. **src/lib/container.sh** - Integration with container lifecycle:
+   - Apply network policy after container start (3 paths: exited, created, new)
+   - Clean up network rules before stop/remove in `_containai_stop_all` (5 cleanup call sites)
+
+3. **src/containai.sh** - Integration with stop command:
+   - Clean up network rules in `--container` stop path (2 sites: rm and stop)
+   - Clean up network rules in workspace-based stop path (2 sites: rm and stop)
+
+4. **tests/integration/test-network-policy.sh** - Comprehensive unit tests
+
+### Features Implemented
+
+- Config parsing with comments, whitespace handling
+- Preset support: `package-managers`, `git-hosts`, `ai-apis`
+- Hard block conflict detection and warning
+- Per-container iptables rules using `-s <container_ip>` and comment tags
+- Rule cleanup on all stop paths
+- Template-level and workspace-level config merge
+- DNS resolution with timeout and fallback strategies
+## Implementation Summary
+
 Implemented opt-in network egress control via `.containai/network.conf` parsing.
 
 ### Changes Made
@@ -201,6 +236,6 @@ Implemented opt-in network egress control via `.containai/network.conf` parsing.
 - Rule cleanup on all stop paths
 - Template-level and workspace-level config merge
 ## Evidence
-- Commits: 5c93171
-- Tests: test-network-policy.sh, shellcheck
+- Commits: 5c93171, 4645487, 10a7d6c
+- Tests:
 - PRs:

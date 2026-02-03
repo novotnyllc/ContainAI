@@ -9,9 +9,11 @@
 # 4. Preset expansion works
 # 5. Rule cleanup on stop
 # 6. Hard block conflicts are logged and ignored
+# 7. Docker+iptables integration: rules applied and enforced (requires Docker+iptables)
 #
 # Environment variables:
 #   CAI_ALLOW_IPTABLES_SKIP=1 - Allow tests to pass without iptables
+#   CAI_SKIP_DOCKER_TESTS=1   - Skip Docker-based integration tests
 # ==============================================================================
 
 set -euo pipefail
@@ -44,8 +46,15 @@ section() {
 
 FAILED=0
 TEST_TMPDIR=""
+TEST_CONTAINER_NAME=""
 
 cleanup() {
+    # Clean up test container if it exists
+    if [[ -n "$TEST_CONTAINER_NAME" ]]; then
+        docker rm -f "$TEST_CONTAINER_NAME" >/dev/null 2>&1 || true
+        # Clean up any network rules for the test container
+        _cai_cleanup_container_network "$TEST_CONTAINER_NAME" "" 2>/dev/null || true
+    fi
     if [[ -n "$TEST_TMPDIR" && -d "$TEST_TMPDIR" ]]; then
         rm -rf "$TEST_TMPDIR"
     fi
@@ -56,6 +65,19 @@ trap cleanup EXIT
 setup_test_dir() {
     TEST_TMPDIR=$(mktemp -d)
     mkdir -p "$TEST_TMPDIR/.containai"
+}
+
+# Check if Docker integration tests can run
+can_run_docker_tests() {
+    # Skip if explicitly disabled
+    [[ "${CAI_SKIP_DOCKER_TESTS:-}" == "1" ]] && return 1
+    # Need Docker
+    command -v docker >/dev/null 2>&1 || return 1
+    docker info >/dev/null 2>&1 || return 1
+    # Need iptables with permissions
+    _cai_iptables_available || return 1
+    _cai_iptables_can_run || return 1
+    return 0
 }
 
 # ==============================================================================
@@ -368,13 +390,127 @@ test_cleanup_function() {
 }
 
 # ==============================================================================
+# Test 9: Docker+iptables integration (requires Docker and iptables permissions)
+# ==============================================================================
+test_docker_iptables_integration() {
+    section "Test 9: Docker+iptables integration"
+
+    if ! can_run_docker_tests; then
+        warn "Skipping Docker integration test (Docker or iptables not available/permitted)"
+        warn "Set CAI_SKIP_DOCKER_TESTS=0 and ensure Docker+iptables are available to run this test"
+        return 0
+    fi
+
+    info "Docker and iptables available - running integration test"
+
+    setup_test_dir
+    TEST_CONTAINER_NAME="cai-netpol-test-$$"
+
+    # Create a network.conf that allows only a known public IP (Cloudflare DNS)
+    # and blocks everything else
+    cat > "$TEST_TMPDIR/.containai/network.conf" << 'EOF'
+[egress]
+# Allow only Cloudflare DNS (1.1.1.1)
+allow = 1.1.1.1
+default_deny = true
+EOF
+
+    info "Created network.conf with default_deny=true, allowing only 1.1.1.1"
+
+    # Start a test container (alpine is small and has wget)
+    info "Starting test container: $TEST_CONTAINER_NAME"
+    if ! docker run -d --name "$TEST_CONTAINER_NAME" alpine:3.20 sleep 300 >/dev/null 2>&1; then
+        fail "Could not start test container"
+        return 1
+    fi
+
+    # Wait for container to be running
+    local retries=10
+    while [[ $retries -gt 0 ]]; do
+        local state
+        state=$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER_NAME" 2>/dev/null) || state="false"
+        [[ "$state" == "true" ]] && break
+        sleep 0.5
+        retries=$((retries - 1))
+    done
+
+    if [[ $retries -eq 0 ]]; then
+        fail "Test container did not start in time"
+        return 1
+    fi
+
+    pass "Test container started"
+
+    # Apply network policy
+    info "Applying network policy to container"
+    if ! _cai_apply_container_network_policy "$TEST_CONTAINER_NAME" "$TEST_TMPDIR" "" ""; then
+        fail "Failed to apply network policy"
+        return 1
+    fi
+
+    pass "Network policy applied"
+
+    # Verify rules were created in iptables
+    local comment="${_CAI_CONTAINER_IPTABLES_COMMENT}:${TEST_CONTAINER_NAME}"
+    if _cai_iptables -S DOCKER-USER 2>/dev/null | grep -q "$comment"; then
+        pass "iptables rules created with container comment"
+    else
+        fail "iptables rules not found for container"
+        _cai_iptables -S DOCKER-USER 2>/dev/null || true
+        return 1
+    fi
+
+    # Test 1: Allowed destination (1.1.1.1) should work
+    info "Testing allowed destination (1.1.1.1)..."
+    local allowed_result
+    if allowed_result=$(docker exec "$TEST_CONTAINER_NAME" wget -q -O /dev/null -T 5 http://1.1.1.1 2>&1); then
+        pass "Connection to allowed IP (1.1.1.1) succeeded"
+    else
+        # wget returns non-zero on HTTP errors, but TCP connect working is the key
+        # Check if it was a connection refused vs timeout
+        if [[ "$allowed_result" == *"Connection refused"* ]] || [[ "$allowed_result" == *"timed out"* ]]; then
+            fail "Connection to allowed IP (1.1.1.1) blocked: $allowed_result"
+        else
+            # HTTP error is fine - TCP connected
+            pass "Connection to allowed IP (1.1.1.1) succeeded (HTTP error expected)"
+        fi
+    fi
+
+    # Test 2: Non-allowed destination (8.8.8.8) should be blocked
+    info "Testing blocked destination (8.8.8.8)..."
+    local blocked_result
+    if docker exec "$TEST_CONTAINER_NAME" wget -q -O /dev/null -T 5 http://8.8.8.8 2>&1; then
+        fail "Connection to blocked IP (8.8.8.8) should have failed"
+    else
+        pass "Connection to blocked IP (8.8.8.8) correctly denied"
+    fi
+
+    # Test 3: Verify rule cleanup works
+    info "Testing rule cleanup..."
+    _cai_cleanup_container_network "$TEST_CONTAINER_NAME" ""
+
+    if _cai_iptables -S DOCKER-USER 2>/dev/null | grep -q "$comment"; then
+        fail "iptables rules not cleaned up"
+    else
+        pass "iptables rules cleaned up successfully"
+    fi
+
+    # Stop and remove container
+    docker rm -f "$TEST_CONTAINER_NAME" >/dev/null 2>&1 || true
+    TEST_CONTAINER_NAME=""
+
+    cleanup
+}
+
+# ==============================================================================
 # Main
 # ==============================================================================
 main() {
     printf '%s\n' "=============================================================================="
-    printf '%s\n' "Network Policy Unit Tests for ContainAI"
+    printf '%s\n' "Network Policy Tests for ContainAI"
     printf '%s\n' "=============================================================================="
 
+    # Unit tests (no Docker/iptables required)
     test_parse_presets
     test_parse_no_deny
     test_no_config_file
@@ -383,6 +519,9 @@ main() {
     test_parse_formats
     test_dns_resolution
     test_cleanup_function
+
+    # Docker+iptables integration test (skipped if not available)
+    test_docker_iptables_integration
 
     # Summary
     printf '\n'
