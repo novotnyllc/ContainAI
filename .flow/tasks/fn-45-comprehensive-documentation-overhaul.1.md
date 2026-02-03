@@ -50,9 +50,8 @@ Competitors:
 - [ ] Optional: Simple architecture diagram if it aids comprehension (include `accTitle`/`accDescr`)
 
 ## Done summary
-TBD
-
+Overhauled README.md value proposition to lead with "why ContainAI vs alternatives" - VM-like isolation without --privileged, preferences sync, and ephemeral/persistent choice. Added 30-second install demo, comparison table vs Docker Sandbox/plain containers, three differentiators section, and persona-based jump links. Fixed example-ml.Dockerfile USER permissions for systemd setup.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 595ea56, d193663
+- Tests: shellcheck
 - PRs:
