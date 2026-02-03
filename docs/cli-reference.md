@@ -196,11 +196,11 @@ cai [path] [options] [-- <agent-args>]
 | Flag | Behavior |
 |------|----------|
 | `--allow-host-credentials` | Errors at runtime (unsupported with Sysbox) |
-| `--i-understand-this-exposes-host-credentials` | Errors at runtime (unsupported with Sysbox) |
 | `--allow-host-docker-socket` | Errors at runtime (unsupported with Sysbox) |
-| `--i-understand-this-grants-root-access` | Errors at runtime (unsupported with Sysbox) |
 | `--mount-docker-socket` | Errors at runtime (unsupported with Sysbox) |
-| `--please-root-my-host` | Errors at runtime (unsupported with Sysbox) |
+| `--i-understand-this-exposes-host-credentials` | Parsed but ignored (acknowledgment for `--allow-host-credentials`) |
+| `--i-understand-this-grants-root-access` | Parsed but ignored (acknowledgment for `--allow-host-docker-socket`) |
+| `--please-root-my-host` | Parsed but ignored (legacy flag) |
 | `--acknowledge-credential-risk` | Parsed but ignored (legacy flag) |
 
 **Note:** Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
