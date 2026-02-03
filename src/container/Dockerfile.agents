@@ -6,13 +6,14 @@
 # Usage (from repo root, requires BuildKit):
 #   ./src/build.sh --layer full
 #
-# The build script runs generators first to create src/container/generated/ files.
+# The build script runs generators first to create artifacts/container-generated/ files.
 # Manual docker build requires running generators first:
-#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh
-#   ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh
-#   ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json
-#   cp src/container/link-repair.sh src/container/generated/link-repair.sh
-#   docker build -t containai/full -f src/container/Dockerfile.agents src/
+#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml artifacts/container-generated/symlinks.sh
+#   ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml artifacts/container-generated/init-dirs.sh
+#   ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml artifacts/container-generated/link-spec.json
+#   cp src/container/link-repair.sh artifacts/container-generated/link-repair.sh
+#   ./src/scripts/build-cai-tarballs.sh --platforms linux/amd64 --version <version>
+#   docker build -t containai/full -f src/container/Dockerfile.agents .
 #
 # Requires containai/sdks:latest to be built first (or use ./src/build.sh for all layers)
 #
@@ -132,7 +133,7 @@ RUN mkdir -p /mnt/agent-data && chown agent:agent /mnt/agent-data
 # Uses bash explicitly since symlinks.sh uses bash features for error logging
 # Note: /tmp cleanup happens later as root (RUN rm -rf /tmp/*)
 USER agent
-COPY --chown=agent:agent container/generated/symlinks.sh /tmp/symlinks.sh
+COPY --chown=agent:agent artifacts/container-generated/symlinks.sh /tmp/symlinks.sh
 RUN bash /tmp/symlinks.sh
 
 # =============================================================================
@@ -173,8 +174,8 @@ RUN printf '%s\n' \
 # =============================================================================
 USER root
 
-COPY container/containai-init.sh /usr/local/lib/containai/init.sh
-COPY services/containai-init.service /etc/systemd/system/containai-init.service
+COPY src/container/containai-init.sh /usr/local/lib/containai/init.sh
+COPY src/services/containai-init.service /etc/systemd/system/containai-init.service
 RUN chmod +x /usr/local/lib/containai/init.sh && \
     # Enable the service via symlink (systemctl requires systemd as PID 1)
     mkdir -p /etc/systemd/system/multi-user.target.wants && \
@@ -184,17 +185,17 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
 # LINK SPEC AND REPAIR TOOLS
 # Generated from sync-manifest.toml for runtime link verification/repair
 # =============================================================================
-COPY container/generated/link-spec.json /usr/local/lib/containai/link-spec.json
-COPY container/generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
-COPY container/generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
+COPY artifacts/container-generated/link-spec.json /usr/local/lib/containai/link-spec.json
+COPY artifacts/container-generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
+COPY artifacts/container-generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
 RUN chmod +x /usr/local/lib/containai/link-repair.sh /usr/local/lib/containai/init-dirs.sh
 
 # =============================================================================
 # LINK WATCHER SERVICE
 # Monitors for new imports and auto-repairs symlinks
 # =============================================================================
-COPY container/link-watcher.sh /usr/local/lib/containai/link-watcher.sh
-COPY services/containai-link-watcher.service /etc/systemd/system/containai-link-watcher.service
+COPY src/container/link-watcher.sh /usr/local/lib/containai/link-watcher.sh
+COPY src/services/containai-link-watcher.service /etc/systemd/system/containai-link-watcher.service
 RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
     ln -sf /etc/systemd/system/containai-link-watcher.service /etc/systemd/system/multi-user.target.wants/containai-link-watcher.service
 
@@ -203,11 +204,29 @@ RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
 # In-container cai command for sync and other operations
 # =============================================================================
 
-# Copy containai library to /opt/containai
-COPY containai.sh /opt/containai/containai.sh
-COPY lib/ /opt/containai/lib/
-COPY scripts/parse-manifest.sh /opt/containai/scripts/parse-manifest.sh
-COPY sync-manifest.toml /opt/containai/sync-manifest.toml
+# Install containai CLI from prebuilt tarball (generated before build)
+ARG TARGETARCH
+RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
+    set -euo pipefail; \
+    tarball=""; \
+    case "${TARGETARCH:-}" in \
+        amd64) tarball="$(ls -1 /tmp/cai/containai-*-linux-x64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        arm64) tarball="$(ls -1 /tmp/cai/containai-*-linux-arm64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        *) echo "ERROR: Unsupported TARGETARCH: ${TARGETARCH:-unset}" >&2; exit 1 ;; \
+    esac; \
+    if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
+        echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
+        echo "Run ./src/scripts/build-cai-tarballs.sh before building this image." >&2; \
+        exit 1; \
+    fi; \
+    rm -rf /opt/containai; \
+    mkdir -p /opt/containai; \
+    tar -xzf "$tarball" -C /opt/containai --strip-components 1; \
+    if [[ -f /opt/containai/acp-proxy ]]; then \
+        mkdir -p /opt/containai/bin; \
+        mv /opt/containai/acp-proxy /opt/containai/bin/acp-proxy; \
+        chmod +x /opt/containai/bin/acp-proxy; \
+    fi
 
 # Executable wrapper for non-interactive use (docker exec <container> cai --help)
 RUN printf '#!/bin/bash\nsource /opt/containai/containai.sh\ncai "$@"\n' > /usr/local/bin/cai && \

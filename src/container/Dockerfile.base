@@ -7,7 +7,7 @@
 # - dockerd for Docker-in-Docker (via sysbox-runc)
 #
 # Usage (from repo root, requires BuildKit):
-#   docker build -t containai/base -f src/container/Dockerfile.base src/
+#   docker build -t containai/base -f src/container/Dockerfile.base .
 #
 # Run with sysbox-runc runtime:
 #   docker run --runtime=sysbox-runc -d containai/base
@@ -147,8 +147,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ln -sf /lib/systemd/system/ssh.service /etc/systemd/system/multi-user.target.wants/ssh.service
 
 # Copy systemd service files for container-aware operation
-COPY services/ssh-keygen.service /etc/systemd/system/ssh-keygen.service
-COPY services/ssh.service.d/ /etc/systemd/system/ssh.service.d/
+COPY src/services/ssh-keygen.service /etc/systemd/system/ssh-keygen.service
+COPY src/services/ssh.service.d/ /etc/systemd/system/ssh.service.d/
 RUN ln -sf /etc/systemd/system/ssh-keygen.service /etc/systemd/system/multi-user.target.wants/ssh-keygen.service
 
 EXPOSE 22
@@ -181,7 +181,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ln -sf /lib/systemd/system/containerd.service /etc/systemd/system/multi-user.target.wants/containerd.service
 
 # Copy Docker service drop-in for container awareness and sysbox dependency
-COPY services/docker.service.d/ /etc/systemd/system/docker.service.d/
+COPY src/services/docker.service.d/ /etc/systemd/system/docker.service.d/
 
 # =============================================================================
 # ESSENTIAL TOOLS

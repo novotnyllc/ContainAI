@@ -445,13 +445,13 @@ The generators create container artifacts from the manifest.
 
 ```bash
 # Generate Dockerfile symlink script
-./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml src/container/generated/symlinks.sh
+./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml artifacts/container-generated/symlinks.sh
 
 # Generate init directory script
-./src/scripts/gen-init-dirs.sh src/sync-manifest.toml src/container/generated/init-dirs.sh
+./src/scripts/gen-init-dirs.sh src/sync-manifest.toml artifacts/container-generated/init-dirs.sh
 
 # Generate link spec JSON for runtime repair
-./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml src/container/generated/link-spec.json
+./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml artifacts/container-generated/link-spec.json
 ```
 
 **Note**: The build script `./src/build.sh` runs these generators automatically before building the image. Manual execution is only needed for development/testing.

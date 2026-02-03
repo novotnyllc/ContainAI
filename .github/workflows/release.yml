@@ -25,20 +25,16 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
-            dotnet_rid: linux-x64
-            tarball_arch: linux-x64
+            tarball_target: linux-x64
           - arch: arm64
             runner: ubuntu-24.04-arm
-            dotnet_rid: linux-arm64
-            tarball_arch: linux-arm64
+            tarball_target: linux-arm64
           - arch: macos-x64
             runner: macos-15-intel
-            dotnet_rid: osx-x64
-            tarball_arch: macos-x64
+            tarball_target: macos-x64
           - arch: macos-arm64
             runner: macos-26
-            dotnet_rid: osx-arm64
-            tarball_arch: macos-arm64
+            tarball_target: macos-arm64
 
     steps:
       - name: Checkout repository
@@ -58,27 +54,20 @@ jobs:
           echo "SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_OUTPUT"
           echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
-      - name: Build AOT binary
+      - name: Build release tarball
         run: |
           echo "============================================="
-          echo "Building acp-proxy for ${{ matrix.dotnet_rid }}"
+          echo "Creating tarball for ${{ matrix.tarball_target }}"
           echo "============================================="
-          dotnet publish src/acp-proxy \
-            -r ${{ matrix.dotnet_rid }} \
-            -c Release \
-            --self-contained \
-            -o src/acp-proxy/publish/${{ matrix.dotnet_rid }}
-
-          ls -la src/acp-proxy/publish/${{ matrix.dotnet_rid }}/
-          file src/acp-proxy/publish/${{ matrix.dotnet_rid }}/acp-proxy
-
-      - name: Create release tarball
-        run: |
-          echo "============================================="
-          echo "Creating tarball for ${{ matrix.tarball_arch }}"
-          echo "============================================="
-          ./scripts/package-release.sh \
-            --arch ${{ matrix.tarball_arch }} \
+          case "${{ matrix.tarball_target }}" in
+            linux-x64) platform="linux/amd64" ;;
+            linux-arm64) platform="linux/arm64" ;;
+            macos-x64) platform="macos/amd64" ;;
+            macos-arm64) platform="macos/arm64" ;;
+            *) echo "ERROR: Unknown tarball target: ${{ matrix.tarball_target }}" >&2; exit 1 ;;
+          esac
+          ./src/scripts/build-cai-tarballs.sh \
+            --platforms "$platform" \
             --version "$NBGV_SemVer2" \
             --output-dir ./artifacts
 

@@ -152,14 +152,14 @@ if [[ -d "$SRC_DIR/templates" ]]; then
 fi
 
 # Copy acp-proxy binary (must be pre-built)
-ACP_BINARY="$SRC_DIR/acp-proxy/publish/${DOTNET_RID}/acp-proxy"
+ACP_BINARY="$REPO_ROOT/artifacts/publish/acp-proxy/release_${DOTNET_RID}/acp-proxy"
 if [[ -f "$ACP_BINARY" ]]; then
     printf '  Copying acp-proxy binary...\n'
     cp "$ACP_BINARY" "$PACKAGE_DIR/acp-proxy"
     chmod +x "$PACKAGE_DIR/acp-proxy"
 else
     printf 'ERROR: acp-proxy binary not found at: %s\n' "$ACP_BINARY" >&2
-    printf '  Build it first: dotnet publish src/acp-proxy -r %s -c Release --self-contained -o src/acp-proxy/publish/%s\n' "$DOTNET_RID" "$DOTNET_RID" >&2
+    printf '  Build it first: dotnet publish src/acp-proxy -r %s -c Release --self-contained\n' "$DOTNET_RID" >&2
     exit 1
 fi
 

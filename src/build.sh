@@ -32,6 +32,7 @@ set -euo pipefail
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DATE_TAG="$(date +%Y-%m-%d)"
 
 # Defaults
@@ -426,7 +427,7 @@ local_image_exists() {
 # ==============================================================================
 generate_container_files() {
     local manifest="${SCRIPT_DIR}/sync-manifest.toml"
-    local gen_dir="${SCRIPT_DIR}/container/generated"
+    local gen_dir="${REPO_ROOT}/artifacts/container-generated"
     local scripts_dir="${SCRIPT_DIR}/scripts"
 
     if [[ ! -f "$manifest" ]]; then
@@ -477,6 +478,72 @@ generate_container_files() {
     echo ""
 }
 
+# ==============================================================================
+# Build ContainAI CLI tarballs for container installation
+# ==============================================================================
+build_cai_tarballs() {
+    local script="${SCRIPT_DIR}/scripts/build-cai-tarballs.sh"
+    local platforms=""
+    local tarballs_dir="${REPO_ROOT}/artifacts/cai-tarballs"
+    local host_arch
+    local missing=0
+
+    if [[ ! -x "$script" ]]; then
+        printf 'ERROR: Tarball build script not found or not executable: %s\n' "$script" >&2
+        return 1
+    fi
+
+    if [[ "$USE_BUILDX" -eq 1 && -n "$PLATFORMS" ]]; then
+        platforms="$PLATFORMS"
+    else
+        platforms="linux/$(detect_host_arch)"
+    fi
+    platforms="${platforms//[[:space:]]/}"
+    host_arch="$(detect_host_arch)"
+
+    echo ""
+    echo "=== Building ContainAI CLI tarballs ==="
+    echo ""
+
+    mkdir -p "$tarballs_dir"
+
+    IFS=',' read -ra platform_list <<< "$platforms"
+    for platform in "${platform_list[@]}"; do
+        local_arch=""
+        case "$platform" in
+            linux/amd64) local_arch="linux-x64" ;;
+            linux/arm64) local_arch="linux-arm64" ;;
+            *)
+                printf 'ERROR: Unsupported platform for cai tarball: %s\n' "$platform" >&2
+                return 1
+                ;;
+        esac
+
+        local pattern="${tarballs_dir}/containai-*-${local_arch}.tar.gz"
+        if compgen -G "$pattern" >/dev/null; then
+            continue
+        fi
+
+        if [[ "$platform" != "linux/${host_arch}" ]]; then
+            printf 'ERROR: Missing tarball for %s. Build it on a native %s runner and place it in %s\n' \
+                "$platform" "$platform" "$tarballs_dir" >&2
+            return 1
+        fi
+
+        missing=1
+    done
+
+    if [[ "$missing" -eq 0 ]]; then
+        printf '[INFO] Using existing CLI tarballs in %s\n' "$tarballs_dir"
+        return 0
+    fi
+
+    "$script" \
+        --platforms "linux/${host_arch}" \
+        --version "$BUILD_VERSION" \
+        --output-dir "$tarballs_dir"
+}
+
 # Build function for a single layer
 build_layer() {
     local name="$1"
@@ -513,7 +580,7 @@ build_layer() {
         ${extra_args[@]+"${extra_args[@]}"} \
         ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
         -f "${SCRIPT_DIR}/container/${dockerfile}" \
-        "$SCRIPT_DIR"
+        "$REPO_ROOT"
 
     echo "  Tagged: ${repo}:latest, ${repo}:${DATE_TAG}"
 }
@@ -535,6 +602,7 @@ case "$BUILD_LAYER" in
         ;;
     agents)
         generate_container_files || exit 1
+        build_cai_tarballs || exit 1
         agents_args=()
         if local_image_exists "${IMAGE_SDKS}:latest"; then
             printf '[INFO] Using local sdks image: %s\n' "${IMAGE_SDKS}:latest"
@@ -552,8 +620,9 @@ case "$BUILD_LAYER" in
         echo "Building all ContainAI layers..."
         echo "  .NET channel: $DOTNET_CHANNEL"
 
-        # Generate container files from manifest before agents layer
+        # Generate container files and tarballs before building images
         generate_container_files || exit 1
+        build_cai_tarballs || exit 1
 
         # Build in dependency order
         build_layer "base" "Dockerfile.base"
@@ -626,7 +695,7 @@ case "$BUILD_LAYER" in
             "${final_args[@]}" \
             ${DOCKER_ARGS[@]+"${DOCKER_ARGS[@]}"} \
             -f "${SCRIPT_DIR}/container/Dockerfile" \
-            "$SCRIPT_DIR"
+            "$REPO_ROOT"
         echo "  Tagged: ${IMAGE_MAIN}:latest, ${IMAGE_MAIN}:${DATE_TAG}"
         ;;
     *)
