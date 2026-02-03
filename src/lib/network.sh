@@ -1388,6 +1388,8 @@ _cai_apply_container_network_policy() {
 
     if [[ "$has_template_conf" != "true" && "$has_workspace_conf" != "true" ]]; then
         _cai_debug "No network.conf found for container $container_name - using default allow-all"
+        # Remove any existing per-container rules (handles case where config was removed)
+        _cai_remove_container_network_rules "$container_name" "$context"
         return 0
     fi
 
@@ -1584,22 +1586,29 @@ _cai_remove_container_network_rules() {
         return 0
     fi
 
-    # Find and delete all rules with our comment
+    # Find and delete all rules with our EXACT comment
     # Use loop since we need to delete multiple rules
     # Note: No hard cap - presets + DNS can create many rules; they must all be cleaned up
+    #
+    # IMPORTANT: Match exact comment to avoid prefix collisions
+    # e.g., "cai:foo" should NOT match "cai:foo2"
+    # iptables -S output format: ... -m comment --comment "cai:container-name" ...
+    # We match the full quoted comment string to ensure exact match
     local deleted=0
     local max_iterations=1000  # High safety limit (presets * multi-IP DNS answers)
     local iteration=0
+    local exact_comment_pattern="--comment \"${comment}\""
 
     while [[ $iteration -lt $max_iterations ]]; do
         iteration=$((iteration + 1))
 
-        # Find rule number with our comment
+        # Find rule number with our EXACT comment (not substring match)
         local rule_num=""
         local line_num=0
         while IFS= read -r line; do
             line_num=$((line_num + 1))
-            if [[ "$line" == *"$comment"* ]]; then
+            # Match exact comment pattern including quotes to prevent prefix collision
+            if [[ "$line" == *"${exact_comment_pattern}"* ]]; then
                 rule_num=$line_num
                 break
             fi
