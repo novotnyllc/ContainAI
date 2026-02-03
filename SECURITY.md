@@ -56,15 +56,20 @@ ContainAI enforces the following security measures:
 
 ### Unsafe Opt-ins
 
-These features bypass security boundaries and require explicit acknowledgement:
+| Flag | Risk |
+|------|------|
+| `--force` | Skips isolation verification (testing only) |
 
-| Flag | Acknowledgement Required | Risk |
-|------|-------------------------|------|
-| `--allow-host-credentials` | `--i-understand-this-exposes-host-credentials` | Exposes ~/.ssh, ~/.gitconfig, API tokens to agent |
-| `--allow-host-docker-socket` | `--i-understand-this-grants-root-access` | Full root access to host system |
-| `--force` | None | Skips isolation verification (testing only) |
+### Removed Flags (Error at Runtime)
 
-**Note:** `--allow-host-credentials` and `--allow-host-docker-socket` are not supported with Sysbox isolation and will error at runtime. Use `cai import` to sync credentials into containers.
+The following flags are no longer supported with Sysbox isolation and will error at runtime:
+
+| Flag | Reason | Alternative |
+|------|--------|-------------|
+| `--allow-host-credentials` | Incompatible with user namespace isolation | Use `cai import` to sync credentials |
+| `--allow-host-docker-socket` | Incompatible with Sysbox isolation | Use built-in Docker-in-Docker |
+
+See [CLI Reference - Deprecated Flags](docs/cli-reference.md#cai-run) for details.
 
 ### Network Security
 

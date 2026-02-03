@@ -48,22 +48,22 @@ cai --help | head -3
 
 ContainAI follows the Unix Rule of Silence: commands produce no output on success by default.
 
-| Output Type | Default | `--verbose` | `--quiet` |
-|-------------|---------|-------------|-----------|
-| Info/step messages | Hidden | Shown | Hidden |
-| Warnings | Shown (stderr) | Shown | Hidden |
-| Errors | Shown (stderr) | Shown | Shown |
+| Output Type | Default | `--verbose` |
+|-------------|---------|-------------|
+| Info/step messages | Hidden | Shown |
+| Warnings | Shown (stderr) | Shown |
+| Errors | Shown (stderr) | Shown |
 
 **Enable verbose output:**
 ```bash
 # Per-command flag
-cai --verbose
+cai --verbose doctor
 
 # Environment variable (persistent)
 export CONTAINAI_VERBOSE=1
 ```
 
-**Precedence**: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE` environment variable.
+**Precedence**: `--verbose` flag > `CONTAINAI_VERBOSE` environment variable.
 
 **Exceptions**: `cai doctor`, `cai help`, and `cai version` always produce output regardless of verbosity settings.
 
