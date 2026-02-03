@@ -406,3 +406,6 @@ When task specs define allowed status values (e.g., 'already planned / partially
 
 ## 2026-02-03 manual [pitfall]
 bash -lc (login shell) sources profile files that can emit stdout, corrupting protocol streams like JSON-RPC; use bash -c instead
+
+## 2026-02-03 manual [pitfall]
+DOCKER-USER chain has RETURN at end; rules appended with -A are unreachable - must insert before RETURN
