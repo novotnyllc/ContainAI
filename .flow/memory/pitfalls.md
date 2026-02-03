@@ -400,3 +400,6 @@ Codex impl-review may make factually incorrect claims about code behavior - alwa
 
 ## 2026-02-03 manual [pitfall]
 When auditing code patterns, always run grep with exact patterns and wc -l to get accurate counts before writing reports - manual estimates are unreliable
+
+## 2026-02-03 manual [pitfall]
+When task specs define allowed status values (e.g., 'already planned / partially planned / new'), use ONLY those exact values - do not add variants like 'new task' or 'planned' or parenthetical notes
