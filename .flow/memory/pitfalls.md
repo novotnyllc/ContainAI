@@ -422,3 +422,6 @@ flowctl codex impl-review uses git diff base..HEAD - changes must be committed b
 
 ## 2026-02-03 manual [pitfall]
 Codex impl-review may return stale findings if diff base doesn't include recent commits - verify flagged issues manually before iterating
+
+## 2026-02-03 manual [pitfall]
+Mermaid flowchart edges cannot link to subgraph IDs directly - link to actual nodes inside subgraphs instead (e.g., A --> NodeInB, not A --> SubgraphB)

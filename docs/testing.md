@@ -37,8 +37,8 @@ flowchart TB
         Sysbox["Requires Sysbox"]
     end
 
-    T1 -->|"Pass"| T2
-    T2 -->|"Pass"| T3
+    Manifest -->|"Pass"| Sync
+    Docker -->|"Pass"| DinD
 
     style T1 fill:#0f3460,stroke:#16213e,color:#fff
     style T2 fill:#1a1a2e,stroke:#16213e,color:#fff

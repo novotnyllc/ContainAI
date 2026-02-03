@@ -34,8 +34,8 @@ flowchart LR
         Symlinks["~/.claude → /mnt/agent-data/claude<br/>~/.config/gh → /mnt/agent-data/config/gh"]
     end
 
-    HostConfigs -->|"rsync"| Sync
-    Sync -->|"to volume"| VolData
+    HostConfigs -->|"rsync"| SyncMap
+    SyncMap -->|"to volume"| VolData
     VolData -->|"symlinks"| Symlinks
 
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff

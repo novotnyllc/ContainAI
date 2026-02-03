@@ -122,10 +122,10 @@ flowchart TB
         Config["~/.config/containai/config.toml"]
     end
 
-    Docker --> Sysbox
-    Sysbox --> Context
-    Context --> SSH
-    SSH --> User
+    Daemon --> Runtime
+    Runtime --> Ctx
+    Ctx --> Key
+    Key --> Config
 
     style Docker fill:#1a1a2e,stroke:#16213e,color:#fff
     style Sysbox fill:#0f3460,stroke:#16213e,color:#fff

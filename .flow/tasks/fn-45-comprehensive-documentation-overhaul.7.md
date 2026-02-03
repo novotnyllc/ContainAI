@@ -115,7 +115,7 @@ accDescr: <description of what diagram shows>
 Added accessibility attributes (accTitle/accDescr) to all existing Mermaid diagrams and added new diagrams to documentation files that lacked visual aids.
 
 Phase 1 - Retrofitted existing diagrams with accessibility:
-- docs/architecture.md: 12 diagrams
+- docs/architecture.md: 11 diagrams
 - docs/lifecycle.md: 1 diagram
 - docs/quickstart.md: 2 diagrams
 - docs/security-comparison.md: 8 diagrams

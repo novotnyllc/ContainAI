@@ -82,7 +82,7 @@ accDescr: Vertical hierarchy showing config resolution order from CLI flags (hig
 flowchart TB
     CLI["1. CLI Flags<br/>--data-volume, --agent"]
     ENV["2. Environment Variables<br/>CONTAINAI_DATA_VOLUME"]
-    Workspace["3. Workspace Config Section<br/>[workspace./path]"]
+    Workspace["3. Workspace Config Section<br/>[workspace.&quot;path&quot;]"]
     Global["4. Global Config Section<br/>[agent], [credentials]"]
     Default["5. Built-in Defaults<br/>sandbox-agent-data, claude"]
 

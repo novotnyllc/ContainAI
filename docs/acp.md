@@ -49,10 +49,10 @@ accTitle: ACP Protocol Flow
 accDescr: Sequence diagram showing editor communication through ACP stdio to proxy, then cai exec to container where agent runs with MCP server connections.
 sequenceDiagram
     participant Editor
-    participant Proxy as cai --acp<br/>(Proxy)
+    participant Proxy as cai --acp (Proxy)
     participant Exec as cai exec
     participant Container
-    participant Agent as Agent<br/>(claude --acp)
+    participant Agent as Agent (claude --acp)
     participant MCP as MCP Servers
 
     Editor->>Proxy: ACP stdio (NDJSON)
@@ -60,7 +60,9 @@ sequenceDiagram
     Exec->>Container: SSH/exec
     Container->>Agent: Run agent --acp
     Agent->>MCP: Connect to MCP servers
-    Agent-->>Editor: Response via proxy
+    MCP-->>Agent: Tool responses
+    Agent-->>Proxy: Response
+    Proxy-->>Editor: Response via stdio
 ```
 
 1. Editor spawns `cai --acp claude`
