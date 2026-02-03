@@ -500,14 +500,15 @@ Standard and correct.
 
 ## Unknown Command Routing
 
-**Finding**: Unknown subcommands route to `run`, not "unknown command" error.
+**Finding**: Unknown subcommands are delegated to `run`; if the token matches an existing directory it is treated as a workspace, otherwise `run` errors with "Unknown option: {token}".
 
 ```bash
-cai unknowncommand  # Silently runs container with "unknowncommand" as workspace path
+cai unknowncommand  # Routes to run, fails with "[ERROR] Unknown option: unknowncommand"
+cai ./mydir         # Routes to run, treats ./mydir as workspace path if it exists
 ```
 
-**Impact**: Typos don't error; user may not realize mistake.
-**Recommendation**: Consider validating subcommand before routing to run.
+**Impact**: Typos produce "Unknown option" error (not "Unknown command"), which can be confusing. However, the error does include help suggestions.
+**Recommendation**: Consider adding explicit unknown command validation before routing to run, or at least emitting "Unknown command" instead of "Unknown option" for non-directory tokens.
 
 ---
 
