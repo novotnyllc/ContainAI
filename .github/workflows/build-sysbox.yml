@@ -40,11 +40,11 @@ env:
 
 jobs:
   # ============================================================================
-  # Build Jobs - Native architecture builds (no QEMU cross-compilation)
+  # Build Jobs - Native architecture buildss
   # ============================================================================
   build-amd64:
     name: Build amd64
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout ContainAI

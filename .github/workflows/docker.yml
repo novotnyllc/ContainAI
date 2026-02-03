@@ -37,8 +37,9 @@ jobs:
       - name: Check manifest consistency
         run: ./scripts/check-manifest-consistency.sh
 
-  build:
+  build-push:
     needs: lint
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -112,15 +113,6 @@ jobs:
               echo "tag_suffix=nightly" >> $GITHUB_OUTPUT
             fi
           fi
-
-      - name: Build images (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          ./src/build.sh \
-            --image-prefix containai \
-            --version "${{ steps.nbgv.outputs.SemVer2 }}" \
-            --platforms linux/amd64 \
-            --load
 
       - name: Build and push base image
         if: github.event_name != 'pull_request'
@@ -222,6 +214,72 @@ jobs:
           cache-to: type=gha,mode=max,scope=main
 
   # ============================================================================
+  # Build Test Images (per-arch) - shared across test jobs
+  # ============================================================================
+  build-images:
+    needs: lint
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
+
+      - name: Set up .NET for NBGV
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install and run NBGV
+        run: |
+          dotnet tool restore
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build test images (${{ matrix.arch }})
+        run: |
+          echo "Building containai images for ${{ matrix.platform }}..."
+          ./src/build.sh \
+            --image-prefix containai \
+            --version "$NBGV_SemVer2" \
+            --platforms ${{ matrix.platform }} \
+            --load
+
+      - name: Save images to artifact
+        run: |
+          mkdir -p artifacts
+          docker save \
+            containai:latest \
+            containai/base:latest \
+            containai/sdks:latest \
+            containai/agents:latest \
+            -o artifacts/containai-images-${{ matrix.arch }}.tar
+          gzip -f artifacts/containai-images-${{ matrix.arch }}.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-images-${{ matrix.arch }}
+          path: artifacts/containai-images-${{ matrix.arch }}.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  # ============================================================================
   # Build Multi-arch Tarballs
   # ============================================================================
   # Builds AOT .NET binaries for each architecture and creates release tarballs.
@@ -237,9 +295,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Use ubuntu-22.04 for x64 to ensure glibc compatibility with older distros
           - arch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             dotnet_rid: linux-x64
             tarball_arch: linux-x64
           - arch: arm64
@@ -310,16 +367,14 @@ jobs:
   #   with sysbox installed - see docs/testing.md for manual E2E testing
   #
   # Test execution on PRs:
-  # - Depends on build job to ensure build passes first
-  # - Builds image locally (GitHub Actions jobs can't share Docker images)
+  # - Depends on build-images job (per-arch)
+  # - Uses image artifacts produced earlier (no local rebuild)
   # - Runs full test suite (standard Docker runtime, no sysbox required)
   #
-  # Note: The test job rebuilds the image because GitHub Actions jobs run on
-  # separate runners. The build dependency ensures we don't waste CI time
-  # running tests if the build would fail.
+  # Note: Image artifacts are produced in build-images and shared across jobs.
   # ============================================================================
   test:
-    needs: build
+    needs: build-images
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -339,29 +394,17 @@ jobs:
           dotnet tool restore
           echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download image artifact (amd64)
+        uses: actions/download-artifact@v4
+        with:
+          name: containai-images-amd64
+          path: /tmp/containai-images
 
-      - name: Build test image
+      - name: Load test images
         run: |
-          echo "Building containai image for testing..."
-          ./src/build.sh \
-            --image-prefix containai \
-            --version "$NBGV_SemVer2" \
-            --platforms linux/amd64 \
-            --load
-
-      - name: Verify test image
-        run: |
-          echo "Verifying containai:latest image was built..."
-          if ! docker image inspect containai:latest >/dev/null 2>&1; then
-            echo "::error::containai:latest image not found after build"
-            echo "Available images:"
-            docker images | grep -E '^(containai|REPOSITORY)' || true
-            exit 1
-          fi
-          echo "Image built successfully:"
-          docker image inspect containai:latest --format '{{.Id}} {{.Created}}'
+          gunzip -c /tmp/containai-images/containai-images-amd64.tar.gz | docker load
+          echo "Loaded images:"
+          docker images | grep -E '^(containai|REPOSITORY)' || true
 
       - name: Run import integration tests
         run: |
@@ -418,6 +461,93 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
+  # Integration Tests (Linux arm64)
+  # ============================================================================
+  test-arm64:
+    needs: build-images
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # CRITICAL for NBGV
+
+      - name: Set up .NET for NBGV
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install and run NBGV
+        run: |
+          dotnet tool restore
+          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
+
+      - name: Download image artifact (arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: containai-images-arm64
+          path: /tmp/containai-images
+
+      - name: Load test images
+        run: |
+          gunzip -c /tmp/containai-images/containai-images-arm64.tar.gz | docker load
+          echo "Loaded images:"
+          docker images | grep -E '^(containai|REPOSITORY)' || true
+
+      - name: Run import integration tests
+        run: |
+          echo "============================================="
+          echo "Running import integration tests (arm64)"
+          echo "============================================="
+          export IMAGE_NAME="containai:latest"
+          ./tests/integration/test-sync-integration.sh
+
+      - name: Run .NET unit tests (if test projects exist)
+        run: |
+          echo "============================================="
+          echo "Running .NET unit tests (arm64 runner)"
+          echo "============================================="
+          if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
+            dotnet test --configuration Release
+          else
+            echo "No test projects found, skipping dotnet test"
+          fi
+
+      - name: Build ACP Proxy (arm64)
+        run: |
+          echo "============================================="
+          echo "Building ACP proxy binary (arm64)"
+          echo "============================================="
+          cd src/acp-proxy
+          dotnet publish -r linux-arm64 -c Release --self-contained -o publish
+          mkdir -p ../bin
+          cp publish/acp-proxy ../bin/acp-proxy
+          chmod +x ../bin/acp-proxy
+
+      - name: Run ACP integration tests
+        env:
+          CAI_ACP_TEST_MODE: "1"
+          CAI_ACP_DIRECT_SPAWN: "1"
+        run: |
+          echo "============================================="
+          echo "Running ACP proxy integration tests (arm64)"
+          echo "============================================="
+          chmod +x ./tests/integration/mock-acp-server
+          ./tests/integration/test-acp-proxy.sh
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-arm64-${{ github.run_id }}
+          path: |
+            ~/.containai-test-*
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ============================================================================
   # E2E Tests (Sysbox/DinD) - GitHub-hosted runners
   # ============================================================================
   # Attempts to run E2E tests on GitHub-hosted runners. Sysbox requires kernel
@@ -428,7 +558,7 @@ jobs:
   # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test:
-    needs: [build, build-tarballs]
+    needs: [build-images, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -437,7 +567,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
 
@@ -674,31 +804,19 @@ jobs:
             echo "DOCKER_READY=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up Docker Buildx
+      - name: Download image artifact
         if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Set up .NET for NBGV
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/download-artifact@v4
         with:
-          global-json-file: global.json
+          name: containai-images-${{ matrix.arch }}
+          path: /tmp/containai-images
 
-      - name: Install and run NBGV
+      - name: Load test images
         if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
         run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
-
-      - name: Build test image
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
-        run: |
-          echo "Building containai image for E2E testing..."
-          ./src/build.sh \
-            --image-prefix containai \
-            --version "$NBGV_SemVer2" \
-            --platforms linux/${{ matrix.arch }} \
-            --load
+          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
+          echo "Loaded images:"
+          docker images | grep -E '^(containai|REPOSITORY)' || true
 
       - name: Run E2E tests (DinD)
         if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
@@ -750,13 +868,84 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
+  # E2E Tests (macOS + Lima)
+  # ============================================================================
+  e2e-test-macos:
+    needs: [lint, build-images]
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install macOS dependencies (Docker CLI + Lima + Bash)
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            echo "::error::Homebrew not found on macOS runner"
+            exit 1
+          fi
+          brew update
+          if ! command -v docker >/dev/null 2>&1; then
+            brew install docker
+          fi
+          if ! command -v limactl >/dev/null 2>&1; then
+            brew install lima
+          fi
+          if ! command -v bash >/dev/null 2>&1; then
+            brew install bash
+          fi
+          brew upgrade bash || true
+
+      - name: Run setup (Lima + Sysbox)
+        run: |
+          BASH_BIN="$(brew --prefix bash)/bin/bash"
+          if [[ ! -x "$BASH_BIN" ]]; then
+            echo "::error::Bash 4+ not found at ${BASH_BIN}"
+            exit 1
+          fi
+          "$BASH_BIN" -lc 'source src/containai.sh && cai setup --verbose'
+
+      - name: Determine image artifact arch
+        run: |
+          machine="$(uname -m)"
+          case "$machine" in
+            x86_64|amd64) echo "IMAGE_ARCH=amd64" >> "$GITHUB_ENV" ;;
+            arm64|aarch64) echo "IMAGE_ARCH=arm64" >> "$GITHUB_ENV" ;;
+            *) echo "::error::Unsupported macOS arch: $machine"; exit 1 ;;
+          esac
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: containai-images-${{ env.IMAGE_ARCH }}
+          path: /tmp/containai-images
+
+      - name: Load images into Lima
+        run: |
+          gunzip -c /tmp/containai-images/containai-images-${IMAGE_ARCH}.tar.gz | docker --context containai-docker load
+          docker --context containai-docker images | grep -E '^(containai|REPOSITORY)' || true
+
+      - name: Run Secure Engine E2E tests (macOS)
+        env:
+          CONTAINAI_TEST_IMAGE: containai/base:latest
+        run: |
+          BASH_BIN="$(brew --prefix bash)/bin/bash"
+          "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
+          "$BASH_BIN" -lc './tests/integration/test-dind.sh'
+          "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
+          "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+
+  # ============================================================================
   # E2E Tests (Sysbox/DinD) - Self-hosted runners
   # ============================================================================
   # Runs E2E tests on self-hosted runners with sysbox pre-installed.
   # These runners provide reliable sysbox support without installation issues.
   #
   # Self-hosted runner requirements:
-  # - Ubuntu 22.04+ with kernel 5.5+
+  # - Ubuntu with kernel 5.5+
   # - Sysbox pre-installed: https://github.com/nestybox/sysbox
   # - Docker configured with sysbox runtime
   # - Runner labels: self-hosted, linux, sysbox, <arch>
@@ -769,7 +958,7 @@ jobs:
   # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test-selfhosted:
-    needs: [build, build-tarballs]
+    needs: [build-tarballs, build-images]
     # Only run on main repo or when explicitly enabled via repo variable
     # This prevents forks from hanging indefinitely waiting for self-hosted runners
     if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
@@ -890,27 +1079,17 @@ jobs:
             exit 1
           fi
 
-      - name: Set up .NET for NBGV
-        uses: actions/setup-dotnet@v4
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
         with:
-          global-json-file: global.json
+          name: containai-images-${{ matrix.arch }}
+          path: /tmp/containai-images
 
-      - name: Install and run NBGV
+      - name: Load test images
         run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build test image
-        run: |
-          echo "Building containai image for E2E testing (${{ matrix.arch }})..."
-          ./src/build.sh \
-            --image-prefix containai \
-            --version "$NBGV_SemVer2" \
-            --platforms "linux/${{ matrix.arch }}" \
-            --load
+          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
+          echo "Loaded images:"
+          docker images | grep -E '^(containai|REPOSITORY)' || true
 
       - name: Run E2E tests (DinD)
         env:

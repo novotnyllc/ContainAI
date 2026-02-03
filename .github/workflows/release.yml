@@ -13,7 +13,7 @@ jobs:
   # ============================================================================
   # Build Multi-arch Tarballs for Release
   # ============================================================================
-  # Builds on ubuntu-22.04 for x64 to ensure glibc compatibility with older distros.
+  # Builds on ubuntu-24.04 for x64 to match supported platform baseline.
   # ============================================================================
   build-release-tarballs:
     runs-on: ${{ matrix.runner }}
@@ -24,7 +24,7 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
             dotnet_rid: linux-x64
             tarball_arch: linux-x64
           - arch: arm64
