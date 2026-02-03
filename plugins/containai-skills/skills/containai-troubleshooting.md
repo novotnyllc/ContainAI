@@ -269,7 +269,10 @@ When all else fails:
 cai stop --all --remove
 
 # 2. Clean up volumes (WARNING: loses data!)
-cai docker volume ls | grep cai- | xargs cai docker volume rm
+# Default volume:
+cai docker volume rm sandbox-agent-data
+# Reset-generated volumes (check with cai docker volume ls):
+cai docker volume ls --filter name=containai | xargs cai docker volume rm
 
 # 3. Re-run setup
 cai setup --force

@@ -29,8 +29,8 @@ Host                          Container
 ~/projects/myapp/             /home/agent/workspace/
   (workspace mount)              (read-write)
 
-Docker volume: cai-data-xxx   /mnt/agent-data/
-  (persistent data)              (volume mount)
+Docker volume: <volume-name>  /mnt/agent-data/
+  (default: sandbox-agent-data)  (volume mount)
 
                               ~/.gitconfig -> /mnt/agent-data/git/gitconfig
                               ~/.claude.json -> /mnt/agent-data/claude/claude.json

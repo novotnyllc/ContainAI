@@ -72,10 +72,10 @@ Default sync items (from sync-manifest.toml):
 
 **Secrets are synced by default.** Use `--no-secrets` to skip them.
 
-NOT synced by default (excluded from manifest):
+NOT synced when importing from home profile:
 - SSH keys (use agent forwarding instead)
-- Specific credential files: `~/.claude/.credentials.json`, `~/.codex/auth.json`
-  (add via `[import].additional_paths` if needed)
+- `~/.claude/.credentials.json`, `~/.codex/auth.json` (skipped from home profile;
+  use `--from` or `[import].additional_paths` to include)
 
 ### Examples
 
@@ -226,11 +226,11 @@ cai run
 **Secrets are synced by default.** This includes OAuth tokens in `~/.claude.json`,
 `~/.config/gh/hosts.yml`, etc. Use `--no-secrets` to skip these files.
 
-Some credential files are intentionally excluded from the sync manifest:
+Some credential files are skipped when importing from the home profile:
 - `~/.claude/.credentials.json` (Claude desktop app)
 - `~/.codex/auth.json` (Codex CLI)
 
-To import these excluded files:
+To import these files, use `--from` or add to config:
 ```toml
 # containai.toml
 [import]
