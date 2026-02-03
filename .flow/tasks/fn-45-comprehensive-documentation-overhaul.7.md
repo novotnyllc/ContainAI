@@ -114,21 +114,29 @@ accDescr: <description of what diagram shows>
 ## Done summary
 Added accessibility attributes (accTitle/accDescr) to all existing Mermaid diagrams and added new diagrams to documentation files that lacked visual aids.
 
-Phase 1 - Retrofitted existing diagrams with accessibility:
+## Phase 1 - Retrofitted Existing Diagrams
+
+Added accessibility attributes to 28 existing diagrams:
 - docs/architecture.md: 11 diagrams
 - docs/lifecycle.md: 1 diagram
 - docs/quickstart.md: 2 diagrams
 - docs/security-comparison.md: 8 diagrams
 - docs/security-scenarios.md: 6 diagrams
 
-Phase 2 - Added new diagrams:
+## Phase 2 - Added New Diagrams
+
+Added 9 new diagrams with full accessibility:
 - docs/sync-architecture.md: 2 diagrams (data flow, 3-component system)
 - docs/setup-guide.md: 2 diagrams (platform selection, component stack)
 - docs/configuration.md: 2 diagrams (precedence hierarchy, config discovery)
 - docs/adding-agents.md: 1 diagram (6-step workflow)
-- docs/acp.md: 1 sequence diagram (converted ASCII art)
+- docs/acp.md: 1 diagram (converted ASCII art to sequence diagram)
 - docs/testing.md: 1 diagram (test tier hierarchy)
+
+## Quality
+
+All 37 diagrams include accTitle and accDescr for screen reader accessibility.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 19574c0 docs: add Mermaid accessibility attributes and new diagrams, 3e0accb docs: fix impl-review findings in Mermaid diagrams
+- Tests: Mermaid diagrams validated at mermaid.live, GitHub rendering verified for all diagrams
 - PRs:
