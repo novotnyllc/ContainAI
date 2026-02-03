@@ -1098,7 +1098,7 @@ _cai_install_sysbox_wsl2() {
     # Do this BEFORE checking for Sysbox to ensure jq is available for configure step
     _cai_step "Ensuring required tools are installed"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would ensure jq, ripgrep, and wget are installed"
+        _cai_dryrun " Would ensure jq, ripgrep, wget, and inotify-tools are installed"
     else
         local missing_pkgs=()
         if ! command -v jq >/dev/null 2>&1; then
@@ -1109,6 +1109,9 @@ _cai_install_sysbox_wsl2() {
         fi
         if ! command -v wget >/dev/null 2>&1; then
             missing_pkgs+=("wget")
+        fi
+        if ! command -v inotifywait >/dev/null 2>&1; then
+            missing_pkgs+=("inotify-tools")
         fi
         if [[ ${#missing_pkgs[@]} -gt 0 ]]; then
             _cai_info "Installing required tools: ${missing_pkgs[*]}"
@@ -2894,6 +2897,27 @@ _cai_setup_wsl2() {
     # Step 12: Configure Windows named-pipe bridge (WSL2 only)
     if ! _cai_setup_wsl2_windows_npipe_bridge "$dry_run" "$verbose"; then
         _cai_warn "Windows named-pipe bridge setup had issues (continuing)"
+    fi
+
+    # Step 12a: Create ~/.docker-cai/ with platform-specific context (WSL2 only)
+    # This creates a separate Docker config directory that isn't symlinked to Windows
+    if ! _cai_setup_docker_cai_dir "$dry_run"; then
+        _cai_warn "Docker CAI directory setup had issues (continuing)"
+    fi
+
+    # Step 12b: Initial sync of user's other contexts (WSL2 only)
+    # Sync excludes containai-docker (platform-specific in ~/.docker-cai/)
+    if _cai_is_wsl2 && [[ "$dry_run" != "true" ]]; then
+        if ! _cai_sync_docker_contexts_once "$HOME/.docker/contexts" "$HOME/.docker-cai/contexts" "host-to-cai"; then
+            _cai_warn "Initial context sync had issues (continuing)"
+        fi
+    elif _cai_is_wsl2 && [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would sync Docker contexts from ~/.docker/ to ~/.docker-cai/"
+    fi
+
+    # Step 12c: Start persistent context sync service (WSL2 only)
+    if ! _cai_start_context_sync_service "$dry_run"; then
+        _cai_warn "Context sync service setup had issues (continuing)"
     fi
 
     # Step 13: Verify installation

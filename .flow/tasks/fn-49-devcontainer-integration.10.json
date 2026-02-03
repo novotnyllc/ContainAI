@@ -1,0 +1,11 @@
+{
+  "created_at": "2026-02-03T23:01:00.000000Z",
+  "depends_on": [],
+  "epic": "fn-49-devcontainer-integration",
+  "id": "fn-49-devcontainer-integration.10",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-49-devcontainer-integration.10.md",
+  "status": "todo",
+  "title": "Wire docker-context-sync into CLI lifecycle",
+  "updated_at": "2026-02-03T23:01:00.000000Z"
+}

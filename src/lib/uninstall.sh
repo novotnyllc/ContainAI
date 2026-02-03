@@ -633,6 +633,36 @@ _cai_uninstall() {
         overall_status=1
     fi
 
+    # Step 2a: Stop context sync service and remove ~/.docker-cai/ (WSL2 only)
+    if _cai_is_wsl2; then
+        # Stop the context sync service
+        if ! _cai_stop_context_sync_service "$dry_run"; then
+            # Non-fatal - continue with uninstall
+            _cai_debug "Context sync service stop had issues (continuing)"
+        fi
+
+        # Stop any running context watchers
+        if [[ "$dry_run" != "true" ]]; then
+            _cai_stop_docker_context_watcher
+        else
+            _cai_dryrun "Would stop Docker context watchers"
+        fi
+
+        # Remove ~/.docker-cai/
+        if [[ -d "$HOME/.docker-cai" ]]; then
+            _cai_step "Removing ~/.docker-cai/"
+            if [[ "$dry_run" == "true" ]]; then
+                _cai_dryrun "Would remove: $HOME/.docker-cai/"
+            else
+                if rm -rf "$HOME/.docker-cai"; then
+                    _cai_ok "Removed ~/.docker-cai/"
+                else
+                    _cai_warn "Failed to remove ~/.docker-cai/ (continuing)"
+                fi
+            fi
+        fi
+    fi
+
     # Step 3: Remove Docker context
     if ! _cai_uninstall_docker_context "$dry_run"; then
         overall_status=1

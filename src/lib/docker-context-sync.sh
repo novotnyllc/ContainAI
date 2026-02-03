@@ -444,4 +444,240 @@ _cai_stop_docker_context_watcher() {
     return 0
 }
 
+# ==============================================================================
+# Systemd Service Management (WSL2 Only)
+# ==============================================================================
+
+# Systemd user service name for context sync
+readonly _CAI_CONTEXT_SYNC_SERVICE="containai-context-sync"
+readonly _CAI_CONTEXT_SYNC_SERVICE_FILE="${HOME}/.config/systemd/user/containai-context-sync.service"
+
+# Create ~/.docker-cai/ directory with platform-specific containai-docker context
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+# Note: WSL2 gets a Unix socket context; other platforms skip this
+_cai_setup_docker_cai_dir() {
+    local dry_run="${1:-false}"
+
+    # Only needed on WSL2
+    if ! _cai_is_wsl2; then
+        _cai_debug "Not WSL2 - skipping docker-cai setup"
+        return 0
+    fi
+
+    _cai_step "Creating ~/.docker-cai/ with platform-specific context"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would create ${HOME}/.docker-cai/contexts/"
+        _cai_dryrun "Would create containai-docker context with unix:///var/run/containai-docker.sock"
+        return 0
+    fi
+
+    # Create the directory structure
+    if ! mkdir -p "${HOME}/.docker-cai/contexts/meta" "${HOME}/.docker-cai/contexts/tls" 2>/dev/null; then
+        _cai_error "Failed to create ~/.docker-cai/contexts/"
+        return 1
+    fi
+
+    # Create the containai-docker context for WSL2 (Unix socket)
+    local socket_path="unix:///var/run/containai-docker.sock"
+    local context_hash
+    context_hash=$(printf '%s' "$_CAI_CONTAINAI_CONTEXT_NAME" | sha256sum | cut -c1-64)
+
+    local meta_dir="${HOME}/.docker-cai/contexts/meta/${context_hash}"
+    if ! mkdir -p "$meta_dir" 2>/dev/null; then
+        _cai_error "Failed to create context meta directory"
+        return 1
+    fi
+
+    # Create meta.json with context configuration
+    if ! cat > "${meta_dir}/meta.json" <<EOF
+{
+    "Name": "${_CAI_CONTAINAI_CONTEXT_NAME}",
+    "Metadata": {
+        "Description": "ContainAI Docker context (WSL2 Unix socket)"
+    },
+    "Endpoints": {
+        "docker": {
+            "Host": "${socket_path}",
+            "SkipTLSVerify": false
+        }
+    }
+}
+EOF
+    then
+        _cai_error "Failed to write context metadata"
+        return 1
+    fi
+
+    _cai_ok "Created ~/.docker-cai/ with containai-docker context (Unix socket)"
+    return 0
+}
+
+# Start the context sync systemd user service (WSL2 only)
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+# Note: Creates and enables a systemd user service for persistent syncing
+_cai_start_context_sync_service() {
+    local dry_run="${1:-false}"
+
+    # Only on WSL2
+    if ! _cai_is_wsl2; then
+        _cai_debug "Not WSL2 - skipping context sync service"
+        return 0
+    fi
+
+    # Check if systemctl is available (systemd enabled in WSL2)
+    if ! command -v systemctl >/dev/null 2>&1; then
+        _cai_warn "systemctl not found - context sync service cannot be installed"
+        _cai_warn "  Enable systemd in WSL2 by adding to /etc/wsl.conf:"
+        _cai_warn "    [boot]"
+        _cai_warn "    systemd=true"
+        return 1
+    fi
+
+    _cai_step "Installing context sync systemd service"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would create ${_CAI_CONTEXT_SYNC_SERVICE_FILE}"
+        _cai_dryrun "Would run: systemctl --user daemon-reload"
+        _cai_dryrun "Would run: systemctl --user enable --now ${_CAI_CONTEXT_SYNC_SERVICE}"
+        return 0
+    fi
+
+    # Create systemd user service directory
+    local service_dir
+    service_dir=$(dirname "$_CAI_CONTEXT_SYNC_SERVICE_FILE")
+    if ! mkdir -p "$service_dir" 2>/dev/null; then
+        _cai_error "Failed to create systemd user directory: $service_dir"
+        return 1
+    fi
+
+    # Determine the containai.sh path for the service
+    # Use _CAI_SCRIPT_DIR which is set when containai.sh is sourced
+    local containai_script="${_CAI_SCRIPT_DIR}/containai.sh"
+    if [[ ! -f "$containai_script" ]]; then
+        # Fallback to standard installation path
+        containai_script="${HOME}/.local/share/containai/containai.sh"
+    fi
+
+    # Create the service unit file
+    if ! cat > "$_CAI_CONTEXT_SYNC_SERVICE_FILE" <<EOF
+[Unit]
+Description=ContainAI Docker Context Sync
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'source "${containai_script}" && _cai_watch_docker_contexts foreground'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+    then
+        _cai_error "Failed to create systemd service file"
+        return 1
+    fi
+
+    # Reload systemd user daemon
+    if ! systemctl --user daemon-reload; then
+        _cai_error "Failed to reload systemd user daemon"
+        return 1
+    fi
+
+    # Enable and start the service
+    if ! systemctl --user enable --now "$_CAI_CONTEXT_SYNC_SERVICE" 2>/dev/null; then
+        _cai_error "Failed to enable/start context sync service"
+        return 1
+    fi
+
+    _cai_ok "Context sync service installed and started"
+    return 0
+}
+
+# Stop and remove the context sync systemd user service (WSL2 only)
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success or nothing to do
+# Note: Idempotent - safe to call even if service doesn't exist
+_cai_stop_context_sync_service() {
+    local dry_run="${1:-false}"
+
+    # Only on WSL2
+    if ! _cai_is_wsl2; then
+        return 0
+    fi
+
+    # Check if systemctl is available
+    if ! command -v systemctl >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Check if service exists
+    if ! systemctl --user cat "$_CAI_CONTEXT_SYNC_SERVICE" >/dev/null 2>&1; then
+        _cai_debug "Context sync service not found - nothing to stop"
+        return 0
+    fi
+
+    _cai_step "Stopping context sync service"
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would run: systemctl --user stop ${_CAI_CONTEXT_SYNC_SERVICE}"
+        _cai_dryrun "Would run: systemctl --user disable ${_CAI_CONTEXT_SYNC_SERVICE}"
+        _cai_dryrun "Would remove: ${_CAI_CONTEXT_SYNC_SERVICE_FILE}"
+        return 0
+    fi
+
+    # Stop the service
+    systemctl --user stop "$_CAI_CONTEXT_SYNC_SERVICE" 2>/dev/null || true
+
+    # Disable the service
+    systemctl --user disable "$_CAI_CONTEXT_SYNC_SERVICE" 2>/dev/null || true
+
+    # Remove the service file
+    if [[ -f "$_CAI_CONTEXT_SYNC_SERVICE_FILE" ]]; then
+        rm -f "$_CAI_CONTEXT_SYNC_SERVICE_FILE"
+    fi
+
+    # Reload daemon
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    _cai_ok "Context sync service stopped and removed"
+    return 0
+}
+
+# Check if the context sync service is running (WSL2 only)
+# Arguments: none
+# Returns: 0=running, 1=not running, 2=not applicable (not WSL2)
+# Outputs: Status string on stdout ("running", "stopped", "not_installed", "not_wsl2")
+_cai_context_sync_service_status() {
+    # Only on WSL2
+    if ! _cai_is_wsl2; then
+        printf '%s' "not_wsl2"
+        return 2
+    fi
+
+    # Check if systemctl is available
+    if ! command -v systemctl >/dev/null 2>&1; then
+        printf '%s' "no_systemd"
+        return 1
+    fi
+
+    # Check if service exists
+    if ! systemctl --user cat "$_CAI_CONTEXT_SYNC_SERVICE" >/dev/null 2>&1; then
+        printf '%s' "not_installed"
+        return 1
+    fi
+
+    # Check if running
+    if systemctl --user is-active --quiet "$_CAI_CONTEXT_SYNC_SERVICE" 2>/dev/null; then
+        printf '%s' "running"
+        return 0
+    else
+        printf '%s' "stopped"
+        return 1
+    fi
+}
+
 return 0

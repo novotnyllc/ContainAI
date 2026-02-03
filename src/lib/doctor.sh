@@ -668,6 +668,26 @@ _cai_doctor() {
                 ;;
         esac
 
+        # Context sync service status (WSL2 only)
+        local context_sync_status
+        context_sync_status=$(_cai_context_sync_service_status)
+        case "$context_sync_status" in
+            running)
+                printf '  %-44s %s\n' "Context sync service:" "[OK] running"
+                ;;
+            stopped)
+                printf '  %-44s %s\n' "Context sync service:" "[WARN] stopped"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to restart)"
+                ;;
+            not_installed)
+                printf '  %-44s %s\n' "Context sync service:" "[INFO] not installed"
+                printf '  %-44s %s\n' "" "(Run 'cai setup' to install)"
+                ;;
+            no_systemd)
+                printf '  %-44s %s\n' "Context sync service:" "[SKIP] systemd not enabled"
+                ;;
+        esac
+
         printf '\n'
     elif [[ "$platform" == "macos" ]]; then
         printf '%s\n' "Platform: macOS"
