@@ -33,8 +33,6 @@ ContainAI searches for configuration in this order:
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Config Discovery Flowchart
-accDescr: Decision flow showing config file search from cwd upward, stopping at git root or finding .containai/config.toml, with fallback to user XDG config.
 flowchart TD
     Start["Start at cwd"]
     Start --> Check{"Check for<br/>.containai/config.toml"}
@@ -77,8 +75,6 @@ Configuration values are resolved with this precedence (highest to lowest):
   'textColor': '#ffffff',
   'background': '#0d1117'
 }}}%%
-accTitle: Configuration Precedence Hierarchy
-accDescr: Vertical hierarchy showing config resolution order from CLI flags (highest) through environment variables, workspace config, global config, to built-in defaults (lowest).
 flowchart TB
     CLI["1. CLI Flags<br/>--data-volume, --agent"]
     ENV["2. Environment Variables<br/>CONTAINAI_DATA_VOLUME"]
