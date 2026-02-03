@@ -200,7 +200,7 @@ start_dockerd() {
             return 0
         fi
         sleep 1
-        ((i++))
+        i=$((i + 1))
     done
 
     printf '✗ dockerd failed to start (see %s)\n' "$LOGFILE" >&2

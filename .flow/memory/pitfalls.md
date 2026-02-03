@@ -434,3 +434,6 @@ flock is Linux-only; macOS needs fcntl.flock via Python or explicit scope limita
 
 ## 2026-02-03 manual [pitfall]
 Python sys.exit() raises SystemExit caught by bare 'except:' - use 'except Exception:' to avoid catching it
+
+## 2026-02-03 manual [pitfall]
+((var++)) exits with status 1 when var is 0 under set -e; use var=$((var + 1)) instead

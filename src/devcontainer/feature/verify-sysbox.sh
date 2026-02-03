@@ -21,7 +21,7 @@ verify_sysbox() {
     # Format: device mountpoint fstype options dump pass
     if awk '$3 == "sysboxfs" || $3 == "fuse.sysboxfs" { found=1; exit } END { exit !found }' /proc/mounts 2>/dev/null; then
         sysboxfs_found=true
-        ((passed++))
+        passed=$((passed + 1))
         printf '  ✓ Sysboxfs: mounted (REQUIRED)\n'
     else
         printf '  ✗ Sysboxfs: not found (REQUIRED)\n'
@@ -30,7 +30,7 @@ verify_sysbox() {
     # Check 2: UID mapping (sysbox maps 0 → high UID)
     if [[ -f /proc/self/uid_map ]]; then
         if ! grep -qE '^[[:space:]]*0[[:space:]]+0[[:space:]]' /proc/self/uid_map; then
-            ((passed++))
+            passed=$((passed + 1))
             printf '  ✓ UID mapping: sysbox user namespace\n'
         else
             printf '  ✗ UID mapping: 0→0 (not sysbox)\n'
@@ -39,7 +39,7 @@ verify_sysbox() {
 
     # Check 3: Nested user namespace (sysbox allows, docker blocks)
     if unshare --user --map-root-user true 2>/dev/null; then
-        ((passed++))
+        passed=$((passed + 1))
         printf '  ✓ Nested userns: allowed\n'
     else
         printf '  ✗ Nested userns: blocked\n'
@@ -50,7 +50,7 @@ verify_sysbox() {
     testdir=$(mktemp -d)
     if mount -t tmpfs none "$testdir" 2>/dev/null; then
         umount "$testdir" 2>/dev/null
-        ((passed++))
+        passed=$((passed + 1))
         printf '  ✓ Capabilities: CAP_SYS_ADMIN works\n'
     else
         printf '  ✗ Capabilities: mount denied\n'
