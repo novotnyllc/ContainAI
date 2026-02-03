@@ -1,13 +1,18 @@
 {
   "branch_name": "fn-49-devcontainer-integration",
+  "completion_review_status": "unknown",
+  "completion_reviewed_at": null,
   "created_at": "2026-02-02T23:23:21.023759Z",
+  "default_impl": null,
+  "default_review": null,
+  "default_sync": null,
   "depends_on_epics": [],
   "id": "fn-49-devcontainer-integration",
-  "next_task": 1,
-  "plan_review_status": "unknown",
-  "plan_reviewed_at": null,
+  "next_task": 11,
+  "plan_review_status": "ship",
+  "plan_reviewed_at": "2026-02-03T14:50:08.096992Z",
   "spec_path": ".flow/specs/fn-49-devcontainer-integration.md",
   "status": "open",
   "title": "DevContainer Integration",
-  "updated_at": "2026-02-02T23:23:21.023778Z"
+  "updated_at": "2026-02-03T14:50:08.097005Z"
 }

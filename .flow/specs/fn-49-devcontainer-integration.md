@@ -6,7 +6,14 @@ Enable VS Code devcontainers to run securely in sysbox with minimal friction. Us
 
 **Key insight**: The devcontainer runs **directly** in sysbox - no outer container, no nesting overhead. Our feature overlays onto whatever base image the user wants.
 
-**Security invariant**: Hard-block if not running in sysbox. Kernel-enforced checks cannot be faked.
+**Security invariant**: Hard-block if not running in sysbox. The wrapper enforces `--runtime=sysbox-runc` at launch time, and the container performs kernel-level verification on startup.
+
+**Credential opt-in**: Credentials (GitHub tokens, Claude API keys) are NOT exposed by default. When `enableCredentials=false`:
+1. The wrapper mounts a credential-sanitized volume (requires `cai import --no-secrets` or validation)
+2. The init.sh skips symlinks to credential files
+This defense-in-depth ensures untrusted code cannot access credentials even by reading the volume directly.
+
+**Scope**: V1 supports Docker CLI only (not docker-compose). Compose support is explicitly out of scope.
 
 ---
 
@@ -18,15 +25,15 @@ Enable VS Code devcontainers to run securely in sysbox with minimal friction. Us
 │                                                                         │
 │   Prerequisites (via cai setup):                                        │
 │   ├─ sysbox runtime installed                                           │
-│   ├─ containai-docker context (uses sysbox as default runtime)          │
+│   ├─ containai-docker context (platform-specific, reuse existing)       │
 │   ├─ cai-docker wrapper at ~/.local/bin/cai-docker                      │
 │   ├─ VS Code ContainAI extension                                        │
-│   └─ Data volume created by 'cai import' (containai-data-<name>)        │
+│   └─ Data volume (default: sandbox-agent-data, configurable)            │
 │                                                                         │
-│   ~/.ssh/config (managed by cai-docker):                                │
+│   ~/.ssh/containai.d/devcontainer-<workspace> (managed via Include):    │
 │   ├─ Host containai-devcontainer-<workspace>                            │
 │   │     HostName localhost                                              │
-│   │     Port 2322                                                       │
+│   │     Port <allocated>     # Dynamically allocated, not fixed         │
 │   │     User vscode                                                     │
 │   └─ (enables: ssh containai-devcontainer-myproject)                    │
 │                                                                         │
@@ -48,7 +55,7 @@ Enable VS Code devcontainers to run securely in sysbox with minimal friction. Us
 │   │   Base image: ANY + ContainAI feature                           │   │
 │   │                                                                 │   │
 │   │   Mounts:                                                       │   │
-│   │   ├─ /mnt/agent-data ← containai-data-<name> volume             │   │
+│   │   ├─ /mnt/agent-data ← sandbox-agent-data volume (default)      │   │
 │   │   └─ /workspaces/<project> ← host workspace (standard)          │   │
 │   │                                                                 │   │
 │   │   postCreateCommand (init.sh):                                  │   │
@@ -56,26 +63,28 @@ Enable VS Code devcontainers to run securely in sysbox with minimal friction. Us
 │   │   └─ Create symlinks: ~/.claude → /mnt/agent-data/claude, etc.  │   │
 │   │                                                                 │   │
 │   │   postStartCommand (start.sh):                                  │   │
-│   │   ├─ Start sshd on port 2322 (not systemd)                      │   │
+│   │   ├─ Start sshd on $CONTAINAI_SSH_PORT (dynamic, not systemd)   │   │
 │   │   └─ Re-verify sysbox                                           │   │
 │   │                                                                 │   │
 │   │   Services:                                                     │   │
-│   │   ├─ sshd (port 2322) - for non-VS Code access                  │   │
-│   │   └─ dockerd (DinD) - works without --privileged                │   │
+│   │   ├─ sshd (dynamic port) - for non-VS Code access               │   │
+│   │   └─ dockerd (DinD via postStart) - works without --privileged  │   │
 │   │                                                                 │   │
-│   │   Labels:                                                       │   │
+│   │   Labels (for cai ps/stop/gc integration):                      │   │
+│   │   ├─ containai.managed=true          # Required for CLI cmds    │   │
 │   │   ├─ containai.type=devcontainer                                │   │
-│   │   ├─ containai.workspace=<project-name>                         │   │
-│   │   └─ containai.created=<timestamp>                              │   │
+│   │   ├─ containai.devcontainer.workspace=<project-name>            │   │
+│   │   └─ containai.created=<ISO8601-UTC>  # Portable timestamp      │   │
 │   └─────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key points**:
 - Devcontainer runs **directly** in sysbox (no outer container overhead)
-- Data volume provides all synced configs (run `cai import` first)
-- SSH works via devcontainer port forwarding (not systemd)
-- Labels enable `cai ps`, `cai stop`, GC integration
+- Data volume provides non-credential configs by default (credentials opt-in)
+- SSH works via devcontainer port forwarding (not systemd), with dynamically allocated ports
+- Labels enable `cai ps`, `cai stop`, GC integration (requires `containai.managed=true`)
+- Reuses existing platform-specific context logic (WSL2 SSH bridge, macOS/Lima, etc.)
 
 ---
 
@@ -88,9 +97,14 @@ The feature replicates the full `cai` experience on any base image:
 - Hard-fail if not running in sysbox
 
 ### 2. Data Volume Integration
-- Mounts existing cai data volume (`containai-data-<name>`)
-- Creates symlinks from standard paths to volume (like `containai-init.sh`)
-- Synced configs: Claude, Git, GitHub CLI, shell, editors, agents, etc.
+- Mounts existing cai data volume (default: `sandbox-agent-data`, configurable via `dataVolume` option)
+- Creates symlinks using existing `link-spec.json` and `link-repair.sh` (no duplicate manifest)
+- **Credentials disabled by default** (defense-in-depth):
+  1. **Wrapper level**: When `enableCredentials=false`, wrapper validates that the volume was created with `--no-secrets` flag (checks `.containai-no-secrets` marker file). If the marker is missing, refuses to mount and prompts user to run `cai import --no-secrets`.
+  2. **Init level**: Skips symlinks to credential files as secondary protection.
+- When `enableCredentials: true`: Full sync including tokens (requires explicit opt-in, no volume validation)
+
+**Prerequisite**: `cai import --no-secrets` must create the `.containai-no-secrets` marker file in the volume root. This is a separate change to `src/lib/import.sh` that must be implemented before this epic.
 
 ### 3. Docker-in-Docker
 - Works without `--privileged` (sysbox provides this)
@@ -98,8 +112,9 @@ The feature replicates the full `cai` experience on any base image:
 
 ### 4. SSH Access
 - sshd runs as devcontainer service (not systemd)
+- Port dynamically allocated per workspace (uses ContainAI port allocation with file locking)
 - Port forwarded via devcontainer's `forwardPorts`
-- Host SSH config entry added by cai-docker wrapper
+- Host SSH config managed via `~/.ssh/containai.d/<workspace>` with `Include` directive (reuses existing `_cai_setup_ssh_config` pattern)
 
 ### 5. Container Lifecycle
 - Labels for cai GC integration
@@ -110,13 +125,15 @@ The feature replicates the full `cai` experience on any base image:
     "image": "mcr.microsoft.com/devcontainers/python:3.11",
     "features": {
         "ghcr.io/novotnyllc/containai/feature:latest": {
-            "dataVolume": "containai-data-myproject",
-            "enableSsh": true,
-            "sshPort": 2322
+            "dataVolume": "sandbox-agent-data",
+            "enableCredentials": false,
+            "enableSsh": true
         }
     }
 }
 ```
+
+**Security note**: Setting `enableCredentials: true` exposes GitHub tokens, Claude API keys, and other credentials to any code in the workspace. Only enable for trusted repositories.
 
 ---
 
@@ -127,208 +144,338 @@ The feature replicates the full `cai` experience on any base image:
 **Location**: `~/.local/bin/cai-docker`
 
 **Purpose**:
-- Detect ContainAI devcontainers
-- Route to sysbox context
+- Detect ContainAI devcontainers via VS Code labels (not `--workspace-folder`)
+- Enforce sysbox runtime at launch time (`--runtime=sysbox-runc`)
 - Mount data volume automatically
 - Add labels for GC integration
-- Update host SSH config
+- Update host SSH config via `~/.ssh/containai.d/`
+
+**Detection mechanism**: VS Code Dev Containers extension passes labels like:
+- `--label devcontainer.local_folder=/path/to/workspace`
+- `--label devcontainer.config_file=/path/to/.devcontainer/devcontainer.json`
+
+The wrapper parses these labels to locate and read the devcontainer.json.
+
+**JSONC parsing**: Uses a proper state-machine JSONC stripper (string/escape aware) via python3 or a bundled parser, NOT sed-based comment stripping (which fails on comment-like sequences in strings).
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-CAI_SSH_CONFIG_MARKER="# ContainAI devcontainer managed"
+# ══════════════════════════════════════════════════════════════════════
+# cai-docker: Smart docker wrapper for ContainAI devcontainers
+# ══════════════════════════════════════════════════════════════════════
 
-find_devcontainer_json() {
-    local workspace_dir=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --workspace-folder=*) workspace_dir="${1#*=}" ;;
-            --workspace-folder) workspace_dir="$2"; shift ;;
-            *) ;;
-        esac
-        shift
+# Detect devcontainer via VS Code labels (docker create/run args)
+# VS Code passes: --label devcontainer.config_file=... and devcontainer.local_folder=...
+extract_devcontainer_labels() {
+    local config_file="" local_folder=""
+    local prev=""
+    for arg in "$@"; do
+        if [[ "$prev" == "--label" ]]; then
+            case "$arg" in
+                devcontainer.config_file=*) config_file="${arg#*=}" ;;
+                devcontainer.local_folder=*) local_folder="${arg#*=}" ;;
+            esac
+        fi
+        prev="$arg"
     done
-    [[ -z "$workspace_dir" ]] && return 1
+    printf '%s\n%s\n' "$config_file" "$local_folder"
+}
 
-    for path in \
-        "$workspace_dir/.devcontainer/devcontainer.json" \
-        "$workspace_dir/.devcontainer.json" \
-        "$workspace_dir/.devcontainer/"*/devcontainer.json
-    do
-        [[ -f "$path" ]] && echo "$path" && return 0
+# Parse JSONC safely using python3 (handles strings, multiline comments correctly)
+strip_jsonc_comments() {
+    python3 -c "
+import sys, re, json
+content = sys.stdin.read()
+# Remove // comments (not inside strings)
+result = []
+in_string = False
+escape = False
+i = 0
+while i < len(content):
+    c = content[i]
+    if escape:
+        result.append(c)
+        escape = False
+    elif c == '\\\\' and in_string:
+        result.append(c)
+        escape = True
+    elif c == '\"' and not escape:
+        in_string = not in_string
+        result.append(c)
+    elif not in_string and c == '/' and i+1 < len(content):
+        if content[i+1] == '/':
+            # Skip to end of line
+            while i < len(content) and content[i] != '\n':
+                i += 1
+            continue
+        elif content[i+1] == '*':
+            # Skip to */
+            i += 2
+            while i+1 < len(content) and not (content[i] == '*' and content[i+1] == '/'):
+                i += 1
+            i += 2
+            continue
+        else:
+            result.append(c)
+    else:
+        result.append(c)
+    i += 1
+print(''.join(result))
+"
+}
+
+# Check for containai feature in devcontainer.json
+has_containai_feature() {
+    local config_file="$1"
+    [[ -f "$config_file" ]] || return 1
+    strip_jsonc_comments < "$config_file" | grep -qE '"containai"'
+}
+
+# Get data volume from devcontainer.json or default
+get_data_volume() {
+    local config_file="$1"
+    local vol
+    if [[ -f "$config_file" ]]; then
+        vol=$(strip_jsonc_comments < "$config_file" | \
+              python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('features',{}).get('ghcr.io/novotnyllc/containai/feature:latest',{}).get('dataVolume',''))" 2>/dev/null || echo "")
+        [[ -n "$vol" ]] && echo "$vol" && return
+    fi
+    # Default: sandbox-agent-data (matches existing cai volume naming)
+    echo "sandbox-agent-data"
+}
+
+# Allocate SSH port using ContainAI port allocation (reuse existing logic)
+# This coordinates with _cai_allocate_ssh_port from src/lib/ssh.sh
+# Uses SAME lock file to prevent races with concurrent cai commands
+allocate_ssh_port() {
+    local workspace_name="$1"
+
+    # Use SAME paths as cai for coordination
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/containai"
+    local port_dir="$config_dir/ports"
+    local port_file="$port_dir/devcontainer-${workspace_name}"
+    local lock_file="$config_dir/.ssh-port.lock"  # SAME as cai uses
+    mkdir -p "$port_dir"
+
+    # Check if we already have a port for this workspace (no lock needed for read)
+    if [[ -f "$port_file" ]]; then
+        cat "$port_file"
+        return
+    fi
+
+    # Port allocation - lock is already held by caller (main)
+    # This function just does the allocation logic
+
+    # Check if already allocated for this workspace
+    if [[ -f "$port_file" ]]; then
+        cat "$port_file"
+        return
+    fi
+
+    # Get reserved ports from docker labels
+    local reserved_ports
+    reserved_ports=$(docker --context containai-docker ps -a \
+        --filter "label=containai.ssh-port" \
+        --format '{{.Label "containai.ssh-port"}}' 2>/dev/null | sort -u || true)
+
+    # Also check port files from cai (shared directory)
+    for f in "$port_dir"/*; do
+        [[ -f "$f" ]] && reserved_ports="$reserved_ports"$'\n'"$(cat "$f")"
+    done
+
+    # Cross-platform port-in-use check
+    is_port_in_use() {
+        local port="$1"
+        if command -v ss &>/dev/null; then
+            ss -tln 2>/dev/null | grep -q ":$port " && return 0
+        elif command -v lsof &>/dev/null; then
+            lsof -iTCP:"$port" -sTCP:LISTEN &>/dev/null && return 0
+        fi
+        return 1
+    }
+
+    # Find next available port in range 2400-2499 (devcontainer range)
+    local port
+    for port in $(seq 2400 2499); do
+        if ! echo "$reserved_ports" | grep -qw "$port" && ! is_port_in_use "$port"; then
+            printf '%s' "$port" > "$port_file"
+            printf '%s' "$port"
+            return
+        fi
+    done
+
+    # Fallback (should not happen with 100 ports available)
+    printf '2322'
+}
+
+# Update SSH config via ~/.ssh/containai.d/ (reuses existing pattern)
+update_ssh_config() {
+    local workspace_name="$1"
+    local ssh_port="$2"
+    local host_alias="containai-devcontainer-${workspace_name}"
+    local ssh_dir="$HOME/.ssh/containai.d"
+    local config_file="$ssh_dir/devcontainer-${workspace_name}"
+
+    mkdir -p "$ssh_dir"
+    chmod 700 "$ssh_dir"
+
+    # Ensure Include directive exists in main config
+    local main_config="$HOME/.ssh/config"
+    if ! grep -q 'Include containai.d/\*' "$main_config" 2>/dev/null; then
+        printf 'Include containai.d/*\n\n%s' "$(cat "$main_config" 2>/dev/null || true)" > "$main_config"
+        chmod 600 "$main_config"
+    fi
+
+    # Write workspace-specific config
+    cat > "$config_file" << EOF
+# ContainAI devcontainer: $workspace_name
+Host $host_alias
+    HostName localhost
+    Port $ssh_port
+    User vscode
+EOF
+    chmod 600 "$config_file"
+    printf 'SSH: ssh %s\n' "$host_alias" >&2
+}
+
+# Check if this is a docker create/run command
+is_container_create_command() {
+    for arg in "$@"; do
+        case "$arg" in
+            create|run) return 0 ;;
+            container) continue ;;  # docker container create/run
+            -*)  continue ;;
+            *) return 1 ;;
+        esac
     done
     return 1
 }
 
-get_workspace_name() {
-    local workspace_dir=""
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --workspace-folder=*) workspace_dir="${1#*=}" ;;
-            --workspace-folder) workspace_dir="$2"; shift ;;
-            *) ;;
-        esac
-        shift
-    done
-    basename "$workspace_dir"
-}
-
-is_containai_devcontainer() {
-    local config
-    config=$(find_devcontainer_json "$@") || return 1
-    sed 's|//.*$||; s|/\*.*\*/||g' "$config" | grep -qE 'containai'
-}
-
-get_data_volume_name() {
-    local workspace_name="$1"
-    local config
-    config=$(find_devcontainer_json "$@") || echo ""
-
-    # Check if dataVolume is specified in feature options
-    if [[ -n "$config" ]]; then
-        local vol
-        vol=$(sed 's|//.*$||; s|/\*.*\*/||g' "$config" | \
-              grep -oE '"dataVolume"\s*:\s*"[^"]+"' | \
-              sed 's/.*"\([^"]*\)"$/\1/' | head -1)
-        [[ -n "$vol" ]] && echo "$vol" && return
+main() {
+    # Only intercept docker create/run commands
+    if ! is_container_create_command "$@"; then
+        exec docker "$@"
     fi
 
-    # Default: containai-data-<workspace>
-    echo "containai-data-${workspace_name}"
-}
+    # Extract VS Code devcontainer labels
+    local labels
+    labels=$(extract_devcontainer_labels "$@")
+    local config_file local_folder
+    config_file=$(echo "$labels" | head -1)
+    local_folder=$(echo "$labels" | tail -1)
 
-check_containai_ready() {
+    # Check if this is a ContainAI devcontainer
+    if [[ -z "$config_file" ]] || ! has_containai_feature "$config_file"; then
+        exec docker "$@"
+    fi
+
+    # Verify containai-docker context exists
     if ! docker context inspect containai-docker &>/dev/null; then
         cat >&2 <<'EOF'
 ╔═══════════════════════════════════════════════════════════════════╗
 ║  ContainAI: Not set up. Run: cai setup                            ║
 ╚═══════════════════════════════════════════════════════════════════╝
 EOF
-        return 1
-    fi
-    return 0
-}
-
-# Add SSH config entry for this devcontainer
-update_ssh_config() {
-    local workspace_name="$1"
-    local ssh_port="${2:-2322}"
-    local host_alias="containai-devcontainer-${workspace_name}"
-    local ssh_config="$HOME/.ssh/config"
-
-    mkdir -p "$HOME/.ssh"
-    touch "$ssh_config"
-    chmod 600 "$ssh_config"
-
-    # Remove existing entry for this workspace
-    if grep -q "Host $host_alias" "$ssh_config" 2>/dev/null; then
-        # Remove the block (Host line through next Host or EOF)
-        sed -i.bak "/Host $host_alias/,/^Host /{ /^Host $host_alias/d; /^Host /!d; }" "$ssh_config"
+        exit 1
     fi
 
-    # Add new entry
-    cat >> "$ssh_config" << EOF
+    local workspace_name
+    workspace_name=$(basename "$local_folder")
 
-$CAI_SSH_CONFIG_MARKER
-Host $host_alias
-    HostName localhost
-    Port $ssh_port
-    User vscode
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
-EOF
-    echo "SSH: ssh $host_alias" >&2
-}
+    local data_volume
+    data_volume=$(get_data_volume "$config_file")
 
-# Check if image is a ContainAI image
-is_containai_image() {
-    local image="$1"
-    [[ "$image" == *"containai"* ]] || [[ "$image" == "ghcr.io/novotnyllc/containai"* ]]
-}
+    # IMPORTANT: Acquire port lock and HOLD IT across allocation + docker exec
+    # This prevents races with concurrent cai commands
+    # The lock is released when docker exec replaces this process (or on error exit)
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/containai"
+    local lock_file="$config_dir/.ssh-port.lock"
+    mkdir -p "$config_dir"
 
-# Get user from devcontainer.json (remoteUser or containerUser)
-get_devcontainer_user() {
-    local config="$1"
-    sed 's|//.*$||; s|/\*.*\*/||g' "$config" | \
-        grep -oE '"(remoteUser|containerUser)"\s*:\s*"[^"]+"' | \
-        head -1 | sed 's/.*"\([^"]*\)"$/\1/'
-}
+    # Acquire lock (held until exec or exit)
+    # Linux: flock coordinates with cai
+    # macOS: flock not available - V1 LIMITATION (see below)
+    if command -v flock &>/dev/null; then
+        exec 200>"$lock_file"
+        flock -w 10 200 || {
+            printf 'Warning: Could not acquire port lock\n' >&2
+        }
+    fi
+    # V1 LIMITATION (macOS): Without flock, concurrent cai + cai-docker
+    # operations may race on port allocation. Mitigation: port files provide
+    # best-effort coordination. Full fix requires V2 enhancement to cai.
 
-# Inject volume mount, labels, and user into docker run/create commands
-inject_containai_args() {
-    local workspace_name="$1"
-    local data_volume="$2"
-    local config="$3"
-    local image="$4"
-    shift 4
+    local ssh_port
+    ssh_port=$(allocate_ssh_port "$workspace_name")
 
-    local args=()
-    local found_run_or_create=false
+    # Check enableCredentials from devcontainer.json
+    local enable_credentials
+    enable_credentials=$(strip_jsonc_comments < "$config_file" | \
+        python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('features',{}).get('ghcr.io/novotnyllc/containai/feature:latest',{}).get('enableCredentials','false'))" 2>/dev/null || echo "false")
+
+    # Validate volume for credentials (defense-in-depth)
+    local mount_volume=true
+    if [[ "$enable_credentials" != "true" ]]; then
+        # Check for no-secrets marker in volume
+        if ! docker --context containai-docker run --rm -v "${data_volume}:/vol:ro" alpine test -f /vol/.containai-no-secrets 2>/dev/null; then
+            printf 'Warning: Volume %s may contain credentials.\n' "$data_volume" >&2
+            printf 'Either set enableCredentials: true, or recreate with: cai import --no-secrets\n' >&2
+            mount_volume=false
+        fi
+    fi
+
+    # Build modified args with injected options
+    local -a args=()
+    local found_create=false
 
     for arg in "$@"; do
         args+=("$arg")
 
+        # Inject after run/create command
         if [[ "$arg" == "run" || "$arg" == "create" ]]; then
-            found_run_or_create=true
+            found_create=true
 
-            # Inject data volume mount (if volume exists)
-            if docker --context containai-docker volume inspect "$data_volume" &>/dev/null; then
+            # Enforce sysbox runtime at launch time
+            args+=("--runtime=sysbox-runc")
+
+            # Mount data volume if validated
+            if [[ "$mount_volume" == "true" ]] && docker --context containai-docker volume inspect "$data_volume" &>/dev/null; then
                 args+=("-v" "${data_volume}:/mnt/agent-data:rw")
             fi
 
-            # Inject labels for cai integration
-            args+=("--label" "containai.type=devcontainer")
-            args+=("--label" "containai.workspace=${workspace_name}")
-            args+=("--label" "containai.created=$(date -Iseconds)")
+            # Pass SSH port to container via env var
+            args+=("-e" "CONTAINAI_SSH_PORT=${ssh_port}")
 
-            # Inject -u agent for ContainAI images (unless user specified in devcontainer.json)
-            if is_containai_image "$image"; then
-                local specified_user
-                specified_user=$(get_devcontainer_user "$config")
-                if [[ -z "$specified_user" ]]; then
-                    args+=("-u" "agent")
-                fi
-            fi
+            # Labels for cai ps/stop/gc integration (complete set)
+            args+=("--label" "containai.managed=true")
+            args+=("--label" "containai.type=devcontainer")
+            args+=("--label" "containai.devcontainer.workspace=${workspace_name}")
+            args+=("--label" "containai.data-volume=${data_volume}")
+            args+=("--label" "containai.ssh-port=${ssh_port}")
+            args+=("--label" "containai.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)")
         fi
     done
 
-    printf '%s\0' "${args[@]}"
-}
+    # Update SSH config
+    update_ssh_config "$workspace_name" "$ssh_port"
 
-main() {
-    if is_containai_devcontainer "$@"; then
-        check_containai_ready || exit 1
-
-        local workspace_name
-        workspace_name=$(get_workspace_name "$@")
-
-        local data_volume
-        data_volume=$(get_data_volume_name "$workspace_name" "$@")
-
-        local config
-        config=$(find_devcontainer_json "$@")
-
-        local image
-        image=$(get_image_from_args "$@")
-
-        # Update SSH config
-        update_ssh_config "$workspace_name" 2322
-
-        # Inject mounts, labels, and user, then exec
-        local -a modified_args
-        while IFS= read -r -d '' arg; do
-            modified_args+=("$arg")
-        done < <(inject_containai_args "$workspace_name" "$data_volume" "$config" "$image" "$@")
-
-        exec docker --context containai-docker "${modified_args[@]}"
-    else
-        exec docker "$@"
-    fi
+    # Execute with containai-docker context
+    exec docker --context containai-docker "${args[@]}"
 }
 
 main "$@"
 ```
+
+**Portability notes**:
+- Uses `date -u +%Y-%m-%dT%H:%M:%SZ` (POSIX portable) instead of `date -Iseconds` (GNU only)
+- SSH config via `~/.ssh/containai.d/` with Include (avoids brittle sed block edits)
+- JSONC parsing via python3 state machine (not sed which breaks on strings)
+
+**V1 Limitations**:
+- Docker CLI only (not docker-compose)
+- No compose-aware injection
 
 ---
 
@@ -345,6 +492,7 @@ main "$@"
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { parse as parseJSONC } from 'jsonc-parser';  // Proper JSONC parser (npm package)
 
 export function activate(context: vscode.ExtensionContext) {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -353,7 +501,7 @@ export function activate(context: vscode.ExtensionContext) {
     const devcontainerPath = findDevcontainerJson(workspaceFolder.uri.fsPath);
     if (!devcontainerPath) return;
 
-    if (hasContainAIMarkers(devcontainerPath)) {
+    if (hasContainAIFeature(devcontainerPath)) {
         const caiDockerPath = findCaiDocker();
         if (caiDockerPath) {
             vscode.workspace.getConfiguration('dev.containers').update(
@@ -373,11 +521,13 @@ export function activate(context: vscode.ExtensionContext) {
     }
 }
 
-function hasContainAIMarkers(devcontainerPath: string): boolean {
-    const content = fs.readFileSync(devcontainerPath, 'utf8')
-        .replace(/\/\/.*$/gm, '')
-        .replace(/\/\*[\s\S]*?\*\//g, '');
-    return content.includes('containai');
+// Use proper JSONC parser - DO NOT use regex-based comment stripping
+// which fails on comment-like sequences in strings
+function hasContainAIFeature(devcontainerPath: string): boolean {
+    const content = fs.readFileSync(devcontainerPath, 'utf8');
+    const parsed = parseJSONC(content);
+    const features = parsed?.features || {};
+    return Object.keys(features).some(key => key.includes('containai'));
 }
 
 function findCaiDocker(): string | null {
@@ -401,28 +551,28 @@ function findCaiDocker(): string | null {
     "id": "containai",
     "version": "1.0.0",
     "name": "ContainAI Sysbox Sandbox",
-    "description": "Full ContainAI experience: sysbox, data sync, SSH, DinD",
+    "description": "ContainAI experience: sysbox verification, data sync (no creds by default), SSH, DinD",
     "documentationURL": "https://github.com/novotnyllc/containai",
     "options": {
         "dataVolume": {
             "type": "string",
-            "default": "",
-            "description": "Name of cai data volume to mount (e.g., containai-data-myproject)"
+            "default": "sandbox-agent-data",
+            "description": "Name of cai data volume to mount"
+        },
+        "enableCredentials": {
+            "type": "boolean",
+            "default": false,
+            "description": "SECURITY: Sync credential files (GH tokens, Claude API keys). Only enable for trusted repos."
         },
         "enableSsh": {
             "type": "boolean",
             "default": true,
             "description": "Run sshd for non-VS Code access"
         },
-        "sshPort": {
-            "type": "string",
-            "default": "2322",
-            "description": "SSH port to expose (will be forwarded)"
-        },
         "installDocker": {
             "type": "boolean",
             "default": true,
-            "description": "Install Docker for DinD"
+            "description": "Install Docker for DinD (starts in postStartCommand)"
         },
         "remoteUser": {
             "type": "string",
@@ -437,82 +587,111 @@ function findCaiDocker(): string | null {
 ```
 
 **install.sh** (runs at build time):
+
+**Platform support**: Debian/Ubuntu only in V1. Clear error on other distros.
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-DATA_VOLUME="${DATAVOLUME:-}"
+DATA_VOLUME="${DATAVOLUME:-sandbox-agent-data}"
+ENABLE_CREDENTIALS="${ENABLECREDENTIALS:-false}"
 ENABLE_SSH="${ENABLESSH:-true}"
-SSH_PORT="${SSHPORT:-2322}"
 INSTALL_DOCKER="${INSTALLDOCKER:-true}"
 REMOTE_USER="${REMOTEUSER:-auto}"
+
+# ══════════════════════════════════════════════════════════════════════
+# PLATFORM CHECK (Debian/Ubuntu only in V1)
+# ══════════════════════════════════════════════════════════════════════
+if ! command -v apt-get &>/dev/null; then
+    cat >&2 <<'ERROR'
+╔═══════════════════════════════════════════════════════════════════╗
+║  ContainAI feature requires Debian/Ubuntu base image              ║
+║  Alpine, Fedora, and other distros not yet supported              ║
+╚═══════════════════════════════════════════════════════════════════╝
+ERROR
+    exit 1
+fi
 
 mkdir -p /usr/local/share/containai
 
 # Store config for runtime scripts
 cat > /usr/local/share/containai/config << EOF
 DATA_VOLUME="$DATA_VOLUME"
+ENABLE_CREDENTIALS="$ENABLE_CREDENTIALS"
 ENABLE_SSH="$ENABLE_SSH"
-SSH_PORT="$SSH_PORT"
 REMOTE_USER="$REMOTE_USER"
 EOF
 
 # ══════════════════════════════════════════════════════════════════════
-# SYSBOX VERIFICATION (kernel-enforced, cannot be faked)
+# SYSBOX VERIFICATION
+# Threat model: Defense-in-depth. The wrapper enforces --runtime=sysbox-runc
+# at launch, and this script verifies kernel-level sysbox indicators.
+# The sysboxfs check is MANDATORY (sysbox-unique, cannot be faked).
 # ══════════════════════════════════════════════════════════════════════
 
 cat > /usr/local/share/containai/verify-sysbox.sh << 'VERIFY_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-CHECKS_REQUIRED=3
-
 verify_sysbox() {
     local passed=0
+    local sysboxfs_found=false
 
-    echo "ContainAI Sysbox Verification"
-    echo "═══════════════════════════════"
+    printf 'ContainAI Sysbox Verification\n'
+    printf '═══════════════════════════════\n'
 
-    # Check 1: UID mapping (sysbox maps 0 → high UID)
+    # MANDATORY CHECK: Sysbox-fs mounts (sysbox-unique, cannot be faked)
+    # This check MUST pass - it's the definitive sysbox indicator
+    if grep -qE 'sysboxfs|fuse\.sysbox' /proc/mounts 2>/dev/null; then
+        sysboxfs_found=true
+        ((passed++))
+        printf '  ✓ Sysboxfs: mounted (REQUIRED)\n'
+    else
+        printf '  ✗ Sysboxfs: not found (REQUIRED)\n'
+    fi
+
+    # Check 2: UID mapping (sysbox maps 0 → high UID)
     if [[ -f /proc/self/uid_map ]]; then
         if ! grep -qE '^[[:space:]]*0[[:space:]]+0[[:space:]]' /proc/self/uid_map; then
             ((passed++))
-            echo "  ✓ UID mapping: sysbox user namespace"
+            printf '  ✓ UID mapping: sysbox user namespace\n'
         else
-            echo "  ✗ UID mapping: 0→0 (not sysbox)"
+            printf '  ✗ UID mapping: 0→0 (not sysbox)\n'
         fi
     fi
 
-    # Check 2: Nested user namespace (sysbox allows, docker blocks)
+    # Check 3: Nested user namespace (sysbox allows, docker blocks)
     if unshare --user --map-root-user true 2>/dev/null; then
         ((passed++))
-        echo "  ✓ Nested userns: allowed"
+        printf '  ✓ Nested userns: allowed\n'
     else
-        echo "  ✗ Nested userns: blocked"
-    fi
-
-    # Check 3: Sysbox-fs mounts
-    if grep -qE "sysboxfs|fuse\.sysbox" /proc/mounts 2>/dev/null; then
-        ((passed++))
-        echo "  ✓ Sysboxfs: mounted"
-    else
-        echo "  ✗ Sysboxfs: not found"
+        printf '  ✗ Nested userns: blocked\n'
     fi
 
     # Check 4: CAP_SYS_ADMIN works (sysbox userns)
-    local testdir=$(mktemp -d)
+    local testdir
+    testdir=$(mktemp -d)
     if mount -t tmpfs none "$testdir" 2>/dev/null; then
         umount "$testdir" 2>/dev/null
         ((passed++))
-        echo "  ✓ Capabilities: CAP_SYS_ADMIN works"
+        printf '  ✓ Capabilities: CAP_SYS_ADMIN works\n'
     else
-        echo "  ✗ Capabilities: mount denied"
+        printf '  ✗ Capabilities: mount denied\n'
     fi
     rmdir "$testdir" 2>/dev/null || true
 
-    echo ""
-    echo "Passed: $passed / $CHECKS_REQUIRED required"
-    [[ $passed -ge $CHECKS_REQUIRED ]]
+    printf '\nPassed: %d checks\n' "$passed"
+
+    # HARD REQUIREMENT: sysboxfs MUST be present
+    # This is the sysbox-unique predicate that cannot be faked
+    if [[ "$sysboxfs_found" != "true" ]]; then
+        printf 'FAIL: sysboxfs not detected (mandatory for sysbox)\n' >&2
+        return 1
+    fi
+
+    # Also require at least 2 other checks for defense-in-depth
+    [[ $passed -ge 3 ]]
 }
 
 if ! verify_sysbox; then
@@ -521,33 +700,40 @@ if ! verify_sysbox; then
 ╔═══════════════════════════════════════════════════════════════════╗
 ║  🛑 ContainAI: NOT running in sysbox                              ║
 ║                                                                   ║
+║  The wrapper should enforce --runtime=sysbox-runc at launch.      ║
+║  If you see this, the devcontainer was started incorrectly.       ║
+║                                                                   ║
 ║  To fix:                                                          ║
 ║    1. Install ContainAI: curl -fsSL https://containai.dev | sh    ║
-║    2. Run: cai setup && cai import                                ║
-║    3. Reopen this devcontainer                                    ║
+║    2. Run: cai setup                                              ║
+║    3. Ensure VS Code uses cai-docker wrapper                      ║
+║    4. Reopen this devcontainer                                    ║
 ╚═══════════════════════════════════════════════════════════════════╝
 ERROR
     exit 1
 fi
-echo "✓ Running in sysbox sandbox"
+printf '✓ Running in sysbox sandbox\n'
 VERIFY_EOF
 chmod +x /usr/local/share/containai/verify-sysbox.sh
 
 # ══════════════════════════════════════════════════════════════════════
 # INIT SCRIPT (postCreateCommand - runs once after container created)
-# Mirrors containai-init.sh: creates symlinks from ~ to data volume
+# Uses existing link-spec.json and link-repair.sh from ContainAI
+# NO DUPLICATE SYMLINK LISTS - reads from canonical source
 # ══════════════════════════════════════════════════════════════════════
 
 cat > /usr/local/share/containai/init.sh << 'INIT_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=/dev/null
 source /usr/local/share/containai/config
 
 # Verify sysbox first
 /usr/local/share/containai/verify-sysbox.sh || exit 1
 
 DATA_DIR="/mnt/agent-data"
+LINK_SPEC="/usr/local/lib/containai/link-spec.json"
 
 # Detect user home
 if [[ "$REMOTE_USER" == "auto" ]]; then
@@ -562,107 +748,169 @@ else
     USER_HOME="/home/$REMOTE_USER"
 fi
 
-echo "ContainAI init: Setting up symlinks in $USER_HOME"
+printf 'ContainAI init: Setting up symlinks in %s\n' "$USER_HOME"
 
 # Only set up symlinks if data volume is mounted
 if [[ ! -d "$DATA_DIR" ]]; then
-    echo "Warning: Data volume not mounted at $DATA_DIR"
-    echo "Run 'cai import' on host, then rebuild container with dataVolume option"
+    printf 'Warning: Data volume not mounted at %s\n' "$DATA_DIR"
+    printf 'Run "cai import" on host, then rebuild container with dataVolume option\n'
     exit 0
 fi
 
 # ─────────────────────────────────────────────────────────────────────
-# Symlink creation (mirrors sync-manifest.toml structure)
+# Use existing link-repair.sh from ContainAI (no duplicate manifest)
+# The feature install copies link-spec.json to /usr/local/lib/containai/
 # ─────────────────────────────────────────────────────────────────────
 
-create_symlink() {
-    local target="$1"  # Path in data volume (relative to $DATA_DIR)
-    local link="$2"    # Path in user home (relative to $USER_HOME)
+# List of credential-bearing files to SKIP unless enableCredentials=true
+# These contain tokens/API keys that should not be exposed to untrusted code
+CREDENTIAL_TARGETS=(
+    "/mnt/agent-data/config/gh/hosts.yml"        # GitHub token
+    "/mnt/agent-data/claude/credentials.json"    # Claude API key
+    "/mnt/agent-data/codex/config.toml"          # May contain keys
+    "/mnt/agent-data/gemini/settings.json"       # May contain keys
+)
 
-    local full_target="$DATA_DIR/$target"
-    local full_link="$USER_HOME/$link"
-
-    # Skip if target doesn't exist in volume
-    [[ -e "$full_target" ]] || return 0
-
-    # Create parent directory
-    mkdir -p "$(dirname "$full_link")"
-
-    # Remove existing (file or dir) and create symlink
-    rm -rf "$full_link"
-    ln -sfn "$full_target" "$full_link"
-    echo "  ✓ $link → $target"
+is_credential_file() {
+    local target="$1"
+    for cred in "${CREDENTIAL_TARGETS[@]}"; do
+        [[ "$target" == "$cred" ]] && return 0
+    done
+    return 1
 }
 
-# Claude Code
-create_symlink "claude/claude.json" ".claude.json"
-create_symlink "claude/credentials.json" ".claude/.credentials.json"
-create_symlink "claude/settings.json" ".claude/settings.json"
-create_symlink "claude/settings.local.json" ".claude/settings.local.json"
-create_symlink "claude/plugins" ".claude/plugins"
-create_symlink "claude/skills" ".claude/skills"
-create_symlink "claude/commands" ".claude/commands"
-create_symlink "claude/agents" ".claude/agents"
-create_symlink "claude/hooks" ".claude/hooks"
-create_symlink "claude/CLAUDE.md" ".claude/CLAUDE.md"
+# Check if link-spec.json exists
+if [[ ! -f "$LINK_SPEC" ]]; then
+    printf 'Warning: link-spec.json not found at %s\n' "$LINK_SPEC"
+    printf 'Feature may not be fully installed\n'
+    exit 0
+fi
 
-# GitHub CLI
-create_symlink "config/gh/hosts.yml" ".config/gh/hosts.yml"
-create_symlink "config/gh/config.yml" ".config/gh/config.yml"
+# Get home_dir from link-spec.json (usually /home/agent in container images)
+SPEC_HOME=$(jq -r '.home_dir // "/home/agent"' "$LINK_SPEC")
 
-# Git
-create_symlink "git/gitconfig" ".gitconfig"
-create_symlink "git/gitignore_global" ".gitignore_global"
+# Process links from link-spec.json using jq
+links_count=$(jq -r '.links | length' "$LINK_SPEC")
 
-# Shell
-create_symlink "shell/bash_aliases" ".bash_aliases_imported"
-create_symlink "shell/zshrc" ".zshrc"
-create_symlink "shell/inputrc" ".inputrc"
-create_symlink "shell/oh-my-zsh-custom" ".oh-my-zsh/custom"
+for i in $(seq 0 $((links_count - 1))); do
+    link=$(jq -r ".links[$i].link" "$LINK_SPEC")
+    target=$(jq -r ".links[$i].target" "$LINK_SPEC")
+    remove_first=$(jq -r ".links[$i].remove_first // false" "$LINK_SPEC")
 
-# Editors
-create_symlink "editors/vimrc" ".vimrc"
-create_symlink "editors/vim" ".vim"
-create_symlink "config/nvim" ".config/nvim"
+    # Skip credential files unless explicitly enabled
+    if [[ "$ENABLE_CREDENTIALS" != "true" ]] && is_credential_file "$target"; then
+        printf '  ⊘ %s (credentials disabled)\n' "$link"
+        continue
+    fi
 
-# Prompt
-create_symlink "config/starship.toml" ".config/starship.toml"
+    # Rewrite link path from spec's home_dir to detected USER_HOME
+    # e.g., /home/agent/.config -> /home/vscode/.config
+    link="${link/$SPEC_HOME/$USER_HOME}"
 
-# tmux
-create_symlink "config/tmux" ".config/tmux"
+    # Skip if target doesn't exist
+    [[ -e "$target" ]] || continue
 
-# Other agents (optional - only if present in volume)
-create_symlink "gemini/settings.json" ".gemini/settings.json"
-create_symlink "codex/config.toml" ".codex/config.toml"
+    # Create parent directory
+    mkdir -p "$(dirname "$link")"
 
-echo "ContainAI init complete"
+    # Handle remove_first for directories (ln -sfn can't replace directories)
+    if [[ -d "$link" && ! -L "$link" ]]; then
+        if [[ "$remove_first" == "true" || "$remove_first" == "1" ]]; then
+            rm -rf "$link"
+        else
+            printf '  ✗ %s (directory exists, remove_first not set)\n' "$link" >&2
+            continue
+        fi
+    fi
+
+    # Create symlink (ln -sfn handles existing files/symlinks)
+    if ln -sfn "$target" "$link" 2>/dev/null; then
+        printf '  ✓ %s → %s\n' "$link" "$target"
+    else
+        printf '  ✗ %s (failed)\n' "$link" >&2
+    fi
+done
+
+printf 'ContainAI init complete\n'
 INIT_EOF
 chmod +x /usr/local/share/containai/init.sh
 
 # ══════════════════════════════════════════════════════════════════════
 # START SCRIPT (postStartCommand - runs every container start)
+# Handles: sysbox verification, sshd, dockerd (DinD)
 # ══════════════════════════════════════════════════════════════════════
 
 cat > /usr/local/share/containai/start.sh << 'START_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=/dev/null
 source /usr/local/share/containai/config
 
+# Re-verify sysbox first (in case container was restarted on different host)
+/usr/local/share/containai/verify-sysbox.sh || exit 1
+
+# ─────────────────────────────────────────────────────────────────────
 # Start sshd if enabled (devcontainer-style, not systemd)
+# Port is dynamically allocated by the wrapper, check container labels
+# ─────────────────────────────────────────────────────────────────────
 if [[ "$ENABLE_SSH" == "true" ]]; then
     if command -v sshd &>/dev/null; then
         # Generate host keys if missing
         [[ -f /etc/ssh/ssh_host_rsa_key ]] || ssh-keygen -A
 
-        # Start sshd on configured port (non-privileged port for non-root)
-        /usr/sbin/sshd -p "$SSH_PORT" -o "PidFile=/tmp/sshd.pid"
-        echo "✓ sshd started on port $SSH_PORT"
+        # Get SSH port from container label or default
+        SSH_PORT="${CONTAINAI_SSH_PORT:-2322}"
+
+        # Check if already running
+        if [[ -f /tmp/sshd.pid ]] && kill -0 "$(cat /tmp/sshd.pid)" 2>/dev/null; then
+            printf '✓ sshd already running on port %s\n' "$SSH_PORT"
+        else
+            /usr/sbin/sshd -p "$SSH_PORT" -o "PidFile=/tmp/sshd.pid"
+            printf '✓ sshd started on port %s\n' "$SSH_PORT"
+        fi
     fi
 fi
 
-# Re-verify sysbox (in case container was restarted on different host)
-/usr/local/share/containai/verify-sysbox.sh
+# ─────────────────────────────────────────────────────────────────────
+# Start dockerd for DinD (if Docker installed and not already running)
+# Sysbox provides the isolation, no --privileged needed
+# ─────────────────────────────────────────────────────────────────────
+start_dockerd() {
+    local pidfile="/var/run/docker.pid"
+    local logfile="/var/log/containai-dockerd.log"
+    local retries=30
+
+    # Already running?
+    if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
+        printf '✓ dockerd already running\n'
+        return 0
+    fi
+
+    # Start dockerd in background
+    printf 'Starting dockerd...\n'
+    nohup dockerd --pidfile="$pidfile" > "$logfile" 2>&1 &
+
+    # Wait for socket
+    local i=0
+    while [[ $i -lt $retries ]]; do
+        if docker info &>/dev/null; then
+            printf '✓ dockerd started (DinD ready)\n'
+            return 0
+        fi
+        sleep 1
+        ((i++))
+    done
+
+    printf '✗ dockerd failed to start (see %s)\n' "$logfile" >&2
+    return 1
+}
+
+if command -v dockerd &>/dev/null; then
+    start_dockerd || printf 'Warning: DinD not available\n' >&2
+fi
+
+printf '✓ ContainAI devcontainer ready\n'
 START_EOF
 chmod +x /usr/local/share/containai/start.sh
 
@@ -670,38 +918,63 @@ chmod +x /usr/local/share/containai/start.sh
 # INSTALL DEPENDENCIES
 # ══════════════════════════════════════════════════════════════════════
 
+# Install jq for JSON parsing (required for link-spec.json)
+apt-get update && apt-get install -y jq
+
 # SSH server (if enabled)
 if [[ "$ENABLE_SSH" == "true" ]]; then
-    apt-get update && apt-get install -y openssh-server
+    apt-get install -y openssh-server
     mkdir -p /var/run/sshd
 fi
 
 # Docker for DinD (sysbox provides isolation)
+# Note: dockerd startup happens in postStartCommand, not here
 if [[ "$INSTALL_DOCKER" == "true" ]]; then
     curl -fsSL https://get.docker.com | sh
-    echo "Docker installed. DinD works without --privileged in sysbox."
+    # Add devcontainer user to docker group (vscode/node/root)
+    if id -u vscode &>/dev/null; then
+        usermod -aG docker vscode
+    elif id -u node &>/dev/null; then
+        usermod -aG docker node
+    fi
+    printf 'Docker installed. DinD starts via postStartCommand.\n'
 fi
 
-echo "ContainAI feature installed."
+# Copy link-spec.json from ContainAI (if available in image or fetch)
+# This allows symlink creation without hardcoded paths
+mkdir -p /usr/local/lib/containai
+if [[ -f /usr/local/lib/containai/link-spec.json ]]; then
+    printf 'link-spec.json already present\n'
+else
+    # Fetch from release or use bundled version
+    printf 'Note: link-spec.json should be bundled with feature\n'
+fi
+
+printf 'ContainAI feature installed.\n'
 ```
 
 ---
 
 ## Detection Matrix
 
-| Scenario            | UID Map | unshare | Sysboxfs | Cap Probe | Total | Result |
-|---------------------|---------|---------|----------|-----------|-------|--------|
-| Sysbox (correct)    | ✓       | ✓       | ✓        | ✓         | 4     | PASS   |
-| Regular docker      | ✗       | ✗      | ✗        | ✗         | 0     | FAIL   |
-| Docker --privileged | ✗       | ✓       | ✗        | ✓         | 2     | FAIL   |
+| Scenario              | Sysboxfs | UID Map | unshare | Cap Probe | Total | Result |
+|-----------------------|----------|---------|---------|-----------|-------|--------|
+| Sysbox (correct)      | ✓ (REQ)  | ✓       | ✓       | ✓         | 4     | PASS   |
+| Regular docker        | ✗        | ✗       | ✗       | ✗         | 0     | FAIL   |
+| Docker --privileged   | ✗        | ✗       | ✓       | ✓         | 2     | FAIL   |
+| userns-remap + --priv | ✗        | ✓       | ✓       | ✓         | 3     | FAIL   |
 
-**Minimum required: 3 checks**
+**Verification requirements**:
+1. **Sysboxfs MANDATORY**: The sysboxfs mount check MUST pass (sysbox-unique indicator)
+2. **Defense-in-depth**: At least 3 total checks must pass
 
-**Why these can't be faked**:
-- UID mapping is kernel-enforced (you can't change /proc/self/uid_map)
-- unshare capability requires kernel permission
-- Sysboxfs mounts are kernel-level
-- CAP_SYS_ADMIN in userns is kernel-enforced
+**Why sysboxfs is unforgeable**:
+- Sysbox-fs is a FUSE filesystem implemented by sysbox-fs daemon
+- It intercepts specific procfs/sysfs reads to provide VM-like behavior
+- Only sysbox-runc can set up these mounts - no userspace bypass possible
+- Even with userns-remap + --privileged, you cannot fake sysboxfs mounts
+
+**Defense-in-depth**: The wrapper ALSO enforces `--runtime=sysbox-runc` at launch time, so even if verification could somehow be bypassed, the container cannot start without sysbox.
 
 ---
 
@@ -752,21 +1025,23 @@ The checks are kernel-enforced. No userspace bypass possible.
 
 ## containai-docker Context Setup
 
-The context is configured by `cai setup`:
+**Important**: Reuse existing platform-specific context logic from `cai setup`. Do NOT hardcode Unix socket.
+
+The `containai-docker` context is already set up by `cai setup` with platform-specific endpoints:
+- **WSL2**: SSH bridge to WSL2 Docker daemon
+- **macOS/Lima**: Socket to Lima VM
+- **Native Linux**: Unix socket to local Docker daemon
+
+The wrapper uses `--runtime=sysbox-runc` to enforce sysbox at launch time, regardless of context endpoint:
 
 ```bash
-# Create context that uses sysbox runtime
-docker context create containai-docker \
-    --docker "host=unix:///var/run/docker.sock"
-
-# Configure daemon to use sysbox for this context
-# (actual implementation depends on platform)
+# Wrapper enforces runtime, context handles connection
+exec docker --context containai-docker --runtime=sysbox-runc "${args[@]}"
 ```
 
-**daemon.json for containai context**:
+**daemon.json** (configured by `cai setup`, not by devcontainer wrapper):
 ```json
 {
-    "default-runtime": "sysbox-runc",
     "runtimes": {
         "sysbox-runc": {
             "path": "/usr/bin/sysbox-runc"
@@ -774,6 +1049,11 @@ docker context create containai-docker \
     }
 }
 ```
+
+The context creation is handled by existing functions:
+- `_cai_setup_containai_docker_context()`
+- `_cai_auto_repair_containai_context()`
+- `_cai_expected_docker_host()`
 
 ---
 
@@ -824,64 +1104,68 @@ docker context create containai-docker \
 ## Acceptance Criteria
 
 ### Core
-- [ ] cai-docker routes ContainAI devcontainers to sysbox context
-- [ ] ContainAI feature installs on any base image
-- [ ] Verification uses kernel-enforced checks only
+- [ ] cai-docker detects ContainAI devcontainers via VS Code labels (not --workspace-folder)
+- [ ] cai-docker enforces `--runtime=sysbox-runc` at launch time
+- [ ] cai-docker routes to existing containai-docker context (platform-specific)
+- [ ] ContainAI feature installs on Debian/Ubuntu base images (clear error on others)
+- [ ] Verification requires sysboxfs mount (mandatory) + 2 other checks
 - [ ] Hard-fail with clear message when not in sysbox
 
+### Security
+- [ ] Credentials NOT synced by default (`enableCredentials: false`)
+- [ ] Sysbox devcontainers pass verification (sysboxfs + 3 total)
+- [ ] Regular docker fails verification (no sysboxfs)
+- [ ] userns-remap + --privileged fails (no sysboxfs)
+- [ ] No env var or userspace bypass possible
+
 ### VS Code Extension
-- [ ] Detects ContainAI feature
+- [ ] Detects ContainAI feature via proper JSONC parsing
 - [ ] Sets dockerPath automatically
 - [ ] Published to VS Code Marketplace and Open VSX
 
-### Security
-- [ ] Sysbox devcontainers pass verification (4 checks)
-- [ ] Regular docker fails verification (0 checks)
-- [ ] --privileged fails verification (2 checks, need 3)
-- [ ] No env var or userspace bypass possible
+### Integration
+- [ ] Labels include complete set: `containai.managed`, `containai.data-volume`, `containai.ssh-port`
+- [ ] SSH ports dynamically allocated (checks existing ports, not fixed 2322)
+- [ ] SSH port passed to container via `-e CONTAINAI_SSH_PORT=<port>`
+- [ ] SSH config via `~/.ssh/containai.d/` with Include directive
+- [ ] Uses portable timestamps (`date -u +%Y-%m-%dT%H:%M:%SZ`)
+- [ ] DinD starts via postStartCommand with retry/idempotency
+- [ ] link-spec.json paths rewritten from `/home/agent` to detected user home
+- [ ] `remove_first` handled for directory symlinks
+
+### V1 Scope
+- [ ] Docker CLI only (not docker-compose)
+- [ ] Debian/Ubuntu only (clear error on other distros)
+- [ ] Task 8 (Docker context sync) DEFERRED - no clear V1 use case
+- [ ] Task 9 (VS Code server-env-setup) DEFERRED - depends on task 8
+
+### V1 Known Limitations
+- **macOS port allocation race**: On macOS, `flock` is not available. Concurrent `cai` and `cai-docker` operations may race on SSH port allocation. Mitigation: port reservation files provide best-effort coordination. Full fix requires V2 enhancement where `cai` reads shared port files.
+
+### Task Dependencies
+- [ ] Task 10 (Add no-secrets marker to cai import) - must complete before task 1 can validate credentials
+- Task 1 depends on: Task 10
+- Tasks 1, 2 can run in parallel after Task 10
+- Task 3 can run independently
 
 ---
 
 ## Docker Context Sync Architecture
 
-The devcontainer needs access to the host's Docker contexts (for tools like Docker CLI), but with different socket paths. The host uses SSH-based context for `containai-docker`, while the container uses a local Unix socket.
+**STATUS: DEFERRED (V2)**
 
-### Context Directory Structure
+The original rationale for syncing Docker contexts between host and container is unclear for the devcontainer use case:
 
-```
-~/.docker/contexts/           # Host's contexts (SSH sockets)
-~/.docker-cai/contexts/       # ContainAI contexts (Unix sockets for container)
-```
+- **DinD in devcontainer**: The container runs its own dockerd, so it doesn't need host contexts
+- **Host Docker access**: Devcontainers typically don't need to talk to the host Docker daemon
+- **Context complexity**: Syncing contexts adds complexity without clear benefit
 
-### Sync Rules
+**Recommendation**: Cut this from V1. If a concrete use case emerges (e.g., "I need to manage host containers from within devcontainer"), implement it then with clear requirements.
 
-1. **Host → Container direction** (`~/.docker/contexts` → `~/.docker-cai/contexts`):
-   - All contexts EXCEPT `containai-docker` are copied verbatim
-   - The `containai-docker` context gets a modified socket path (Unix instead of SSH)
-
-2. **Container → Host direction** (`~/.docker-cai/contexts` → `~/.docker/contexts`):
-   - New contexts created in the container are synced back
-   - `containai-docker` is excluded (different socket paths intentional)
-
-3. **containai-docker special handling**:
-   - Host version: SSH socket (`ssh://user@host`)
-   - Container version: Unix socket (`unix:///var/run/docker.sock`)
-
-### Sync Daemon
-
-A lightweight watcher process monitors both directories for changes:
-- Uses inotifywait (Linux) or fswatch (macOS) for efficiency
-- Handles creates, deletes, and modifications
-- Excludes `containai-docker` from bidirectional sync
-
-### Implementation
-
-Location: `src/lib/docker-context-sync.sh`
-
-Key functions:
-- `_cai_sync_docker_contexts()` - one-time sync
-- `_cai_watch_docker_contexts()` - continuous watcher
-- `_cai_is_containai_docker_context()` - check if context is the special one
+If needed in V2, the approach would be:
+- One-time sync during setup (not continuous watcher)
+- Explicit user opt-in via feature option
+- Clear documentation of the use case
 
 ---
 

@@ -1,0 +1,37 @@
+{
+    "id": "containai",
+    "version": "1.0.0",
+    "name": "ContainAI Sysbox Sandbox",
+    "description": "ContainAI experience: sysbox verification, data sync (no creds by default), SSH, DinD",
+    "documentationURL": "https://github.com/novotnyllc/containai",
+    "options": {
+        "dataVolume": {
+            "type": "string",
+            "default": "sandbox-agent-data",
+            "description": "Name of cai data volume to mount"
+        },
+        "enableCredentials": {
+            "type": "boolean",
+            "default": false,
+            "description": "SECURITY: Sync credential files (GH tokens, Claude API keys). Only enable for trusted repos."
+        },
+        "enableSsh": {
+            "type": "boolean",
+            "default": true,
+            "description": "Run sshd for non-VS Code access"
+        },
+        "installDocker": {
+            "type": "boolean",
+            "default": true,
+            "description": "Install Docker for DinD (starts in postStartCommand)"
+        },
+        "remoteUser": {
+            "type": "string",
+            "default": "auto",
+            "description": "User for symlinks (auto-detects vscode/node/root)"
+        }
+    },
+    "mounts": [],
+    "postCreateCommand": "/usr/local/share/containai/init.sh",
+    "postStartCommand": "/usr/local/share/containai/start.sh"
+}

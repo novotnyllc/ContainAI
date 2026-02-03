@@ -59,41 +59,6 @@ export DOCKER_CONFIG="$HOME/.docker-cai"
 2. **Devcontainer feature `init.sh`**: Creates scripts inside container
 3. **`cai doctor`**: Verifies scripts exist and are correct
 
-### Directory Creation
-
-Both directories may not exist on fresh systems:
-```bash
-mkdir -p ~/.vscode-server
-mkdir -p ~/.vscode-insiders
-```
-
-### Edge Cases
-
-1. **Script already exists with different content**:
-   - Check if our marker comment is present
-   - If yes: overwrite (update)
-   - If no: append our export (preserve user's customizations)
-
-2. **VS Code Server not installed**:
-   - Still create scripts (they'll be ready when VS Code connects)
-   - No error, just informational message
-
-3. **Permissions issues**:
-   - Scripts must be in user's home directory
-   - Should work even if run as different user in container
-
-### Doctor Output
-
-```
-Devcontainer support:
-  ✓ cai-docker wrapper installed
-  ✓ containai-docker context exists
-  ✓ Docker context sync configured
-  ✓ VS Code server-env-setup scripts installed
-    - ~/.vscode-server/server-env-setup (executable)
-    - ~/.vscode-insiders/server-env-setup (executable)
-```
-
 ## Acceptance
 
 - [ ] `~/.vscode-server/server-env-setup` created with correct content

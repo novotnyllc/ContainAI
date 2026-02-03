@@ -428,3 +428,9 @@ Mermaid flowchart edges cannot link to subgraph IDs directly - link to actual no
 
 ## 2026-02-03 manual [pitfall]
 Link validation scripts must verify normalized paths stay within repo root to prevent false-positive validation of escaped paths (../../etc/passwd)
+
+## 2026-02-03 manual [pitfall]
+flock is Linux-only; macOS needs fcntl.flock via Python or explicit scope limitation for cross-platform file locking
+
+## 2026-02-03 manual [pitfall]
+Python sys.exit() raises SystemExit caught by bare 'except:' - use 'except Exception:' to avoid catching it
