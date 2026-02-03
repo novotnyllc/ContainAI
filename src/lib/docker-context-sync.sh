@@ -403,26 +403,25 @@ _cai_watch_with_fswatch() {
 
 # Internal: Handle a context change event
 # Arguments: $1 = path that changed, $2 = event type
+# Note: On WSL2, only syncs host-to-cai direction to avoid touching ~/.docker/
+#       which may be symlinked to Windows. The spec requires "Don't touch ~/.docker/"
 _cai_handle_context_change() {
     local path="$1"
     local event="$2"
 
     _cai_debug "Context change detected: $path ($event)"
 
-    # Determine sync direction based on which directory changed
+    # Only sync from host to cai on WSL2
+    # This is one-way to avoid modifying ~/.docker/ which may be shared with Windows
     if [[ "$path" == "${_CAI_DOCKER_CONTEXTS_DIR}"* ]]; then
         # Host Docker contexts changed -> sync to CAI contexts
         _cai_sync_docker_contexts_once \
             "$_CAI_DOCKER_CONTEXTS_DIR" \
             "$_CAI_DOCKER_CAI_CONTEXTS_DIR" \
             "host-to-cai"
-    elif [[ "$path" == "${_CAI_DOCKER_CAI_CONTEXTS_DIR}"* ]]; then
-        # CAI contexts changed -> sync to host Docker contexts
-        _cai_sync_docker_contexts_once \
-            "$_CAI_DOCKER_CAI_CONTEXTS_DIR" \
-            "$_CAI_DOCKER_CONTEXTS_DIR" \
-            "cai-to-host"
     fi
+    # Note: Changes to ~/.docker-cai/ are NOT synced back to ~/.docker/
+    # to avoid modifying the shared/symlinked directory
 }
 
 # Stop the Docker context watcher
@@ -469,7 +468,7 @@ _cai_setup_docker_cai_dir() {
 
     if [[ "$dry_run" == "true" ]]; then
         _cai_dryrun "Would create ${HOME}/.docker-cai/contexts/"
-        _cai_dryrun "Would create containai-docker context with unix:///var/run/containai-docker.sock"
+        _cai_dryrun "Would create containai-docker context with unix://${_CAI_CONTAINAI_DOCKER_SOCKET}"
         return 0
     fi
 
@@ -480,7 +479,8 @@ _cai_setup_docker_cai_dir() {
     fi
 
     # Create the containai-docker context for WSL2 (Unix socket)
-    local socket_path="unix:///var/run/containai-docker.sock"
+    # Use the constant from docker.sh for consistency
+    local socket_path="unix://${_CAI_CONTAINAI_DOCKER_SOCKET}"
     local context_hash
     context_hash=$(printf '%s' "$_CAI_CONTAINAI_CONTEXT_NAME" | sha256sum | cut -c1-64)
 

@@ -3531,9 +3531,19 @@ _containai_docker_cmd() {
     # Silent repair - cai docker is a pass-through and shouldn't be verbose
     _cai_auto_repair_containai_context "false" || true
 
+    # On WSL2, use ~/.docker-cai/ config directory to get Unix socket context
+    # This avoids the SSH endpoint in ~/.docker/ which is shared with Windows
+    local docker_config_dir=""
+    if _cai_is_wsl2 && [[ -d "$HOME/.docker-cai" ]]; then
+        docker_config_dir="$HOME/.docker-cai"
+    fi
+
     local context=""
     if _cai_is_container; then
         context=""
+    elif [[ -n "$docker_config_dir" ]] && DOCKER_CONFIG="$docker_config_dir" docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
+        # WSL2: Use context from ~/.docker-cai/
+        context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     elif docker context inspect "$_CAI_CONTAINAI_DOCKER_CONTEXT" >/dev/null 2>&1; then
         context="$_CAI_CONTAINAI_DOCKER_CONTEXT"
     else
@@ -3605,11 +3615,11 @@ _containai_docker_cmd() {
 
         if [[ "$has_user" != "true" && -n "$container_name" ]]; then
             local managed_label image_name is_containai="false"
-            managed_label=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
+            managed_label=$(DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{index .Config.Labels "containai.managed"}}' -- "$container_name" 2>/dev/null) || managed_label=""
             if [[ "$managed_label" == "true" ]]; then
                 is_containai="true"
             else
-                image_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
+                image_name=$(DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" inspect --format '{{.Config.Image}}' -- "$container_name" 2>/dev/null) || image_name=""
                 if [[ "$image_name" == "${_CONTAINAI_DEFAULT_REPO}:"* ]]; then
                     is_containai="true"
                 fi
@@ -3621,7 +3631,9 @@ _containai_docker_cmd() {
         fi
     fi
 
-    DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
+    # Execute docker with appropriate config directory
+    # On WSL2, DOCKER_CONFIG points to ~/.docker-cai/ to use Unix socket context
+    DOCKER_CONFIG="${docker_config_dir:-$HOME/.docker}" DOCKER_CONTEXT= DOCKER_HOST= "${docker_base[@]}" "${args[@]}"
 }
 
 # ==============================================================================
