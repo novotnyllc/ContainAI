@@ -1,65 +1,203 @@
-# fn-49-devcontainer-integration.10 Add no-secrets marker to cai import
+# fn-49-devcontainer-integration.10 Wire docker-context-sync into CLI lifecycle
 
 ## Description
 
-Update `cai import` to create a `.containai-no-secrets` marker file in the data volume when `--no-secrets` flag is used. This marker is required by the devcontainer wrapper to validate that credentials are not exposed.
+Solve the WSL2/Windows context collision problem where symlinked `~/.docker/contexts` causes the `ssh://` URL to appear on both sides.
 
-### Location
-`src/lib/import.sh`
+**Problem:**
+- User's `~/.docker/contexts` is symlinked between Windows and WSL2
+- `containai-docker` context uses `ssh://` endpoint
+- This `ssh://` URL shows up on WSL2 side too (unnecessary SSH hop, friction)
 
-### Changes Required
+**Solution:**
+- Create separate `~/.docker-cai/` directory (not symlinked)
+- **WSL2**: `containai-docker` → `unix:///var/run/containai-docker.sock`
+- **Windows**: `containai-docker` → `ssh://user@wsl-host`
+- **Continuous watcher** syncs user's other contexts `~/.docker/` → `~/.docker-cai/` (excluding `containai-docker`)
+- Use `DOCKER_CONFIG=~/.docker-cai` to pick up the right context per-platform
 
-1. **When `--no-secrets` flag is used**:
-   - Create `.containai-no-secrets` marker file in the volume root (`/mnt/agent-data/.containai-no-secrets`)
-   - Marker content: timestamp and flag indicator (e.g., `created: 2024-01-01T00:00:00Z`)
+**Size:** M
 
-2. **When full import (with secrets)**:
-   - Remove `.containai-no-secrets` marker if it exists
-   - This ensures the marker accurately reflects the volume's credential state
+**Files:**
+- `src/containai.sh` (add to library loading)
+- `src/lib/docker-context-sync.sh` (add service management functions)
+- `src/lib/setup.sh` (create platform-specific context + start sync service on WSL2)
+- `src/lib/uninstall.sh` (stop service and cleanup)
+- `src/lib/doctor.sh` (add sync service status check)
 
-3. **Marker format**:
-   ```
-   # ContainAI no-secrets marker
-   # This volume was created with: cai import --no-secrets
-   # Credential files are NOT synced to this volume
-   created: 2024-01-01T00:00:00Z
-   ```
+## Current State
 
-### Why This Is Needed
+Library exists at `src/lib/docker-context-sync.sh` with:
+- `_cai_sync_docker_contexts_once()` - one-time sync (excludes `containai-docker`)
+- `_cai_create_containai_docker_context()` - create container-local context
+- `_cai_watch_docker_contexts()` - continuous watcher
+- `_cai_stop_docker_context_watcher()` - cleanup
 
-The devcontainer wrapper validates volumes before mounting when `enableCredentials=false`:
-- If marker exists: Volume is safe, mount it
-- If marker missing: Volume may contain credentials, refuse to mount and prompt user
+**Not loaded or called anywhere.**
 
-This defense-in-depth prevents untrusted code from accessing credentials even if the init.sh symlink filtering is bypassed.
+## Integration Points
 
-### Implementation
+### 1. Load the library (`src/containai.sh`)
+
+Add to `_containai_libs_exist()` check at line ~77:
+```bash
+&& [[ -f "$_CAI_SCRIPT_DIR/lib/docker-context-sync.sh" ]]
+```
+
+Add sourcing block after docker.sh:
+```bash
+# shellcheck source=lib/docker-context-sync.sh
+if ! source "$_CAI_SCRIPT_DIR/lib/docker-context-sync.sh"; then ...
+```
+
+### 2. Setup integration (`src/lib/setup.sh`)
+
+**WSL2 only** - after `_cai_setup_wsl2_windows_npipe_bridge()`:
 
 ```bash
-# In _cai_import_to_volume() or similar:
+# Create ~/.docker-cai/ with platform-specific containai-docker context
+_cai_setup_docker_cai_dir "$dry_run"
 
-# At end of import process:
-if [[ "$NO_SECRETS" == "true" ]]; then
-    # Create no-secrets marker
-    cat > "$VOLUME_ROOT/.containai-no-secrets" << EOF
-# ContainAI no-secrets marker
-# This volume was created with: cai import --no-secrets
-# Credential files are NOT synced to this volume
-created: $(date -u +%Y-%m-%dT%H:%M:%SZ)
-EOF
-else
-    # Remove marker if doing full import
-    rm -f "$VOLUME_ROOT/.containai-no-secrets"
+# Initial sync of user's other contexts (excludes containai-docker)
+_cai_sync_docker_contexts_once "$HOME/.docker/contexts" "$HOME/.docker-cai/contexts" "host-to-cai"
+
+# Start persistent watcher service (runs continuously, syncs on every change)
+_cai_start_context_sync_service
+```
+
+**macOS/Linux**: No sync needed - use Unix socket directly in `~/.docker/contexts`.
+
+### 2a. Add inotify-tools to WSL2 dependencies
+
+Add to `_cai_setup_wsl2()` tool checks (~line 1104):
+```bash
+if ! command -v inotifywait >/dev/null 2>&1; then
+    missing_pkgs+=("inotify-tools")
 fi
 ```
 
+### 2b. Platform-specific containai-docker context
+
+New function `_cai_setup_docker_cai_dir()`:
+
+```bash
+_cai_setup_docker_cai_dir() {
+    local dry_run="${1:-false}"
+
+    mkdir -p "$HOME/.docker-cai/contexts"
+
+    if _cai_is_wsl2; then
+        # WSL2: Unix socket (direct access)
+        _cai_create_context_in_dir "$HOME/.docker-cai" "containai-docker" \
+            "unix:///var/run/containai-docker.sock"
+    fi
+    # Windows side handled separately (by Windows install or manual)
+}
+```
+
+### 2c. Persistent sync service (WSL2 only)
+
+systemd user service at `~/.config/systemd/user/containai-context-sync.service`:
+```ini
+[Unit]
+Description=ContainAI Docker Context Sync
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c 'source ~/.local/share/containai/containai.sh && _cai_watch_docker_contexts foreground'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+New functions:
+- `_cai_start_context_sync_service()` - Install and enable systemd user service
+- `_cai_stop_context_sync_service()` - Stop and remove service
+- `_cai_context_sync_service_status()` - Check if running
+
+### 3. Uninstall integration (`src/lib/uninstall.sh`)
+
+Add before Docker context removal (WSL2 only):
+```bash
+if _cai_is_wsl2; then
+    _cai_stop_context_sync_service
+    _cai_stop_docker_context_watcher
+    rm -rf "$HOME/.docker-cai"
+fi
+```
+
+## Key Decisions
+
+1. **WSL2 only** - macOS/Linux don't have the symlink collision problem
+2. **Separate directory** - `~/.docker-cai/` is NOT symlinked, platform-specific
+3. **Continuous sync** - Watcher runs always, syncs on every file change (inotifywait)
+4. **Don't touch `~/.docker/`** - User's shared contexts remain untouched
+5. **systemd user service** - Survives reboots, auto-restarts on failure
+
+## Testing Strategy
+
+### Unit Tests (`tests/unit/test-docker-context-sync-service.sh`)
+
+1. **Platform detection**
+   - Service only starts on WSL2
+   - macOS/Linux skip gracefully
+
+2. **Context creation**
+   - `_cai_setup_docker_cai_dir` creates correct context per platform
+   - WSL2 gets `unix://` endpoint
+
+3. **Service management**
+   - `_cai_context_sync_service_status` returns correct codes
+   - `_cai_stop_context_sync_service` is idempotent
+
+### Integration Tests (`tests/integration/test-context-sync-service.sh`)
+
+1. **Sync behavior**
+   ```bash
+   # Create test context in ~/.docker/contexts
+   docker context create test-remote --docker "host=tcp://remote:2375"
+
+   # Trigger sync
+   _cai_sync_docker_contexts_once ~/.docker/contexts ~/.docker-cai/contexts host-to-cai
+
+   # Verify synced (but containai-docker is NOT synced)
+   grep -r "test-remote" ~/.docker-cai/contexts/
+   ! grep -r "containai-docker" ~/.docker-cai/contexts/meta/*/meta.json | grep -q "ssh://"
+   ```
+
+2. **Uninstall cleanup**
+   ```bash
+   _cai_stop_context_sync_service
+   rm -rf "$HOME/.docker-cai"
+   [[ ! -d "$HOME/.docker-cai" ]]
+   ```
+
+### Manual Testing (WSL2)
+
+- [ ] `cai setup` creates `~/.docker-cai/` with Unix socket context
+- [ ] User's other contexts synced to `~/.docker-cai/`
+- [ ] `containai-docker` in `~/.docker-cai/` has `unix://` (not `ssh://`)
+- [ ] Watcher service running: `systemctl --user status containai-context-sync`
+- [ ] Add context on host → appears in `~/.docker-cai/` within seconds
+- [ ] `cai uninstall` removes service and `~/.docker-cai/`
+
 ## Acceptance
 
-- [ ] `cai import --no-secrets` creates `.containai-no-secrets` marker in volume root
-- [ ] `cai import` (without --no-secrets) removes the marker if it exists
-- [ ] Marker file contains human-readable explanation and timestamp
-- [ ] Existing tests pass
-- [ ] New test verifies marker creation/removal
+- [ ] `docker-context-sync.sh` sourced in `containai.sh`
+- [ ] `_containai_libs_exist()` includes the new library
+- [ ] WSL2: `cai setup` creates `~/.docker-cai/` with Unix socket `containai-docker`
+- [ ] WSL2: User's other contexts synced from `~/.docker/`
+- [ ] WSL2: Watcher service runs persistently (survives reboots)
+- [ ] WSL2: `cai uninstall` stops service + removes `~/.docker-cai/`
+- [ ] macOS/Linux: No sync service started (not needed)
+- [ ] `inotify-tools` added to WSL2 dependency list
+- [ ] `cai doctor` shows sync service status (WSL2 only)
+- [ ] Operations respect `--dry-run` flag
+- [ ] `shellcheck` passes
+- [ ] Unit tests pass
+- [ ] Integration tests pass
 
 ## Done summary
 TBD
