@@ -419,3 +419,6 @@ TOML keys after [table] header become nested - place top-level keys before any t
 
 ## 2026-02-03 manual [pitfall]
 flowctl codex impl-review uses git diff base..HEAD - changes must be committed before review sees them
+
+## 2026-02-03 manual [pitfall]
+Codex impl-review may return stale findings if diff base doesn't include recent commits - verify flagged issues manually before iterating
