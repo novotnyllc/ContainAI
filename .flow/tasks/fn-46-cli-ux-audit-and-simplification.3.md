@@ -129,8 +129,7 @@ _cai_error "Message here"  # Uses [ERROR] prefix
 - [ ] Raw upstream errors flagged for wrapping consideration
 
 ## Done summary
-TBD
-
+Completed comprehensive error message actionability audit. Analyzed 72 _cai_error calls, 515 direct [ERROR] messages, and 98 printf ERROR patterns. Identified ~85 unique message templates with overall actionability score of 3.2/5. Key findings: (1) 59% of messages lack remediation guidance, (2) build.sh uses inconsistent 'ERROR:' format vs '[ERROR]', (3) Isolation/Setup errors are the gold standard at 100% remediation, (4) Top 10 worst messages identified with specific improvement recommendations. All testing was strictly non-destructive (--help, --dry-run, status, validate only). Report saved to docs/reports/fn-46.3-error-message-audit.md
 ## Evidence
 - Commits:
 - Tests:
