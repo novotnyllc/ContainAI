@@ -483,6 +483,11 @@ print(secrets.token_hex(2))
 PY
 }
 
+# Portable file truncation (ZSH-safe: bare `> file` hangs on macOS default shell)
+truncate_file() {
+  : > "$1"
+}
+
 render_template() {
   local path="$1"
   "$PYTHON_BIN" - "$path" <<'PY'
@@ -542,7 +547,10 @@ print(json.dumps({"epics": parts}, indent=2, sort_keys=True))
 PY
 }
 
-RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$(hostname -s 2>/dev/null || hostname)-$(sanitize_id "$(get_actor)")-$$-$(rand4)"
+# Clean format for branches and run dirs (no PII: no hostname, email, or PID)
+RUN_ID="$(date -u +%Y%m%d-%H%M%S)-$(rand4)"
+# Verbose format for debugging (internal use only in logs)
+RUN_ID_FULL="$(date -u +%Y%m%dT%H%M%SZ)-$(hostname -s 2>/dev/null || hostname)-$(sanitize_id "$(get_actor)")-$$-$(rand4)"
 RUN_DIR="$SCRIPT_DIR/runs/$RUN_ID"
 mkdir -p "$RUN_DIR"
 ATTEMPTS_FILE="$RUN_DIR/attempts.json"
@@ -554,6 +562,7 @@ PROGRESS_FILE="$RUN_DIR/progress.txt"
 {
   echo "# Ralph Progress Log"
   echo "Run: $RUN_ID"
+  echo "Full ID: $RUN_ID_FULL"
   echo "Started: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "---"
 } > "$PROGRESS_FILE"
@@ -1211,6 +1220,7 @@ Violations break automation and leave the user with incomplete work. Be precise,
         {
           echo "Auto-blocked after ${attempts} attempts."
           echo "Run: $RUN_ID"
+          echo "Full ID: $RUN_ID_FULL"
           echo "Task: $task_id"
           echo ""
           echo "Last output:"
