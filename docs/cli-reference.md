@@ -169,7 +169,7 @@ cai [path] [options] [-- <agent-args>]
 | Option | Description |
 |--------|-------------|
 | `<path>` | Workspace path (positional, alternative to --workspace) |
-| `--workspace <path>` | Workspace path (default: current directory) |
+| `-w`, `--workspace <path>` | Workspace path (default: current directory) |
 | `--data-volume <vol>` | Data volume name (overrides config) |
 | `--config <path>` | Config file path (overrides auto-discovery) |
 | `--container <name>` | Use or create container with specified name |
@@ -191,7 +191,19 @@ cai [path] [options] [-- <agent-args>]
 | `--credentials <mode>` | Credential mode (only `none` supported with Sysbox isolation) |
 | `-- <args>` | Pass arguments to agent |
 
-**Note on host access flags:** The `--allow-host-credentials`, `--allow-host-docker-socket`, and `--mount-docker-socket` flags are parsed for backward compatibility but result in an error. Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
+**Deprecated/Unsupported flags (parsed but error at runtime):**
+
+| Flag | Status |
+|------|--------|
+| `--allow-host-credentials` | Unsupported with Sysbox |
+| `--i-understand-this-exposes-host-credentials` | Unsupported with Sysbox |
+| `--allow-host-docker-socket` | Unsupported with Sysbox |
+| `--i-understand-this-grants-root-access` | Unsupported with Sysbox |
+| `--mount-docker-socket` | Unsupported with Sysbox |
+| `--please-root-my-host` | Unsupported with Sysbox |
+| `--acknowledge-credential-risk` | Legacy, unsupported |
+
+**Note:** Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
 
 **Examples:**
 ```bash
@@ -232,7 +244,7 @@ cai shell [path] [options]
 | Option | Description |
 |--------|-------------|
 | `<path>` | Workspace path (positional) |
-| `--workspace <path>` | Workspace path (default: current directory) |
+| `-w`, `--workspace <path>` | Workspace path (default: current directory) |
 | `--data-volume <vol>` | Data volume name |
 | `--config <path>` | Config file path |
 | `--container <name>` | Container name |
@@ -247,6 +259,7 @@ cai shell [path] [options]
 | `--force` | Skip isolation checks |
 | `--dry-run` | Show what would happen |
 | `-q`, `--quiet` | Suppress verbose output |
+| `-D`, `--debug` | Enable debug output |
 | `--verbose` | Print container and volume names to stderr |
 
 **Exit Codes:**
