@@ -66,13 +66,16 @@ cai import --container my-proj   # Sync to specific container
 
 Default sync items (from sync-manifest.toml):
 - Git config (user.name, user.email)
-- GitHub CLI config
-- Agent configs (Claude, Gemini, Codex, etc.)
+- GitHub CLI config and OAuth tokens
+- Agent configs and secrets (Claude, Gemini, Codex, etc.)
 - Shell configs (.bashrc.d additions)
 
-NOT synced by default:
+**Secrets are synced by default.** Use `--no-secrets` to skip them.
+
+NOT synced by default (excluded from manifest):
 - SSH keys (use agent forwarding instead)
-- Agent credentials (containers run their own login)
+- Specific credential files: `~/.claude/.credentials.json`, `~/.codex/auth.json`
+  (add via `[import].additional_paths` if needed)
 
 ### Examples
 
@@ -218,11 +221,16 @@ cai import --data-volume <name>
 cai run
 ```
 
-### Credentials Isolation
+### Credentials and Secrets
 
-By default, credentials (OAuth tokens) are NOT imported from your home directory. Containers run their own login flows for security. The sync creates empty placeholder files that containers write to.
+**Secrets are synced by default.** This includes OAuth tokens in `~/.claude.json`,
+`~/.config/gh/hosts.yml`, etc. Use `--no-secrets` to skip these files.
 
-To override (if you explicitly want to share credentials):
+Some credential files are intentionally excluded from the sync manifest:
+- `~/.claude/.credentials.json` (Claude desktop app)
+- `~/.codex/auth.json` (Codex CLI)
+
+To import these excluded files:
 ```toml
 # containai.toml
 [import]
@@ -261,7 +269,16 @@ Override with `--no-excludes` (not recommended).
 
 ### Volume Names
 
-Volume names are derived from workspace paths. Same workspace = same volume. Use `--data-volume` to override, or `--reset` for a fresh volume.
+Volume resolution precedence:
+1. `--data-volume` flag (highest)
+2. `CONTAINAI_DATA_VOLUME` environment variable
+3. Workspace state (from previous `--reset` or config)
+4. Repo-local config (`.containai/config.toml`)
+5. User global config
+6. Default: `sandbox-agent-data`
+
+Use `--reset` to generate a new unique volume name for the workspace.
+Multiple workspaces share the default volume unless configured otherwise.
 
 ## Related Skills
 
