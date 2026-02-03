@@ -47,8 +47,29 @@ Real sync paths from `src/sync-manifest.toml`: shell configs, editor configs, gi
 ## Done summary
 # Task Summary: Create configuration examples cookbook
 
-Created a comprehensive configuration examples cookbook at `docs/examples/` with 6 copy-paste TOML configurations for common ContainAI setups:
+Created a comprehensive configuration examples cookbook at `docs/examples/` with 6 copy-paste TOML configurations for common ContainAI setups.
 
+## Examples Created
+
+1. **multi-agent.toml** - Teams using multiple AI agents with separate volumes
+2. **custom-sync.toml** - Adding custom dotfiles via `additional_paths`
+3. **isolated-workspace.toml** - Security-sensitive work with minimal sync
+4. **power-user.toml** - VS Code Remote-SSH with agent/port forwarding
+5. **ci-ephemeral.toml** - CI/CD environments with no persistence
+6. **team-shared.toml** - Repository-checked config for consistent team settings
+
+## Documentation Added
+
+- `docs/examples/README.md` - Index with usage instructions and config discovery explanation
+- Cross-references added from `docs/configuration.md` to examples directory
+
+## Validation
+
+- All 6 TOML files validated with Python tomllib
+- Each example includes inline comments explaining use case and settings
+- No secrets or real credentials in examples
+
+All acceptance criteria met. Commit: 9f756d3
 ## Examples Created
 
 1. **multi-agent.toml** - Teams using multiple AI agents (Claude, Gemini, Codex) with per-workspace volume isolation
@@ -162,6 +183,6 @@ Created a comprehensive configuration examples cookbook at `docs/examples/` with
 - [x] Cross-references from configuration.md to examples
 - [x] No secrets or real credentials in examples
 ## Evidence
-- Commits:
+- Commits: 9f756d3, 2b0f296
 - Tests:
 - PRs:
