@@ -153,7 +153,7 @@ When you ran `cai`, ContainAI:
 1. **Detected isolation mode** - Checked for Sysbox runtime availability
 2. **Created a named container** - Based on your git repo and branch (e.g., `myproject-main`)
 3. **Mounted your workspace** - Your current directory is available at `/workspace` inside the container
-4. **Created a data volume** - `sandbox-agent-data` stores your agent credentials and plugins
+4. **Created a data volume** - `containai-data` stores your agent credentials and plugins
 5. **Started the AI agent** - Claude (or your configured agent) is ready to use
 
 ```mermaid

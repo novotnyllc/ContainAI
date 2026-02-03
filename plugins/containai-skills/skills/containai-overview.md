@@ -30,7 +30,7 @@ Host                          Container
   (workspace mount)              (read-write)
 
 Docker volume: <volume-name>  /mnt/agent-data/
-  (default: sandbox-agent-data)  (volume mount)
+  (default: containai-data)  (volume mount)
 
                               ~/.gitconfig -> /mnt/agent-data/git/gitconfig
                               ~/.claude.json -> /mnt/agent-data/claude/claude.json

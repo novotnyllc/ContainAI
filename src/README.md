@@ -68,7 +68,7 @@ cai
 
 > **Note:** `containai.sh` sources the modular libraries (`lib/*.sh`) to provide all ContainAI functionality.
 
-The data volume (`sandbox-agent-data` by default) is created automatically on first run.
+The data volume (`containai-data` by default) is created automatically on first run.
 
 **New users** (authenticate inside container):
 ```bash
@@ -152,13 +152,13 @@ containai sandbox reset   # Equivalent to 'cai sandbox reset'
 
 | Volume Name | Mount Point | Purpose |
 |-------------|-------------|---------|
-| configurable (default: `sandbox-agent-data`) | `/mnt/agent-data` | Plugins and agent data |
+| configurable (default: `containai-data`) | `/mnt/agent-data` | Plugins and agent data |
 
 The volume name can be configured via:
 1. `--data-volume` flag (highest precedence)
 2. `CONTAINAI_DATA_VOLUME` environment variable
 3. Config file (`[agent].data_volume` or `[workspace."<path>"].data_volume`)
-4. Default: `sandbox-agent-data`
+4. Default: `containai-data`
 
 ## Port Forwarding
 
@@ -226,7 +226,7 @@ cai-stop-all                    # Interactive selection
 cai sandbox reset               # Remove sandbox for current workspace
 
 # Remove the volume
-docker --context containai-docker volume rm sandbox-agent-data
+docker --context containai-docker volume rm containai-data
 
 # Or with a custom volume name
 docker --context containai-docker volume rm <your-volume-name>

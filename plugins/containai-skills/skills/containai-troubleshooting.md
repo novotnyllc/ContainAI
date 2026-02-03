@@ -200,7 +200,7 @@ cai import /path/to/workspace
 
 **Fix:**
 ```bash
-# List all volumes (look for sandbox-agent-data or {repo}-{branch}-{timestamp})
+# List all volumes (look for containai-data or {repo}-{branch}-{timestamp})
 cai docker volume ls
 
 # Export with specific volume
@@ -272,7 +272,7 @@ cai stop --all --remove
 # List volumes first to see what exists:
 cai docker volume ls
 # Remove the default volume:
-cai docker volume rm sandbox-agent-data
+cai docker volume rm containai-data
 # Remove any reset-generated volumes (named {repo}-{branch}-{timestamp}):
 # cai docker volume rm myapp-main-20240115-123456
 

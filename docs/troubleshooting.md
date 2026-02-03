@@ -883,13 +883,13 @@ docker --context containai-docker rm -f myproject-main
 
 **Symptom:**
 ```
-[ERROR] Failed to create volume sandbox-agent-data
+[ERROR] Failed to create volume containai-data
 ```
 
 **Diagnosis:**
 ```bash
 docker --context containai-docker volume ls
-docker --context containai-docker volume inspect sandbox-agent-data
+docker --context containai-docker volume inspect containai-data
 ```
 
 **Solution:**
@@ -898,7 +898,7 @@ docker --context containai-docker volume inspect sandbox-agent-data
 2. Check disk space: `docker --context containai-docker system df`
 3. Try creating manually:
    ```bash
-   docker --context containai-docker volume create sandbox-agent-data
+   docker --context containai-docker volume create containai-data
    ```
 
 ---
@@ -1085,8 +1085,8 @@ or agent cannot access GitHub, APIs, or other services that previously worked.
 **Diagnosis:**
 ```bash
 # Check volume contents for credential files
-docker --context containai-docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/claude/
-docker --context containai-docker run --rm -v sandbox-agent-data:/data alpine ls -la /data/config/gh/
+docker --context containai-docker run --rm -v containai-data:/data alpine ls -la /data/claude/
+docker --context containai-docker run --rm -v containai-data:/data alpine ls -la /data/config/gh/
 ```
 
 **Solution:**
@@ -1109,7 +1109,7 @@ cai import
 docker --context containai-docker pull eeacms/rsync
 
 # Check volume status
-docker --context containai-docker volume inspect sandbox-agent-data
+docker --context containai-docker volume inspect containai-data
 ```
 
 **Solution:**

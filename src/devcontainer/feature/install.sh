@@ -12,7 +12,7 @@
 set -euo pipefail
 
 # Feature options (passed as uppercase env vars by devcontainer)
-DATA_VOLUME="${DATAVOLUME:-sandbox-agent-data}"
+DATA_VOLUME="${DATAVOLUME:-containai-data}"
 ENABLE_CREDENTIALS="${ENABLECREDENTIALS:-false}"
 ENABLE_SSH="${ENABLESSH:-true}"
 INSTALL_DOCKER="${INSTALLDOCKER:-true}"

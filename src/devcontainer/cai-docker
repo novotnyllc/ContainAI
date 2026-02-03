@@ -23,7 +23,7 @@ readonly _CAI_PORT_DIR="$_CAI_CONFIG_DIR/ports"
 readonly _CAI_LOCK_FILE="$_CAI_CONFIG_DIR/.ssh-port.lock"
 readonly _CAI_SSH_PORT_RANGE_START=2400
 readonly _CAI_SSH_PORT_RANGE_END=2499
-readonly _CAI_DEFAULT_DATA_VOLUME="sandbox-agent-data"
+readonly _CAI_DEFAULT_DATA_VOLUME="containai-data"
 # ContainAI feature patterns to match in devcontainer.json
 readonly _CAI_FEATURE_PATTERNS=(
     "ghcr.io/novotnyllc/containai"
@@ -217,7 +217,7 @@ except Exception:
         fi
     fi
 
-    # Default: sandbox-agent-data (matches existing cai volume naming)
+    # Default: containai-data (matches existing cai volume naming)
     printf '%s' "$_CAI_DEFAULT_DATA_VOLUME"
 }
 

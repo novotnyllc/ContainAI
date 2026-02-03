@@ -7,7 +7,7 @@
     "options": {
         "dataVolume": {
             "type": "string",
-            "default": "sandbox-agent-data",
+            "default": "containai-data",
             "description": "Name of cai data volume to mount"
         },
         "enableCredentials": {

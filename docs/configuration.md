@@ -80,7 +80,7 @@ flowchart TB
     ENV["2. Environment Variables<br/>CONTAINAI_DATA_VOLUME"]
     Workspace["3. Workspace Config Section<br/>[workspace.&quot;path&quot;]"]
     Global["4. Global Config Section<br/>[agent], [credentials]"]
-    Default["5. Built-in Defaults<br/>sandbox-agent-data, claude"]
+    Default["5. Built-in Defaults<br/>containai-data, claude"]
 
     CLI -->|overrides| ENV
     ENV -->|overrides| Workspace
@@ -98,7 +98,7 @@ flowchart TB
 2. **Environment variables** - `CONTAINAI_DATA_VOLUME`, `CONTAINAI_AGENT`, etc.
 3. **Workspace config section** - `[workspace."<path>"]` matching current workspace
 4. **Global config section** - `[agent]`, `[credentials]`, etc.
-5. **Built-in defaults** - `sandbox-agent-data`, `claude`, `none`
+5. **Built-in defaults** - `containai-data`, `claude`, `none`
 
 When a CLI flag or environment variable is provided, config file parsing is **skipped entirely** for that value.
 
@@ -111,12 +111,12 @@ Global agent configuration.
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `default` | string | `"claude"` | Default agent to use (`claude`, `gemini`, etc.) |
-| `data_volume` | string | `"sandbox-agent-data"` | Docker volume for agent data and credentials |
+| `data_volume` | string | `"containai-data"` | Docker volume for agent data and credentials |
 
 ```toml
 [agent]
 default = "claude"
-data_volume = "sandbox-agent-data"
+data_volume = "containai-data"
 ```
 
 **Volume name rules:**

@@ -623,7 +623,7 @@ flowchart LR
     end
 
     subgraph Volumes["Docker Volumes"]
-        DataVol["Data Volume<br/>(sandbox-agent-data)"]
+        DataVol["Data Volume<br/>(containai-data)"]
     end
 
     subgraph Container["System Container"]

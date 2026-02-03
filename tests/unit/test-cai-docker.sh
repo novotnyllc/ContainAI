@@ -253,7 +253,7 @@ EOF
     local result
     result=$(_cai_get_data_volume "$temp_file")
     rm -f "$temp_file"
-    [[ "$result" == "sandbox-agent-data" ]]
+    [[ "$result" == "containai-data" ]]
 }
 
 test_get_data_volume_rejects_path() {
@@ -273,7 +273,7 @@ EOF
     result=$(_cai_get_data_volume "$temp_file" 2>/dev/null)
     rm -f "$temp_file"
     # Should return default, not the path
-    [[ "$result" == "sandbox-agent-data" ]]
+    [[ "$result" == "containai-data" ]]
 }
 
 test_get_data_volume_rejects_bind_mount() {
@@ -293,7 +293,7 @@ EOF
     result=$(_cai_get_data_volume "$temp_file" 2>/dev/null)
     rm -f "$temp_file"
     # Should return default, not the bind mount
-    [[ "$result" == "sandbox-agent-data" ]]
+    [[ "$result" == "containai-data" ]]
 }
 
 test_get_data_volume_rejects_home() {
@@ -312,7 +312,7 @@ EOF
     local result
     result=$(_cai_get_data_volume "$temp_file" 2>/dev/null)
     rm -f "$temp_file"
-    [[ "$result" == "sandbox-agent-data" ]]
+    [[ "$result" == "containai-data" ]]
 }
 
 # ──────────────────────────────────────────────────────────────────────

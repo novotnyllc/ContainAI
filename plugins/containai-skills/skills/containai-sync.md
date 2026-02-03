@@ -275,7 +275,7 @@ Volume resolution precedence:
 3. Workspace state (from previous `--reset` or config)
 4. Repo-local config (`.containai/config.toml`)
 5. User global config
-6. Default: `sandbox-agent-data`
+6. Default: `containai-data`
 
 Use `--reset` to generate a new unique volume name for the workspace.
 Multiple workspaces share the default volume unless configured otherwise.

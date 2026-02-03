@@ -57,7 +57,7 @@ fi
 _CAI_CONFIG_LOADED=1
 
 # Default volume name
-: "${_CONTAINAI_DEFAULT_VOLUME:=sandbox-agent-data}"
+: "${_CONTAINAI_DEFAULT_VOLUME:=containai-data}"
 
 # Global variables for parsed config (set by _containai_parse_config)
 # Only initialize once (guarded above)
@@ -610,7 +610,7 @@ for item in default_excludes + ws_excludes:
 #   3. User workspace state (~/.config/containai/config.toml [workspace."path"])
 #   4. Repo-local config (.containai/config.toml in workspace)
 #   5. User global config (~/.config/containai/config.toml top-level)
-#   6. Default: sandbox-agent-data
+#   6. Default: containai-data
 _containai_resolve_volume() {
     local cli_volume="${1:-}"
     local workspace="${2:-$PWD}"
@@ -1762,7 +1762,7 @@ if val is not None:
 # - Max 255 chars (Docker volume name limit)
 #
 # This function is used by --reset to generate a NEW unique volume name.
-# It NEVER falls back to the default sandbox-agent-data volume.
+# It NEVER falls back to the default containai-data volume.
 _containai_generate_volume_name() {
     local workspace="$1"
     local repo_name branch_name timestamp sanitized_repo sanitized_branch volume_name
