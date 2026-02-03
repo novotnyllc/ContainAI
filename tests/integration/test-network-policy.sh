@@ -392,6 +392,16 @@ test_cleanup_function() {
 # ==============================================================================
 # Test 9: Docker+iptables integration (requires Docker and iptables permissions)
 # ==============================================================================
+# This test verifies actual network enforcement by:
+# 1. Starting a container with bind-utils (for nslookup/dig)
+# 2. Applying a network policy that allows only 1.1.1.1 (Cloudflare DNS)
+# 3. Verifying DNS query to 1.1.1.1 succeeds (allowed)
+# 4. Verifying DNS query to 8.8.8.8 times out (blocked)
+# 5. Verifying rule cleanup removes iptables entries
+#
+# DNS queries are deterministic: both 1.1.1.1 and 8.8.8.8 reliably respond to DNS.
+# If 8.8.8.8 times out while 1.1.1.1 works, iptables blocking is proven.
+# ==============================================================================
 test_docker_iptables_integration() {
     section "Test 9: Docker+iptables integration"
 
@@ -406,8 +416,8 @@ test_docker_iptables_integration() {
     setup_test_dir
     TEST_CONTAINER_NAME="cai-netpol-test-$$"
 
-    # Create a network.conf that allows only a known public IP (Cloudflare DNS)
-    # and blocks everything else
+    # Create a network.conf that allows only Cloudflare DNS (1.1.1.1)
+    # and blocks everything else including Google DNS (8.8.8.8)
     cat > "$TEST_TMPDIR/.containai/network.conf" << 'EOF'
 [egress]
 # Allow only Cloudflare DNS (1.1.1.1)
@@ -417,29 +427,46 @@ EOF
 
     info "Created network.conf with default_deny=true, allowing only 1.1.1.1"
 
-    # Start a test container (alpine is small and has wget)
+    # Start a test container with bind-tools for DNS testing
+    # Alpine's bind-tools provides nslookup which is more reliable than wget for this test
     info "Starting test container: $TEST_CONTAINER_NAME"
-    if ! docker run -d --name "$TEST_CONTAINER_NAME" alpine:3.20 sleep 300 >/dev/null 2>&1; then
+    if ! docker run -d --name "$TEST_CONTAINER_NAME" alpine:3.20 sh -c "apk add --no-cache bind-tools >/dev/null 2>&1; sleep 300" >/dev/null 2>&1; then
         fail "Could not start test container"
         return 1
     fi
 
-    # Wait for container to be running
-    local retries=10
+    # Wait for container to be running and packages installed
+    local retries=30
     while [[ $retries -gt 0 ]]; do
         local state
         state=$(docker inspect --format '{{.State.Running}}' "$TEST_CONTAINER_NAME" 2>/dev/null) || state="false"
-        [[ "$state" == "true" ]] && break
-        sleep 0.5
+        if [[ "$state" == "true" ]]; then
+            # Check if nslookup is available (package installed)
+            if docker exec "$TEST_CONTAINER_NAME" command -v nslookup >/dev/null 2>&1; then
+                break
+            fi
+        fi
+        sleep 1
         retries=$((retries - 1))
     done
 
     if [[ $retries -eq 0 ]]; then
-        fail "Test container did not start in time"
+        fail "Test container did not start or bind-tools not installed in time"
         return 1
     fi
 
-    pass "Test container started"
+    pass "Test container started with bind-tools"
+
+    # First, verify DNS works WITHOUT policy (baseline)
+    info "Baseline check: verifying DNS to 8.8.8.8 works before policy..."
+    if docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=3 example.com 8.8.8.8 >/dev/null 2>&1; then
+        pass "Baseline: DNS to 8.8.8.8 works (no policy yet)"
+    else
+        warn "Baseline DNS to 8.8.8.8 failed - network may be restricted, skipping enforcement test"
+        docker rm -f "$TEST_CONTAINER_NAME" >/dev/null 2>&1 || true
+        TEST_CONTAINER_NAME=""
+        return 0
+    fi
 
     # Apply network policy
     info "Applying network policy to container"
@@ -456,33 +483,41 @@ EOF
         pass "iptables rules created with container comment"
     else
         fail "iptables rules not found for container"
+        info "Current DOCKER-USER chain:"
         _cai_iptables -S DOCKER-USER 2>/dev/null || true
         return 1
     fi
 
-    # Test 1: Allowed destination (1.1.1.1) should work
-    info "Testing allowed destination (1.1.1.1)..."
+    # Test 1: Allowed destination (1.1.1.1) should work - use DNS query
+    info "Testing allowed destination: DNS query to 1.1.1.1..."
     local allowed_result
-    if allowed_result=$(docker exec "$TEST_CONTAINER_NAME" wget -q -O /dev/null -T 5 http://1.1.1.1 2>&1); then
-        pass "Connection to allowed IP (1.1.1.1) succeeded"
+    if allowed_result=$(docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=5 example.com 1.1.1.1 2>&1); then
+        pass "DNS query to allowed IP (1.1.1.1) succeeded"
     else
-        # wget returns non-zero on HTTP errors, but TCP connect working is the key
-        # Check if it was a connection refused vs timeout
-        if [[ "$allowed_result" == *"Connection refused"* ]] || [[ "$allowed_result" == *"timed out"* ]]; then
-            fail "Connection to allowed IP (1.1.1.1) blocked: $allowed_result"
-        else
-            # HTTP error is fine - TCP connected
-            pass "Connection to allowed IP (1.1.1.1) succeeded (HTTP error expected)"
-        fi
+        fail "DNS query to allowed IP (1.1.1.1) failed: $allowed_result"
+        info "This indicates iptables rules may not be allowing 1.1.1.1"
     fi
 
-    # Test 2: Non-allowed destination (8.8.8.8) should be blocked
-    info "Testing blocked destination (8.8.8.8)..."
+    # Test 2: Blocked destination (8.8.8.8) should timeout - use DNS query
+    # nslookup with short timeout should fail because packets are dropped
+    info "Testing blocked destination: DNS query to 8.8.8.8 (should timeout)..."
     local blocked_result
-    if docker exec "$TEST_CONTAINER_NAME" wget -q -O /dev/null -T 5 http://8.8.8.8 2>&1; then
-        fail "Connection to blocked IP (8.8.8.8) should have failed"
+    local blocked_rc
+    blocked_result=$(docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=3 example.com 8.8.8.8 2>&1) && blocked_rc=0 || blocked_rc=$?
+
+    if [[ $blocked_rc -ne 0 ]]; then
+        # Check that it's a timeout/connection issue, not just DNS resolution failure
+        if [[ "$blocked_result" == *"timed out"* ]] || [[ "$blocked_result" == *"connection timed out"* ]] || [[ "$blocked_result" == *"no servers could be reached"* ]]; then
+            pass "DNS query to blocked IP (8.8.8.8) correctly timed out"
+        else
+            # Any failure is acceptable - the point is it didn't succeed
+            pass "DNS query to blocked IP (8.8.8.8) failed (blocked): ${blocked_result:0:100}"
+        fi
     else
-        pass "Connection to blocked IP (8.8.8.8) correctly denied"
+        fail "DNS query to blocked IP (8.8.8.8) succeeded - iptables blocking is NOT working!"
+        info "Result: $blocked_result"
+        info "Current DOCKER-USER chain:"
+        _cai_iptables -S DOCKER-USER 2>/dev/null || true
     fi
 
     # Test 3: Verify rule cleanup works
@@ -493,6 +528,14 @@ EOF
         fail "iptables rules not cleaned up"
     else
         pass "iptables rules cleaned up successfully"
+    fi
+
+    # Test 4: After cleanup, blocked destination should work again
+    info "Verifying DNS to 8.8.8.8 works after cleanup..."
+    if docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=5 example.com 8.8.8.8 >/dev/null 2>&1; then
+        pass "DNS to 8.8.8.8 works after rule cleanup (rules properly removed)"
+    else
+        warn "DNS to 8.8.8.8 still fails after cleanup (may be network issue, not iptables)"
     fi
 
     # Stop and remove container
