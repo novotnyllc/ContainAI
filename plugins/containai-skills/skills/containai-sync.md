@@ -72,8 +72,8 @@ Default sync items (from sync-manifest.toml):
 
 **Secrets are synced by default.** Use `--no-secrets` to skip them.
 
-NOT synced when importing from home profile:
-- SSH keys (use agent forwarding instead)
+NOT synced by default:
+- SSH keys (use agent forwarding instead; add via `[import].additional_paths` if needed)
 - `~/.claude/.credentials.json`, `~/.codex/auth.json` (skipped from home profile;
   use `--from` or `[import].additional_paths` to include)
 

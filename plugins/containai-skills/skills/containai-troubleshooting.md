@@ -200,8 +200,8 @@ cai import /path/to/workspace
 
 **Fix:**
 ```bash
-# Check volume exists (use cai docker for correct context)
-cai docker volume ls | grep containai
+# List all volumes (look for sandbox-agent-data or {repo}-{branch}-{timestamp})
+cai docker volume ls
 
 # Export with specific volume
 cai export --data-volume <correct-name>
@@ -269,10 +269,12 @@ When all else fails:
 cai stop --all --remove
 
 # 2. Clean up volumes (WARNING: loses data!)
-# Default volume:
+# List volumes first to see what exists:
+cai docker volume ls
+# Remove the default volume:
 cai docker volume rm sandbox-agent-data
-# Reset-generated volumes (check with cai docker volume ls):
-cai docker volume ls --filter name=containai | xargs cai docker volume rm
+# Remove any reset-generated volumes (named {repo}-{branch}-{timestamp}):
+# cai docker volume rm myapp-main-20240115-123456
 
 # 3. Re-run setup
 cai setup --force
