@@ -48,7 +48,9 @@ RUN chmod +x /opt/containai/startup/check-gpu.sh
 
 # Systemd service for GPU check
 # IMPORTANT: Use symlink pattern, NOT `systemctl enable` which fails in docker build
-COPY --chown=root:root <<'EOF' /etc/systemd/system/check-gpu.service
+# NOTE: Must switch to USER root for /etc/systemd/system/ modifications
+USER root
+COPY <<'EOF' /etc/systemd/system/check-gpu.service
 [Unit]
 Description=Check GPU availability
 After=containai-init.service
@@ -65,3 +67,6 @@ EOF
 # Enable the service using symlink pattern (NOT systemctl enable)
 RUN ln -sf /etc/systemd/system/check-gpu.service \
     /etc/systemd/system/multi-user.target.wants/check-gpu.service
+
+# Final USER must be agent (see warning at top of file)
+USER agent
