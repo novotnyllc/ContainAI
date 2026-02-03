@@ -8,7 +8,7 @@
 # Usage: ./scripts/package-release.sh --arch <arch> --version <version> [--output-dir <dir>]
 #
 # Arguments:
-#   --arch        Architecture (linux-x64 or linux-arm64)
+#   --arch        Architecture (linux-x64, linux-arm64, macos-x64, macos-arm64)
 #   --version     Version string (e.g., 0.2.0-dev.5)
 #   --output-dir  Output directory (default: ./artifacts)
 #
@@ -51,7 +51,7 @@ while [[ $# -gt 0 ]]; do
         --help|-h)
             printf 'Usage: %s --arch <arch> --version <version> [--output-dir <dir>]\n' "$0"
             printf '\nArguments:\n'
-            printf '  --arch        Architecture (linux-x64 or linux-arm64)\n'
+            printf '  --arch        Architecture (linux-x64, linux-arm64, macos-x64, macos-arm64)\n'
             printf '  --version     Version string (e.g., 0.2.0-dev.5)\n'
             printf '  --output-dir  Output directory (default: ./artifacts)\n'
             exit 0
@@ -76,11 +76,11 @@ fi
 
 # Validate architecture
 case "$ARCH" in
-    linux-x64|linux-arm64)
+    linux-x64|linux-arm64|macos-x64|macos-arm64)
         ;;
     *)
         printf 'ERROR: Unsupported architecture: %s\n' "$ARCH" >&2
-        printf '  Supported: linux-x64, linux-arm64\n' >&2
+        printf '  Supported: linux-x64, linux-arm64, macos-x64, macos-arm64\n' >&2
         exit 1
         ;;
 esac
@@ -96,6 +96,12 @@ case "$ARCH" in
         ;;
     linux-arm64)
         DOTNET_RID="linux-arm64"
+        ;;
+    macos-x64)
+        DOTNET_RID="osx-x64"
+        ;;
+    macos-arm64)
+        DOTNET_RID="osx-arm64"
         ;;
 esac
 

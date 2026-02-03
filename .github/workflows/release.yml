@@ -17,7 +17,7 @@ jobs:
   # ============================================================================
   build-release-tarballs:
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -31,6 +31,14 @@ jobs:
             runner: ubuntu-24.04-arm
             dotnet_rid: linux-arm64
             tarball_arch: linux-arm64
+          - arch: macos-x64
+            runner: macos-15-intel
+            dotnet_rid: osx-x64
+            tarball_arch: macos-x64
+          - arch: macos-arm64
+            runner: macos-26
+            dotnet_rid: osx-arm64
+            tarball_arch: macos-arm64
 
     steps:
       - name: Checkout repository
@@ -162,6 +170,18 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: release-tarball-arm64
+          path: ./release-assets
+
+      - name: Download macOS x64 tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-macos-x64
+          path: ./release-assets
+
+      - name: Download macOS arm64 tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: release-tarball-macos-arm64
           path: ./release-assets
 
       - name: Prepare install.sh for release

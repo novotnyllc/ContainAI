@@ -382,6 +382,77 @@ _cai_show_seccomp_warning() {
 # Dependency Checks
 # ==============================================================================
 
+# ==============================================================================
+# Dependency Install Plan (prompt once)
+# ==============================================================================
+
+_CAI_INSTALL_PLAN_ITEMS=()
+_CAI_INSTALL_PLAN_SHOWN="false"
+
+_cai_install_plan_reset() {
+    _CAI_INSTALL_PLAN_ITEMS=()
+    _CAI_INSTALL_PLAN_SHOWN="false"
+}
+
+_cai_install_plan_add() {
+    local item="$1"
+    local existing
+    for existing in "${_CAI_INSTALL_PLAN_ITEMS[@]:-}"; do
+        if [[ "$existing" == "$item" ]]; then
+            return 0
+        fi
+    done
+    _CAI_INSTALL_PLAN_ITEMS+=("$item")
+}
+
+_cai_install_plan_add_list() {
+    local label="$1"
+    shift
+    if (($# == 0)); then
+        return 0
+    fi
+    local joined
+    local IFS=", "
+    joined="$*"
+    _cai_install_plan_add "${label}: ${joined}"
+}
+
+_cai_install_plan_confirm() {
+    local dry_run="${1:-false}"
+
+    if [[ "$_CAI_INSTALL_PLAN_SHOWN" == "true" ]]; then
+        return 0
+    fi
+
+    if ((${#_CAI_INSTALL_PLAN_ITEMS[@]} == 0)); then
+        _CAI_INSTALL_PLAN_SHOWN="true"
+        return 0
+    fi
+
+    _cai_spacing
+    _cai_info "ContainAI will install the following dependencies:"
+    local item
+    for item in "${_CAI_INSTALL_PLAN_ITEMS[@]}"; do
+        _cai_info "  - $item"
+    done
+    _cai_spacing
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would install dependencies (dry-run)"
+        _CAI_INSTALL_PLAN_SHOWN="true"
+        return 0
+    fi
+
+    if _cai_prompt_confirm "Proceed with installing these dependencies?" "true"; then
+        _CAI_INSTALL_PLAN_SHOWN="true"
+        return 0
+    fi
+
+    _cai_error "Dependency installation canceled."
+    _cai_error "Set CAI_YES=1 to auto-confirm in non-interactive mode."
+    return 1
+}
+
 # Check required dependencies for setup (informational only)
 # Arguments: none
 # Returns: 0 always (just logs what's missing)
@@ -411,7 +482,44 @@ _cai_check_setup_deps_info() {
     return 0
 }
 
-# Ensure jq and ripgrep are available on macOS hosts via Homebrew
+# Ensure Homebrew is available on macOS (auto-install if missing)
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+_cai_macos_ensure_homebrew() {
+    local dry_run="${1:-false}"
+
+    if command -v brew >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun " Would install Homebrew"
+        return 0
+    fi
+
+    _cai_step "Installing Homebrew"
+    if ! NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+        _cai_error "Failed to install Homebrew"
+        return 1
+    fi
+
+    # Ensure brew is on PATH for this session
+    if [[ -x "/opt/homebrew/bin/brew" ]]; then
+        export PATH="/opt/homebrew/bin:$PATH"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        export PATH="/usr/local/bin:$PATH"
+    fi
+
+    if ! command -v brew >/dev/null 2>&1; then
+        _cai_error "Homebrew installation completed but brew is not on PATH"
+        return 1
+    fi
+
+    _cai_ok "Homebrew installed"
+    return 0
+}
+
+# Ensure required host tools are available on macOS via Homebrew
 # Arguments: $1 = dry_run flag ("true" to simulate)
 # Returns: 0=success, 1=failure
 _cai_macos_ensure_host_tools() {
@@ -424,19 +532,19 @@ _cai_macos_ensure_host_tools() {
     if ! command -v rg >/dev/null 2>&1; then
         missing_pkgs+=(ripgrep)
     fi
+    if ! command -v docker >/dev/null 2>&1; then
+        missing_pkgs+=(docker)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        missing_pkgs+=(wget)
+    fi
 
     if ((${#missing_pkgs[@]} == 0)); then
-        _cai_ok "Required host tools available (jq, rg)"
+        _cai_ok "Required host tools available (jq, rg, docker, wget)"
         return 0
     fi
 
-    if ! command -v brew >/dev/null 2>&1; then
-        if [[ "$dry_run" == "true" ]]; then
-            _cai_dryrun " Homebrew not found; cannot install: ${missing_pkgs[*]}"
-            return 0
-        fi
-        _cai_error "Homebrew is required to install missing tools: ${missing_pkgs[*]}"
-        _cai_error "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    if ! _cai_macos_ensure_homebrew "$dry_run"; then
         return 1
     fi
 
@@ -452,6 +560,111 @@ _cai_macos_ensure_host_tools() {
     fi
 
     _cai_ok "Host tools installed: ${missing_pkgs[*]}"
+    return 0
+}
+
+# Prepare dependency install plan for macOS
+# Arguments: $1 = dry_run flag ("true" to simulate)
+# Returns: 0=success, 1=failure
+_cai_install_plan_prepare_macos() {
+    local dry_run="${1:-false}"
+    local -a brew_missing=()
+
+    if ! command -v brew >/dev/null 2>&1; then
+        _cai_install_plan_add "Homebrew"
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        brew_missing+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        brew_missing+=(ripgrep)
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        brew_missing+=(docker)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        brew_missing+=(wget)
+    fi
+    if ! command -v limactl >/dev/null 2>&1; then
+        brew_missing+=(lima)
+    fi
+
+    _cai_install_plan_add_list "Homebrew packages" "${brew_missing[@]}"
+
+    if command -v limactl >/dev/null 2>&1; then
+        if ! _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME" 2>/dev/null; then
+            _cai_install_plan_add "Lima VM provisioning (Docker Engine + Sysbox inside VM)"
+        fi
+    else
+        _cai_install_plan_add "Lima VM provisioning (Docker Engine + Sysbox inside VM)"
+    fi
+
+    return 0
+}
+
+# Prepare dependency install plan for Linux/WSL2
+# Arguments: $1 = dry_run flag ("true" to simulate)
+#            $2 = include_docker_bundle ("true" to include ContainAI dockerd bundle)
+# Returns: 0=success, 1=failure
+_cai_install_plan_prepare_linux() {
+    local dry_run="${1:-false}"
+    local include_bundle="${2:-true}"
+    local -a apt_missing=()
+
+    if ! _cai_linux_detect_distro; then
+        _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
+        _cai_error "Supported distributions: Ubuntu (LTS), Debian (stable)"
+        return 1
+    fi
+
+    if ! command -v jq >/dev/null 2>&1; then
+        apt_missing+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        apt_missing+=(ripgrep)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        apt_missing+=(wget)
+    fi
+    if ! command -v tar >/dev/null 2>&1; then
+        apt_missing+=(tar)
+    fi
+
+    _cai_install_plan_add_list "APT packages" "${apt_missing[@]}"
+
+    # Sysbox (only if missing or update needed)
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+        x86_64) arch="amd64" ;;
+        aarch64) arch="arm64" ;;
+        *) arch="unknown" ;;
+    esac
+
+    local sysbox_needed="true"
+    if command -v sysbox-runc >/dev/null 2>&1 && [[ "$arch" != "unknown" ]]; then
+        if command -v jq >/dev/null 2>&1 && command -v wget >/dev/null 2>&1; then
+            _cai_sysbox_needs_update "$arch"
+            case $? in
+                1) sysbox_needed="false" ;;
+                *) sysbox_needed="true" ;;
+            esac
+        fi
+    fi
+    if [[ "$sysbox_needed" == "true" ]]; then
+        if [[ "$arch" == "unknown" ]]; then
+            _cai_install_plan_add "Sysbox (ContainAI build)"
+        else
+            _cai_install_plan_add "Sysbox (ContainAI build for $arch)"
+        fi
+    fi
+
+    if [[ "$include_bundle" == "true" ]]; then
+        if ! _cai_dockerd_bundle_installed; then
+            _cai_install_plan_add "ContainAI-managed Docker bundle (dockerd, docker CLI, containerd, runc)"
+        fi
+    fi
+
     return 0
 }
 
@@ -846,8 +1059,6 @@ _cai_install_sysbox_wsl2() {
         *)
             _cai_error "Sysbox auto-install only supports Ubuntu/Debian"
             _cai_error "  Detected distro: ${distro:-unknown}"
-            _cai_error "  For other distros, install Sysbox manually:"
-            _cai_error "  https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
             return 1
             ;;
     esac
@@ -969,16 +1180,29 @@ _cai_install_sysbox_wsl2() {
 
     _cai_step "Installing Sysbox dependencies"
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would run: apt-get update"
-        _cai_dryrun " Would run: apt-get install -y jq ripgrep wget"
+        _cai_dryrun " Would ensure jq, ripgrep, and wget are installed"
     else
-        if ! sudo apt-get update; then
-            _cai_error "Failed to run apt-get update"
-            return 1
+        local -a deps_missing=()
+        if ! command -v jq >/dev/null 2>&1; then
+            deps_missing+=(jq)
         fi
-        if ! sudo apt-get install -y jq ripgrep wget; then
-            _cai_error "Failed to install dependencies (jq, ripgrep, wget)"
-            return 1
+        if ! command -v rg >/dev/null 2>&1; then
+            deps_missing+=(ripgrep)
+        fi
+        if ! command -v wget >/dev/null 2>&1; then
+            deps_missing+=(wget)
+        fi
+        if ((${#deps_missing[@]} > 0)); then
+            if ! sudo apt-get update; then
+                _cai_error "Failed to run apt-get update"
+                return 1
+            fi
+            if ! sudo apt-get install -y "${deps_missing[@]}"; then
+                _cai_error "Failed to install dependencies: ${deps_missing[*]}"
+                return 1
+            fi
+        else
+            _cai_info "Sysbox dependencies already installed"
         fi
     fi
 
@@ -1090,7 +1314,6 @@ _cai_install_dockerd_bundle() {
             # shellcheck disable=SC2086
             if ! sudo apt-get install -y$missing_tools; then
                 _cai_error "Failed to install required tools:$missing_tools"
-                _cai_error "  Install manually: sudo apt-get install$missing_tools"
                 return 1
             fi
         fi
@@ -1268,6 +1491,23 @@ _cai_install_dockerd_bundle() {
 
     _cai_ok "Docker bundle $latest_version installed"
     return 0
+}
+
+# Ensure docker CLI is available in PATH (Linux/WSL2)
+# Uses ContainAI-managed bundle if system docker is missing.
+# Returns: 0=available, 1=not available
+_cai_use_containai_docker_cli() {
+    if command -v docker >/dev/null 2>&1; then
+        return 0
+    fi
+
+    if [[ -x "$_CAI_DOCKERD_BIN_DIR/docker" ]]; then
+        export PATH="$_CAI_DOCKERD_BIN_DIR:$PATH"
+        return 0
+    fi
+
+    _cai_error "Docker CLI not available after bundle installation"
+    return 1
 }
 
 # ==============================================================================
@@ -2615,6 +2855,11 @@ _cai_setup_wsl2() {
     if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
         return 1
     fi
+    if [[ "$dry_run" != "true" ]]; then
+        if ! _cai_use_containai_docker_cli; then
+            return 1
+        fi
+    fi
 
     # Step 6: Create isolated Docker directories
     if ! _cai_create_isolated_docker_dirs "$dry_run"; then
@@ -2838,10 +3083,7 @@ _cai_lima_install() {
     fi
 
     _cai_step "Installing Lima via Homebrew"
-
-    if ! command -v brew >/dev/null 2>&1; then
-        _cai_error "Homebrew not found. Please install Homebrew first:"
-        _cai_error "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+    if ! _cai_macos_ensure_homebrew "$dry_run"; then
         return 1
     fi
 
@@ -3305,7 +3547,7 @@ _cai_spacing
         _cai_warn "Legacy path cleanup had issues - continuing anyway"
     fi
 
-    # Step 1: Ensure required host tools (jq, rg)
+    # Step 1: Ensure required host tools (jq, rg, docker)
     _cai_step "Ensuring required host tools are installed"
     if ! _cai_macos_ensure_host_tools "$dry_run"; then
         return 1
@@ -3446,8 +3688,6 @@ _cai_install_sysbox_linux() {
     if ! _cai_linux_detect_distro; then
         _cai_error "Sysbox auto-install only supports Ubuntu/Debian on native Linux"
         _cai_error "  Detected distro: ${_CAI_LINUX_DISTRO:-unknown}"
-        _cai_error "  For other distros, install Sysbox manually:"
-        _cai_error "  https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
         return 1
     fi
 
@@ -3620,16 +3860,28 @@ _cai_install_sysbox_linux() {
     fi
 
     _cai_step "Installing Sysbox dependencies"
-    if ! command -v jq >/dev/null 2>&1 || ! command -v rg >/dev/null 2>&1 || ! command -v wget >/dev/null 2>&1; then
-        _cai_info "Installing missing dependencies: jq ripgrep wget"
+    local -a deps_missing=()
+    if ! command -v jq >/dev/null 2>&1; then
+        deps_missing+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        deps_missing+=(ripgrep)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        deps_missing+=(wget)
+    fi
+    if ((${#deps_missing[@]} > 0)); then
+        _cai_info "Installing missing dependencies: ${deps_missing[*]}"
         if ! sudo apt-get update; then
             _cai_error "Failed to run apt-get update"
             return 1
         fi
-        if ! sudo apt-get install -y jq ripgrep wget; then
-            _cai_error "Failed to install dependencies (jq, ripgrep, wget)"
+        if ! sudo apt-get install -y "${deps_missing[@]}"; then
+            _cai_error "Failed to install dependencies: ${deps_missing[*]}"
             return 1
         fi
+    else
+        _cai_info "Sysbox dependencies already installed"
     fi
 
     if [[ "$verbose" == "true" ]]; then
@@ -3813,49 +4065,20 @@ _cai_setup_linux() {
         return 1
     fi
 
-    # Detect distribution FIRST - if unsupported, show manual instructions
-    # regardless of Docker status (per acceptance criteria: "handle unsupported
-    # distributions gracefully with clear message")
+    # Detect distribution FIRST - if unsupported, exit
     if ! _cai_linux_detect_distro; then
-        # Distribution not supported for auto-install
         _cai_error "Auto-install not supported for distribution: ${_CAI_LINUX_DISTRO:-unknown}"
-_cai_spacing
-        _cai_info "Supported distributions for auto-install:"
-        _cai_info "  - Ubuntu (LTS)"
-        _cai_info "  - Debian (stable)"
-_cai_spacing
-        _cai_info "For other distributions, install Sysbox manually:"
-        _cai_info "  Fedora/RHEL: Build from source"
-        _cai_info "  Arch Linux: AUR package (sysbox-ce-bin)"
-        _cai_info ""
-        _cai_info "Manual installation steps:"
-        _cai_info "  1. Install Sysbox: https://github.com/nestybox/sysbox/blob/master/docs/user-guide/install-package.md"
-        _cai_info "  2. Download Docker static binaries from https://download.docker.com/linux/static/stable/"
-        _cai_info "     Extract to /opt/containai/docker/<version>/ and create symlinks in /opt/containai/bin/"
-        _cai_info "  3. Create isolated config: /etc/containai/docker/daemon.json"
-        _cai_info "  4. Create systemd unit: /etc/systemd/system/containai-docker.service"
-        _cai_info "     ExecStart=/opt/containai/bin/dockerd --config-file=/etc/containai/docker/daemon.json"
-        _cai_info "     Environment=PATH=/opt/containai/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        _cai_info "  5. Start service: sudo systemctl enable --now containai-docker"
-        _cai_info "  6. Create context: docker context create containai-docker --docker host=unix://$_CAI_CONTAINAI_DOCKER_SOCKET"
+        _cai_error "Supported distributions: Ubuntu (LTS), Debian (stable)"
         return 1
     fi
 
-    # Preflight: Check Docker CLI is available
-    # (Only run after distro detection succeeds to ensure unsupported distros get
-    # manual instructions regardless of Docker status)
-    # We need docker CLI for context creation; dockerd comes from our bundle
-    # In dry-run mode, degrade to warnings so users can see planned actions
+    # Preflight: Docker CLI (informational only)
     _cai_step "Preflight: Checking Docker CLI"
     if ! command -v docker >/dev/null 2>&1; then
         if [[ "$dry_run" == "true" ]]; then
-            _cai_dryrun " Docker CLI not found - would be required for actual setup"
-            _cai_warn "  Install Docker Engine first: https://docs.docker.com/engine/install/"
+            _cai_dryrun " Docker CLI not found - would be installed via ContainAI bundle"
         else
-            _cai_error "Docker CLI is not installed"
-            _cai_error "  Install Docker Engine first:"
-            _cai_error "  https://docs.docker.com/engine/install/"
-            return 1
+            _cai_info "Docker CLI not found; ContainAI will install it via the bundle"
         fi
     else
         _cai_ok "Docker CLI available"
@@ -3864,9 +4087,9 @@ _cai_spacing
     # Note: We no longer require system dockerd - the bundle provides it
     # The bundle installs dockerd to /opt/containai/bin/dockerd
 
-    # Step 1: Check for Docker Desktop coexistence
+    # Step 1: Check for Docker Desktop coexistence (if docker CLI available)
     _cai_step "Checking for Docker Desktop"
-    if _cai_linux_docker_desktop_detected; then
+    if command -v docker >/dev/null 2>&1 && _cai_linux_docker_desktop_detected; then
 _cai_spacing
         _cai_info "Docker Desktop detected on this system"
         _cai_info "  ContainAI creates a completely isolated Docker daemon"
@@ -3904,6 +4127,11 @@ _cai_spacing
     # Step 4: Install ContainAI-managed dockerd bundle
     if ! _cai_install_dockerd_bundle "$dry_run" "$verbose"; then
         return 1
+    fi
+    if [[ "$dry_run" != "true" ]]; then
+        if ! _cai_use_containai_docker_cli; then
+            return 1
+        fi
     fi
 
     # Step 5: Create isolated Docker directories
@@ -4288,6 +4516,13 @@ _cai_setup() {
     fi
 
     if _cai_is_container; then
+        _cai_install_plan_reset
+        if ! _cai_install_plan_prepare_linux "$dry_run" "false"; then
+            return 1
+        fi
+        if ! _cai_install_plan_confirm "$dry_run"; then
+            return 1
+        fi
         _cai_setup_nested "$dry_run" "$verbose" || return $?
         # Install shell completions (non-fatal on failure)
         _cai_spacing
@@ -4309,14 +4544,35 @@ _cai_setup() {
                 _cai_error "  Or set default: wsl --set-default-version 2"
                 return 1
             fi
+            _cai_install_plan_reset
+            if ! _cai_install_plan_prepare_linux "$dry_run" "true"; then
+                return 1
+            fi
+            if ! _cai_install_plan_confirm "$dry_run"; then
+                return 1
+            fi
             _cai_setup_wsl2 "$force" "$dry_run" "$verbose"
             platform_result=$?
             ;;
         macos)
+            _cai_install_plan_reset
+            if ! _cai_install_plan_prepare_macos "$dry_run"; then
+                return 1
+            fi
+            if ! _cai_install_plan_confirm "$dry_run"; then
+                return 1
+            fi
             _cai_setup_macos "$force" "$dry_run" "$verbose"
             platform_result=$?
             ;;
         linux)
+            _cai_install_plan_reset
+            if ! _cai_install_plan_prepare_linux "$dry_run" "true"; then
+                return 1
+            fi
+            if ! _cai_install_plan_confirm "$dry_run"; then
+                return 1
+            fi
             _cai_setup_linux "$force" "$dry_run" "$verbose"
             platform_result=$?
             ;;
@@ -4623,7 +4879,7 @@ Configures secure container isolation with Sysbox runtime.
 
 Platform behavior:
   - Linux (Ubuntu/Debian) / WSL2: Installs Sysbox, creates isolated Docker daemon
-  - Linux (other distros): Manual setup required (see docs/setup-guide.md)
+  - Linux (other distros): Auto-install not supported
   - macOS: Creates a lightweight Linux VM (Lima) running Docker + Sysbox
 
 Options:
@@ -4645,7 +4901,7 @@ What It Does (Linux native):
   5. Creates 'containai-docker' Docker context pointing to isolated socket
   6. Verifies installation with test container
   7. Installs shell completions for bash and zsh
-  Note: System Docker is NOT modified. Fedora/RHEL/Arch require manual install.
+  Note: System Docker is NOT modified.
 
 What It Does (WSL2):
   1. Checks seccomp compatibility (warns if WSL 1.1.0+ filter conflict)
@@ -4669,23 +4925,17 @@ What It Does (macOS):
   7. Installs shell completions for bash and zsh
 
 Requirements (Linux native):
-  - Ubuntu/Debian (auto-install)
-  - Other distros: Manual Sysbox installation required
+  - Ubuntu/Debian (auto-install supported)
   - systemd-based init system
-  - Docker Engine installed
-  - Internet access to download Sysbox
-  - jq, ripgrep (rg), and wget installed (will install if missing)
+  - Internet access to download dependencies
 
 Requirements (WSL2):
   - Ubuntu or Debian WSL2 distribution (WSL1 not supported)
   - systemd enabled ([boot] systemd=true in /etc/wsl.conf)
-  - Docker Engine installed (standalone, not Docker Desktop integration)
-  - Internet access to download Sysbox
-  - jq, ripgrep (rg), and wget installed (will install if missing)
+  - Internet access to download dependencies
 
 Requirements (macOS):
-  - Homebrew installed
-  - Internet access to download Lima and Ubuntu image
+  - Internet access to download Homebrew, Lima, and Ubuntu image
   - Disk space for Lima VM (~10GB)
   - Works on both Intel and Apple Silicon Macs
 

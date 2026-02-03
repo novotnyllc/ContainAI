@@ -398,30 +398,14 @@ check_bash_version() {
 
 check_docker() {
     if ! command -v docker >/dev/null 2>&1; then
-        local os
-        os="$(detect_os)"
-        error "Docker is not installed"
-        case "$os" in
-            macos)
-                error "Install Docker Desktop: https://www.docker.com/products/docker-desktop/"
-                ;;
-            debian)
-                error "Install Docker: sudo apt-get update && sudo apt-get install -y docker.io"
-                ;;
-            fedora)
-                error "Install Docker: sudo dnf install -y docker"
-                ;;
-            *)
-                error "Install Docker: https://docs.docker.com/engine/install/"
-                ;;
-        esac
-        return 1
+        warn "Docker CLI not found"
+        warn "ContainAI will install and manage its own isolated Docker during 'cai setup'"
+        return 0
     fi
 
     if ! docker info >/dev/null 2>&1; then
-        warn "Docker is installed but not running"
-        warn "Please start Docker and run this script again"
-        warn "Continuing with installation anyway..."
+        warn "Docker CLI is installed but the daemon is not running"
+        warn "ContainAI will use its own isolated Docker during 'cai setup'"
     fi
 
     return 0
@@ -433,12 +417,13 @@ check_prerequisites() {
 
     check_bash_version
 
-    if ! check_docker; then
-        failed=1
-    else
+    check_docker
+    if command -v docker >/dev/null 2>&1; then
         local docker_version
         docker_version=$(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',')
         success "Docker $docker_version"
+    else
+        info "Docker CLI not installed - will be installed during 'cai setup'"
     fi
 
     if [[ "$failed" -eq 1 ]]; then

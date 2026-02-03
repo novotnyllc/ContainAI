@@ -289,7 +289,7 @@ jobs:
   build-tarballs:
     needs: lint
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
@@ -303,6 +303,14 @@ jobs:
             runner: ubuntu-24.04-arm
             dotnet_rid: linux-arm64
             tarball_arch: linux-arm64
+          - arch: macos-x64
+            runner: macos-15-intel
+            dotnet_rid: osx-x64
+            tarball_arch: macos-x64
+          - arch: macos-arm64
+            runner: macos-26
+            dotnet_rid: osx-arm64
+            tarball_arch: macos-arm64
 
     steps:
       - name: Checkout repository
@@ -375,8 +383,19 @@ jobs:
   # ============================================================================
   test:
     needs: build-images
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            dotnet_rid: linux-x64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            dotnet_rid: linux-arm64
 
     steps:
       - name: Checkout repository
@@ -394,47 +413,44 @@ jobs:
           dotnet tool restore
           echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
 
-      - name: Download image artifact (amd64)
+      - name: Download image artifact (${{ matrix.arch }})
         uses: actions/download-artifact@v4
         with:
-          name: containai-images-amd64
+          name: containai-images-${{ matrix.arch }}
           path: /tmp/containai-images
 
       - name: Load test images
         run: |
-          gunzip -c /tmp/containai-images/containai-images-amd64.tar.gz | docker load
+          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
           echo "Loaded images:"
-          docker images | grep -E '^(containai|REPOSITORY)' || true
+          docker images
 
       - name: Run import integration tests
         run: |
           echo "============================================="
-          echo "Running import integration tests"
+          echo "Running import integration tests (${{ matrix.arch }})"
           echo "============================================="
-          # Set IMAGE_NAME to use the built image
           export IMAGE_NAME="containai:latest"
           ./tests/integration/test-sync-integration.sh
 
       - name: Run .NET unit tests (if test projects exist)
         run: |
           echo "============================================="
-          echo "Running .NET unit tests (MTP runner)"
+          echo "Running .NET unit tests (${{ matrix.arch }})"
           echo "============================================="
-          # Only run tests if test projects exist
           if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
             dotnet test --configuration Release
           else
             echo "No test projects found, skipping dotnet test"
           fi
 
-      - name: Build ACP Proxy
+      - name: Build ACP Proxy (${{ matrix.arch }})
         run: |
           echo "============================================="
-          echo "Building ACP proxy binary"
+          echo "Building ACP proxy binary (${{ matrix.arch }})"
           echo "============================================="
           cd src/acp-proxy
-          # Use self-contained publish for portability
-          dotnet publish -r linux-x64 -c Release --self-contained -o publish
+          dotnet publish -r ${{ matrix.dotnet_rid }} -c Release --self-contained -o publish
           mkdir -p ../bin
           cp publish/acp-proxy ../bin/acp-proxy
           chmod +x ../bin/acp-proxy
@@ -445,7 +461,7 @@ jobs:
           CAI_ACP_DIRECT_SPAWN: "1"
         run: |
           echo "============================================="
-          echo "Running ACP proxy integration tests"
+          echo "Running ACP proxy integration tests (${{ matrix.arch }})"
           echo "============================================="
           chmod +x ./tests/integration/mock-acp-server
           ./tests/integration/test-acp-proxy.sh
@@ -454,94 +470,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ github.run_id }}
-          path: |
-            ~/.containai-test-*
-          retention-days: 7
-          if-no-files-found: ignore
-
-  # ============================================================================
-  # Integration Tests (Linux arm64)
-  # ============================================================================
-  test-arm64:
-    needs: build-images
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # CRITICAL for NBGV
-
-      - name: Set up .NET for NBGV
-        uses: actions/setup-dotnet@v4
-        with:
-          global-json-file: global.json
-
-      - name: Install and run NBGV
-        run: |
-          dotnet tool restore
-          echo "NBGV_SemVer2=$(dotnet nbgv get-version -v SemVer2)" >> "$GITHUB_ENV"
-
-      - name: Download image artifact (arm64)
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-images-arm64
-          path: /tmp/containai-images
-
-      - name: Load test images
-        run: |
-          gunzip -c /tmp/containai-images/containai-images-arm64.tar.gz | docker load
-          echo "Loaded images:"
-          docker images | grep -E '^(containai|REPOSITORY)' || true
-
-      - name: Run import integration tests
-        run: |
-          echo "============================================="
-          echo "Running import integration tests (arm64)"
-          echo "============================================="
-          export IMAGE_NAME="containai:latest"
-          ./tests/integration/test-sync-integration.sh
-
-      - name: Run .NET unit tests (if test projects exist)
-        run: |
-          echo "============================================="
-          echo "Running .NET unit tests (arm64 runner)"
-          echo "============================================="
-          if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
-            dotnet test --configuration Release
-          else
-            echo "No test projects found, skipping dotnet test"
-          fi
-
-      - name: Build ACP Proxy (arm64)
-        run: |
-          echo "============================================="
-          echo "Building ACP proxy binary (arm64)"
-          echo "============================================="
-          cd src/acp-proxy
-          dotnet publish -r linux-arm64 -c Release --self-contained -o publish
-          mkdir -p ../bin
-          cp publish/acp-proxy ../bin/acp-proxy
-          chmod +x ../bin/acp-proxy
-
-      - name: Run ACP integration tests
-        env:
-          CAI_ACP_TEST_MODE: "1"
-          CAI_ACP_DIRECT_SPAWN: "1"
-        run: |
-          echo "============================================="
-          echo "Running ACP proxy integration tests (arm64)"
-          echo "============================================="
-          chmod +x ./tests/integration/mock-acp-server
-          ./tests/integration/test-acp-proxy.sh
-
-      - name: Upload test logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs-arm64-${{ github.run_id }}
+          name: test-logs-${{ matrix.arch }}-${{ github.run_id }}
           path: |
             ~/.containai-test-*
           retention-days: 7
@@ -578,19 +507,13 @@ jobs:
         with:
           fetch-depth: 0  # CRITICAL for NBGV
 
-      # Try to download tarball artifact (from Task 5's PR artifact upload)
-      # This tests the install path; repo checkout above provides build/test scripts
       - name: Download tarball artifact
-        id: download_tarball
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: containai-tarball-${{ matrix.arch }}
           path: /tmp/tarball
 
       - name: Extract and install from tarball
-        id: install
-        if: steps.download_tarball.outcome == 'success'
         run: |
           echo "============================================="
           echo "Installing from tarball artifact"
@@ -598,32 +521,19 @@ jobs:
           cd /tmp/tarball
           tar xzf containai-*.tar.gz
           cd containai-*/
-          if ./install.sh --local --yes --no-setup 2>&1; then
-            echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
-            echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::install.sh --local --yes --no-setup failed"
-            echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
-          fi
+          ./install.sh --local --yes --no-setup
 
-      - name: Log install method
+      - name: Run cai setup
+        env:
+          CAI_YES: "1"
         run: |
-          if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Tested install from tarball artifact"
-          else
-            echo "Tarball artifact not available - build-tarballs job may have failed"
-          fi
-
-      # Fail if tarball was downloaded but install failed - this is a regression
-      - name: Verify install success
-        if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
-        run: |
-          echo "::error::Tarball artifact was downloaded but install.sh --local --yes --no-setup failed"
-          echo "This indicates a regression in the install path."
-          exit 1
+          echo "============================================="
+          echo "Running cai setup"
+          echo "============================================="
+          export PATH="$HOME/.local/bin:$PATH"
+          cai setup --verbose
 
       - name: Smoke test acp-proxy binary
-        if: steps.install.outputs.INSTALL_SUCCESS == 'true'
         run: |
           ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
           if [[ -f "$ACP_PROXY" ]]; then
@@ -648,178 +558,19 @@ jobs:
           uname -a
           echo "KERNEL_VERSION=$(uname -r)" >> "$GITHUB_OUTPUT"
 
-      - name: Attempt sysbox installation
-        id: sysbox
-        run: |
-          echo "============================================="
-          echo "Attempting Sysbox Installation"
-          echo "============================================="
-
-          # Try to install sysbox - this may fail on GH-hosted runners
-          # due to kernel module loading restrictions
-
-          # Download sysbox package with SHA256 verification
-          SYSBOX_VERSION="0.6.4"
-          ARCH=$(dpkg --print-architecture)
-          SYSBOX_URL="https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb"
-
-          # Pinned SHA256 checksums for supply chain security
-          # From: https://github.com/nestybox/sysbox/releases/tag/v0.6.4
-          if [[ "$ARCH" == "amd64" ]]; then
-            EXPECTED_SHA256="d034ddd364ee1f226b8b1ce7456ea8a12abc2eb661bdf42d3e603ed2dc741827"
-          elif [[ "$ARCH" == "arm64" ]]; then
-            EXPECTED_SHA256="0ed41cd828cbeadbeceae41ec8c422b415bb1437443eb1fdf571f4973806a90e"
-          else
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=Unsupported architecture: $ARCH" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Downloading sysbox from: $SYSBOX_URL"
-          if ! curl -fsSL -o /tmp/sysbox.deb "$SYSBOX_URL"; then
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=Failed to download sysbox package" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Verify SHA256 checksum
-          echo "Verifying SHA256 checksum..."
-          ACTUAL_SHA256=$(sha256sum /tmp/sysbox.deb | cut -d' ' -f1)
-          if [[ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]]; then
-            echo "::error::SHA256 checksum mismatch!"
-            echo "  Expected: $EXPECTED_SHA256"
-            echo "  Actual:   $ACTUAL_SHA256"
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=SHA256 checksum verification failed" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "SHA256 checksum verified: $ACTUAL_SHA256"
-
-          # Install sysbox dependencies (with graceful failure handling)
-          echo "Installing dependencies..."
-          if ! sudo apt-get update -qq 2>&1; then
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=apt-get update failed" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! sudo apt-get install -y -qq jq fuse rsync 2>&1; then
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=Failed to install dependencies (jq, fuse, rsync)" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Attempt sysbox installation
-          echo "Installing sysbox..."
-          if ! sudo dpkg -i /tmp/sysbox.deb 2>&1; then
-            # dpkg may fail but apt can fix it
-            if ! sudo apt-get install -f -y 2>&1; then
-              echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-              echo "SYSBOX_SKIP_REASON=Sysbox installation failed (likely kernel module issue)" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          fi
-
-          # Verify sysbox services are running
-          echo "Checking sysbox services..."
-          if systemctl is-active --quiet sysbox-mgr && systemctl is-active --quiet sysbox-fs; then
-            echo "Sysbox services are running"
-            echo "SYSBOX_AVAILABLE=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Sysbox services failed to start"
-            systemctl status sysbox-mgr --no-pager || true
-            systemctl status sysbox-fs --no-pager || true
-            echo "SYSBOX_AVAILABLE=false" >> "$GITHUB_OUTPUT"
-            echo "SYSBOX_SKIP_REASON=Sysbox services failed to start" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Configure Docker for sysbox
-        id: docker_config
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true'
-        run: |
-          echo "============================================="
-          echo "Configuring Docker with sysbox runtime"
-          echo "============================================="
-
-          # Create Docker context for E2E tests (test-dind.sh uses containai-docker context)
-          docker context create containai-docker --docker "host=unix:///var/run/docker.sock" || true
-
-          # Merge sysbox runtime into existing daemon.json (don't clobber runner defaults)
-          # Don't set default-runtime - tests explicitly use --runtime=sysbox-runc
-          sudo mkdir -p /etc/docker
-          DAEMON_JSON="/etc/docker/daemon.json"
-          if [[ -f "$DAEMON_JSON" ]]; then
-            echo "Merging sysbox runtime into existing daemon.json..."
-            EXISTING=$(sudo cat "$DAEMON_JSON" 2>/dev/null || echo "{}")
-            # Validate JSON before merging; if invalid, start fresh
-            if ! echo "$EXISTING" | jq . >/dev/null 2>&1; then
-              echo "::warning::Existing daemon.json is invalid, creating new one"
-              EXISTING="{}"
-            fi
-            # Use jq to merge, adding sysbox-runc runtime
-            if ! echo "$EXISTING" | jq '. + {"runtimes": (.runtimes // {} | . + {"sysbox-runc": {"path": "/usr/bin/sysbox-runc"}})}' | sudo tee "$DAEMON_JSON" > /dev/null; then
-              echo "::error::Failed to merge daemon.json"
-              echo "DOCKER_READY=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          else
-            echo "Creating new daemon.json with sysbox runtime..."
-            echo '{"runtimes": {"sysbox-runc": {"path": "/usr/bin/sysbox-runc"}}}' | sudo tee "$DAEMON_JSON" > /dev/null
-          fi
-
-          cat "$DAEMON_JSON"
-
-          # Restart Docker to pick up new config (with error handling)
-          echo "Restarting Docker..."
-          if ! sudo systemctl restart docker 2>&1; then
-            echo "::error::Failed to restart Docker"
-            echo "DOCKER_READY=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Wait for Docker to be ready (poll instead of sleep)
-          echo "Waiting for Docker to be ready..."
-          TIMEOUT=30
-          ELAPSED=0
-          while ! docker info >/dev/null 2>&1; do
-            sleep 1
-            ELAPSED=$((ELAPSED + 1))
-            if [[ $ELAPSED -ge $TIMEOUT ]]; then
-              echo "::error::Docker failed to become ready within ${TIMEOUT}s"
-              echo "DOCKER_READY=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
-          echo "Docker ready after ${ELAPSED}s"
-
-          # Verify sysbox is available on containai-docker context
-          echo "Verifying sysbox runtime on containai-docker context..."
-          RUNTIMES=$(docker --context containai-docker info --format '{{json .Runtimes}}' 2>/dev/null || echo "{}")
-          echo "Available runtimes: $RUNTIMES"
-
-          if echo "$RUNTIMES" | grep -q "sysbox-runc"; then
-            echo "✓ Sysbox runtime detected on containai-docker context"
-            echo "DOCKER_READY=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Sysbox runtime not detected on containai-docker context"
-            echo "DOCKER_READY=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Download image artifact
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
         uses: actions/download-artifact@v4
         with:
           name: containai-images-${{ matrix.arch }}
           path: /tmp/containai-images
 
-      - name: Load test images
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
+      - name: Load test images into containai-docker
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
+          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker --context containai-docker load
           echo "Loaded images:"
-          docker images | grep -E '^(containai|REPOSITORY)' || true
+          docker --context containai-docker images
 
       - name: Run E2E tests (DinD)
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true' && steps.docker_config.outputs.DOCKER_READY == 'true'
         env:
           CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
@@ -828,28 +579,8 @@ jobs:
           echo "============================================="
           ./tests/integration/test-dind.sh
 
-      - name: Skip message (sysbox unavailable)
-        if: steps.sysbox.outputs.SYSBOX_AVAILABLE != 'true' || steps.docker_config.outputs.DOCKER_READY != 'true'
-        run: |
-          echo "============================================="
-          echo "E2E Tests Skipped (GitHub-hosted runner)"
-          echo "============================================="
-          if [[ "${{ steps.sysbox.outputs.SYSBOX_AVAILABLE }}" != "true" ]]; then
-            echo "Reason: ${{ steps.sysbox.outputs.SYSBOX_SKIP_REASON }}"
-          elif [[ "${{ steps.docker_config.outputs.DOCKER_READY }}" != "true" ]]; then
-            echo "Reason: Docker failed to expose sysbox runtime"
-          fi
-          echo ""
-          echo "Sysbox requires kernel module loading which is not supported"
-          echo "on GitHub-hosted runners due to virtualization constraints."
-          echo ""
-          echo "E2E tests run automatically on the e2e-test-selfhosted job"
-          echo "when self-hosted runners are available."
-          echo ""
-          echo "See docs/testing.md for manual E2E testing instructions."
-
       - name: Collect sysbox logs
-        if: failure() && steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true'
+        if: failure()
         run: |
           mkdir -p /tmp/sysbox-logs
           journalctl -u sysbox-mgr --no-pager > /tmp/sysbox-logs/sysbox-mgr.log 2>&1 || true
@@ -857,7 +588,7 @@ jobs:
           sudo cp -r /var/log/sysbox/ /tmp/sysbox-logs/ 2>/dev/null || true
 
       - name: Upload E2E test logs on failure
-        if: failure() && steps.sysbox.outputs.SYSBOX_AVAILABLE == 'true'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-logs-${{ matrix.arch }}-${{ github.run_id }}
@@ -871,9 +602,22 @@ jobs:
   # E2E Tests (macOS + Lima)
   # ============================================================================
   e2e-test-macos:
-    needs: [lint, build-images]
-    runs-on: macos-latest
+    needs: [lint, build-images, build-tarballs]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            image_arch: amd64
+            tarball_arch: macos-x64
+            expected_uname: x86_64
+          - runner: macos-26
+            image_arch: arm64
+            tarball_arch: macos-arm64
+            expected_uname: arm64
 
     steps:
       - name: Checkout repository
@@ -881,41 +625,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install macOS dependencies (Docker CLI + Lima + Bash)
-        run: |
-          if ! command -v brew >/dev/null 2>&1; then
-            echo "::error::Homebrew not found on macOS runner"
-            exit 1
-          fi
-          brew update
-          if ! command -v docker >/dev/null 2>&1; then
-            brew install docker
-          fi
-          if ! command -v limactl >/dev/null 2>&1; then
-            brew install lima
-          fi
-          if ! command -v bash >/dev/null 2>&1; then
-            brew install bash
-          fi
-          brew upgrade bash || true
-
-      - name: Run setup (Lima + Sysbox)
-        run: |
-          BASH_BIN="$(brew --prefix bash)/bin/bash"
-          if [[ ! -x "$BASH_BIN" ]]; then
-            echo "::error::Bash 4+ not found at ${BASH_BIN}"
-            exit 1
-          fi
-          "$BASH_BIN" -lc 'source src/containai.sh && cai setup --verbose'
-
-      - name: Determine image artifact arch
+      - name: Verify runner architecture
         run: |
           machine="$(uname -m)"
-          case "$machine" in
-            x86_64|amd64) echo "IMAGE_ARCH=amd64" >> "$GITHUB_ENV" ;;
-            arm64|aarch64) echo "IMAGE_ARCH=arm64" >> "$GITHUB_ENV" ;;
-            *) echo "::error::Unsupported macOS arch: $machine"; exit 1 ;;
-          esac
+          expected="${{ matrix.expected_uname }}"
+          if [[ "$machine" != "$expected" ]]; then
+            echo "::error::Runner arch mismatch. Expected $expected, got $machine"
+            exit 1
+          fi
+          echo "IMAGE_ARCH=${{ matrix.image_arch }}" >> "$GITHUB_ENV"
+          echo "TARBALL_ARCH=${{ matrix.tarball_arch }}" >> "$GITHUB_ENV"
+
+      - name: Download tarball artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: containai-tarball-${{ env.TARBALL_ARCH }}
+          path: /tmp/tarball
+
+      - name: Extract and install from tarball
+        run: |
+          echo "============================================="
+          echo "Installing from tarball artifact"
+          echo "============================================="
+          cd /tmp/tarball
+          tar xzf containai-*.tar.gz
+          cd containai-*/
+          ./install.sh --local --yes --no-setup
+
+      - name: Run cai setup (Lima + Sysbox)
+        env:
+          CAI_YES: "1"
+        run: |
+          echo "============================================="
+          echo "Running cai setup"
+          echo "============================================="
+          export PATH="$HOME/.local/bin:$PATH"
+          cai setup --verbose
 
       - name: Download image artifact
         uses: actions/download-artifact@v4
@@ -980,16 +725,12 @@ jobs:
       # Try to download tarball artifact (from Task 5's PR artifact upload)
       # This tests the install path; repo checkout above provides build/test scripts
       - name: Download tarball artifact
-        id: download_tarball
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           name: containai-tarball-${{ matrix.arch }}
           path: /tmp/tarball
 
       - name: Extract and install from tarball
-        id: install
-        if: steps.download_tarball.outcome == 'success'
         run: |
           echo "============================================="
           echo "Installing from tarball artifact"
@@ -997,32 +738,19 @@ jobs:
           cd /tmp/tarball
           tar xzf containai-*.tar.gz
           cd containai-*/
-          if ./install.sh --local --yes --no-setup 2>&1; then
-            echo "INSTALL_SUCCESS=true" >> "$GITHUB_OUTPUT"
-            echo "INSTALL_METHOD=tarball" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::install.sh --local --yes --no-setup failed"
-            echo "INSTALL_SUCCESS=false" >> "$GITHUB_OUTPUT"
-          fi
+          ./install.sh --local --yes --no-setup
 
-      - name: Log install method
+      - name: Run cai setup
+        env:
+          CAI_YES: "1"
         run: |
-          if [[ "${{ steps.install.outputs.INSTALL_METHOD }}" == "tarball" ]]; then
-            echo "Tested install from tarball artifact"
-          else
-            echo "Tarball artifact not available - build-tarballs job may have failed"
-          fi
-
-      # Fail if tarball was downloaded but install failed - this is a regression
-      - name: Verify install success
-        if: steps.download_tarball.outcome == 'success' && steps.install.outputs.INSTALL_SUCCESS != 'true'
-        run: |
-          echo "::error::Tarball artifact was downloaded but install.sh --local --yes --no-setup failed"
-          echo "This indicates a regression in the install path."
-          exit 1
+          echo "============================================="
+          echo "Running cai setup"
+          echo "============================================="
+          export PATH="$HOME/.local/bin:$PATH"
+          cai setup --verbose
 
       - name: Smoke test acp-proxy binary
-        if: steps.install.outputs.INSTALL_SUCCESS == 'true'
         run: |
           ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
           if [[ -f "$ACP_PROXY" ]]; then
@@ -1038,58 +766,17 @@ jobs:
             exit 1
           fi
 
-      - name: Verify sysbox is pre-installed
-        id: verify
-        run: |
-          echo "============================================="
-          echo "Verifying Sysbox Installation"
-          echo "============================================="
-
-          # Self-hosted runners should have sysbox pre-installed
-          # DO NOT attempt to install/modify sysbox on self-hosted runners
-
-          # Check sysbox services
-          if ! systemctl is-active --quiet sysbox-mgr; then
-            echo "::error::sysbox-mgr service is not running"
-            echo "SYSBOX_READY=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-
-          if ! systemctl is-active --quiet sysbox-fs; then
-            echo "::error::sysbox-fs service is not running"
-            echo "SYSBOX_READY=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-
-          echo "✓ Sysbox services are running"
-
-          # Create containai-docker context if it doesn't exist
-          docker context create containai-docker --docker "host=unix:///var/run/docker.sock" 2>/dev/null || true
-
-          # Verify sysbox runtime on containai-docker context
-          RUNTIMES=$(docker --context containai-docker info --format '{{json .Runtimes}}' 2>/dev/null || echo "{}")
-          echo "Available runtimes: $RUNTIMES"
-
-          if echo "$RUNTIMES" | grep -q "sysbox-runc"; then
-            echo "✓ Sysbox runtime detected on containai-docker context"
-            echo "SYSBOX_READY=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Sysbox runtime not available in Docker"
-            echo "SYSBOX_READY=false" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-
       - name: Download image artifact
         uses: actions/download-artifact@v4
         with:
           name: containai-images-${{ matrix.arch }}
           path: /tmp/containai-images
 
-      - name: Load test images
+      - name: Load test images into containai-docker
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
+          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker --context containai-docker load
           echo "Loaded images:"
-          docker images | grep -E '^(containai|REPOSITORY)' || true
+          docker --context containai-docker images
 
       - name: Run E2E tests (DinD)
         env:

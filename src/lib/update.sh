@@ -147,6 +147,154 @@ EOF
 }
 
 # ==============================================================================
+# Dependency Install Plan (prompt once)
+# ==============================================================================
+
+_cai_update_prepare_install_plan_linux_wsl2() {
+    local dry_run="${1:-false}"
+    local -a apt_missing=()
+
+    if ! command -v jq >/dev/null 2>&1; then
+        apt_missing+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        apt_missing+=(ripgrep)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        apt_missing+=(wget)
+    fi
+    if ! command -v tar >/dev/null 2>&1; then
+        apt_missing+=(tar)
+    fi
+
+    _cai_install_plan_add_list "APT packages" "${apt_missing[@]}"
+
+    local can_check_updates="true"
+    if ! command -v wget >/dev/null 2>&1; then
+        can_check_updates="false"
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        can_check_updates="false"
+    fi
+
+    if [[ "$can_check_updates" == "true" ]]; then
+        if _cai_update_check_required; then
+            if [[ "$_CAI_UPDATE_REASON" == *"sysbox"* ]]; then
+                _cai_install_plan_add "Sysbox update (ContainAI build)"
+            fi
+            if [[ "$_CAI_UPDATE_REASON" == *"dockerd"* ]]; then
+                _cai_install_plan_add "Dockerd bundle update"
+            fi
+        fi
+    else
+        if command -v sysbox-runc >/dev/null 2>&1; then
+            _cai_install_plan_add "Sysbox update (ContainAI build, if available)"
+        fi
+        if _cai_dockerd_bundle_installed; then
+            _cai_install_plan_add "Dockerd bundle update (if a newer version is available)"
+        fi
+    fi
+
+    return 0
+}
+
+_cai_update_prepare_install_plan_macos() {
+    local dry_run="${1:-false}"
+    local lima_recreate="${2:-false}"
+    local need_recreate="false"
+
+    if ! _cai_install_plan_prepare_macos "$dry_run"; then
+        return 1
+    fi
+
+    # Decide whether we will recreate the VM (hash-based)
+    if [[ "$lima_recreate" == "true" ]]; then
+        need_recreate="true"
+    elif command -v limactl >/dev/null 2>&1 && _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME" 2>/dev/null; then
+        local current_hash stored_hash hash_file
+        hash_file="$HOME/.config/containai/lima-template.hash"
+        if ! current_hash=$(_cai_lima_template_hash 2>/dev/null); then
+            _cai_error "Failed to compute template hash"
+            return 1
+        fi
+        if [[ -f "$hash_file" ]]; then
+            stored_hash=$(cat "$hash_file" 2>/dev/null) || stored_hash=""
+        else
+            stored_hash=""
+        fi
+        if [[ "$current_hash" == "$stored_hash" ]]; then
+            need_recreate="false"
+        else
+            need_recreate="true"
+        fi
+    else
+        need_recreate="true"
+    fi
+
+    if [[ "$need_recreate" == "true" ]]; then
+        _cai_install_plan_add "Lima VM recreation (Docker Engine + Sysbox inside VM)"
+    else
+        _cai_install_plan_add "Lima VM package updates (apt update/upgrade)"
+        _cai_install_plan_add "Sysbox update inside Lima VM (if available)"
+    fi
+
+    return 0
+}
+
+_cai_update_install_prereqs_linux_wsl2() {
+    local dry_run="${1:-false}"
+    local -a pkgs=()
+
+    if ! command -v jq >/dev/null 2>&1; then
+        pkgs+=(jq)
+    fi
+    if ! command -v rg >/dev/null 2>&1; then
+        pkgs+=(ripgrep)
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        pkgs+=(wget)
+    fi
+    if ! command -v tar >/dev/null 2>&1; then
+        pkgs+=(tar)
+    fi
+
+    if ((${#pkgs[@]} == 0)); then
+        return 0
+    fi
+
+    _cai_step "Installing required tools"
+    if [[ "$dry_run" == "true" ]]; then
+        _cai_dryrun "Would install: ${pkgs[*]}"
+        return 0
+    fi
+
+    if ! sudo apt-get update -qq; then
+        _cai_error "Failed to run apt-get update"
+        return 1
+    fi
+    if ! sudo apt-get install -y "${pkgs[@]}"; then
+        _cai_error "Failed to install required tools: ${pkgs[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+_cai_update_install_prereqs_macos() {
+    local dry_run="${1:-false}"
+
+    if ! _cai_macos_ensure_host_tools "$dry_run"; then
+        return 1
+    fi
+
+    if ! _cai_lima_install "$dry_run"; then
+        return 1
+    fi
+
+    return 0
+}
+
+# ==============================================================================
 # Systemd Unit Comparison
 # ==============================================================================
 
@@ -680,7 +828,7 @@ _cai_update_dockerd_bundle() {
     fi
 
     # Prompt for confirmation (unless --force, use shared helper with CAI_YES support)
-    if [[ "$force" != "true" ]]; then
+    if [[ "$force" != "true" ]] && [[ "${_CAI_INSTALL_PLAN_SHOWN:-false}" != "true" ]]; then
         printf '\n'
         _cai_warn "Updating dockerd will stop running containers."
         if ! _cai_prompt_confirm "Continue?"; then
@@ -1942,9 +2090,39 @@ _cai_update() {
         _CAI_IMAGE_CHANNEL=""
     fi
 
-    # Dispatch based on platform for infrastructure updates
+    # Dependency install plan (prompt once)
     local overall_status=0
+    _cai_install_plan_reset
+    if _cai_is_macos; then
+        if ! _cai_update_prepare_install_plan_macos "$dry_run" "$lima_recreate"; then
+            return 1
+        fi
+    else
+        if ! _cai_update_prepare_install_plan_linux_wsl2 "$dry_run"; then
+            return 1
+        fi
+    fi
+    if ! _cai_install_plan_confirm "$dry_run"; then
+        return 1
+    fi
 
+    # Install prerequisites after confirmation
+    if _cai_is_macos; then
+        if ! _cai_update_install_prereqs_macos "$dry_run"; then
+            return 1
+        fi
+    else
+        if ! _cai_update_install_prereqs_linux_wsl2 "$dry_run"; then
+            return 1
+        fi
+        if [[ "$dry_run" != "true" ]]; then
+            if ! _cai_use_containai_docker_cli; then
+                return 1
+            fi
+        fi
+    fi
+
+    # Dispatch based on platform for infrastructure updates
     if _cai_is_macos; then
         _cai_update_macos "$dry_run" "$verbose" "$force" "$lima_recreate"
         overall_status=$?
