@@ -2314,6 +2314,16 @@ _containai_start_container() {
                     return 1
                 fi
             fi
+            # Apply per-container network policy on attach (policies may have changed)
+            # Pass template network.conf path if using templates
+            local template_network_conf=""
+            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
+                local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+                template_network_conf="${templates_root}/${template_name}/network.conf"
+                [[ ! -f "$template_network_conf" ]] && template_network_conf=""
+            fi
+            _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"
+
             # Ensure SSH setup is configured for running container
             # This handles containers that were running before SSH setup was added
             local running_ssh_port
@@ -2920,9 +2930,6 @@ _containai_stop_all() {
                 ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
             fi
 
-            # Clean up per-container network rules before stopping/removing
-            _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
-
             if [[ "$remove_flag" == "true" ]]; then
                 echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
                 local rm_success=false
@@ -2935,8 +2942,10 @@ _containai_stop_all() {
                         rm_success=true
                     fi
                 fi
-                # Only clean up SSH config after SUCCESSFUL removal
+                # Only clean up after SUCCESSFUL removal
                 if [[ "$rm_success" == "true" ]]; then
+                    # Clean up per-container network rules AFTER successful removal
+                    _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
                     # Clean by port if known, otherwise try to get port from config file
                     if [[ -z "$ssh_port" ]]; then
                         # Legacy container - try to get port from config file before removing it
@@ -2952,14 +2961,23 @@ _containai_stop_all() {
                         _cai_remove_ssh_host_config "$container_to_stop"
                     fi
                 else
-                    echo "  Warning: Failed to remove $container_to_stop (skipping SSH cleanup)"
+                    echo "  Warning: Failed to remove $container_to_stop (skipping cleanup)"
                 fi
             else
                 echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+                local stop_success=false
                 if [[ -n "$ctx_to_use" ]]; then
-                    docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+                    if docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1; then
+                        stop_success=true
+                    fi
                 else
-                    docker stop "$container_to_stop" >/dev/null 2>&1 || true
+                    if docker stop "$container_to_stop" >/dev/null 2>&1; then
+                        stop_success=true
+                    fi
+                fi
+                # Clean up per-container network rules AFTER successful stop
+                if [[ "$stop_success" == "true" ]]; then
+                    _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
                 fi
             fi
         done
@@ -3037,9 +3055,6 @@ _containai_stop_all() {
             ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
         fi
 
-        # Clean up per-container network rules before stopping/removing
-        _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
-
         if [[ "$remove_flag" == "true" ]]; then
             echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
             local rm_success=false
@@ -3052,8 +3067,10 @@ _containai_stop_all() {
                     rm_success=true
                 fi
             fi
-            # Only clean up SSH config after SUCCESSFUL removal
+            # Only clean up after SUCCESSFUL removal
             if [[ "$rm_success" == "true" ]]; then
+                # Clean up per-container network rules AFTER successful removal
+                _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
                 # Clean by port if known, otherwise try to get port from config file
                 if [[ -z "$ssh_port" ]]; then
                     # Legacy container - try to get port from config file before removing it
@@ -3069,14 +3086,23 @@ _containai_stop_all() {
                     _cai_remove_ssh_host_config "$container_to_stop"
                 fi
             else
-                echo "  Warning: Failed to remove $container_to_stop (skipping SSH cleanup)"
+                echo "  Warning: Failed to remove $container_to_stop (skipping cleanup)"
             fi
         else
             echo "Stopping: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
+            local stop_success=false
             if [[ -n "$ctx_to_use" ]]; then
-                docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1 || true
+                if docker --context "$ctx_to_use" stop "$container_to_stop" >/dev/null 2>&1; then
+                    stop_success=true
+                fi
             else
-                docker stop "$container_to_stop" >/dev/null 2>&1 || true
+                if docker stop "$container_to_stop" >/dev/null 2>&1; then
+                    stop_success=true
+                fi
+            fi
+            # Clean up per-container network rules AFTER successful stop
+            if [[ "$stop_success" == "true" ]]; then
+                _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
             fi
         fi
     done

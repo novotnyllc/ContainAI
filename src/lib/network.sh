@@ -1141,8 +1141,15 @@ _cai_resolve_domain_to_ips() {
 
     # Use getent for portability (works on most Linux systems)
     # Falls back to dig if getent is unavailable
+    # Use timeout wrapper if available to avoid hangs on DNS issues
     if command -v getent >/dev/null 2>&1; then
         # getent ahostsv4 returns all IPv4 addresses for a host
+        local getent_output=""
+        if command -v timeout >/dev/null 2>&1; then
+            getent_output=$(timeout 5 getent ahostsv4 "$domain" 2>/dev/null) || getent_output=""
+        else
+            getent_output=$(getent ahostsv4 "$domain" 2>/dev/null) || getent_output=""
+        fi
         while IFS= read -r ip_line; do
             local ip="${ip_line%% *}"
             # Skip if already in list (dedup)
@@ -1152,7 +1159,7 @@ _cai_resolve_domain_to_ips() {
             if [[ -n "$ip" ]]; then
                 ips="${ips:+$ips }$ip"
             fi
-        done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+        done < <(printf '%s\n' "$getent_output" | awk '{print $1}' | sort -u)
     elif command -v dig >/dev/null 2>&1; then
         # dig +short returns IPs one per line
         while IFS= read -r ip_line; do
@@ -1262,6 +1269,9 @@ _cai_parse_network_conf() {
         line="${line#"${line%%[![:space:]]*}"}"
         line="${line%"${line##*[![:space:]]}"}"
 
+        # Skip lines that became empty after trimming (whitespace-only lines)
+        [[ -z "$line" ]] && continue
+
         # Check for section headers
         if [[ "$line" =~ ^\[([a-zA-Z_-]+)\]$ ]]; then
             local section="${BASH_REMATCH[1]}"
@@ -1339,11 +1349,11 @@ _cai_get_container_ip() {
         '{{range $k, $v := .NetworkSettings.Networks}}{{if eq $k "bridge"}}{{$v.IPAddress}}{{end}}{{end}}' \
         -- "$container_name" 2>/dev/null) || ip=""
 
-    # Fallback: get first available IP
+    # Fallback: get first available IP (with delimiter to avoid concatenation issues)
     if [[ -z "$ip" ]]; then
         ip=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format \
-            '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-            -- "$container_name" 2>/dev/null | head -c 15) || ip=""
+            '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' \
+            -- "$container_name" 2>/dev/null | awk '{print $1}') || ip=""
     fi
 
     if [[ -z "$ip" ]]; then
@@ -1520,10 +1530,11 @@ _cai_apply_container_network_policy() {
     # First, remove any existing rules for this container (idempotent)
     _cai_remove_container_network_rules "$container_name" "$context"
 
-    # Add ACCEPT rules for each allowed IP (must be before the DROP)
+    # Add ACCEPT rules for each allowed IP (must be before the DROP and before RETURN)
+    # Use _cai_ensure_rule_before_return to position rules correctly
     local rule_count=0
     for ip in "${unique_ips[@]}"; do
-        if _cai_iptables -I "$_CAI_IPTABLES_CHAIN" -s "$container_ip" -d "$ip" -j ACCEPT -m comment --comment "$comment" 2>/dev/null; then
+        if _cai_ensure_rule_before_return -s "$container_ip" -d "$ip" -j ACCEPT -m comment --comment "$comment"; then
             rule_count=$((rule_count + 1))
             _cai_debug "Added ACCEPT rule: $container_ip -> $ip"
         else
@@ -1532,7 +1543,9 @@ _cai_apply_container_network_policy() {
     done
 
     # Add final DROP rule for this container (default deny)
-    if _cai_iptables -A "$_CAI_IPTABLES_CHAIN" -s "$container_ip" -j DROP -m comment --comment "$comment" 2>/dev/null; then
+    # CRITICAL: Use _cai_ensure_rule_before_return to insert before DOCKER-USER RETURN
+    # Using -A (append) would place the rule AFTER RETURN, making it unreachable
+    if _cai_ensure_rule_before_return -s "$container_ip" -j DROP -m comment --comment "$comment"; then
         _cai_debug "Added DROP rule for container $container_name"
     else
         _cai_warn "Failed to add DROP rule for container"
@@ -1570,8 +1583,9 @@ _cai_remove_container_network_rules() {
 
     # Find and delete all rules with our comment
     # Use loop since we need to delete multiple rules
+    # Note: No hard cap - presets + DNS can create many rules; they must all be cleaned up
     local deleted=0
-    local max_iterations=100  # Safety limit
+    local max_iterations=1000  # High safety limit (presets * multi-IP DNS answers)
     local iteration=0
 
     while [[ $iteration -lt $max_iterations ]]; do
