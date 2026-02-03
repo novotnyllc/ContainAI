@@ -200,9 +200,8 @@ fi
 - [ ] Integration tests pass
 
 ## Done summary
-TBD
-
+Wired docker-context-sync.sh into CLI lifecycle with full WSL2 integration: library loaded in containai.sh, service management functions for systemd user service, setup creates ~/.docker-cai/ with Unix socket context and starts persistent watcher, uninstall cleans up service and directory, doctor shows sync service status. All operations respect --dry-run and only activate on WSL2.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 1db76073e68ff39e96f5df0d2ac2fde2709b5f08, 6885ada0dd5360e33db4e19b5f1e0ffe0ff4d52a, b23ed501ada5960ba47c51262a6fabb85cf64b27
+- Tests: shellcheck -x src/*.sh src/lib/*.sh, bash -c 'source src/containai.sh && type _cai_sync_docker_contexts_once'
 - PRs:
