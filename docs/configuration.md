@@ -382,12 +382,12 @@ chmod +x ~/.config/containai/templates/default/hooks/startup.d/10-common.sh
 
 # Workspace-level hooks (project-specific)
 mkdir -p .containai/hooks/startup.d
-cat > .containai/hooks/startup.d/30-project.sh << 'HOOK'
+cat > .containai/hooks/startup.d/10-setup.sh << 'SCRIPT'
 #!/bin/bash
-echo "Project-specific setup"
 npm install
-HOOK
-chmod +x .containai/hooks/startup.d/30-project.sh
+redis-server --daemonize yes
+SCRIPT
+chmod +x .containai/hooks/startup.d/10-setup.sh
 ```
 
 **Hook requirements:**
@@ -425,8 +425,8 @@ Network policy configuration controls egress traffic from containers. This is an
 [egress]
 preset = package-managers
 preset = git-hosts
+allow = github.com
 allow = api.anthropic.com
-allow = example.com
 default_deny = true
 ```
 
