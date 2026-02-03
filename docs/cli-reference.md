@@ -191,17 +191,17 @@ cai [path] [options] [-- <agent-args>]
 | `--credentials <mode>` | Credential mode (only `none` supported with Sysbox isolation) |
 | `-- <args>` | Pass arguments to agent |
 
-**Deprecated/Unsupported flags (parsed but error at runtime):**
+**Deprecated/Unsupported flags:**
 
-| Flag | Status |
-|------|--------|
-| `--allow-host-credentials` | Unsupported with Sysbox |
-| `--i-understand-this-exposes-host-credentials` | Unsupported with Sysbox |
-| `--allow-host-docker-socket` | Unsupported with Sysbox |
-| `--i-understand-this-grants-root-access` | Unsupported with Sysbox |
-| `--mount-docker-socket` | Unsupported with Sysbox |
-| `--please-root-my-host` | Unsupported with Sysbox |
-| `--acknowledge-credential-risk` | Legacy, unsupported |
+| Flag | Behavior |
+|------|----------|
+| `--allow-host-credentials` | Errors at runtime (unsupported with Sysbox) |
+| `--i-understand-this-exposes-host-credentials` | Errors at runtime (unsupported with Sysbox) |
+| `--allow-host-docker-socket` | Errors at runtime (unsupported with Sysbox) |
+| `--i-understand-this-grants-root-access` | Errors at runtime (unsupported with Sysbox) |
+| `--mount-docker-socket` | Errors at runtime (unsupported with Sysbox) |
+| `--please-root-my-host` | Errors at runtime (unsupported with Sysbox) |
+| `--acknowledge-credential-risk` | Parsed but ignored (legacy flag) |
 
 **Note:** Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
 
@@ -311,7 +311,7 @@ cai exec [options] [--] <command> [args...]
 
 | Option | Description |
 |--------|-------------|
-| `--workspace <path>`, `-w <path>` | Workspace path (default: current directory) |
+| `-w`, `--workspace <path>` | Workspace path (default: current directory) |
 | `--container <name>` | Container name |
 | `--template <name>` | Template name (default: "default") |
 | `--channel <channel>` | Release channel |
@@ -321,6 +321,7 @@ cai exec [options] [--] <command> [args...]
 | `--force` | Skip isolation checks |
 | `-q`, `--quiet` | Suppress verbose output |
 | `--verbose` | Enable verbose output |
+| `-D`, `--debug` | Enable debug output |
 | `--` | Separator between cai options and command |
 
 **Exit Codes:**
