@@ -12,9 +12,9 @@
    ```
 
 2. **Setup isolation** (one-time):
-   - Linux (Ubuntu/Debian) and WSL2: Run `cai setup`
-   - macOS: Run `cai setup` (uses Lima VM)
-   - Other Linux distros: Follow [Setup Guide](setup-guide.md) or [Sysbox docs](https://github.com/nestybox/sysbox)
+   - Linux (Ubuntu/Debian) and WSL2: Run `cai setup` (installs Sysbox via ContainAI-managed docker-ce)
+   - macOS: Run `cai setup` (uses Lima VM with Sysbox)
+   - Other Linux distros: Follow [Setup Guide](setup-guide.md) for manual Sysbox installation
 
 3. **Launch your first sandbox** - Navigate to your project and run `cai`:
    ```bash

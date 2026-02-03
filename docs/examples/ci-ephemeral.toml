@@ -86,6 +86,7 @@ from_host = true
 #         - name: Cleanup
 #           if: always()
 #           run: |
+#             source src/containai.sh
 #             cai docker volume rm "ci-${{ github.run_id }}" || true
 # =============================================================================
 
@@ -103,7 +104,7 @@ from_host = true
 #       - source src/containai.sh
 #       - cai -- "Review changes since $CI_MERGE_REQUEST_DIFF_BASE_SHA"
 #     after_script:
-#       - cai docker volume rm "ci-${CI_PIPELINE_ID}" || true
+#       - source src/containai.sh && cai docker volume rm "ci-${CI_PIPELINE_ID}" || true
 # =============================================================================
 
 # =============================================================================
