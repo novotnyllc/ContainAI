@@ -250,9 +250,13 @@ cai gc --force     # Actually remove
 cd ~/project-a && cai run -d
 cd ~/project-b && cai run -d
 
-# Check all
-cai status --container cai-project-a-xxx
-cai status --container cai-project-b-xxx
+# Check status for each workspace
+cd ~/project-a && cai status
+cd ~/project-b && cai status
+
+# Or use --workspace flag
+cai status --workspace ~/project-a
+cai status --workspace ~/project-b
 
 # Stop all
 cai stop --all
@@ -263,9 +267,11 @@ cai stop --all
 ### Container Naming
 
 Containers are named deterministically from workspace path:
-- `cai-<dirname>-<hash>` format
+- New format: `{repo}-{branch}` (e.g., `myapp-main`)
+- Legacy format: `containai-{hash}`
 - Same path always gives same container
 - Use `--container` to override
+- Use `cai status` to see container name for a workspace
 
 ### Data Volume vs Container
 

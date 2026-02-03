@@ -151,7 +151,7 @@ cd ~/project-b && cai run  # Different container for project-b
 
 ### Data Persists in Volume
 
-Files in `/home/agent/.containai/data/` persist across container recreations (with `--fresh`). Use `--reset` to start with a fresh data volume.
+Files in `/mnt/agent-data/` (the Docker volume) persist across container recreations (with `--fresh`). User-facing files like `~/.gitconfig` are symlinked to the volume. Use `--reset` to start with a fresh data volume.
 
 ### SSH Agent Forwarding
 

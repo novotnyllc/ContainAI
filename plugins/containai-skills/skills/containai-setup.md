@@ -72,12 +72,12 @@ cai doctor fix [target]
 Targets:
 - `volume [--all|<name>]` - Fix volume permissions
 - `container [--all|<name>]` - Fix container issues
-- `template [--all|<name>]` - Rebuild templates
+- `template [--all|<name>]` - Restore/repair templates
 
 ```bash
 cai doctor fix volume --all     # Fix all volumes
 cai doctor fix container foo    # Fix specific container
-cai doctor fix template default # Rebuild default template
+cai doctor fix template default # Restore default template (next cai run rebuilds image)
 ```
 
 ## Setup Command

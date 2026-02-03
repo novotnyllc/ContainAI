@@ -4,18 +4,27 @@ Use this skill when: syncing host configs to containers, exporting data for back
 
 ## Data Model
 
-ContainAI uses Docker volumes for persistent data:
+ContainAI uses Docker volumes for persistent data, mounted at `/mnt/agent-data`:
 
 ```
 Container filesystem:
 /home/agent/
-├── workspace/           # Your project (bind mount from host)
-└── .containai/
-    └── data/            # Persistent data (Docker volume)
-        ├── .gitconfig   # Git configuration
-        ├── .claude.json # Agent credentials
-        └── ...          # Other synced configs
+├── workspace/             # Your project (bind mount from host)
+├── .gitconfig             # Symlink -> /mnt/agent-data/git/gitconfig
+├── .claude.json           # Symlink -> /mnt/agent-data/claude/claude.json
+└── ...                    # Other symlinked configs
+
+/mnt/agent-data/           # Docker volume mount (persistent)
+├── git/
+│   └── gitconfig          # Actual git config
+├── claude/
+│   └── claude.json        # Actual credentials
+└── ...                    # Other imported configs
 ```
+
+The `cai sync` command (run automatically on container init) creates symlinks
+from user-facing paths to the volume, so you can edit `~/.gitconfig` normally
+while data persists in the volume.
 
 ## Import Command
 

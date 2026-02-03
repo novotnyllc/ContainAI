@@ -29,15 +29,24 @@ Host                          Container
 ~/projects/myapp/             /home/agent/workspace/
   (workspace mount)              (read-write)
 
-Docker volume: cai-data-xxx   /home/agent/.containai/data/
-  (persistent data)              (agent configs, caches)
+Docker volume: cai-data-xxx   /mnt/agent-data/
+  (persistent data)              (volume mount)
+
+                              ~/.gitconfig -> /mnt/agent-data/git/gitconfig
+                              ~/.claude.json -> /mnt/agent-data/claude/claude.json
+                              (symlinks to volume)
 ```
+
+The `cai sync` command creates symlinks from user-facing config paths to the
+persistent volume, so agents can edit normal dotfiles while data persists.
 
 ### Workspace Binding
 
 Each workspace path gets a deterministic container:
-- Same path = same container (content-addressed naming)
+- Same path = same container
 - Different paths = different containers
+- Container names: `{repo}-{branch}` format (e.g., `myapp-main`)
+- Legacy containers: `containai-{hash}` format
 - Override with `--container <name>` for explicit naming
 
 ## When to Use ContainAI

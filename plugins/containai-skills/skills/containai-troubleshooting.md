@@ -41,11 +41,11 @@ cai doctor               # Verify installation
 
 **Fix:**
 ```bash
-# Check Docker
-docker ps
+# Check Docker (using ContainAI's context)
+cai docker ps
 
 # Check container logs
-docker logs <container-name>
+cai docker logs <container-name>
 
 # Try fresh start
 cai run --fresh
@@ -112,8 +112,8 @@ cai run
 # Use different container name
 cai run --container different-name
 
-# Or remove existing container manually
-docker rm <container-name>
+# Or remove existing container manually (use cai docker for correct context)
+cai docker rm <container-name>
 cai run
 ```
 
@@ -145,8 +145,8 @@ cai setup
 
 **Fix:**
 ```bash
-# Pull image manually
-docker pull ghcr.io/containai/containai:stable
+# Pull image manually (use cai docker for correct context)
+cai docker pull ghcr.io/containai/containai:stable
 
 # Or rebuild template
 cai doctor fix template default
@@ -200,8 +200,8 @@ cai import /path/to/workspace
 
 **Fix:**
 ```bash
-# Check volume exists
-docker volume ls | grep containai
+# Check volume exists (use cai docker for correct context)
+cai docker volume ls | grep containai
 
 # Export with specific volume
 cai export --data-volume <correct-name>
@@ -269,7 +269,7 @@ When all else fails:
 cai stop --all --remove
 
 # 2. Clean up volumes (WARNING: loses data!)
-docker volume ls | grep cai- | xargs docker volume rm
+cai docker volume ls | grep cai- | xargs cai docker volume rm
 
 # 3. Re-run setup
 cai setup --force
@@ -311,11 +311,11 @@ cai run --verbose
 # Dry-run to see what would happen
 cai run --dry-run
 
-# Check container logs
-docker logs <container-name>
+# Check container logs (use cai docker for correct context)
+cai docker logs <container-name>
 
 # Shell into container manually
-docker exec -it <container-name> bash
+cai docker exec -it <container-name> bash
 ```
 
 ## Getting Help
@@ -327,7 +327,7 @@ Collect diagnostics for bug reports:
 ```bash
 cai doctor --json > doctor.json
 cai status --json > status.json
-docker logs <container-name> > container.log 2>&1
+cai docker logs <container-name> > container.log 2>&1
 ```
 
 ### Common Log Locations
