@@ -394,3 +394,6 @@ CI install tests that swallow failures (warning instead of exit 1) mask regressi
 
 ## 2026-02-02 manual [pitfall]
 When validating tar archives, use tar -tvf to check entry types and reject symlinks/hardlinks that can be used to overwrite files outside extraction directory
+
+## 2026-02-03 manual [pitfall]
+Codex impl-review may make factually incorrect claims about code behavior - always verify reviewer assertions against actual source code before accepting NEEDS_WORK verdicts

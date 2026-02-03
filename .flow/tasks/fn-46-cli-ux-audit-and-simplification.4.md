@@ -1,71 +1,122 @@
 # fn-46-cli-ux-audit-and-simplification.4 Produce prioritized recommendations document
 
 ## Description
-Synthesize findings from tasks .1-.3 into a prioritized recommendations document that can guide future CLI improvements.
+Synthesize findings from tasks .1-.3 into a prioritized recommendations document that can guide future CLI improvements. Output is an **internal planning document** in `.flow/specs/`, not user-facing documentation.
 
 **Size:** M
-**Files:** `docs/cli-ux-audit.md` (new) or `.flow/specs/cli-ux-recommendations.md`
+**Files:** `.flow/specs/cli-ux-recommendations.md` (new)
 
 ## Approach
 
-1. Synthesize findings:
-   - Heuristic evaluation results (.1)
-   - Flag consistency audit (.2)
-   - Error message audit (.3)
+### Step 1: Synthesize Findings
+- Heuristic evaluation results (.1) - scores and help checklist gaps
+- Flag consistency audit (.2) - matrix and inconsistencies
+- Error message audit (.3) - templates and scores
 
-2. Categorize recommendations:
-   - **Quick wins**: Low effort, high impact, no breaking changes
-   - **Medium effort**: Moderate complexity, clear benefit
-   - **Breaking changes**: Require deprecation cycle, significant benefit
+### Step 2: Categorize Recommendations
 
-3. Prioritize by:
-   - User impact (how many users affected, how often)
-   - Implementation effort (estimated complexity)
-   - Risk (breaking changes, backward compatibility)
+| Category | Description | Approval |
+|----------|-------------|----------|
+| **Quick wins** | Low effort, high impact, no breaking changes | Implement now |
+| **Medium effort** | Moderate complexity, clear benefit | Plan for next release |
+| **Breaking changes** | Require deprecation cycle | Requires RFC/approval |
 
-4. Document format:
-   ```markdown
-   # CLI UX Audit Recommendations
+### Step 3: Prioritize by Impact × Frequency
 
-   ## Executive Summary
-   ## Quick Wins (implement now)
-   ## Medium Effort (next release)
-   ## Breaking Changes (requires RFC)
-   ## Appendix: Full Audit Data
-   ```
+**Scoring formula:** Impact (1-5) × Frequency (1-5) = Priority score
 
-5. Cross-reference with existing epics:
-   - What's already planned in fn-36-rb7?
-   - What's already planned in fn-42?
-   - What's new and needs a new epic?
+| Impact | Description |
+|--------|-------------|
+| 1 | Affects edge case only |
+| 2 | Affects power users occasionally |
+| 3 | Affects regular workflow sometimes |
+| 4 | Affects common workflow often |
+| 5 | Affects every user every time |
+
+**Tie-breaker:** Lower effort wins
+
+### Step 4: Cross-Reference with Existing Epics
+
+**REQUIRED field per recommendation:**
+
+```markdown
+**Owner epic:** fn-36-rb7 / fn-42 / fn-45 / NEW
+**Status:** already planned / partially planned / new
+```
+
+Mapping:
+- **fn-36-rb7** (CLI UX Consistency): Flag normalization, help text, completion
+- **fn-42** (CLI UX Fixes): Short container names, hostname fixes
+- **fn-45** (Documentation): CLI reference documentation (user-facing docs)
+- **NEW**: Needs new epic filed
+
+### Step 5: Document Format
+
+```markdown
+# CLI UX Audit Recommendations
+
+## Executive Summary
+- Total recommendations: N
+- Quick wins: N (implement now)
+- Medium effort: N (next release)
+- Breaking changes: N (requires RFC)
+- Top 3 priorities: [list]
+
+## Quick Wins (implement now)
+### REC-001: [Title]
+**Category:** Quick win
+**Priority:** [Impact × Frequency = score]
+**Effort:** Low
+**Breaking:** No
+**Owner epic:** fn-36-rb7 | Status: already planned
+
+**Current:** [Current behavior]
+**Proposed:** [Proposed change]
+**Rationale:** [Why this improves UX]
+
+## Medium Effort (next release)
+### REC-00N: [Title]
+...
+
+## Breaking Changes (requires RFC)
+### REC-00N: [Title]
+...
+**Migration path:** [How users transition]
+
+## Appendix A: Full Audit Data
+- Heuristic scores table
+- Flag consistency matrix
+- Error message templates with scores
+
+## Appendix B: Epic Cross-Reference
+| Recommendation | Owner Epic | Status |
+|----------------|------------|--------|
+| REC-001 | fn-36-rb7 | planned |
+| REC-002 | NEW | - |
+...
+```
 
 ## Key context
 
-Output should inform:
+Output informs:
 - fn-36-rb7 remaining tasks (if any)
+- fn-42 scope validation
 - fn-45 documentation (CLI reference)
 - Future CLI improvement epics
 
-Recommendation template:
-```markdown
-### REC-001: Standardize --name to --container
+**Output location:** `.flow/specs/cli-ux-recommendations.md` (internal planning doc)
+**NOT:** `docs/` (user-facing docs are fn-45's scope)
 
-**Category:** Quick win
-**Impact:** High (affects daily usage)
-**Effort:** Low (search-replace + deprecation warning)
-**Breaking:** Yes (soft - add deprecation warning)
-
-**Current:** `cai links --name foo`
-**Proposed:** `cai links --container foo` (with --name as deprecated alias)
-**Rationale:** Consistency with all other commands
-```
 ## Acceptance
 - [ ] All findings from .1-.3 synthesized
 - [ ] Recommendations categorized (quick-win, medium, breaking)
-- [ ] Each recommendation has impact/effort/risk assessment
-- [ ] Cross-referenced with fn-36-rb7 and fn-42 scope
-- [ ] Document written and committed to repo
+- [ ] Each recommendation has Impact × Frequency priority score
+- [ ] Each recommendation has **Owner epic** field
+- [ ] Each recommendation has **Status** field (already planned / new)
+- [ ] Cross-reference appendix links to fn-36-rb7, fn-42, fn-45
+- [ ] Document written to `.flow/specs/cli-ux-recommendations.md`
 - [ ] Executive summary suitable for stakeholder review
+
 ## Done summary
 TBD
 

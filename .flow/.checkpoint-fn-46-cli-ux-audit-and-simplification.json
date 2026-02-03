@@ -1,0 +1,108 @@
+{
+  "created_at": "2026-02-03T01:39:09.582111Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-46-cli-ux-audit-and-simplification",
+      "completion_review_status": "unknown",
+      "completion_reviewed_at": null,
+      "created_at": "2026-02-02T16:55:03.938120Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [],
+      "id": "fn-46-cli-ux-audit-and-simplification",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-46-cli-ux-audit-and-simplification.md",
+      "status": "open",
+      "title": "CLI UX Audit and Simplification Recommendations",
+      "updated_at": "2026-02-02T16:55:29.111214Z"
+    },
+    "spec": "# CLI UX Audit and Simplification Recommendations\n\n## Overview\n\nConduct a UX researcher-style audit of ContainAI's CLI to identify inconsistencies, usability issues, and opportunities for simplification. This epic produces **analysis and recommendations**, not implementation code.\n\n### Core Problem\nThe CLI has grown organically to 24 commands with varying flag patterns, help text depth, and error message quality. No systematic UX review has been performed to ensure the CLI is cohesive, intuitive, and follows modern CLI conventions.\n\n### Goals\n1. **Heuristic evaluation** against CLI UX best practices (clig.dev, GNU, POSIX)\n2. **Consistency audit** of flag naming, help text, and error messages\n3. **Simplification opportunities** - reduce cognitive load for users\n4. **Prioritized recommendations** for future implementation\n\n### Non-Goals\n- **Not implementing fixes** - fn-36-rb7 and fn-42 handle implementation\n- **Not changing the `-v`/`--verbose` decision** - this is documented and intentional\n- **Not breaking backward compatibility** without explicit approval\n\n## Scope\n\n### In Scope\n- Audit all 24 CLI commands against UX heuristics\n- Document flag naming inconsistencies\n- Review error messages for actionability\n- Assess help text completeness and consistency\n- Identify command structure simplification opportunities\n- Produce prioritized recommendations document\n\n### Out of Scope\n- Code changes (defer to fn-36-rb7, fn-42, or new epics)\n- Documentation updates (fn-45 handles docs)\n- Shell completion improvements (fn-36-rb7 handles this)\n\n## Quick commands\n\n```bash\n# View all commands\nsource src/containai.sh && cai help\n\n# Test help text for each command\nfor cmd in run shell exec doctor setup validate import export stop status gc ssh links config template completion version update; do\n  echo \"=== cai $cmd --help ===\"\n  cai $cmd --help 2>&1 | head -20\ndone\n\n# Check flag consistency\ngrep -n '\\-\\-container\\|--name' src/containai.sh | head -20\n```\n\n## Acceptance Criteria\n\n- [ ] UX heuristic evaluation completed for all 24 commands\n- [ ] Flag consistency matrix documenting all flags across commands\n- [ ] Error message audit with actionability scores\n- [ ] Help text completeness checklist\n- [ ] Simplification opportunities identified and prioritized\n- [ ] Recommendations document produced in `.flow/specs/` or `docs/`\n- [ ] Each recommendation tagged: quick-win, medium-effort, breaking-change\n\n## Dependencies\n\n### Coordinates With\n- **fn-36-rb7** (CLI UX Consistency): Implementation epic for CLI fixes\n- **fn-42** (CLI UX Fixes): Short container names, hostname fixes\n- **fn-45** (Documentation): CLI reference documentation\n\n### Blocked By\n- None (audit can proceed independently)\n\n## References\n\n- CLI guidelines: https://clig.dev/\n- GNU coding standards: https://www.gnu.org/prep/standards/\n- Project conventions: `.flow/memory/conventions.md` (verbosity pattern)\n- Project pitfalls: `.flow/memory/pitfalls.md` (flag validation gotchas)\n- Current CLI: `src/containai.sh` (6700+ lines, 24 commands)\n\n## Open Questions\n\n1. What is the target audience - Docker experts, AI developers unfamiliar with containers, or both?\n2. Is there appetite for breaking changes if they significantly improve UX?\n3. Should recommendations be prioritized by user impact or implementation effort?\n\n## Known Issues to Audit\n\nFrom research:\n- `--name` in `cai links` vs `--container` elsewhere\n- Positional workspace AND `--workspace` flag (two ways to do same thing)\n- `--volume/-v` rejected with insufficient explanation\n- JSON output (`--json`) not available on all commands\n- Error messages vary in actionability\n- Help text depth inconsistent across commands\n"
+  },
+  "epic_id": "fn-46-cli-ux-audit-and-simplification",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T16:55:35.684991Z",
+        "depends_on": [],
+        "epic": "fn-46-cli-ux-audit-and-simplification",
+        "id": "fn-46-cli-ux-audit-and-simplification.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-46-cli-ux-audit-and-simplification.1.md",
+        "status": "todo",
+        "title": "Heuristic evaluation of all CLI commands",
+        "updated_at": "2026-02-02T16:55:48.948931Z"
+      },
+      "id": "fn-46-cli-ux-audit-and-simplification.1",
+      "runtime": null,
+      "spec": "# fn-46-cli-ux-audit-and-simplification.1 Heuristic evaluation of all CLI commands\n\n## Description\nConduct a heuristic evaluation of all 24 CLI commands against established CLI UX best practices. Evaluate each command for discoverability, learnability, efficiency, and error prevention.\n\n**Size:** M\n**Files:** Analysis output only (no code changes)\n\n## Approach\n\n1. Define evaluation heuristics based on:\n   - clig.dev guidelines (human-first, discoverability, composability)\n   - GNU coding standards (--help, --version, flag conventions)\n   - POSIX utility conventions (short flags, -- terminator)\n\n2. For each command, evaluate:\n   - **Discoverability**: Can users find this command when they need it?\n   - **Learnability**: Is the command easy to understand from help text?\n   - **Efficiency**: Does the command minimize user effort?\n   - **Error prevention**: Does the command prevent common mistakes?\n   - **Help quality**: Is --help comprehensive and well-structured?\n\n3. Commands to evaluate (24 total):\n   ```\n   run, shell, exec, doctor, setup, validate, docker, sandbox (deprecated),\n   import, export, sync, stop, status, gc, ssh, links, config, template,\n   completion, version, update, refresh, uninstall, help\n   ```\n\n4. Output format: Table with command, heuristic scores (1-5), and notes\n\n## Key context\n\nReference files:\n- Main CLI: `src/containai.sh:6833-6942` (dispatch)\n- Help functions: `src/containai.sh:193-947`\n- Conventions: `.flow/memory/conventions.md` (verbosity pattern)\n\nKnown issues to look for:\n- Inconsistent help text depth\n- Missing examples in help\n- Unclear command purposes\n## Acceptance\n- [ ] Evaluation heuristics defined and documented\n- [ ] All 24 commands evaluated against heuristics\n- [ ] Scores and notes captured in structured format\n- [ ] Top 5 usability issues identified\n- [ ] Quick wins (easy fixes) flagged\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T16:55:35.770711Z",
+        "depends_on": [],
+        "epic": "fn-46-cli-ux-audit-and-simplification",
+        "id": "fn-46-cli-ux-audit-and-simplification.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-46-cli-ux-audit-and-simplification.2.md",
+        "status": "todo",
+        "title": "Flag naming consistency audit",
+        "updated_at": "2026-02-02T16:56:01.001870Z"
+      },
+      "id": "fn-46-cli-ux-audit-and-simplification.2",
+      "runtime": null,
+      "spec": "# fn-46-cli-ux-audit-and-simplification.2 Flag naming consistency audit\n\n## Description\nAudit all CLI flags for naming consistency, behavior consistency, and adherence to conventions. Produce a flag matrix showing usage across all commands.\n\n**Size:** M\n**Files:** Analysis output only (no code changes)\n\n## Approach\n\n1. Extract all flags from:\n   - `src/containai.sh` case statements\n   - Shell completion definitions (lines 5997-6022)\n   - Help text for each command\n\n2. Build flag matrix:\n   | Flag | Short | Long | Commands | Behavior | Notes |\n   |------|-------|------|----------|----------|-------|\n\n3. Check for inconsistencies:\n   - Same concept, different names (`--name` vs `--container`)\n   - Same flag, different behavior across commands\n   - Missing short forms for common flags\n   - Non-standard naming (kebab-case vs snake_case)\n\n4. Known issues to investigate:\n   - `--name` in `cai links` vs `--container` elsewhere\n   - `--workspace` vs positional workspace argument\n   - `--volume/-v` rejection in `cai run`\n   - `-v` for version (not verbose) per project conventions\n\n## Key context\n\nReference files:\n- Flag parsing: `src/containai.sh` case statements throughout\n- Completion flags: `src/containai.sh:5997-6022`\n- Conventions: `.flow/memory/conventions.md` (no `-v` for verbose)\n\nFlag categories to analyze:\n- Global flags (--verbose, --quiet, --help, --version)\n- Resource flags (--container, --workspace, --data-volume)\n- Behavior flags (--force, --dry-run, --fresh, --restart)\n- Output flags (--json, --quiet)\n## Acceptance\n- [ ] Complete flag matrix with all flags across all commands\n- [ ] Inconsistencies documented with severity rating\n- [ ] Convention violations identified (vs POSIX/GNU/clig.dev)\n- [ ] Recommendations for standardization\n- [ ] Impact assessment for any breaking changes\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T16:55:35.859072Z",
+        "depends_on": [],
+        "epic": "fn-46-cli-ux-audit-and-simplification",
+        "id": "fn-46-cli-ux-audit-and-simplification.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-46-cli-ux-audit-and-simplification.3.md",
+        "status": "todo",
+        "title": "Error message actionability audit",
+        "updated_at": "2026-02-02T16:56:13.589901Z"
+      },
+      "id": "fn-46-cli-ux-audit-and-simplification.3",
+      "runtime": null,
+      "spec": "# fn-46-cli-ux-audit-and-simplification.3 Error message actionability audit\n\n## Description\nAudit all error messages for actionability, consistency, and helpfulness. Users should know what went wrong AND how to fix it.\n\n**Size:** M\n**Files:** Analysis output only (no code changes)\n\n## Approach\n\n1. Extract error messages from:\n   - `grep -n '\\[ERROR\\]' src/*.sh src/lib/*.sh`\n   - `grep -n 'echo.*>&2' src/*.sh src/lib/*.sh`\n   - `grep -n '_cai_error' src/*.sh src/lib/*.sh`\n\n2. Evaluate each error message:\n   - **Clarity**: Does it explain what went wrong?\n   - **Actionability**: Does it tell user how to fix it?\n   - **Consistency**: Does it follow `[ERROR]` format per conventions?\n   - **Context**: Does it include relevant details (file, flag, value)?\n\n3. Score each message:\n   - 1 = Cryptic/unhelpful\n   - 2 = Explains problem, no solution\n   - 3 = Explains problem, vague solution\n   - 4 = Clear problem and solution\n   - 5 = Clear problem, solution, and prevention\n\n4. Known areas to audit:\n   - Container not found errors\n   - Configuration parse errors\n   - Docker/Sysbox not available\n   - SSH connection failures\n   - Volume mount failures\n\n## Key context\n\nError message patterns from conventions:\n```bash\n# Standard format\n_cai_error \"Message here\"  # Uses [ERROR] prefix\necho \"[ERROR] message\" >&2  # Direct stderr\n\n# Good: actionable\n\"[ERROR] Container 'foo' not found. Run 'cai run' to create it.\"\n\n# Bad: not actionable\n\"[ERROR] Container not found\"\n```\n## Acceptance\n- [ ] All error messages catalogued with locations\n- [ ] Each message scored for actionability (1-5)\n- [ ] Inconsistent format errors flagged\n- [ ] Top 10 worst error messages identified\n- [ ] Suggested improvements for low-scoring messages\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-02T16:55:35.948713Z",
+        "depends_on": [
+          "fn-46-cli-ux-audit-and-simplification.1",
+          "fn-46-cli-ux-audit-and-simplification.2",
+          "fn-46-cli-ux-audit-and-simplification.3"
+        ],
+        "epic": "fn-46-cli-ux-audit-and-simplification",
+        "id": "fn-46-cli-ux-audit-and-simplification.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-46-cli-ux-audit-and-simplification.4.md",
+        "status": "todo",
+        "title": "Produce prioritized recommendations document",
+        "updated_at": "2026-02-02T16:56:29.318735Z"
+      },
+      "id": "fn-46-cli-ux-audit-and-simplification.4",
+      "runtime": null,
+      "spec": "# fn-46-cli-ux-audit-and-simplification.4 Produce prioritized recommendations document\n\n## Description\nSynthesize findings from tasks .1-.3 into a prioritized recommendations document that can guide future CLI improvements.\n\n**Size:** M\n**Files:** `docs/cli-ux-audit.md` (new) or `.flow/specs/cli-ux-recommendations.md`\n\n## Approach\n\n1. Synthesize findings:\n   - Heuristic evaluation results (.1)\n   - Flag consistency audit (.2)\n   - Error message audit (.3)\n\n2. Categorize recommendations:\n   - **Quick wins**: Low effort, high impact, no breaking changes\n   - **Medium effort**: Moderate complexity, clear benefit\n   - **Breaking changes**: Require deprecation cycle, significant benefit\n\n3. Prioritize by:\n   - User impact (how many users affected, how often)\n   - Implementation effort (estimated complexity)\n   - Risk (breaking changes, backward compatibility)\n\n4. Document format:\n   ```markdown\n   # CLI UX Audit Recommendations\n\n   ## Executive Summary\n   ## Quick Wins (implement now)\n   ## Medium Effort (next release)\n   ## Breaking Changes (requires RFC)\n   ## Appendix: Full Audit Data\n   ```\n\n5. Cross-reference with existing epics:\n   - What's already planned in fn-36-rb7?\n   - What's already planned in fn-42?\n   - What's new and needs a new epic?\n\n## Key context\n\nOutput should inform:\n- fn-36-rb7 remaining tasks (if any)\n- fn-45 documentation (CLI reference)\n- Future CLI improvement epics\n\nRecommendation template:\n```markdown\n### REC-001: Standardize --name to --container\n\n**Category:** Quick win\n**Impact:** High (affects daily usage)\n**Effort:** Low (search-replace + deprecation warning)\n**Breaking:** Yes (soft - add deprecation warning)\n\n**Current:** `cai links --name foo`\n**Proposed:** `cai links --container foo` (with --name as deprecated alias)\n**Rationale:** Consistency with all other commands\n```\n## Acceptance\n- [ ] All findings from .1-.3 synthesized\n- [ ] Recommendations categorized (quick-win, medium, breaking)\n- [ ] Each recommendation has impact/effort/risk assessment\n- [ ] Cross-referenced with fn-36-rb7 and fn-42 scope\n- [ ] Document written and committed to repo\n- [ ] Executive summary suitable for stakeholder review\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

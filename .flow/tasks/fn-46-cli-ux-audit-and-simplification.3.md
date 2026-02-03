@@ -1,37 +1,104 @@
 # fn-46-cli-ux-audit-and-simplification.3 Error message actionability audit
 
 ## Description
-Audit all error messages for actionability, consistency, and helpfulness. Users should know what went wrong AND how to fix it.
+Audit all error messages for actionability, consistency, and helpfulness. Users should know what went wrong AND how to fix it. Uses comprehensive extraction methodology with **strictly non-destructive testing only**.
 
 **Size:** M
 **Files:** Analysis output only (no code changes)
 
 ## Approach
 
-1. Extract error messages from:
-   - `grep -n '\[ERROR\]' src/*.sh src/lib/*.sh`
-   - `grep -n 'echo.*>&2' src/*.sh src/lib/*.sh`
-   - `grep -n '_cai_error' src/*.sh src/lib/*.sh`
+### Step 1: Comprehensive Error Extraction
 
-2. Evaluate each error message:
-   - **Clarity**: Does it explain what went wrong?
-   - **Actionability**: Does it tell user how to fix it?
-   - **Consistency**: Does it follow `[ERROR]` format per conventions?
-   - **Context**: Does it include relevant details (file, flag, value)?
+**a) Static extraction (all patterns):**
+```bash
+# _cai_error calls (primary)
+grep -rn '_cai_error' src/*.sh src/lib/*.sh
 
-3. Score each message:
-   - 1 = Cryptic/unhelpful
-   - 2 = Explains problem, no solution
-   - 3 = Explains problem, vague solution
-   - 4 = Clear problem and solution
-   - 5 = Clear problem, solution, and prevention
+# printf to stderr
+grep -rn "printf.*>&2" src/*.sh src/lib/*.sh
 
-4. Known areas to audit:
-   - Container not found errors
-   - Configuration parse errors
-   - Docker/Sysbox not available
-   - SSH connection failures
-   - Volume mount failures
+# echo [ERROR] pattern
+grep -rn '\[ERROR\]' src/*.sh src/lib/*.sh
+
+# echo to stderr without [ERROR]
+grep -rn "echo.*>&2" src/*.sh src/lib/*.sh | grep -v '\[ERROR\]'
+```
+
+**b) Dynamic/runtime errors (STRICTLY NON-DESTRUCTIVE scenarios):**
+
+**SAFETY CONSTRAINT**: Only use `--help`, `--dry-run`, `status`, `validate`, or read-only commands.
+**FORBIDDEN**: `cai shell`, `cai run`, `cai update`, `cai uninstall` (can create/modify state)
+**NOTE**: `cai setup --dry-run` is safe (preview only) and included in test scenarios below.
+
+| Scenario | Safe Test Command | Expected Error |
+|----------|-------------------|----------------|
+| Invalid container name | `cai status --container nonexistent` | Container not found |
+| Invalid path | `cai validate --config /nonexistent/config.toml` | File not found |
+| Unknown option | `cai status --badoption` | Unknown option |
+| Missing flag value | `cai status --container` | Flag needs value |
+| Config validation | `cai validate` (with broken config) | Config parse error |
+| Dry-run mode | `cai setup --dry-run` | Preview only, no mutations |
+| Version check | `cai version --json` | JSON output (verify format) |
+
+**Note**: Unknown commands route to `run` (not "unknown command" error). Document this as a UX finding - it may cause confusion when users typo a command name.
+
+**c) Upstream tool errors (from code review, not live execution):**
+
+Review error handling in code to categorize:
+- **Raw upstream**: Docker/SSH errors passed through unchanged
+- **Wrapped with remediation**: Error caught and user guidance added
+
+```bash
+# Find error handling patterns for external commands
+grep -rn 'docker.*||' src/*.sh src/lib/*.sh | head -20
+grep -rn 'ssh.*||' src/*.sh src/lib/*.sh | head -20
+```
+
+### Step 2: Dedupe Strategy
+
+**Group by normalized message template:**
+- Strip variable parts: container names, paths, numbers
+- Template: `"Container '{}' not found"` with example instances
+
+**Track unique templates + callsites:**
+| Template | Callsites | Example | Score |
+|----------|-----------|---------|-------|
+| Container '{}' not found | 5 | Container 'foo' not found | 2 |
+
+### Step 3: Score Each Message (1-5)
+
+| Score | Description | Example |
+|-------|-------------|---------|
+| 1 | Cryptic/unhelpful | "Error" |
+| 2 | Explains problem, no solution | "Container not found" |
+| 3 | Explains problem, vague solution | "Container not found. Check name." |
+| 4 | Clear problem and solution | "Container 'foo' not found. Run 'cai run' to create it." |
+| 5 | Clear problem, solution, and prevention | "Container 'foo' not found. Run 'cai run' to create, or 'cai status' to list existing." |
+
+### Step 4: Categorize Findings
+
+**By error type:**
+- User input errors (typos, wrong flags)
+- State errors (container not running, not found)
+- Environment errors (Docker not installed, permissions)
+- External errors (network, Docker daemon, SSH)
+
+**By actionability gap:**
+- No action suggested (score 1-2)
+- Vague action (score 3)
+- Specific action but no alternatives (score 4)
+
+### Step 5: Audit Priority Areas
+
+Focus on high-frequency error scenarios (from static analysis):
+- Container not found errors
+- Configuration parse errors
+- Docker/Sysbox not available
+- SSH connection failures
+- Volume mount failures
+- Permission denied errors
+- Missing dependencies
 
 ## Key context
 
@@ -39,7 +106,6 @@ Error message patterns from conventions:
 ```bash
 # Standard format
 _cai_error "Message here"  # Uses [ERROR] prefix
-echo "[ERROR] message" >&2  # Direct stderr
 
 # Good: actionable
 "[ERROR] Container 'foo' not found. Run 'cai run' to create it."
@@ -47,12 +113,21 @@ echo "[ERROR] message" >&2  # Direct stderr
 # Bad: not actionable
 "[ERROR] Container not found"
 ```
+
+**UX Finding to Document**: Unknown commands silently route to `run` instead of showing an error. This can cause confusion when users typo command names (e.g., `cai stattus` tries to run a container named `stattus`).
+
 ## Acceptance
-- [ ] All error messages catalogued with locations
-- [ ] Each message scored for actionability (1-5)
+- [ ] All error patterns extracted via static analysis
+- [ ] Strictly non-destructive misuse scenarios tested (status, validate, --help, --dry-run)
+- [ ] Unknown command routing behavior documented as UX finding
+- [ ] Upstream errors categorized (raw vs wrapped) from code review
+- [ ] Dedupe strategy applied (templates with examples)
+- [ ] Each template scored for actionability (1-5)
 - [ ] Inconsistent format errors flagged
-- [ ] Top 10 worst error messages identified
+- [ ] Top 10 worst error messages identified (lowest scores, highest frequency)
 - [ ] Suggested improvements for low-scoring messages
+- [ ] Raw upstream errors flagged for wrapping consideration
+
 ## Done summary
 TBD
 
