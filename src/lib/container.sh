@@ -2443,6 +2443,16 @@ _containai_start_container() {
                 return 1
             fi
 
+            # Apply per-container network policy if configured
+            # Pass template network.conf path if using templates
+            local template_network_conf=""
+            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
+                local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+                template_network_conf="${templates_root}/${template_name}/network.conf"
+                [[ ! -f "$template_network_conf" ]] && template_network_conf=""
+            fi
+            _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"
+
             # Set up SSH access (wait for sshd, inject key, update known_hosts, write config)
             # Get SSH port from container label for stopped containers being started
             local exited_ssh_port
@@ -2700,6 +2710,16 @@ _containai_start_container() {
                 return 1
             fi
 
+            # Apply per-container network policy if configured
+            # Pass template network.conf path if using templates
+            local template_network_conf=""
+            if [[ "$use_template" == "true" && -n "$template_name" ]]; then
+                local templates_root="${_CAI_TEMPLATE_DIR:-$HOME/.config/containai/templates}"
+                template_network_conf="${templates_root}/${template_name}/network.conf"
+                [[ ! -f "$template_network_conf" ]] && template_network_conf=""
+            fi
+            _cai_apply_container_network_policy "$container_name" "$workspace_resolved" "$selected_context" "$template_network_conf"
+
             # Set up SSH access (wait for sshd, inject key, update known_hosts, write config)
             # Force update for newly created containers (host keys are fresh)
             if ! _cai_setup_container_ssh "$container_name" "$ssh_port" "$selected_context" "true"; then
@@ -2900,6 +2920,9 @@ _containai_stop_all() {
                 ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
             fi
 
+            # Clean up per-container network rules before stopping/removing
+            _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
+
             if [[ "$remove_flag" == "true" ]]; then
                 echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"
                 local rm_success=false
@@ -3013,6 +3036,9 @@ _containai_stop_all() {
         if [[ "$remove_flag" == "true" ]]; then
             ssh_port=$(_cai_get_container_ssh_port "$container_to_stop" "$ctx_to_use" 2>/dev/null) || ssh_port=""
         fi
+
+        # Clean up per-container network rules before stopping/removing
+        _cai_cleanup_container_network "$container_to_stop" "$ctx_to_use"
 
         if [[ "$remove_flag" == "true" ]]; then
             echo "Removing: $container_to_stop${ctx_to_use:+ [context: $ctx_to_use]}"

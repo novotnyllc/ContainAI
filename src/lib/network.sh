@@ -12,6 +12,16 @@
 #   _cai_is_nested_container()    - Check if running in a nested container environment
 #   _cai_nested_iptables_supported() - Check if iptables works in nested environment
 #
+# Per-Container Network Policy (opt-in via .containai/network.conf):
+#   _cai_parse_network_conf()     - Parse INI-style network config file
+#   _cai_expand_preset()          - Expand preset name to domain list
+#   _cai_resolve_domain_to_ips()  - DNS resolution with timeout
+#   _cai_ip_conflicts_with_hard_block() - Check if IP conflicts with hard blocks
+#   _cai_get_container_ip()       - Get container IP from Docker
+#   _cai_apply_container_network_policy() - Apply per-container iptables rules
+#   _cai_remove_container_network_rules() - Remove per-container rules
+#   _cai_cleanup_container_network() - Cleanup helper for stop paths
+#
 # Network Policy:
 #   Allow:
 #   - Host gateway (bridge gateway IP, host.docker.internal)
@@ -1084,6 +1094,529 @@ _cai_network_doctor_status() {
         esac
     fi
 
+    return 0
+}
+
+# ==============================================================================
+# Per-Container Network Policy (Opt-In)
+# ==============================================================================
+# These functions implement opt-in network egress restrictions via .containai/network.conf
+# The default (no config file) allows all egress except hard blocks (private ranges, metadata)
+
+# Comment marker for per-container rules (distinct from global rules)
+_CAI_CONTAINER_IPTABLES_COMMENT="cai"
+
+# Preset definitions for common domain groups
+# Format: preset_name -> space-separated list of domains
+declare -A _CAI_NETWORK_PRESETS 2>/dev/null || true
+_CAI_NETWORK_PRESETS=(
+    [package-managers]="registry.npmjs.org pypi.org files.pythonhosted.org crates.io dl.crates.io static.crates.io rubygems.org"
+    [git-hosts]="github.com api.github.com codeload.github.com raw.githubusercontent.com objects.githubusercontent.com media.githubusercontent.com gitlab.com registry.gitlab.com bitbucket.org"
+    [ai-apis]="api.anthropic.com api.openai.com"
+)
+
+# Expand a preset name to its list of domains
+# Arguments: $1 = preset name
+# Outputs: space-separated domain list to stdout
+# Returns: 0=success, 1=unknown preset
+_cai_expand_preset() {
+    local preset_name="$1"
+
+    if [[ -n "${_CAI_NETWORK_PRESETS[$preset_name]:-}" ]]; then
+        printf '%s' "${_CAI_NETWORK_PRESETS[$preset_name]}"
+        return 0
+    else
+        _cai_warn "Unknown network preset: $preset_name"
+        return 1
+    fi
+}
+
+# Resolve a domain name to IP addresses
+# Arguments: $1 = domain name
+# Outputs: space-separated list of IPs to stdout
+# Returns: 0=success, 1=resolution failed
+_cai_resolve_domain_to_ips() {
+    local domain="$1"
+    local ips="" ip_line
+
+    # Use getent for portability (works on most Linux systems)
+    # Falls back to dig if getent is unavailable
+    if command -v getent >/dev/null 2>&1; then
+        # getent ahostsv4 returns all IPv4 addresses for a host
+        while IFS= read -r ip_line; do
+            local ip="${ip_line%% *}"
+            # Skip if already in list (dedup)
+            case " $ips " in
+                *" $ip "*) continue ;;
+            esac
+            if [[ -n "$ip" ]]; then
+                ips="${ips:+$ips }$ip"
+            fi
+        done < <(getent ahostsv4 "$domain" 2>/dev/null | awk '{print $1}' | sort -u)
+    elif command -v dig >/dev/null 2>&1; then
+        # dig +short returns IPs one per line
+        while IFS= read -r ip_line; do
+            # Skip CNAME responses (not IPs)
+            if [[ "$ip_line" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                ips="${ips:+$ips }$ip_line"
+            fi
+        done < <(dig +short +time=5 +tries=2 "$domain" A 2>/dev/null)
+    elif command -v host >/dev/null 2>&1; then
+        # host command as fallback
+        while IFS= read -r ip_line; do
+            if [[ "$ip_line" =~ has\ address\ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+                ips="${ips:+$ips }${BASH_REMATCH[1]}"
+            fi
+        done < <(host -t A -W 5 "$domain" 2>/dev/null)
+    else
+        _cai_warn "No DNS resolution tool available (getent, dig, or host)"
+        return 1
+    fi
+
+    if [[ -z "$ips" ]]; then
+        _cai_warn "DNS resolution failed for: $domain"
+        return 1
+    fi
+
+    printf '%s' "$ips"
+    return 0
+}
+
+# Check if an IP address conflicts with hard blocks (private ranges, metadata)
+# Arguments: $1 = IP address
+# Returns: 0=conflicts (should be blocked), 1=no conflict
+_cai_ip_conflicts_with_hard_block() {
+    local ip="$1"
+
+    # Parse IP into octets
+    local IFS='.'
+    local -a octets
+    # shellcheck disable=SC2206
+    octets=($ip)
+
+    if [[ ${#octets[@]} -ne 4 ]]; then
+        return 1  # Invalid IP format, no conflict
+    fi
+
+    local o1="${octets[0]}"
+    local o2="${octets[1]}"
+
+    # Check private ranges (RFC 1918)
+    # 10.0.0.0/8
+    if [[ "$o1" -eq 10 ]]; then
+        return 0
+    fi
+    # 172.16.0.0/12 (172.16.x.x - 172.31.x.x)
+    if [[ "$o1" -eq 172 ]] && [[ "$o2" -ge 16 ]] && [[ "$o2" -le 31 ]]; then
+        return 0
+    fi
+    # 192.168.0.0/16
+    if [[ "$o1" -eq 192 ]] && [[ "$o2" -eq 168 ]]; then
+        return 0
+    fi
+
+    # Check link-local (169.254.0.0/16)
+    if [[ "$o1" -eq 169 ]] && [[ "$o2" -eq 254 ]]; then
+        return 0
+    fi
+
+    # Check specific metadata endpoints
+    case "$ip" in
+        169.254.169.254|169.254.170.2|100.100.100.200)
+            return 0
+            ;;
+    esac
+
+    return 1  # No conflict
+}
+
+# Parse a network.conf file (INI-style, one value per line)
+# Arguments: $1 = config file path
+# Sets global arrays:
+#   _CAI_PARSED_PRESETS - array of preset names
+#   _CAI_PARSED_ALLOWS - array of allowed domains/IPs
+#   _CAI_PARSED_DEFAULT_DENY - "true" or "false"
+# Returns: 0=success (or no file), 1=parse error
+_cai_parse_network_conf() {
+    local config_file="$1"
+
+    # Initialize output arrays
+    _CAI_PARSED_PRESETS=()
+    _CAI_PARSED_ALLOWS=()
+    _CAI_PARSED_DEFAULT_DENY="false"
+
+    if [[ ! -f "$config_file" ]]; then
+        return 0  # No config file is valid (means allow-all default)
+    fi
+
+    local line key value in_egress_section=false line_num=0
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line_num=$((line_num + 1))
+
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+
+        # Strip leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Check for section headers
+        if [[ "$line" =~ ^\[([a-zA-Z_-]+)\]$ ]]; then
+            local section="${BASH_REMATCH[1]}"
+            if [[ "$section" == "egress" ]]; then
+                in_egress_section=true
+            else
+                in_egress_section=false
+                _cai_warn "Unknown section in network.conf line $line_num: [$section]"
+            fi
+            continue
+        fi
+
+        # Skip lines outside [egress] section
+        [[ "$in_egress_section" != "true" ]] && continue
+
+        # Parse key = value
+        if [[ "$line" =~ ^([a-zA-Z_]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            key="${BASH_REMATCH[1]}"
+            value="${BASH_REMATCH[2]}"
+
+            # Strip trailing whitespace and comments from value
+            value="${value%%#*}"
+            value="${value%"${value##*[![:space:]]}"}"
+
+            case "$key" in
+                preset)
+                    if [[ -n "$value" ]]; then
+                        _CAI_PARSED_PRESETS+=("$value")
+                    fi
+                    ;;
+                allow)
+                    if [[ -n "$value" ]]; then
+                        _CAI_PARSED_ALLOWS+=("$value")
+                    fi
+                    ;;
+                default_deny)
+                    if [[ "$value" == "true" ]] || [[ "$value" == "yes" ]] || [[ "$value" == "1" ]]; then
+                        _CAI_PARSED_DEFAULT_DENY="true"
+                    elif [[ "$value" == "false" ]] || [[ "$value" == "no" ]] || [[ "$value" == "0" ]]; then
+                        _CAI_PARSED_DEFAULT_DENY="false"
+                    else
+                        _cai_warn "Invalid default_deny value in network.conf line $line_num: $value"
+                    fi
+                    ;;
+                *)
+                    _cai_warn "Unknown key in network.conf line $line_num: $key"
+                    ;;
+            esac
+        else
+            _cai_warn "Invalid syntax in network.conf line $line_num: $line"
+        fi
+    done < "$config_file"
+
+    return 0
+}
+
+# Get container IP address from ContainAI bridge network
+# Arguments: $1 = container name, $2 = docker context (optional)
+# Outputs: IP address to stdout
+# Returns: 0=success, 1=failure
+_cai_get_container_ip() {
+    local container_name="$1"
+    local context="${2:-}"
+    local -a docker_cmd=(docker)
+
+    if [[ -n "$context" ]]; then
+        docker_cmd=(docker --context "$context")
+    fi
+
+    local ip=""
+
+    # Try to get IP from ContainAI bridge network first
+    # Note: On host, bridge is cai0; in nested containers, it's docker0
+    ip=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format \
+        '{{range $k, $v := .NetworkSettings.Networks}}{{if eq $k "bridge"}}{{$v.IPAddress}}{{end}}{{end}}' \
+        -- "$container_name" 2>/dev/null) || ip=""
+
+    # Fallback: get first available IP
+    if [[ -z "$ip" ]]; then
+        ip=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --format \
+            '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+            -- "$container_name" 2>/dev/null | head -c 15) || ip=""
+    fi
+
+    if [[ -z "$ip" ]]; then
+        _cai_debug "Could not get IP for container: $container_name"
+        return 1
+    fi
+
+    printf '%s' "$ip"
+    return 0
+}
+
+# Apply per-container network policy based on .containai/network.conf
+# Arguments:
+#   $1 = container name
+#   $2 = workspace path (where .containai/ lives)
+#   $3 = docker context (optional)
+#   $4 = template network.conf path (optional, for template-level config)
+# Returns: 0=success, 1=failure
+# Note: This is called from start/attach paths
+_cai_apply_container_network_policy() {
+    local container_name="$1"
+    local workspace="$2"
+    local context="${3:-}"
+    local template_conf="${4:-}"
+
+    local workspace_conf="$workspace/.containai/network.conf"
+
+    # Check if either config file exists
+    local has_template_conf=false has_workspace_conf=false
+    [[ -n "$template_conf" && -f "$template_conf" ]] && has_template_conf=true
+    [[ -f "$workspace_conf" ]] && has_workspace_conf=true
+
+    if [[ "$has_template_conf" != "true" && "$has_workspace_conf" != "true" ]]; then
+        _cai_debug "No network.conf found for container $container_name - using default allow-all"
+        return 0
+    fi
+
+    # Parse template config first (base)
+    local -a template_presets=() template_allows=()
+    local template_default_deny="false"
+
+    if [[ "$has_template_conf" == "true" ]]; then
+        _cai_debug "Parsing template network.conf: $template_conf"
+        if _cai_parse_network_conf "$template_conf"; then
+            template_presets=("${_CAI_PARSED_PRESETS[@]}")
+            template_allows=("${_CAI_PARSED_ALLOWS[@]}")
+            template_default_deny="$_CAI_PARSED_DEFAULT_DENY"
+        fi
+    fi
+
+    # Parse workspace config (extends template)
+    local -a workspace_presets=() workspace_allows=()
+    local workspace_default_deny="false"
+
+    if [[ "$has_workspace_conf" == "true" ]]; then
+        _cai_debug "Parsing workspace network.conf: $workspace_conf"
+        if _cai_parse_network_conf "$workspace_conf"; then
+            workspace_presets=("${_CAI_PARSED_PRESETS[@]}")
+            workspace_allows=("${_CAI_PARSED_ALLOWS[@]}")
+            workspace_default_deny="$_CAI_PARSED_DEFAULT_DENY"
+        fi
+    fi
+
+    # Merge configs: presets and allows are additive, default_deny is OR'd
+    local -a all_presets=("${template_presets[@]}" "${workspace_presets[@]}")
+    local -a all_allows=("${template_allows[@]}" "${workspace_allows[@]}")
+    local default_deny="false"
+    [[ "$template_default_deny" == "true" || "$workspace_default_deny" == "true" ]] && default_deny="true"
+
+    # If no default_deny, this is informational only
+    if [[ "$default_deny" != "true" ]]; then
+        if [[ ${#all_presets[@]} -gt 0 || ${#all_allows[@]} -gt 0 ]]; then
+            _cai_info "Network policy (informational only, default_deny not set):"
+            [[ ${#all_presets[@]} -gt 0 ]] && _cai_info "  Presets: ${all_presets[*]}"
+            [[ ${#all_allows[@]} -gt 0 ]] && _cai_info "  Allows: ${all_allows[*]}"
+        fi
+        return 0
+    fi
+
+    _cai_info "Applying network policy for container: $container_name"
+
+    # Get container IP
+    local container_ip
+    if ! container_ip=$(_cai_get_container_ip "$container_name" "$context"); then
+        _cai_warn "Could not get container IP - skipping network policy"
+        return 0  # Don't fail start, just skip policy
+    fi
+
+    _cai_debug "Container IP: $container_ip"
+
+    # Check iptables availability
+    if ! _cai_iptables_available; then
+        _cai_warn "iptables not available - cannot apply network policy"
+        return 0
+    fi
+
+    if ! _cai_iptables_can_run; then
+        _cai_warn "Insufficient permissions for iptables - cannot apply network policy"
+        return 0
+    fi
+
+    # Ensure DOCKER-USER chain exists
+    if ! _cai_ensure_docker_user_chain; then
+        _cai_warn "Could not ensure DOCKER-USER chain - cannot apply network policy"
+        return 0
+    fi
+
+    # Collect all allowed IPs
+    local -a allowed_ips=()
+    local preset domain domains ip ips
+
+    # Expand presets to domains, then resolve to IPs
+    for preset in "${all_presets[@]}"; do
+        if domains=$(_cai_expand_preset "$preset"); then
+            for domain in $domains; do
+                if ips=$(_cai_resolve_domain_to_ips "$domain"); then
+                    for ip in $ips; do
+                        # Check for hard block conflict
+                        if _cai_ip_conflicts_with_hard_block "$ip"; then
+                            _cai_warn "Ignoring $domain ($ip) - conflicts with hard block (private range/metadata)"
+                            continue
+                        fi
+                        allowed_ips+=("$ip")
+                    done
+                fi
+            done
+        fi
+    done
+
+    # Resolve allow entries (domains or direct IPs)
+    for domain in "${all_allows[@]}"; do
+        # Check if it's already an IP
+        if [[ "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then
+            local ip_only="${domain%%/*}"
+            if _cai_ip_conflicts_with_hard_block "$ip_only"; then
+                _cai_warn "Ignoring $domain - conflicts with hard block (private range/metadata)"
+                continue
+            fi
+            allowed_ips+=("$domain")
+        else
+            # It's a domain, resolve it
+            if ips=$(_cai_resolve_domain_to_ips "$domain"); then
+                for ip in $ips; do
+                    if _cai_ip_conflicts_with_hard_block "$ip"; then
+                        _cai_warn "Ignoring $domain ($ip) - conflicts with hard block (private range/metadata)"
+                        continue
+                    fi
+                    allowed_ips+=("$ip")
+                done
+            fi
+        fi
+    done
+
+    # Remove duplicates
+    local -a unique_ips=()
+    local seen_ip
+    for ip in "${allowed_ips[@]}"; do
+        local found=false
+        for seen_ip in "${unique_ips[@]}"; do
+            if [[ "$ip" == "$seen_ip" ]]; then
+                found=true
+                break
+            fi
+        done
+        if [[ "$found" != "true" ]]; then
+            unique_ips+=("$ip")
+        fi
+    done
+
+    # Apply iptables rules
+    # Comment format: cai:<container_name> for easy cleanup
+    local comment="${_CAI_CONTAINER_IPTABLES_COMMENT}:${container_name}"
+
+    # First, remove any existing rules for this container (idempotent)
+    _cai_remove_container_network_rules "$container_name" "$context"
+
+    # Add ACCEPT rules for each allowed IP (must be before the DROP)
+    local rule_count=0
+    for ip in "${unique_ips[@]}"; do
+        if _cai_iptables -I "$_CAI_IPTABLES_CHAIN" -s "$container_ip" -d "$ip" -j ACCEPT -m comment --comment "$comment" 2>/dev/null; then
+            rule_count=$((rule_count + 1))
+            _cai_debug "Added ACCEPT rule: $container_ip -> $ip"
+        else
+            _cai_warn "Failed to add ACCEPT rule for $ip"
+        fi
+    done
+
+    # Add final DROP rule for this container (default deny)
+    if _cai_iptables -A "$_CAI_IPTABLES_CHAIN" -s "$container_ip" -j DROP -m comment --comment "$comment" 2>/dev/null; then
+        _cai_debug "Added DROP rule for container $container_name"
+    else
+        _cai_warn "Failed to add DROP rule for container"
+    fi
+
+    _cai_info "Network policy applied: $rule_count allowed destinations, default deny enabled"
+    return 0
+}
+
+# Remove per-container network rules from iptables
+# Arguments: $1 = container name, $2 = docker context (optional, unused but for consistency)
+# Returns: 0=success
+_cai_remove_container_network_rules() {
+    local container_name="$1"
+    local context="${2:-}"  # Reserved for future use
+
+    # Comment to search for
+    local comment="${_CAI_CONTAINER_IPTABLES_COMMENT}:${container_name}"
+
+    # Check iptables availability
+    if ! _cai_iptables_available; then
+        _cai_debug "iptables not available - skipping rule cleanup"
+        return 0
+    fi
+
+    if ! _cai_iptables_can_run; then
+        _cai_debug "Insufficient permissions for iptables - skipping rule cleanup"
+        return 0
+    fi
+
+    # Check if DOCKER-USER chain exists
+    if ! _cai_iptables -n -L "$_CAI_IPTABLES_CHAIN" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Find and delete all rules with our comment
+    # Use loop since we need to delete multiple rules
+    local deleted=0
+    local max_iterations=100  # Safety limit
+    local iteration=0
+
+    while [[ $iteration -lt $max_iterations ]]; do
+        iteration=$((iteration + 1))
+
+        # Find rule number with our comment
+        local rule_num=""
+        local line_num=0
+        while IFS= read -r line; do
+            line_num=$((line_num + 1))
+            if [[ "$line" == *"$comment"* ]]; then
+                rule_num=$line_num
+                break
+            fi
+        done < <(_cai_iptables -S "$_CAI_IPTABLES_CHAIN" 2>/dev/null | tail -n +2)
+
+        if [[ -z "$rule_num" ]]; then
+            break  # No more rules to delete
+        fi
+
+        # Delete rule by number
+        if _cai_iptables -D "$_CAI_IPTABLES_CHAIN" "$rule_num" 2>/dev/null; then
+            deleted=$((deleted + 1))
+        else
+            break  # Failed to delete, stop
+        fi
+    done
+
+    if [[ $deleted -gt 0 ]]; then
+        _cai_debug "Removed $deleted network policy rules for container: $container_name"
+    fi
+
+    return 0
+}
+
+# Cleanup helper for stop paths - removes container network rules
+# This is the function that all stop paths should call
+# Arguments: $1 = container name, $2 = docker context (optional)
+# Returns: 0 always (cleanup should not fail stop)
+_cai_cleanup_container_network() {
+    local container_name="$1"
+    local context="${2:-}"
+
+    _cai_debug "Cleaning up network rules for container: $container_name"
+    _cai_remove_container_network_rules "$container_name" "$context"
     return 0
 }
 

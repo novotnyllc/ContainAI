@@ -1755,6 +1755,8 @@ _containai_stop_cmd() {
             ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context" 2>/dev/null) || ssh_port=""
 
             _cai_info "Removing: $container_name [context: $selected_context]"
+            # Clean up per-container network rules before removing
+            _cai_cleanup_container_network "$container_name" "$selected_context"
             if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f -- "$container_name" >/dev/null 2>&1; then
                 # Clean up SSH config
                 if [[ -n "$ssh_port" ]]; then
@@ -1769,6 +1771,8 @@ _containai_stop_cmd() {
             fi
         else
             _cai_info "Stopping: $container_name [context: $selected_context]"
+            # Clean up per-container network rules before stopping
+            _cai_cleanup_container_network "$container_name" "$selected_context"
             if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$container_name" >/dev/null 2>&1; then
                 _cai_ok "Done."
             else
@@ -1849,6 +1853,8 @@ _containai_stop_cmd() {
                 local ssh_port
                 ssh_port=$(_cai_get_container_ssh_port "$ws_container_name" "$selected_context" 2>/dev/null) || ssh_port=""
                 _cai_info "Removing: $ws_container_name [context: $selected_context]"
+                # Clean up per-container network rules before removing
+                _cai_cleanup_container_network "$ws_container_name" "$selected_context"
                 if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" rm -f -- "$ws_container_name" >/dev/null 2>&1; then
                     if [[ -n "$ssh_port" ]]; then
                         _cai_cleanup_container_ssh "$ws_container_name" "$ssh_port"
@@ -1862,6 +1868,8 @@ _containai_stop_cmd() {
                 fi
             else
                 _cai_info "Stopping: $ws_container_name [context: $selected_context]"
+                # Clean up per-container network rules before stopping
+                _cai_cleanup_container_network "$ws_container_name" "$selected_context"
                 if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" stop -- "$ws_container_name" >/dev/null 2>&1; then
                     _cai_ok "Done."
                 else
