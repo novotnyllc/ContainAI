@@ -457,12 +457,23 @@ EOF
 
     pass "Test container started with bind-tools"
 
-    # First, verify DNS works WITHOUT policy (baseline)
+    # Baseline checks: verify both DNS servers work WITHOUT policy
+    # This ensures the test is valid - if either fails before policy, network is restricted
     info "Baseline check: verifying DNS to 8.8.8.8 works before policy..."
     if docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=3 example.com 8.8.8.8 >/dev/null 2>&1; then
         pass "Baseline: DNS to 8.8.8.8 works (no policy yet)"
     else
         warn "Baseline DNS to 8.8.8.8 failed - network may be restricted, skipping enforcement test"
+        docker rm -f "$TEST_CONTAINER_NAME" >/dev/null 2>&1 || true
+        TEST_CONTAINER_NAME=""
+        return 0
+    fi
+
+    info "Baseline check: verifying DNS to 1.1.1.1 works before policy..."
+    if docker exec "$TEST_CONTAINER_NAME" nslookup -timeout=3 example.com 1.1.1.1 >/dev/null 2>&1; then
+        pass "Baseline: DNS to 1.1.1.1 works (no policy yet)"
+    else
+        warn "Baseline DNS to 1.1.1.1 failed - network may block Cloudflare, skipping enforcement test"
         docker rm -f "$TEST_CONTAINER_NAME" >/dev/null 2>&1 || true
         TEST_CONTAINER_NAME=""
         return 0

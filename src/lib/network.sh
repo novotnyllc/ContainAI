@@ -1423,8 +1423,11 @@ _cai_apply_container_network_policy() {
     local default_deny="false"
     [[ "$template_default_deny" == "true" || "$workspace_default_deny" == "true" ]] && default_deny="true"
 
-    # If no default_deny, this is informational only
+    # If no default_deny, this is informational only - but we must still remove
+    # any existing rules from a previous config that had default_deny=true
     if [[ "$default_deny" != "true" ]]; then
+        # Remove any existing per-container rules (handles config changes)
+        _cai_remove_container_network_rules "$container_name" "$context"
         if [[ ${#all_presets[@]} -gt 0 || ${#all_allows[@]} -gt 0 ]]; then
             _cai_info "Network policy (informational only, default_deny not set):"
             [[ ${#all_presets[@]} -gt 0 ]] && _cai_info "  Presets: ${all_presets[*]}"
