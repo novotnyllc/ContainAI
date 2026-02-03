@@ -47,6 +47,9 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Install build dependencies
+        run: ./scripts/install-build-dependencies.sh -y
+
       - name: Install and run NBGV
         id: nbgv
         run: |
@@ -66,7 +69,12 @@ jobs:
             macos-arm64) platform="macos/arm64" ;;
             *) echo "ERROR: Unknown tarball target: ${{ matrix.tarball_target }}" >&2; exit 1 ;;
           esac
-          ./src/scripts/build-cai-tarballs.sh \
+          if [[ "$(uname -s)" == "Darwin" ]]; then
+            bash_cmd="$(brew --prefix)/bin/bash"
+          else
+            bash_cmd="bash"
+          fi
+          "$bash_cmd" ./src/scripts/build-cai-tarballs.sh \
             --platforms "$platform" \
             --version "$NBGV_SemVer2" \
             --output-dir ./artifacts

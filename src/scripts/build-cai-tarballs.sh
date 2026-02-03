@@ -21,6 +21,26 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+require_bash_4() {
+    if [[ -z "${BASH_VERSINFO:-}" ]] || ((BASH_VERSINFO[0] < 4)); then
+        local current_version="${BASH_VERSION:-unknown}"
+        printf 'ERROR: %s requires bash 4.0+ (detected: %s)\n' "$0" "$current_version" >&2
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            printf 'Install bash with: %s\n' "$REPO_ROOT/scripts/install-build-dependencies.sh" >&2
+            if command -v brew >/dev/null 2>&1; then
+                local brew_prefix
+                brew_prefix="$(brew --prefix 2>/dev/null || true)"
+                if [[ -n "$brew_prefix" ]]; then
+                    printf 'Then run with: %s %s\n' "$brew_prefix/bin/bash" "$0" >&2
+                fi
+            fi
+        fi
+        exit 2
+    fi
+}
+
+require_bash_4
+
 PLATFORMS=""
 BUILD_VERSION=""
 OUTPUT_DIR="$REPO_ROOT/artifacts/cai-tarballs"
