@@ -1,0 +1,17 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-02T23:23:55.688671Z",
+  "depends_on": [
+    "fn-49-devcontainer-integration.2",
+    "fn-49-devcontainer-integration.4"
+  ],
+  "epic": "fn-49-devcontainer-integration",
+  "id": "fn-49-devcontainer-integration.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-49-devcontainer-integration.5.md",
+  "status": "todo",
+  "title": "Test sysbox verification matrix",
+  "updated_at": "2026-02-02T23:24:06.606526Z"
+}

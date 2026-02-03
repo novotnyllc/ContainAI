@@ -102,9 +102,8 @@ Create release packaging system: build multi-arch .NET binaries, package into fl
 - [ ] No binaries or tarballs in git history
 
 ## Done summary
-TBD
-
+Implemented release packaging system for multi-arch .NET binaries with tarballs and dual-mode installer. Created scripts/package-release.sh for building per-arch tarballs, rewrote install.sh with standalone download and local install modes with security validation, and updated CI workflows to build tarballs in docker.yml and publish to GitHub Releases in release.yml (triggered by rel/v* branches).
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 71ff527, 23e6e78, a0fb028, 61d8ec1
+- Tests: shellcheck scripts/package-release.sh, shellcheck install.sh, bash -n scripts/package-release.sh, bash -n install.sh
 - PRs:
