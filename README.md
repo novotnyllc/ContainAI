@@ -3,8 +3,7 @@
 [![Build](https://github.com/novotnyllc/containai/actions/workflows/docker.yml/badge.svg)](https://github.com/novotnyllc/containai/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-AI coding agents need to build containers, run services, and operate freely - but without risking your host system. ContainAI gives them **VM-like isolation without `--privileged`**, **your shell preferences synced in**, and **ephemeral or persistent environments** - all for free, using the same Sysbox technology that powers Docker Desktop's paid Enhanced Container Isolation.
-
+AI coding agents need to operate freely - but without risking your host system. ContainAI gives them VM-like isolation with your shell preferences synced in, and ephemeral or persistent environments based on sysbox.
 ```bash
 # Install and run in 30 seconds
 curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
