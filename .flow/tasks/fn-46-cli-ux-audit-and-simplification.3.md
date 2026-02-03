@@ -134,7 +134,7 @@ Completed comprehensive error message actionability audit. Analyzed 620 _cai_err
 Key findings:
 1. 59% of messages lack remediation guidance
 2. build.sh uses inconsistent 'ERROR:' format vs '[ERROR]'
-3. Isolation/Setup errors are the gold standard at 100% remediation
+3. Isolation/Setup errors have highest remediation rate (~95%)
 4. Top 10 worst messages identified with specific improvement recommendations
 5. Unknown commands route to `run` dispatcher and fail as "Unknown option: {typo}" (UX issue documented)
 
