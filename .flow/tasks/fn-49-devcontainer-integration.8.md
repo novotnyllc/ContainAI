@@ -51,8 +51,13 @@ The devcontainer needs Docker contexts from the host, but:
 - [ ] Integration test verifying sync behavior
 
 ## Done summary
-TBD
+Task deferred to V2 per epic spec. The Docker context sync watcher is not needed for V1 - the devcontainer use case does not require syncing Docker contexts between host and container because:
 
+1. DinD in devcontainer runs its own dockerd, so it doesn't need host contexts
+2. Devcontainers typically don't need to talk to the host Docker daemon
+3. Context complexity adds overhead without clear V1 benefit
+
+If a concrete use case emerges in V2, implementation would be one-time sync during setup with explicit user opt-in.
 ## Evidence
 - Commits:
 - Tests:

@@ -17,7 +17,9 @@ verify_sysbox() {
 
     # MANDATORY CHECK: Sysbox-fs mounts (sysbox-unique, cannot be faked)
     # This check MUST pass - it's the definitive sysbox indicator
-    if grep -qE 'sysboxfs|fuse\.sysbox' /proc/mounts 2>/dev/null; then
+    # Parse /proc/mounts fields and require EXACT fstype match (not substring)
+    # Format: device mountpoint fstype options dump pass
+    if awk '$3 == "sysboxfs" || $3 == "fuse.sysboxfs" { found=1; exit } END { exit !found }' /proc/mounts 2>/dev/null; then
         sysboxfs_found=true
         ((passed++))
         printf '  ✓ Sysboxfs: mounted (REQUIRED)\n'

@@ -9,12 +9,71 @@
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-# Source configuration from install.sh
-# shellcheck source=/dev/null
-source /usr/local/share/containai/config
+CONFIG_FILE="/usr/local/share/containai/config.json"
+
+# Parse configuration from JSON (SECURITY: don't source untrusted data)
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    printf 'ERROR: Configuration file not found: %s\n' "$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# Read config values using jq
+ENABLE_SSH=$(jq -r '.enable_ssh // true' "$CONFIG_FILE")
 
 # Re-verify sysbox first (in case container was restarted on different host)
 /usr/local/share/containai/verify-sysbox.sh || exit 1
+
+# ──────────────────────────────────────────────────────────────────────
+# Check if any process is listening on a port (cross-platform)
+# ──────────────────────────────────────────────────────────────────────
+is_port_in_use() {
+    local port="$1"
+    if command -v ss &>/dev/null; then
+        ss -tln 2>/dev/null | grep -qE ":${port}[[:space:]]" && return 0
+    elif command -v lsof &>/dev/null; then
+        lsof -iTCP:"$port" -sTCP:LISTEN &>/dev/null && return 0
+    elif command -v netstat &>/dev/null; then
+        netstat -tln 2>/dev/null | grep -qE ":${port}[[:space:]]" && return 0
+    fi
+    return 1
+}
+
+# ──────────────────────────────────────────────────────────────────────
+# Check if sshd is running via pidfile validation
+# Returns 0 if sshd is confirmed running, 1 otherwise
+# ──────────────────────────────────────────────────────────────────────
+is_sshd_running_from_pidfile() {
+    local pidfile="$1"
+    local pid
+
+    # Check pidfile exists and is readable
+    [[ -f "$pidfile" ]] || return 1
+
+    # Try to read pid (may need sudo if root-owned)
+    if [[ -r "$pidfile" ]]; then
+        pid=$(cat "$pidfile" 2>/dev/null) || return 1
+    elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+        pid=$(sudo cat "$pidfile" 2>/dev/null) || return 1
+    else
+        return 1
+    fi
+
+    # Validate pid is numeric
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+
+    # Check process is running and is sshd
+    if [[ -d "/proc/$pid" ]]; then
+        # Linux: check /proc/$pid/comm or cmdline
+        local comm
+        comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+        [[ "$comm" == "sshd" ]] && return 0
+    fi
+
+    # Fallback: just check if process exists
+    kill -0 "$pid" 2>/dev/null && return 0
+
+    return 1
+}
 
 # ──────────────────────────────────────────────────────────────────────
 # Start sshd if enabled (devcontainer-style, not systemd)
@@ -30,25 +89,67 @@ start_sshd() {
         return 0
     fi
 
+    # Get SSH port from env var (set by cai-docker wrapper) or use default
+    local SSH_PORT="${CONTAINAI_SSH_PORT:-2322}"
+    # Use /var/run/sshd for pidfile (proper location, consistent with sshd conventions)
+    local PIDFILE="/var/run/sshd/containai-sshd.pid"
+
+    # Idempotency check 1: Validate pidfile first (works for both root and non-root)
+    if is_sshd_running_from_pidfile "$PIDFILE"; then
+        printf '✓ sshd already running on port %s (validated via pidfile)\n' "$SSH_PORT"
+        return 0
+    fi
+
+    # Idempotency check 2: Check if port is in use
+    if is_port_in_use "$SSH_PORT"; then
+        # Port is in use - assume it's sshd from a previous run (graceful degradation)
+        # We can't reliably determine process name without root on some systems
+        printf '✓ sshd appears to be running on port %s (port in use)\n' "$SSH_PORT"
+        return 0
+    fi
+
+    # Clean up stale pidfile if it exists but sshd isn't running
+    if [[ -f "$PIDFILE" ]]; then
+        if [[ -w "$PIDFILE" ]]; then
+            rm -f "$PIDFILE" 2>/dev/null || true
+        elif command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+            sudo rm -f "$PIDFILE" 2>/dev/null || true
+        fi
+    fi
+
+    # Check if running as root (sshd requires root to bind privileged ports and access keys)
+    if [[ "$(id -u)" -ne 0 ]]; then
+        # Try sudo if available
+        if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+            printf 'Running sshd setup as root via sudo...\n'
+            sudo mkdir -p /var/run/sshd
+            sudo chmod 755 /var/run/sshd
+            [[ -f /etc/ssh/ssh_host_rsa_key ]] || sudo ssh-keygen -A
+            sudo /usr/sbin/sshd -p "$SSH_PORT" -o "PidFile=$PIDFILE"
+            printf '✓ sshd started on port %s (via sudo)\n' "$SSH_PORT"
+            return 0
+        else
+            # SSH was requested but cannot be started - this is an error condition
+            printf '╔═══════════════════════════════════════════════════════════════════╗\n' >&2
+            printf '║  ⚠️  SSH NOT AVAILABLE                                             ║\n' >&2
+            printf '║                                                                   ║\n' >&2
+            printf '║  sshd requires root privileges but:                               ║\n' >&2
+            printf '║  - Container is running as non-root user                          ║\n' >&2
+            printf '║  - Passwordless sudo is not available                             ║\n' >&2
+            printf '║                                                                   ║\n' >&2
+            printf '║  To fix: Run container as root or configure passwordless sudo     ║\n' >&2
+            printf '╚═══════════════════════════════════════════════════════════════════╝\n' >&2
+            return 1
+        fi
+    fi
+
+    # Running as root - ensure runtime directory exists with correct permissions
+    mkdir -p /var/run/sshd
+    chmod 755 /var/run/sshd
+
     # Generate host keys if missing
     if [[ ! -f /etc/ssh/ssh_host_rsa_key ]]; then
         ssh-keygen -A
-    fi
-
-    # Get SSH port from env var (set by cai-docker wrapper) or use default
-    local SSH_PORT="${CONTAINAI_SSH_PORT:-2322}"
-
-    # Idempotency: check if already running
-    local PIDFILE="/tmp/containai-sshd.pid"
-    if [[ -f "$PIDFILE" ]]; then
-        local pid
-        pid=$(cat "$PIDFILE")
-        if kill -0 "$pid" 2>/dev/null; then
-            printf '✓ sshd already running on port %s (pid %s)\n' "$SSH_PORT" "$pid"
-            return 0
-        fi
-        # Stale pidfile
-        rm -f "$PIDFILE"
     fi
 
     # Start sshd on configured port

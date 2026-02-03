@@ -19,6 +19,46 @@ INSTALL_DOCKER="${INSTALLDOCKER:-true}"
 REMOTE_USER="${REMOTEUSER:-auto}"
 
 # ══════════════════════════════════════════════════════════════════════
+# INPUT VALIDATION (SECURITY: Prevent command injection)
+# Feature options come from devcontainer.json which may be attacker-controlled
+# ══════════════════════════════════════════════════════════════════════
+validate_input() {
+    # DATA_VOLUME must be a valid Docker volume name: alphanumeric, dots, underscores, hyphens
+    # Must start with alphanumeric
+    if ! [[ "$DATA_VOLUME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        printf 'ERROR: Invalid dataVolume "%s". Must be alphanumeric with ._- allowed.\n' "$DATA_VOLUME" >&2
+        exit 1
+    fi
+
+    # ENABLE_CREDENTIALS must be true or false
+    if [[ "$ENABLE_CREDENTIALS" != "true" && "$ENABLE_CREDENTIALS" != "false" ]]; then
+        printf 'ERROR: Invalid enableCredentials "%s". Must be true or false.\n' "$ENABLE_CREDENTIALS" >&2
+        exit 1
+    fi
+
+    # ENABLE_SSH must be true or false
+    if [[ "$ENABLE_SSH" != "true" && "$ENABLE_SSH" != "false" ]]; then
+        printf 'ERROR: Invalid enableSsh "%s". Must be true or false.\n' "$ENABLE_SSH" >&2
+        exit 1
+    fi
+
+    # INSTALL_DOCKER must be true or false
+    if [[ "$INSTALL_DOCKER" != "true" && "$INSTALL_DOCKER" != "false" ]]; then
+        printf 'ERROR: Invalid installDocker "%s". Must be true or false.\n' "$INSTALL_DOCKER" >&2
+        exit 1
+    fi
+
+    # REMOTE_USER must be 'auto' or a valid Unix username
+    # Valid: starts with lowercase letter or underscore, followed by lowercase letters, digits, underscores, or hyphens
+    if [[ "$REMOTE_USER" != "auto" ]] && ! [[ "$REMOTE_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+        printf 'ERROR: Invalid remoteUser "%s". Must be "auto" or a valid Unix username.\n' "$REMOTE_USER" >&2
+        exit 1
+    fi
+}
+
+validate_input
+
+# ══════════════════════════════════════════════════════════════════════
 # PLATFORM CHECK (Debian/Ubuntu only in V1)
 # ══════════════════════════════════════════════════════════════════════
 if ! command -v apt-get &>/dev/null; then
@@ -40,16 +80,17 @@ mkdir -p /usr/local/share/containai
 mkdir -p /usr/local/lib/containai
 
 # ══════════════════════════════════════════════════════════════════════
-# STORE CONFIGURATION
-# Runtime scripts source this file for feature options
+# STORE CONFIGURATION AS JSON (SECURITY: avoid sourcing untrusted data)
+# Runtime scripts parse this with jq instead of sourcing
 # ══════════════════════════════════════════════════════════════════════
-cat > /usr/local/share/containai/config << EOF
-# ContainAI feature configuration
-# Generated at build time by install.sh
-DATA_VOLUME="$DATA_VOLUME"
-ENABLE_CREDENTIALS="$ENABLE_CREDENTIALS"
-ENABLE_SSH="$ENABLE_SSH"
-REMOTE_USER="$REMOTE_USER"
+cat > /usr/local/share/containai/config.json << EOF
+{
+    "data_volume": "$DATA_VOLUME",
+    "enable_credentials": $( [[ "$ENABLE_CREDENTIALS" == "true" ]] && echo "true" || echo "false" ),
+    "enable_ssh": $( [[ "$ENABLE_SSH" == "true" ]] && echo "true" || echo "false" ),
+    "install_docker": $( [[ "$INSTALL_DOCKER" == "true" ]] && echo "true" || echo "false" ),
+    "remote_user": "$REMOTE_USER"
+}
 EOF
 
 printf '  Configuration saved\n'
@@ -108,6 +149,10 @@ fi
 # Note: dockerd startup happens in postStartCommand, not here
 # ──────────────────────────────────────────────────────────────────────
 if [[ "$INSTALL_DOCKER" == "true" ]]; then
+    # Install curl and ca-certificates first (may be missing on slim images)
+    apt-get install -y -qq curl ca-certificates
+    printf '    Installed: curl, ca-certificates\n'
+
     # Install Docker using official script
     curl -fsSL https://get.docker.com | sh
 

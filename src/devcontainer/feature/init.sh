@@ -9,9 +9,17 @@
 # ══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-# Source configuration from install.sh
-# shellcheck source=/dev/null
-source /usr/local/share/containai/config
+CONFIG_FILE="/usr/local/share/containai/config.json"
+
+# Parse configuration from JSON (SECURITY: don't source untrusted data)
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    printf 'ERROR: Configuration file not found: %s\n' "$CONFIG_FILE" >&2
+    exit 1
+fi
+
+# Read config values using jq
+ENABLE_CREDENTIALS=$(jq -r '.enable_credentials // false' "$CONFIG_FILE")
+REMOTE_USER=$(jq -r '.remote_user // "auto"' "$CONFIG_FILE")
 
 # Verify sysbox first
 /usr/local/share/containai/verify-sysbox.sh || exit 1
@@ -22,27 +30,43 @@ LINK_SPEC="/usr/local/lib/containai/link-spec.json"
 # ──────────────────────────────────────────────────────────────────────
 # Detect user home directory
 # Devcontainers typically use: vscode, node, or root
+# Uses getent passwd for accurate home directory resolution
 # ──────────────────────────────────────────────────────────────────────
 detect_user_home() {
-    if [[ "$REMOTE_USER" != "auto" && "$REMOTE_USER" != "" ]]; then
-        # User explicitly specified
-        if [[ "$REMOTE_USER" == "root" ]]; then
-            printf '/root'
+    local target_user="$REMOTE_USER"
+
+    # Auto-detect user if not specified
+    if [[ "$target_user" == "auto" || -z "$target_user" ]]; then
+        if id -u vscode &>/dev/null; then
+            target_user="vscode"
+        elif id -u node &>/dev/null; then
+            target_user="node"
+        elif [[ -n "${USER:-}" ]]; then
+            target_user="$USER"
         else
-            printf '/home/%s' "$REMOTE_USER"
+            target_user="root"
         fi
-        return
     fi
 
-    # Auto-detect based on common devcontainer patterns
-    if [[ -d /home/vscode ]]; then
-        printf '/home/vscode'
-    elif [[ -d /home/node ]]; then
-        printf '/home/node'
-    elif [[ -n "${HOME:-}" ]]; then
+    # Use getent passwd for accurate home directory resolution (if available)
+    local home_dir=""
+    if command -v getent &>/dev/null; then
+        home_dir=$(getent passwd "$target_user" 2>/dev/null | cut -d: -f6)
+    fi
+
+    if [[ -n "$home_dir" && -d "$home_dir" ]]; then
+        printf '%s' "$home_dir"
+    elif [[ "$target_user" == "root" ]]; then
+        printf '/root'
+    elif [[ -d "/home/$target_user" ]]; then
+        # Fallback: check if /home/<user> exists
+        printf '/home/%s' "$target_user"
+    elif [[ -n "${HOME:-}" && -d "$HOME" ]]; then
+        # Last resort: use $HOME if set
         printf '%s' "$HOME"
     else
-        printf '/root'
+        # Final fallback to /home/<user> convention
+        printf '/home/%s' "$target_user"
     fi
 }
 
@@ -61,11 +85,13 @@ fi
 # These contain tokens/API keys that should not be exposed to untrusted code
 # ──────────────────────────────────────────────────────────────────────
 CREDENTIAL_TARGETS=(
-    "/mnt/agent-data/config/gh/hosts.yml"           # GitHub token
-    "/mnt/agent-data/claude/credentials.json"       # Claude API key
-    "/mnt/agent-data/codex/config.toml"             # May contain keys
-    "/mnt/agent-data/codex/auth.json"               # Codex auth
+    "/mnt/agent-data/config/gh/hosts.yml"            # GitHub token
+    "/mnt/agent-data/claude/credentials.json"        # Claude API key
+    "/mnt/agent-data/codex/config.toml"              # May contain keys
+    "/mnt/agent-data/codex/auth.json"                # Codex auth
     "/mnt/agent-data/local/share/opencode/auth.json" # OpenCode auth
+    "/mnt/agent-data/gemini/settings.json"           # Gemini API keys
+    "/mnt/agent-data/gemini/oauth_creds.json"        # Gemini OAuth
 )
 
 is_credential_file() {
