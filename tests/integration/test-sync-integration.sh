@@ -346,9 +346,15 @@ get_count() {
     echo "$output" | awk '{print $1}' | grep -E '^[0-9]+$' | tail -1 || echo "0"
 }
 
-# Helper to run in test image - bypassing entrypoint for symlink checks only
+# Helper to run in test image - bypassing entrypoint but running link setup first
+# This ensures symlinks are created even when bypassing systemd init
 run_in_image_no_entrypoint() {
-    if ! "${DOCKER_CMD[@]}" run --rm --entrypoint /bin/bash -v "$DATA_VOLUME":/mnt/agent-data "$IMAGE_NAME" -c "$1" 2>/dev/null; then
+    # Run link-repair.sh to set up symlinks (normally done by containai-init.sh in entrypoint)
+    # Then run the actual test command
+    if ! "${DOCKER_CMD[@]}" run --rm --entrypoint /bin/bash \
+        --user agent -e HOME=/home/agent \
+        -v "$DATA_VOLUME":/mnt/agent-data "$IMAGE_NAME" -c \
+        "/opt/containai/link-repair.sh 2>/dev/null; $1" 2>/dev/null; then
         echo "docker_error"
     fi
 }
@@ -520,9 +526,10 @@ test_dry_run() {
     before_snapshot=$(run_in_rsync 'find /data -exec stat -c "%a %s %n" {} \; 2>/dev/null | sort')
 
     # Run dry-run via hermetic cai import - should succeed when prerequisites are met
+    # Use --verbose to see INFO-level output (per project conventions: silent by default)
     local dry_run_exit=0
     local dry_run_output
-    dry_run_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run) || dry_run_exit=$?
+    dry_run_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run --verbose) || dry_run_exit=$?
 
     if [[ $dry_run_exit -ne 0 ]]; then
         fail "Dry-run failed with exit code $dry_run_exit"
@@ -555,7 +562,7 @@ test_dry_run() {
 
     # Test CONTAINAI_DATA_VOLUME env var precedence (hermetic via run_cai_import_env)
     local env_test_output env_test_exit=0
-    env_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --dry-run) || env_test_exit=$?
+    env_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --dry-run --verbose) || env_test_exit=$?
     if echo "$env_test_output" | grep -q "Using data volume: $env_vol"; then
         pass "CONTAINAI_DATA_VOLUME env var respected"
     else
@@ -565,7 +572,7 @@ test_dry_run() {
 
     # Test --data-volume flag takes precedence over env var
     local cli_test_output cli_test_exit=0
-    cli_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --data-volume "$cli_vol" --dry-run) || cli_test_exit=$?
+    cli_test_output=$(run_cai_import_env "CONTAINAI_DATA_VOLUME=$env_vol" --data-volume "$cli_vol" --dry-run --verbose) || cli_test_exit=$?
     if echo "$cli_test_output" | grep -q "Using data volume: $cli_vol"; then
         pass "--data-volume flag takes precedence over env var"
     else
@@ -575,7 +582,7 @@ test_dry_run() {
 
     # Test --data-volume takes precedence (skips config discovery)
     local skip_config_output skip_config_exit=0
-    skip_config_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run) || skip_config_exit=$?
+    skip_config_output=$(run_cai_import --data-volume "$DATA_VOLUME" --dry-run --verbose) || skip_config_exit=$?
     if echo "$skip_config_output" | grep -q "Using data volume: $DATA_VOLUME"; then
         pass "--data-volume takes precedence (uses specified volume directly)"
     else
@@ -608,7 +615,7 @@ test_dry_run() {
     fi
     register_test_volume "$config_vol"
     # Run from config_test_dir with hermetic HOME and cleared env vars
-    config_test_output=$(run_cai_import_from_dir "$config_test_dir" "" --dry-run) || config_test_exit=$?
+    config_test_output=$(run_cai_import_from_dir "$config_test_dir" "" --dry-run --verbose) || config_test_exit=$?
     if echo "$config_test_output" | grep -q "Using data volume: $config_vol"; then
         pass "Config discovery from \$PWD works"
     else
@@ -969,7 +976,9 @@ test_bashrc_sourcing() {
         chmod +x /mnt/agent-data/shell/.bashrc.d/test.sh
 
         # Test in interactive shell
-        result=$(bash -i -c "echo \$TEST_VAR" 2>/dev/null)
+        # Use unique marker to filter out Ubuntu welcome/sudo messages from interactive bash
+        result=$(bash -i -c "echo MARKER_START; echo \$TEST_VAR; echo MARKER_END" 2>/dev/null | \
+            sed -n "/MARKER_START/,/MARKER_END/{/MARKER/d;p;}")
 
         # Cleanup
         rm -f /mnt/agent-data/shell/.bashrc.d/test.sh
@@ -977,7 +986,8 @@ test_bashrc_sourcing() {
         echo "$result"
     ')
 
-    if [[ "$source_test" == "success" ]]; then
+    # Check if output contains "success" (may have extra whitespace/newlines)
+    if echo "$source_test" | grep -q "^success$"; then
         pass ".bashrc.d scripts are sourced in interactive shells"
     elif [[ "$source_test" == "docker_error" ]]; then
         fail "Docker container failed to start for sourcing test"
@@ -1644,7 +1654,8 @@ from_host = true
     register_test_volume "$test_vol"
 
     local import_output import_exit=0
-    import_output=$(run_cai_import_from_dir "$test_dir" "") || import_exit=$?
+    # Use --verbose to see INFO messages (INFO is silent by default per conventions)
+    import_output=$(run_cai_import_from_dir "$test_dir" "" --verbose) || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Empty allowlist does not cause error"
@@ -3899,7 +3910,8 @@ data_volume = "'"$test_vol"'"
     mkdir -p "$override_dir/.claude"
     echo '{"dryrun": "test"}' > "$override_dir/.claude/settings.json"
 
-    import_output=$(run_cai_import_from_dir "$test_dir" "" --data-volume "$test_vol" --dry-run) || import_exit=$?
+    # Use --verbose to see step/info messages about overrides (silent by default per conventions)
+    import_output=$(run_cai_import_from_dir "$test_dir" "" --data-volume "$test_vol" --dry-run --verbose) || import_exit=$?
 
     if echo "$import_output" | grep -qi "would apply override\|override.*dry-run\|dry-run.*override"; then
         pass "Dry-run output mentions override application"

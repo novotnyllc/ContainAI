@@ -1332,7 +1332,10 @@ _containai_import_cmd() {
     # Import env vars (after dotfile sync, with same context)
     # Skip for restore mode (tgz import) - restore bypasses all host-derived mutations
     if [[ "${_CAI_RESTORE_MODE:-}" != "1" ]]; then
-        _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"
+        if ! _containai_import_env "$selected_context" "$resolved_volume" "$resolved_workspace" "$explicit_config" "$dry_run"; then
+            unset _CAI_RESTORE_MODE
+            return 1
+        fi
     fi
 
     # Clear restore mode flag after use
