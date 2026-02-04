@@ -3426,31 +3426,32 @@ data_volume = "'"$test_vol"'"
 
     # -------------------------------------------------------------------------
     # Setup: Create host-like source structure with various symlink types
-    # Use .config/gh which is synced by _IMPORT_SYNC_MAP
+    # Use .vim which is synced as a directory by _IMPORT_SYNC_MAP (:d flag)
+    # Note: .config/gh only syncs individual files, not the directory itself
     # -------------------------------------------------------------------------
-    # Create target directory INSIDE the synced subtree (.config/gh)
-    mkdir -p "$alt_source_dir/.config/gh/real-target"
-    echo "hosts content" >"$alt_source_dir/.config/gh/real-target/hosts.yml"
+    # Create target directory INSIDE the synced subtree (.vim)
+    mkdir -p "$alt_source_dir/.vim/real-target"
+    echo "vim settings" >"$alt_source_dir/.vim/real-target/vimrc"
 
     # Test case 1: Internal absolute symlink (target INSIDE synced subtree)
-    # Link points from .config/gh/link to .config/gh/real-target (both inside gh/)
+    # Link points from .vim/link to .vim/real-target (both inside .vim/)
     # This should be converted to relative: "real-target" (same directory)
-    ln -s "$alt_source_dir/.config/gh/real-target" "$alt_source_dir/.config/gh/internal-link"
+    ln -s "$alt_source_dir/.vim/real-target" "$alt_source_dir/.vim/internal-link"
 
     # Test case 2: Relative symlink - should NOT be relinked
-    ln -s "./real-target" "$alt_source_dir/.config/gh/relative-link"
+    ln -s "./real-target" "$alt_source_dir/.vim/relative-link"
 
     # Test case 3: External absolute symlink - should be preserved with warning
-    ln -s "/usr/bin/bash" "$alt_source_dir/.config/gh/external-link"
+    ln -s "/usr/bin/bash" "$alt_source_dir/.vim/external-link"
 
     # Test case 4: Broken symlink - symlink to nonexistent target within synced subtree
     # Store the original target for later verification
-    local broken_target="$alt_source_dir/.config/gh/does-not-exist"
-    ln -s "$broken_target" "$alt_source_dir/.config/gh/broken-link"
+    local broken_target="$alt_source_dir/.vim/does-not-exist"
+    ln -s "$broken_target" "$alt_source_dir/.vim/broken-link"
 
     # Test case 5: Circular symlinks - a -> b, b -> a (both inside synced subtree)
-    ln -s "$alt_source_dir/.config/gh/circular-b" "$alt_source_dir/.config/gh/circular-a"
-    ln -s "$alt_source_dir/.config/gh/circular-a" "$alt_source_dir/.config/gh/circular-b"
+    ln -s "$alt_source_dir/.vim/circular-b" "$alt_source_dir/.vim/circular-a"
+    ln -s "$alt_source_dir/.vim/circular-a" "$alt_source_dir/.vim/circular-b"
 
     # -------------------------------------------------------------------------
     # Run import with --from pointing to alternate source
@@ -3477,9 +3478,9 @@ data_volume = "'"$test_vol"'"
     section "Test 46: Symlink relinking - internal absolute to relative"
 
     local target
-    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/internal-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/editors/vim/internal-link 2>/dev/null) || target=""
 
-    # The symlink points from /data/config/gh/internal-link to /data/config/gh/real-target
+    # The symlink points from /data/editors/vim/internal-link to /data/editors/vim/real-target
     # Since they are in the same directory, the relative path is just "real-target"
     # (no ./ prefix, just the filename)
     if [[ "$target" == "real-target" ]]; then
@@ -3493,7 +3494,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 47: Symlink relinking - relative preserved"
 
-    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/relative-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/editors/vim/relative-link 2>/dev/null) || target=""
 
     if [[ "$target" == "./real-target" ]]; then
         pass "Relative symlink preserved unchanged"
@@ -3506,7 +3507,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 48: Symlink relinking - external preserved with warning"
 
-    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/external-link 2>/dev/null) || target=""
+    target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/editors/vim/external-link 2>/dev/null) || target=""
 
     if [[ "$target" == "/usr/bin/bash" ]]; then
         pass "External absolute symlink preserved"
@@ -3533,7 +3534,7 @@ data_volume = "'"$test_vol"'"
 
     # Check symlink exists (even if broken)
     local broken_exists
-    broken_exists=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/broken-link && echo yes || echo no' 2>/dev/null) || broken_exists="no"
+    broken_exists=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/editors/vim/broken-link && echo yes || echo no' 2>/dev/null) || broken_exists="no"
 
     if [[ "$broken_exists" == "yes" ]]; then
         pass "Broken symlink preserved (not deleted)"
@@ -3543,7 +3544,7 @@ data_volume = "'"$test_vol"'"
 
     # Verify the target was preserved as-is (original host path, not rewritten)
     local broken_link_target
-    broken_link_target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/config/gh/broken-link 2>/dev/null) || broken_link_target=""
+    broken_link_target=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 readlink /data/editors/vim/broken-link 2>/dev/null) || broken_link_target=""
 
     # Broken symlink should keep original target (not be rewritten to /mnt/agent-data/...)
     if [[ "$broken_link_target" == "$broken_target" ]]; then
@@ -3563,8 +3564,8 @@ data_volume = "'"$test_vol"'"
     # The fact that import completed (no timeout) proves circular symlinks didn't hang
     # Verify the symlinks were copied
     local circular_a circular_b
-    circular_a=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
-    circular_b=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/circular-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
+    circular_a=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/editors/vim/circular-a && echo yes || echo no' 2>/dev/null) || circular_a="no"
+    circular_b=$("${DOCKER_CMD[@]}" run --rm -v "$test_vol":/data alpine:3.19 sh -c 'test -L /data/editors/vim/circular-b && echo yes || echo no' 2>/dev/null) || circular_b="no"
 
     if [[ "$circular_a" == "yes" && "$circular_b" == "yes" ]]; then
         pass "Circular symlinks imported without hanging"
@@ -3648,7 +3649,7 @@ data_volume = "'"$cross_vol"'"
 
     # -------------------------------------------------------------------------
     # Test 51: Directory symlink replaces pre-existing directory (pitfall)
-    # Uses .config/gh which is synced, with symlink inside the synced subtree
+    # Uses .vim which is synced as a directory (:d flag), with symlink inside the synced subtree
     # -------------------------------------------------------------------------
     section "Test 51: Symlink relinking - directory symlink pitfall"
 
@@ -3662,15 +3663,15 @@ data_volume = "'"$cross_vol"'"
 
     # Pre-populate volume with a real directory at the path where symlink will go
     "${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c '
-        mkdir -p /data/config/gh/subdir
-        echo "pre-existing content" > /data/config/gh/subdir/existing.txt
+        mkdir -p /data/editors/vim/subdir
+        echo "pre-existing content" > /data/editors/vim/subdir/existing.txt
     ' 2>/dev/null
 
     # Create source with symlink at same path as existing directory
-    # Target is inside the synced subtree (.config/gh)
-    mkdir -p "$pitfall_source_dir/.config/gh/real-subdir"
-    echo "new content" >"$pitfall_source_dir/.config/gh/real-subdir/new.txt"
-    ln -s "$pitfall_source_dir/.config/gh/real-subdir" "$pitfall_source_dir/.config/gh/subdir"
+    # Target is inside the synced subtree (.vim)
+    mkdir -p "$pitfall_source_dir/.vim/real-subdir"
+    echo "new content" >"$pitfall_source_dir/.vim/real-subdir/new.txt"
+    ln -s "$pitfall_source_dir/.vim/real-subdir" "$pitfall_source_dir/.vim/subdir"
 
     # Create config for pitfall test
     local pitfall_test_dir
@@ -3695,14 +3696,14 @@ data_volume = "'"$pitfall_vol"'"
 
     # Check that result is a symlink, not a directory with symlink inside
     local is_symlink
-    is_symlink=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_symlink="no"
+    is_symlink=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -L /data/editors/vim/subdir && echo yes || echo no' 2>/dev/null) || is_symlink="no"
 
     if [[ "$is_symlink" == "yes" ]]; then
         pass "Directory symlink replaced pre-existing directory correctly"
     else
         # Check if it's a directory (pitfall not handled)
         local is_dir
-        is_dir=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/config/gh/subdir && echo yes || echo no' 2>/dev/null) || is_dir="no"
+        is_dir=$("${DOCKER_CMD[@]}" run --rm -v "$pitfall_vol":/data alpine:3.19 sh -c 'test -d /data/editors/vim/subdir && echo yes || echo no' 2>/dev/null) || is_dir="no"
         if [[ "$is_dir" == "yes" ]]; then
             fail "Directory symlink pitfall: symlink created INSIDE existing directory"
         else
