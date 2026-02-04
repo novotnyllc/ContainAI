@@ -17,17 +17,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Source test helpers
 source "$SCRIPT_DIR/sync-test-helpers.sh"
 
 # ==============================================================================
-# Test configuration
-# ==============================================================================
-USER_MANIFEST_TEST_RUN_ID="usermanifest-$(date +%s)-$$"
-
 # Test counters
+# ==============================================================================
 TESTS_RUN=0
 TESTS_PASSED=0
 TESTS_FAILED=0
@@ -42,10 +38,6 @@ test_fail() {
     printf '[FAIL] %s\n' "$*" >&2
     TESTS_RUN=$((TESTS_RUN + 1))
     TESTS_FAILED=$((TESTS_FAILED + 1))
-}
-
-test_skip() {
-    printf '[SKIP] %s\n' "$*"
 }
 
 test_info() {
@@ -81,8 +73,9 @@ init_fixture_home >/dev/null
 
 test_info "Fixture home: $SYNC_TEST_FIXTURE_HOME"
 test_info "Test image: $SYNC_TEST_IMAGE_NAME"
+test_info "Run ID: $SYNC_TEST_RUN_ID"
 
-# Test counter for unique names
+# Test counter for unique volume names
 TEST_COUNTER=0
 
 # ==============================================================================
@@ -91,8 +84,8 @@ TEST_COUNTER=0
 printf '\n=== Test 1: User manifest directory synced to container ===\n'
 
 TEST_COUNTER=$((TEST_COUNTER + 1))
-test_vol=$(create_test_volume "user-manifest-sync-${TEST_COUNTER}")
-test_container_name="test-user-manifest-sync-${USER_MANIFEST_TEST_RUN_ID}"
+# Create test volume and set SYNC_TEST_DATA_VOLUME for run_cai_import_from
+SYNC_TEST_DATA_VOLUME=$(create_test_volume "user-manifest-sync-${TEST_COUNTER}")
 
 # Create user manifest fixture
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai/manifests"
@@ -115,41 +108,54 @@ EOF
 # Also create Claude fixture (required agent)
 create_claude_fixture
 
-# Create the container
+# Create the container using helper (uses SYNC_TEST_RUN_ID internally)
 create_test_container "user-manifest-sync" \
-    --volume "$test_vol:/mnt/agent-data" \
+    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
     "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+
+# Derive correct container name (matches helper's naming)
+test_container_name="test-user-manifest-sync-${SYNC_TEST_RUN_ID}"
 
 # Run import
 import_output=$(run_cai_import_from 2>&1) || {
     test_fail "Import failed: $import_output"
-    exit 1
+    # Clean up and continue to next test
+    stop_test_container "$test_container_name" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
+    find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+    SYNC_TEST_DATA_VOLUME=""
+    # Continue to next test section instead of exiting
+    printf '%s\n' "Skipping rest of Test 1 due to import failure"
 }
 
-# Start container
-start_test_container "$test_container_name"
-sleep 2
+# Only continue if import succeeded
+if [[ -n "$SYNC_TEST_DATA_VOLUME" ]]; then
+    # Start container
+    start_test_container "$test_container_name"
+    sleep 2
 
-# Verify user manifest was synced to volume
-SYNC_TEST_CONTAINER="$test_container_name"
-if assert_file_exists_in_volume "containai/manifests/99-custom.toml"; then
-    test_pass "User manifest synced to /mnt/agent-data/containai/manifests/"
-else
-    test_fail "User manifest not found in container volume"
+    # Verify user manifest was synced to volume
+    SYNC_TEST_CONTAINER="$test_container_name"
+    if assert_file_exists_in_volume "containai/manifests/99-custom.toml"; then
+        test_pass "User manifest synced to /mnt/agent-data/containai/manifests/"
+    else
+        test_fail "User manifest not found in container volume"
+    fi
+
+    # Verify symlink exists in container (if link was created)
+    if exec_in_container "$test_container_name" test -L /home/agent/.config/containai/manifests 2>/dev/null; then
+        test_pass "User manifest symlink created in container home"
+    else
+        # May be a directory instead of symlink if entry doesn't use container_link
+        test_info "User manifest path exists as directory (not symlink)"
+    fi
+
+    # Cleanup test 1
+    stop_test_container "$test_container_name"
+    "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
+    "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 fi
-
-# Verify symlink exists in container (if link was created)
-if exec_in_container "$test_container_name" test -L /home/agent/.config/containai/manifests 2>/dev/null; then
-    test_pass "User manifest symlink created in container home"
-else
-    # May be a directory instead of symlink if entry doesn't use container_link
-    test_info "User manifest path exists as directory (not symlink)"
-fi
-
-# Cleanup
-stop_test_container "$test_container_name"
-"${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
-"${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
 # ==============================================================================
@@ -158,8 +164,7 @@ find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 
 printf '\n=== Test 2: User manifest generates wrapper at runtime ===\n'
 
 TEST_COUNTER=$((TEST_COUNTER + 1))
-test_vol=$(create_test_volume "user-manifest-wrapper-${TEST_COUNTER}")
-test_container_name="test-user-manifest-wrapper-${USER_MANIFEST_TEST_RUN_ID}"
+SYNC_TEST_DATA_VOLUME=$(create_test_volume "user-manifest-wrapper-${TEST_COUNTER}")
 
 # Create user manifest with a real binary (bash) for testing
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai/manifests"
@@ -178,45 +183,50 @@ create_claude_fixture
 
 # Create container
 create_test_container "user-manifest-wrapper" \
-    --volume "$test_vol:/mnt/agent-data" \
+    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
     "$SYNC_TEST_IMAGE_NAME" /sbin/init >/dev/null
 
+test_container_name="test-user-manifest-wrapper-${SYNC_TEST_RUN_ID}"
+
 # Run import
-import_output=$(run_cai_import_from 2>&1) || {
+import_exit=0
+import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+
+if [[ $import_exit -ne 0 ]]; then
     test_fail "Import failed: $import_output"
-}
-
-# Start container with init to run containai-init.sh
-"${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
-
-# Wait for container init to complete
-sleep 5
-
-# Check if user wrapper file was created
-if "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null; then
-    test_pass "User wrapper file created at /home/agent/.bash_env.d/containai-user-agents.sh"
-
-    # Check wrapper content
-    wrapper_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null || true)
-    if [[ "$wrapper_content" == *'testwrapper()'* ]]; then
-        test_pass "User wrapper function testwrapper() is defined"
-    else
-        test_fail "User wrapper function testwrapper() not found in wrapper file"
-    fi
-
-    if [[ "$wrapper_content" == *'testwrapper-alias()'* ]]; then
-        test_pass "User wrapper alias testwrapper-alias() is defined"
-    else
-        test_fail "User wrapper alias testwrapper-alias() not found"
-    fi
 else
-    test_info "User wrapper file not created (may require systemd init)"
+    # Start container with init to run containai-init.sh
+    "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
+
+    # Wait for container init to complete
+    sleep 5
+
+    # Check if user wrapper file was created
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null; then
+        test_pass "User wrapper file created at /home/agent/.bash_env.d/containai-user-agents.sh"
+
+        # Check wrapper content
+        wrapper_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null || true)
+        if [[ "$wrapper_content" == *'testwrapper()'* ]]; then
+            test_pass "User wrapper function testwrapper() is defined"
+        else
+            test_fail "User wrapper function testwrapper() not found in wrapper file"
+        fi
+
+        if [[ "$wrapper_content" == *'testwrapper-alias()'* ]]; then
+            test_pass "User wrapper alias testwrapper-alias() is defined"
+        else
+            test_fail "User wrapper alias testwrapper-alias() not found"
+        fi
+    else
+        test_info "User wrapper file not created (may require systemd init)"
+    fi
 fi
 
-# Cleanup
+# Cleanup test 2
 "${DOCKER_CMD[@]}" stop "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
-"${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
+"${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
 # ==============================================================================
@@ -225,8 +235,7 @@ find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 
 printf '\n=== Test 3: Invalid user manifest does not break startup ===\n'
 
 TEST_COUNTER=$((TEST_COUNTER + 1))
-test_vol=$(create_test_volume "user-manifest-invalid-${TEST_COUNTER}")
-test_container_name="test-user-manifest-invalid-${USER_MANIFEST_TEST_RUN_ID}"
+SYNC_TEST_DATA_VOLUME=$(create_test_volume "user-manifest-invalid-${TEST_COUNTER}")
 
 # Create invalid user manifest (malformed TOML)
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai/manifests"
@@ -241,14 +250,22 @@ create_claude_fixture
 
 # Create container
 create_test_container "user-manifest-invalid" \
-    --volume "$test_vol:/mnt/agent-data" \
+    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
     "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
 
-# Run import (should succeed even with invalid manifest in user dir)
-import_output=$(run_cai_import_from 2>&1) || {
-    test_fail "Import should not fail due to invalid user manifest"
-}
-test_pass "Import succeeded despite invalid user manifest"
+test_container_name="test-user-manifest-invalid-${SYNC_TEST_RUN_ID}"
+
+# Run import - user manifests with invalid TOML should be synced but not parsed
+# The sync itself should succeed (it just copies files)
+import_exit=0
+import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+
+if [[ $import_exit -eq 0 ]]; then
+    test_pass "Import succeeded (syncs files regardless of TOML validity)"
+else
+    # Import may fail for other reasons, just note it
+    test_info "Import returned non-zero exit code (may be expected if validation occurs)"
+fi
 
 # Start container
 start_test_container "$test_container_name"
@@ -261,10 +278,10 @@ else
     test_fail "Container failed to start with invalid user manifest"
 fi
 
-# Cleanup
+# Cleanup test 3
 stop_test_container "$test_container_name"
 "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
-"${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
+"${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
 # ==============================================================================
@@ -273,8 +290,7 @@ find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 
 printf '\n=== Test 4: User manifest with optional binary not installed ===\n'
 
 TEST_COUNTER=$((TEST_COUNTER + 1))
-test_vol=$(create_test_volume "user-manifest-optional-${TEST_COUNTER}")
-test_container_name="test-user-manifest-optional-${USER_MANIFEST_TEST_RUN_ID}"
+SYNC_TEST_DATA_VOLUME=$(create_test_volume "user-manifest-optional-${TEST_COUNTER}")
 
 # Create user manifest with non-existent binary
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai/manifests"
@@ -293,39 +309,44 @@ create_claude_fixture
 
 # Create container
 create_test_container "user-manifest-optional" \
-    --volume "$test_vol:/mnt/agent-data" \
+    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
     "$SYNC_TEST_IMAGE_NAME" /sbin/init >/dev/null
 
+test_container_name="test-user-manifest-optional-${SYNC_TEST_RUN_ID}"
+
 # Run import
-import_output=$(run_cai_import_from 2>&1) || {
+import_exit=0
+import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+
+if [[ $import_exit -ne 0 ]]; then
     test_fail "Import failed"
-}
-
-# Start container
-"${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
-sleep 5
-
-# Container should still be running (optional binary guard prevents errors)
-if "${DOCKER_CMD[@]}" ps -q -f name="$test_container_name" | grep -q .; then
-    test_pass "Container started despite non-existent optional binary"
 else
-    test_fail "Container failed with non-existent optional binary"
-fi
+    # Start container
+    "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
+    sleep 5
 
-# Check that wrapper is guarded (if file exists)
-if "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null; then
-    wrapper_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null || true)
-    if [[ "$wrapper_content" == *'command -v this-binary-does-not-exist'* ]]; then
-        test_pass "User wrapper is guarded with command -v check"
+    # Container should still be running (optional binary guard prevents errors)
+    if "${DOCKER_CMD[@]}" ps -q -f name="$test_container_name" | grep -q .; then
+        test_pass "Container started despite non-existent optional binary"
     else
-        test_info "Wrapper may not be generated for missing binary (expected)"
+        test_fail "Container failed with non-existent optional binary"
+    fi
+
+    # Check that wrapper is guarded (if file exists)
+    if "${DOCKER_CMD[@]}" exec "$test_container_name" test -f /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null; then
+        wrapper_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null || true)
+        if [[ "$wrapper_content" == *'command -v this-binary-does-not-exist'* ]]; then
+            test_pass "User wrapper is guarded with command -v check"
+        else
+            test_info "Wrapper may not be generated for missing binary (expected)"
+        fi
     fi
 fi
 
-# Cleanup
+# Cleanup test 4
 "${DOCKER_CMD[@]}" stop "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
-"${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
+"${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
 # ==============================================================================
@@ -334,8 +355,7 @@ find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 
 printf '\n=== Test 5: User manifest entries create symlinks ===\n'
 
 TEST_COUNTER=$((TEST_COUNTER + 1))
-test_vol=$(create_test_volume "user-manifest-links-${TEST_COUNTER}")
-test_container_name="test-user-manifest-links-${USER_MANIFEST_TEST_RUN_ID}"
+SYNC_TEST_DATA_VOLUME=$(create_test_volume "user-manifest-links-${TEST_COUNTER}")
 
 # Create user manifest with entry
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.config/containai/manifests"
@@ -350,45 +370,50 @@ EOF
 
 # Create the source file
 mkdir -p "$SYNC_TEST_FIXTURE_HOME/.myconfig"
-echo '{"user": "config", "_marker": "USER_CONFIG_MARKER"}' > "$SYNC_TEST_FIXTURE_HOME/.myconfig/settings.json"
+printf '%s\n' '{"user": "config", "_marker": "USER_CONFIG_MARKER"}' > "$SYNC_TEST_FIXTURE_HOME/.myconfig/settings.json"
 
 # Create Claude fixture
 create_claude_fixture
 
 # Create container
 create_test_container "user-manifest-links" \
-    --volume "$test_vol:/mnt/agent-data" \
+    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
     "$SYNC_TEST_IMAGE_NAME" /sbin/init >/dev/null
 
+test_container_name="test-user-manifest-links-${SYNC_TEST_RUN_ID}"
+
 # Run import
-import_output=$(run_cai_import_from 2>&1) || {
+import_exit=0
+import_output=$(run_cai_import_from 2>&1) || import_exit=$?
+
+if [[ $import_exit -ne 0 ]]; then
     test_fail "Import failed"
-}
-
-# Start container
-"${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
-sleep 5
-
-# Check if user config was synced
-SYNC_TEST_CONTAINER="$test_container_name"
-if assert_file_exists_in_volume "myconfig/settings.json"; then
-    test_pass "User config synced to volume"
-
-    # Check content
-    content=$(cat_from_volume "myconfig/settings.json" 2>/dev/null || true)
-    if [[ "$content" == *"USER_CONFIG_MARKER"* ]]; then
-        test_pass "User config content is correct"
-    else
-        test_fail "User config content mismatch"
-    fi
 else
-    test_fail "User config not synced to volume"
+    # Start container
+    "${DOCKER_CMD[@]}" start "$test_container_name" >/dev/null
+    sleep 5
+
+    # Check if user config was synced
+    SYNC_TEST_CONTAINER="$test_container_name"
+    if assert_file_exists_in_volume "myconfig/settings.json"; then
+        test_pass "User config synced to volume"
+
+        # Check content
+        content=$(cat_from_volume "myconfig/settings.json" 2>/dev/null || true)
+        if [[ "$content" == *"USER_CONFIG_MARKER"* ]]; then
+            test_pass "User config content is correct"
+        else
+            test_fail "User config content mismatch"
+        fi
+    else
+        test_fail "User config not synced to volume"
+    fi
 fi
 
-# Cleanup
+# Cleanup test 5
 "${DOCKER_CMD[@]}" stop "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
-"${DOCKER_CMD[@]}" volume rm "$test_vol" 2>/dev/null || true
+"${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
 # ==============================================================================

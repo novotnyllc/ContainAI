@@ -168,10 +168,11 @@ else
 fi
 
 # ==============================================================================
-# Test 4: BASH_ENV is set in container environment
+# Test 4: BASH_ENV is set in container environment (as agent user)
 # ==============================================================================
 printf '\n=== Test: BASH_ENV environment variable ===\n'
-bash_env_var=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" printenv BASH_ENV 2>/dev/null || true)
+# Run as agent user to ensure we see the agent's environment
+bash_env_var=$("${DOCKER_CMD[@]}" exec -u agent "$WRAPPER_TEST_CONTAINER" printenv BASH_ENV 2>/dev/null || true)
 if [[ "$bash_env_var" == "/home/agent/.bash_env" ]]; then
     test_pass "BASH_ENV is set to /home/agent/.bash_env"
 else
@@ -311,11 +312,12 @@ fi
 # ==============================================================================
 printf '\n=== Test: Plain SSH-style command execution (critical) ===\n'
 # This simulates: ssh container 'type claude'
-# BASH_ENV must be set and sourced for this to work
-plain_ssh_output=$("${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent -e BASH_ENV=/home/agent/.bash_env \
+# The container's default BASH_ENV should be used (set via Dockerfile ENV)
+# Do NOT explicitly set BASH_ENV here - that would mask regressions
+plain_ssh_output=$("${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent \
     "$WRAPPER_TEST_CONTAINER" bash -c 'type claude' 2>&1 || true)
 if [[ "$plain_ssh_output" == *"function"* ]]; then
-    test_pass "Plain SSH-style 'type claude' shows function (BASH_ENV works)"
+    test_pass "Plain SSH-style 'type claude' shows function (container BASH_ENV works)"
 else
     test_fail "Plain SSH-style command does not see wrapper function, got: $plain_ssh_output"
 fi
