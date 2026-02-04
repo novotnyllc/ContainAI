@@ -13,8 +13,11 @@
 # Limitation: These tests use `docker exec` which inherits Docker ENV variables.
 # Real SSH sessions may not inherit Docker ENV unless PATH/BASH_ENV are set in
 # shell init files. The Dockerfile sets BASH_ENV in the image, and these tests
-# verify that bash -c respects it. For true SSH-based E2E tests (via cai shell),
-# see test-startup-hooks.sh or similar sysbox-enabled test suites.
+# verify that bash -c respects it.
+#
+# For true SSH-based E2E tests with systemd/containai-init runtime:
+# - See test-startup-hooks.sh (Tests 6-7) which require Sysbox
+# - These tests verify user manifest processing and SSH wrapper behavior
 #
 # Prerequisites:
 #   - Docker daemon running

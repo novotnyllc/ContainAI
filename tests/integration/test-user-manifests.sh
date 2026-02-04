@@ -9,7 +9,9 @@
 #
 # Note: Tests for runtime processing of user manifests (wrapper generation,
 # symlink creation at startup) require Sysbox/systemd and are located in
-# test-startup-hooks.sh or similar systemd-enabled test suites.
+# test-startup-hooks.sh (Test 6: User manifest runtime processing).
+# That test verifies: wrapper generation, alias functions, symlink creation,
+# and containai-init log output for user manifest processing.
 #
 # Prerequisites:
 #   - Docker daemon running

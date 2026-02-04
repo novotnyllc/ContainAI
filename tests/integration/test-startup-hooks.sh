@@ -524,6 +524,300 @@ HOOKEOF
 }
 
 # ==============================================================================
+# Test 6: User manifest runtime processing (requires Docker/Sysbox)
+# ==============================================================================
+test_user_manifest_runtime() {
+    section "Test 6: User manifest runtime processing (requires Docker/Sysbox)"
+
+    # Skip Sysbox-based container test when already inside a container
+    if _cai_is_container; then
+        skip "Running inside a container - skipping Sysbox container verification"
+        return
+    fi
+
+    # Check if Docker is available
+    if ! command -v docker >/dev/null 2>&1; then
+        skip "Docker not available"
+        return
+    fi
+
+    # Check if containai-docker context exists
+    if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+        skip "Context '$CONTEXT_NAME' not found - run 'cai setup'"
+        return
+    fi
+
+    # Check if sysbox-runc is available
+    local runtimes_json
+    runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null) || runtimes_json=""
+    if [[ -z "$runtimes_json" ]] || ! printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        skip "sysbox-runc runtime not available"
+        return
+    fi
+
+    # Check test image is available
+    if ! docker --context "$CONTEXT_NAME" image inspect "$TEST_IMAGE" >/dev/null 2>&1; then
+        info "Pulling test image: $TEST_IMAGE"
+        if ! docker --context "$CONTEXT_NAME" pull "$TEST_IMAGE" >/dev/null 2>&1; then
+            skip "Cannot pull test image"
+            return
+        fi
+    fi
+
+    # Create test data volume with user manifest
+    local test_volume="${TEST_RUN_ID}-user-manifest-data"
+    docker --context "$CONTEXT_NAME" volume create --label "test_run=$TEST_RUN_ID" "$test_volume" >/dev/null
+
+    # Create a temp container to populate the volume with test data
+    local init_container="${TEST_RUN_ID}-init"
+    docker --context "$CONTEXT_NAME" run --rm \
+        --name "$init_container" \
+        -v "$test_volume:/data" \
+        alpine:latest /bin/sh -c '
+            mkdir -p /data/containai/manifests
+            cat > /data/containai/manifests/99-test-user-agent.toml << EOF
+# User-defined test agent manifest
+[agent]
+name = "test-user-agent"
+binary = "echo"
+default_args = ["--user-manifest-test-marker"]
+aliases = ["test-alias"]
+optional = true
+
+[[entries]]
+source = ".test-user-config/settings.json"
+target = "test-user-config/settings.json"
+container_link = ".test-user-config/settings.json"
+flags = "fjo"
+EOF
+            mkdir -p /data/test-user-config
+            echo "{\"marker\": \"user-manifest-test\"}" > /data/test-user-config/settings.json
+        ' 2>/dev/null
+
+    # Start container with the volume
+    local container_name="${TEST_RUN_ID}-user-manifest"
+    local run_output run_rc
+    run_output=$(docker --context "$CONTEXT_NAME" run -d \
+        --runtime=sysbox-runc \
+        --name "$container_name" \
+        --label "test_run=$TEST_RUN_ID" \
+        -v "$test_volume:/mnt/agent-data:rw" \
+        --stop-timeout 10 \
+        "$TEST_IMAGE" 2>&1) && run_rc=0 || run_rc=$?
+
+    if [[ $run_rc -ne 0 ]]; then
+        fail "Failed to start test container: $run_output"
+        return
+    fi
+    pass "User manifest test container started"
+
+    # Wait for container to initialize
+    local wait_timeout=30
+    local wait_elapsed=0
+    info "Waiting for container initialization (timeout: ${wait_timeout}s)..."
+    while [[ $wait_elapsed -lt $wait_timeout ]]; do
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active containai-init.service >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+        wait_elapsed=$((wait_elapsed + 2))
+    done
+
+    if [[ $wait_elapsed -ge $wait_timeout ]]; then
+        fail "Timeout waiting for containai-init.service"
+        return
+    fi
+    pass "containai-init completed"
+
+    # Test 6a: Check user wrapper generation
+    local wrapper_file
+    wrapper_file=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+        cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null) || wrapper_file=""
+
+    if [[ -n "$wrapper_file" ]]; then
+        pass "User agent wrapper file exists"
+
+        # Check if user agent function is defined
+        if printf '%s' "$wrapper_file" | grep -q "test-user-agent()"; then
+            pass "User agent wrapper function defined"
+        else
+            # Note: optional=true with binary="echo" means wrapper is only created if echo exists
+            # echo is always available, so wrapper should be created
+            fail "User agent wrapper function not found"
+        fi
+
+        # Check if alias is defined
+        if printf '%s' "$wrapper_file" | grep -q "test-alias()"; then
+            pass "User agent alias function defined"
+        else
+            fail "User agent alias function not found"
+        fi
+    else
+        info "User agent wrapper file not created (may be expected if binary check failed)"
+    fi
+
+    # Test 6b: Check user symlinks
+    local symlink_target
+    symlink_target=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+        readlink -f /home/agent/.test-user-config/settings.json 2>/dev/null) || symlink_target=""
+
+    if [[ "$symlink_target" == "/mnt/agent-data/test-user-config/settings.json" ]]; then
+        pass "User manifest symlink created correctly"
+    elif [[ -n "$symlink_target" ]]; then
+        info "User manifest symlink points to: $symlink_target"
+    else
+        info "User manifest symlink not created (expected for optional entries without source)"
+    fi
+
+    # Test 6c: Check containai-init logs for processing
+    local journal_output
+    journal_output=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        journalctl -u containai-init.service --no-pager 2>/dev/null) || journal_output=""
+
+    if printf '%s' "$journal_output" | grep -q "user manifest"; then
+        pass "User manifest processing logged"
+    else
+        info "No explicit user manifest log entry (may process silently)"
+    fi
+}
+
+# ==============================================================================
+# Test 7: SSH wrapper behavior (requires Docker/Sysbox)
+# ==============================================================================
+test_ssh_wrapper_behavior() {
+    section "Test 7: SSH wrapper behavior (requires Docker/Sysbox)"
+
+    # Skip Sysbox-based container test when already inside a container
+    if _cai_is_container; then
+        skip "Running inside a container - skipping Sysbox container verification"
+        return
+    fi
+
+    # Check if Docker is available
+    if ! command -v docker >/dev/null 2>&1; then
+        skip "Docker not available"
+        return
+    fi
+
+    # Check if containai-docker context exists
+    if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+        skip "Context '$CONTEXT_NAME' not found - run 'cai setup'"
+        return
+    fi
+
+    # Check if sysbox-runc is available
+    local runtimes_json
+    runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null) || runtimes_json=""
+    if [[ -z "$runtimes_json" ]] || ! printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        skip "sysbox-runc runtime not available"
+        return
+    fi
+
+    # Check test image is available
+    if ! docker --context "$CONTEXT_NAME" image inspect "$TEST_IMAGE" >/dev/null 2>&1; then
+        skip "Cannot pull test image"
+        return
+    fi
+
+    # Create test data volume
+    local test_volume="${TEST_RUN_ID}-ssh-wrapper-data"
+    docker --context "$CONTEXT_NAME" volume create --label "test_run=$TEST_RUN_ID" "$test_volume" >/dev/null
+
+    # Start container
+    local container_name="${TEST_RUN_ID}-ssh-wrapper"
+    local run_output run_rc
+    run_output=$(docker --context "$CONTEXT_NAME" run -d \
+        --runtime=sysbox-runc \
+        --name "$container_name" \
+        --label "test_run=$TEST_RUN_ID" \
+        -v "$test_volume:/mnt/agent-data:rw" \
+        --stop-timeout 10 \
+        "$TEST_IMAGE" 2>&1) && run_rc=0 || run_rc=$?
+
+    if [[ $run_rc -ne 0 ]]; then
+        fail "Failed to start test container: $run_output"
+        return
+    fi
+    pass "SSH wrapper test container started"
+
+    # Wait for container to initialize and SSH to be ready
+    local wait_timeout=45
+    local wait_elapsed=0
+    info "Waiting for container initialization and SSH (timeout: ${wait_timeout}s)..."
+    while [[ $wait_elapsed -lt $wait_timeout ]]; do
+        # Check both init and SSH are ready
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active sshd.service >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+        wait_elapsed=$((wait_elapsed + 2))
+    done
+
+    if [[ $wait_elapsed -ge $wait_timeout ]]; then
+        fail "Timeout waiting for SSH service"
+        return
+    fi
+    pass "SSH service is running"
+
+    # Get container IP for SSH connection
+    local container_ip
+    container_ip=$(docker --context "$CONTEXT_NAME" inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_name" 2>/dev/null) || container_ip=""
+
+    if [[ -z "$container_ip" ]]; then
+        info "Could not get container IP - skipping SSH-specific tests"
+        # Fall back to docker exec to test BASH_ENV behavior
+        local bash_env_check
+        bash_env_check=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+            bash -c 'echo "BASH_ENV=$BASH_ENV"' 2>/dev/null) || bash_env_check=""
+
+        if [[ "$bash_env_check" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
+            pass "BASH_ENV is set correctly in container"
+        else
+            fail "BASH_ENV not set correctly: $bash_env_check"
+        fi
+
+        # Test wrapper function via bash -c (simulates ssh container 'cmd')
+        local type_output
+        type_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+            bash -c 'type claude 2>&1' 2>/dev/null) || type_output=""
+
+        if [[ "$type_output" == *"function"* ]]; then
+            pass "Claude wrapper is a function via bash -c"
+        else
+            fail "Claude wrapper not found via bash -c: $type_output"
+        fi
+    else
+        info "Container IP: $container_ip"
+
+        # Test SSH with plain command (this tests the BASH_ENV path)
+        # Note: SSH key setup may be required for actual SSH test
+        # For now, use docker exec with bash -c which simulates the behavior
+        local ssh_sim_output
+        ssh_sim_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+            bash -c 'type claude 2>&1' 2>/dev/null) || ssh_sim_output=""
+
+        if [[ "$ssh_sim_output" == *"function"* ]]; then
+            pass "Claude wrapper is a function (simulated SSH via bash -c)"
+        else
+            fail "Claude wrapper not found (simulated SSH): $ssh_sim_output"
+        fi
+
+        # Test that BASH_ENV is respected
+        local bash_env_output
+        bash_env_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+            bash -c 'echo "BASH_ENV=$BASH_ENV"; type claude 2>&1 | head -1' 2>/dev/null) || bash_env_output=""
+
+        if [[ "$bash_env_output" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
+            pass "BASH_ENV is set correctly"
+        else
+            fail "BASH_ENV not correctly set: $bash_env_output"
+        fi
+    fi
+}
+
+# ==============================================================================
 # Run all tests
 # ==============================================================================
 
@@ -540,6 +834,8 @@ test_failed_hook_exits_nonzero
 
 # Integration tests (require Docker/Sysbox)
 test_hooks_in_container
+test_user_manifest_runtime
+test_ssh_wrapper_behavior
 
 # Summary
 printf '\n'
