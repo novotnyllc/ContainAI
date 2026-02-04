@@ -120,3 +120,24 @@ ssh test 'kimi-cli --help'  # both should work
 - `.bashrc` sourcing `.bash_env` is required for interactive shells
 - Use guard variable to prevent double-sourcing
 - Verify kimi + kimi-cli both work (alias support from Task 2)
+
+## Done summary
+Implementation complete with fixes from two review rounds.
+
+### Round 2 Fixes
+1. **Dockerfile: Implemented spec sourcing chain** - Added `_BASH_ENV_SOURCED=1` guard and `.bashrc` sources `.bash_env`
+2. **Generator: Handle empty default_args** - Wrappers generated whenever `[agent]` has name and binary
+3. **Generator: Use name for wrapper function** - Primary wrapper uses `[agent].name` (calls `binary`)
+
+### Round 1 Fixes
+1. **Fixed alias wrappers** - `kimi-cli()` now calls `command kimi` instead of `command kimi-cli`
+2. **Improved argument escaping** - Single-quote escaping protects against variable expansion
+3. **Removed unused SCRIPT_DIR**
+
+### Shell Sourcing Chain (Per Spec)
+- **Non-interactive SSH**: `BASH_ENV` → `_BASH_ENV_SOURCED=1` → sources `.bash_env.d/*.sh`
+- **Interactive shells**: `.bashrc` checks guard → sources `.bash_env` if needed
+
+## Evidence
+- shellcheck: passed
+- generator output: verified kimi-cli calls command kimi

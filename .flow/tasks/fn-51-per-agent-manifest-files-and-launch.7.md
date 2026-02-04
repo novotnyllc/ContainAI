@@ -1,6 +1,6 @@
 # Task fn-51.7: Update check-manifest-consistency.sh for new structure
 
-**Status:** pending
+**Status:** done
 **Depends on:** fn-51.1, fn-51.3, fn-51.6
 
 ## Objective
@@ -50,3 +50,10 @@ Update the consistency checker to work with per-agent manifest files and generat
 - Reuse `parse-toml.py` for validation
 - Add `--emit-source-file` support to track entry origins
 - Keep backward compat if possible (single file mode)
+
+## Done summary
+Updated `scripts/check-manifest-consistency.sh` to work with the per-agent manifest structure. The script now validates TOML syntax, [agent] section schema, and verifies the generated import-sync-map.sh matches manifest content, with source file attribution for mismatches.
+## Evidence
+- Commits:
+- Tests: ./scripts/check-manifest-consistency.sh - passed all 26 checks (19 TOML, 6 agents, 1 import map)
+- PRs:

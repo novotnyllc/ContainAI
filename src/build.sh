@@ -470,6 +470,12 @@ generate_container_files() {
         return 1
     fi
 
+    # Generate agent wrappers (BASH_ENV sourced functions)
+    if ! "${scripts_dir}/gen-agent-wrappers.sh" "$manifests_dir" "${gen_dir}/agent-wrappers.sh"; then
+        printf 'ERROR: Failed to generate agent-wrappers.sh\n' >&2
+        return 1
+    fi
+
     # Copy link-repair.sh to generated dir so it gets included in build context
     cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
 
@@ -487,7 +493,7 @@ generate_container_files() {
             newest_manifest_mtime="$manifest_mtime"
         fi
     done
-    for gen_file in "${gen_dir}/symlinks.sh" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json"; do
+    for gen_file in "${gen_dir}/symlinks.sh" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json" "${gen_dir}/agent-wrappers.sh"; do
         gen_file_mtime=$(stat -c %Y "$gen_file" 2>/dev/null || stat -f %m "$gen_file" 2>/dev/null)
         if [[ "$gen_file_mtime" -lt "$newest_manifest_mtime" ]]; then
             printf 'ERROR: Generated file is stale: %s\n' "$gen_file" >&2

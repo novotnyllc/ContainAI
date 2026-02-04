@@ -11,7 +11,6 @@
 # (avoiding recursion) and work in both interactive and non-interactive shells.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFESTS_DIR="${1:-}"
 OUTPUT_FILE="${2:-}"
 
@@ -54,8 +53,8 @@ parse_agent_section() {
         # Exit [agent] section on any other section header
         if [[ "$line" == "["*"]" || "$line" == "[["*"]]" ]]; then
             if [[ $in_agent -eq 1 ]]; then
-                # Emit the agent and reset
-                if [[ -n "$name" && -n "$default_args" ]]; then
+                # Emit the agent and reset (emit if name and binary are set, even with empty default_args)
+                if [[ -n "$name" && -n "$binary" ]]; then
                     printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
                 fi
                 return
@@ -104,8 +103,8 @@ parse_agent_section() {
         fi
     done < "$manifest_file"
 
-    # Emit if we reached EOF while in [agent] section
-    if [[ $in_agent -eq 1 && -n "$name" && -n "$default_args" ]]; then
+    # Emit if we reached EOF while in [agent] section (emit if name and binary are set)
+    if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" ]]; then
         printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
     fi
 }
@@ -163,45 +162,62 @@ generate_output() {
         local args_array=()
         IFS=',' read -ra args_array <<< "$default_args"
 
-        # Build the args string with proper quoting
+        # Build the args string with robust shell escaping (single-quote each arg)
         local args_str=""
         for arg in "${args_array[@]}"; do
+            # Shell-escape using single quotes (escape any embedded single quotes)
+            local escaped_arg="'${arg//\'/\'\\\'\'}'"
             if [[ -n "$args_str" ]]; then
-                args_str="${args_str} \"${arg}\""
+                args_str="${args_str} ${escaped_arg}"
             else
-                args_str="\"${arg}\""
+                args_str="${escaped_arg}"
             fi
         done
 
-        # Generate function for primary binary
+        # Generate wrapper function using name (calls binary)
+        # This supports cases where name != binary
         printf '# %s\n' "$name"
         if [[ "$optional" == "true" ]]; then
             printf 'if command -v %s >/dev/null 2>&1; then\n' "$binary"
-            printf '%s() {\n' "$binary"
+            # Primary wrapper uses name, calls binary
+            printf '%s() {\n' "$name"
             printf '    command %s %s "$@"\n' "$binary" "$args_str"
             printf '}\n'
-            # Generate alias functions if any
+            # If name != binary, also create wrapper for binary
+            if [[ "$name" != "$binary" ]]; then
+                printf '%s() {\n' "$binary"
+                printf '    command %s %s "$@"\n' "$binary" "$args_str"
+                printf '}\n'
+            fi
+            # Generate alias functions if any (alias functions call the primary binary)
             if [[ -n "$aliases" ]]; then
                 local alias_array=()
                 IFS=',' read -ra alias_array <<< "$aliases"
                 for alias_name in "${alias_array[@]}"; do
                     printf '%s() {\n' "$alias_name"
-                    printf '    command %s %s "$@"\n' "$alias_name" "$args_str"
+                    printf '    command %s %s "$@"\n' "$binary" "$args_str"
                     printf '}\n'
                 done
             fi
             printf 'fi\n'
         else
-            printf '%s() {\n' "$binary"
+            # Primary wrapper uses name, calls binary
+            printf '%s() {\n' "$name"
             printf '    command %s %s "$@"\n' "$binary" "$args_str"
             printf '}\n'
-            # Generate alias functions if any
+            # If name != binary, also create wrapper for binary
+            if [[ "$name" != "$binary" ]]; then
+                printf '%s() {\n' "$binary"
+                printf '    command %s %s "$@"\n' "$binary" "$args_str"
+                printf '}\n'
+            fi
+            # Generate alias functions if any (alias functions call the primary binary)
             if [[ -n "$aliases" ]]; then
                 local alias_array=()
                 IFS=',' read -ra alias_array <<< "$aliases"
                 for alias_name in "${alias_array[@]}"; do
                     printf '%s() {\n' "$alias_name"
-                    printf '    command %s %s "$@"\n' "$alias_name" "$args_str"
+                    printf '    command %s %s "$@"\n' "$binary" "$args_str"
                     printf '}\n'
                 done
             fi

@@ -443,3 +443,12 @@ Non-interactive SSH (ssh host 'cmd') does NOT source /etc/profile.d - use BASH_E
 
 ## 2026-02-04 manual [pitfall]
 When splitting files for deterministic processing, use numeric prefixes (00-, 01-) to control iteration order rather than relying on alphabetical
+
+## 2026-02-04 manual [pitfall]
+Process substitution (done < <(cmd)) hides command failures under set -e; capture output to variable first with explicit error check
+
+## 2026-02-04 manual [pitfall]
+Shell wrapper alias functions must call the primary binary (command $binary), not the alias name, to avoid missing binary errors
+
+## 2026-02-04 manual [pitfall]
+With set -euo pipefail, diagnostic pipelines (cmd | head) for already-failed commands need || true to prevent script exit

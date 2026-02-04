@@ -177,6 +177,16 @@ else
     sync_map_passed=1
 fi
 
+# Check if import.sh has a fallback _IMPORT_SYNC_MAP that might drift
+# This is a warning only - the generated file is authoritative
+IMPORT_SH="${REPO_ROOT}/src/lib/import.sh"
+if [[ -f "$IMPORT_SH" ]] && grep -q '_IMPORT_SYNC_MAP=(' "$IMPORT_SH"; then
+    printf '\n=== Note ===\n'
+    printf 'import.sh contains a fallback _IMPORT_SYNC_MAP.\n'
+    printf 'During transition, ensure import.sh sources import-sync-map.sh\n'
+    printf 'or keep the fallback synchronized manually.\n'
+fi
+
 printf '\n=== Summary ===\n'
 total_passed=$((toml_passed + agent_passed + sync_map_passed))
 total_failed=$((toml_failed + agent_failed + sync_map_failed))

@@ -124,3 +124,10 @@ process_link_spec "$BUILTIN_SPEC"
 - User wrappers go to separate file (`containai-user-agents.sh`) to avoid clobbering built-in
 - Fail-safe: invalid manifests don't block startup, just log and skip
 - Link spec schema: `link` (full symlink path), `target` (full target path), `remove_first` (0 or 1)
+
+## Done summary
+Added runtime support for user-defined agent manifests. Users can drop TOML files in ~/.config/containai/manifests/, run `cai import`, restart container, and their custom agent configurations just work without Dockerfile knowledge.
+## Evidence
+- Commits: 772483add7b2d22238dea08e8d9b9cf397efaef1, a565dd4, 12f2493, c3c4ecb, 34fc1e5, 7227232, 87d623d
+- Tests: shellcheck -x src/container/lib/*.sh, scripts/check-manifest-consistency.sh
+- PRs:

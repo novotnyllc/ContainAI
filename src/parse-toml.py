@@ -1036,11 +1036,9 @@ def validate_agent_section(config: dict, source_file: str) -> dict | None:
         sys.exit(1)
     result["binary"] = binary
 
-    # Validate 'default_args' - required, must be list of strings
-    default_args = agent_section.get("default_args")
-    if default_args is None:
-        print(f"Error: [agent].default_args is required in {source_file}", file=sys.stderr)
-        sys.exit(1)
+    # Validate 'default_args' - optional, must be list of strings if present, defaults to []
+    # Per spec: wrappers only generated when non-empty, so missing = no wrapper (same as empty)
+    default_args = agent_section.get("default_args", [])
     if not isinstance(default_args, list):
         print(
             f"Error: [agent].default_args must be a list, got {type(default_args).__name__} in {source_file}",

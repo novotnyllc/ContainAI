@@ -110,3 +110,47 @@ ssh container 'type claude'         # should show function definition
 - `/etc/profile.d/` is NOT sufficient for non-interactive SSH
 - `BASH_ENV` is the correct mechanism (already set in Dockerfile.base)
 - `command` builtin prevents function recursion
+
+## Done summary
+## Task fn-51.4: Generate launch wrapper functions from manifest [agent] sections
+
+### Changes Made
+
+1. **Created `src/scripts/gen-agent-wrappers.sh`**
+   - New generator script that parses `[agent]` sections from manifest TOML files
+   - Generates shell functions (not aliases) for each agent with non-empty `default_args`
+   - Handles `aliases` array by generating wrapper functions for each alias name
+   - Optional agents are wrapped in `command -v` check for graceful handling
+
+2. **Updated `src/build.sh`**
+   - Added call to `gen-agent-wrappers.sh` in `generate_container_files()` function
+   - Added `agent-wrappers.sh` to the staleness check list
+
+3. **Updated `src/container/Dockerfile.agents`**
+   - Replaced hardcoded aliases section with generated wrapper functions
+   - Creates `/home/agent/.bash_env.d/` directory for modular BASH_ENV sourcing
+   - Copies generated `agent-wrappers.sh` to `/home/agent/.bash_env.d/containai-agents.sh`
+   - Updates `.bash_env` to source all files in `.bash_env.d/`
+
+### Generated Output (6 agents)
+
+- `claude` - `--dangerously-skip-permissions` (required)
+- `codex` - `--dangerously-bypass-approvals-and-sandbox` (required)
+- `gemini` - `--yolo` (optional)
+- `copilot` - `--yolo` (optional)
+- `kimi` + `kimi-cli` - `--yolo` (optional with alias)
+- `pi` - `--yolo` (optional)
+
+### Key Design Decisions
+
+1. **Functions over aliases**: Shell functions work in non-interactive SSH (`ssh container 'claude --help'`), while aliases don't get expanded for non-interactive shells.
+
+2. **BASH_ENV mechanism**: Uses `BASH_ENV=/home/agent/.bash_env` (set in base image) which is sourced for all non-interactive bash invocations, solving the SSH non-interactive problem.
+
+3. **`command` builtin**: Each wrapper function uses `command <binary>` to invoke the real binary, preventing recursion when the function has the same name.
+
+4. **Pure bash parsing**: Implemented TOML parsing in bash (similar to existing `parse-manifest.sh`) rather than adding Python dependency, maintaining project consistency.
+## Evidence
+- Commits:
+- Tests:
+- PRs:

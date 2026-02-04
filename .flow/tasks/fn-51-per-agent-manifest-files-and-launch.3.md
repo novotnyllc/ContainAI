@@ -86,3 +86,10 @@ diff /tmp/old-sorted.sh /tmp/new-sorted.sh
 - Backward compat: if single file passed, use old behavior
 - Semantic equivalence check: ignore header comments, compare sorted output
 - Keep `_IMPORT_SYNC_MAP` as indexed array of strings - do NOT change to associative
+
+## Done summary
+Updated generators to read from src/manifests/ directory. Created gen-import-map.sh. Updated build.sh, package-release.sh, install.sh, and sync.sh. Deleted sync-manifest.toml.
+## Evidence
+- Commits: 5d9432f, 2eb7306, f659716
+- Tests: shellcheck -x src/scripts/*.sh, scripts/check-manifest-consistency.sh, src/scripts/parse-manifest.sh src/manifests/, src/scripts/gen-dockerfile-symlinks.sh src/manifests/ /tmp/test.sh, src/scripts/gen-init-dirs.sh src/manifests/ /tmp/test.sh, src/scripts/gen-container-link-spec.sh src/manifests/ /tmp/test.json, src/scripts/gen-import-map.sh src/manifests/
+- PRs:
