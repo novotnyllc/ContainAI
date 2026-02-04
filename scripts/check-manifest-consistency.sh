@@ -78,8 +78,8 @@ for manifest in "${MANIFESTS_DIR}"/*.toml; do
     manifest_name="$(basename "$manifest")"
     if ! python3 "$PARSE_TOML" --file "$manifest" --json >/dev/null 2>&1; then
         printf 'ERROR: invalid TOML syntax: %s\n' "$manifest_name" >&2
-        # Get error message for diagnostics
-        python3 "$PARSE_TOML" --file "$manifest" --json 2>&1 | head -3 >&2
+        # Get error message for diagnostics (|| true to avoid pipefail exit)
+        python3 "$PARSE_TOML" --file "$manifest" --json 2>&1 | head -3 >&2 || true
         toml_failed=$((toml_failed + 1))
     else
         toml_passed=$((toml_passed + 1))
