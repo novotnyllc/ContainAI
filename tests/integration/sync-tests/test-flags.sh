@@ -88,10 +88,13 @@ run_flags_test() {
     SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
-    # Create unique container for this test (use tail -f for portable keepalive)
+    # Create unique container for this test
+    # Override entrypoint to bypass systemd (which requires Sysbox)
+    # Use tail -f for portable keepalive
     create_test_container "$test_name" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then
@@ -373,8 +376,9 @@ test_import_dry_run() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
     create_test_container "dry-run" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     start_test_container "test-dry-run-${SYNC_TEST_RUN_ID}"
     SYNC_TEST_CONTAINER="test-dry-run-${SYNC_TEST_RUN_ID}"
@@ -447,8 +451,9 @@ test_import_no_secrets() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
     create_test_container "no-secrets" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     start_test_container "test-no-secrets-${SYNC_TEST_RUN_ID}"
     SYNC_TEST_CONTAINER="test-no-secrets-${SYNC_TEST_RUN_ID}"
@@ -530,8 +535,9 @@ test_export_basic() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
     create_test_container "export-basic" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     start_test_container "test-export-basic-${SYNC_TEST_RUN_ID}"
     SYNC_TEST_CONTAINER="test-export-basic-${SYNC_TEST_RUN_ID}"
@@ -636,8 +642,9 @@ test_export_with_config_excludes() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
     create_test_container "export-excludes" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     start_test_container "test-export-excludes-${SYNC_TEST_RUN_ID}"
     SYNC_TEST_CONTAINER="test-export-excludes-${SYNC_TEST_RUN_ID}"
@@ -736,8 +743,9 @@ test_export_no_excludes_flag() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "flags-data-${SYNC_TEST_COUNTER}")
 
     create_test_container "export-no-excludes" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     start_test_container "test-export-no-excludes-${SYNC_TEST_RUN_ID}"
     SYNC_TEST_CONTAINER="test-export-no-excludes-${SYNC_TEST_RUN_ID}"

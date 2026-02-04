@@ -437,6 +437,14 @@ main() {
     printf '%s\n' "See: https://github.com/nestybox/sysbox/issues/973"
     printf '%s\n' "=============================================================================="
 
+    # Skip Sysbox runc compatibility verification when already inside a container
+    # (these tests verify host-level Sysbox build, not nested ContainAI functionality)
+    if _cai_is_container; then
+        printf '%s\n' "[SKIP] Running inside a container - skipping Sysbox runc 1.3.3+ verification"
+        printf '%s\n' "[SKIP] These tests verify host-level Sysbox build; run on host to test installation"
+        exit 0
+    fi
+
     # Check prerequisites
     if ! command -v docker >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] docker is required" >&2

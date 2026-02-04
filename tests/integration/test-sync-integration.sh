@@ -6029,8 +6029,10 @@ main() {
     # Check if image exists (build if needed)
     if ! "${DOCKER_CMD[@]}" image inspect "$IMAGE_NAME" &>/dev/null; then
         info "Building test image..."
-        if ! "${DOCKER_CMD[@]}" build -t "$IMAGE_NAME" "$SRC_DIR" >/dev/null 2>&1; then
+        # Build from repo root using src/container/Dockerfile (the agents layer)
+        if ! "${DOCKER_CMD[@]}" build -t "$IMAGE_NAME" -f "$SRC_DIR/container/Dockerfile.agents" "$REPO_ROOT" >/dev/null 2>&1; then
             echo "ERROR: Failed to build test image" >&2
+            echo "[INFO] Try: ./src/build.sh --layer agents && docker tag ghcr.io/novotnyllc/containai/agents:latest $IMAGE_NAME" >&2
             exit 1
         fi
     fi

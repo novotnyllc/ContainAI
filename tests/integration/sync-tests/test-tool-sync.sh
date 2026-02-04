@@ -79,10 +79,13 @@ run_tool_sync_test() {
     SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "tool-data-${SYNC_TEST_COUNTER}")
 
-    # Create unique container for this test (use tail -f for portable keepalive)
+    # Create unique container for this test
+    # Override entrypoint to bypass systemd (which requires Sysbox)
+    # Use tail -f for portable keepalive
     create_test_container "$test_name" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then
@@ -145,9 +148,11 @@ run_git_sync_test() {
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "tool-data-${SYNC_TEST_COUNTER}")
 
     # Create unique container for this test
+    # Override entrypoint to bypass systemd (which requires Sysbox)
     create_test_container "$test_name" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then
@@ -456,10 +461,13 @@ run_tool_sync_test_with_config() {
     SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "tool-data-${SYNC_TEST_COUNTER}")
 
-    # Create unique container for this test (use tail -f for portable keepalive)
+    # Create unique container for this test
+    # Override entrypoint to bypass systemd (which requires Sysbox)
+    # Use tail -f for portable keepalive
     create_test_container "$test_name" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then

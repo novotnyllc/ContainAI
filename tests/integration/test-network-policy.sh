@@ -69,6 +69,8 @@ setup_test_dir() {
 
 # Check if Docker integration tests can run
 can_run_docker_tests() {
+    # Skip if inside a container (this test requires host-level iptables access)
+    _cai_is_container && return 1
     # Skip if explicitly disabled
     [[ "${CAI_SKIP_DOCKER_TESTS:-}" == "1" ]] && return 1
     # Need Docker

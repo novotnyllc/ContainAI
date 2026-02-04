@@ -204,8 +204,8 @@ test_template_directory_helpers() {
 test_template_name_validation() {
     section "Test 3: Template name validation"
 
-    # Valid names
-    local valid_names=("default" "my-template" "template123" "My.Template" "template_v2")
+    # Valid names (lowercase only - Docker repo names must be lowercase)
+    local valid_names=("default" "my-template" "template123" "my.template" "template_v2")
     local name
     for name in "${valid_names[@]}"; do
         if _cai_validate_template_name "$name"; then

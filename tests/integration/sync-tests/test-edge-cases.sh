@@ -78,10 +78,13 @@ run_edge_test() {
     SYNC_TEST_COUNTER=$((SYNC_TEST_COUNTER + 1))
     SYNC_TEST_DATA_VOLUME=$(create_test_volume "edge-data-${SYNC_TEST_COUNTER}")
 
-    # Create unique container for this test (use tail -f for portable keepalive)
+    # Create unique container for this test
+    # Override entrypoint to bypass systemd (which requires Sysbox)
+    # Use tail -f for portable keepalive
     create_test_container "$test_name" \
+        --entrypoint /bin/bash \
         --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     # Set up fixture
     if [[ -n "$setup_fn" ]]; then
@@ -446,12 +449,15 @@ test_concurrent_containers() {
     vol2=$(create_test_volume "concurrent-vol2-${SYNC_TEST_COUNTER}")
 
     # Create two containers with separate volumes
+    # Override entrypoint to bypass systemd (which requires Sysbox)
     create_test_container "concurrent-1" \
+        --entrypoint /bin/bash \
         --volume "$vol1:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
     create_test_container "concurrent-2" \
+        --entrypoint /bin/bash \
         --volume "$vol2:/mnt/agent-data" \
-        "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+        "$SYNC_TEST_IMAGE_NAME" -c "tail -f /dev/null" >/dev/null
 
     local container1="test-concurrent-1-${SYNC_TEST_RUN_ID}"
     local container2="test-concurrent-2-${SYNC_TEST_RUN_ID}"

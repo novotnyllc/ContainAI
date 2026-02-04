@@ -366,6 +366,13 @@ TESTEOF
 test_hooks_in_container() {
     section "Test 5: Startup hooks in container (requires Docker/Sysbox)"
 
+    # Skip Sysbox-based container test when already inside a container
+    # (this test verifies host-level Sysbox setup, not nested ContainAI functionality)
+    if _cai_is_container; then
+        skip "Running inside a container - skipping Sysbox container verification"
+        return
+    fi
+
     # Check if Docker is available
     if ! command -v docker >/dev/null 2>&1; then
         skip "Docker not available"

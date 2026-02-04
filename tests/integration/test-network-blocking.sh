@@ -644,6 +644,14 @@ main() {
     printf '%s\n' "Network Security Integration Tests for ContainAI"
     printf '%s\n' "=============================================================================="
 
+    # Skip Sysbox network security verification when already inside a container
+    # (these tests verify host-level Sysbox network rules, not nested ContainAI functionality)
+    if _cai_is_container; then
+        printf '%s\n' "[SKIP] Running inside a container - skipping Sysbox network security verification"
+        printf '%s\n' "[SKIP] These tests verify host-level network rules; run on host to test installation"
+        exit 0
+    fi
+
     # Check prerequisites
     if ! command -v docker >/dev/null 2>&1; then
         printf '%s\n' "[ERROR] docker is required" >&2

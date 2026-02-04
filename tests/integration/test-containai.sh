@@ -938,6 +938,14 @@ main() {
     printf '%s\n' "Comprehensive ContainAI Integration Tests"
     printf '%s\n' "=============================================================================="
 
+    # Skip Sysbox-based tests when already inside a container
+    # (these tests verify host-level Sysbox setup, not nested ContainAI functionality)
+    if _cai_is_container; then
+        printf '%s\n' "[SKIP] Running inside a container - skipping Sysbox integration tests"
+        printf '%s\n' "[SKIP] These tests verify host-level Sysbox setup; run on host to test installation"
+        exit 0
+    fi
+
     info "Test run ID: $TEST_RUN_ID"
     info "Test image: $TEST_IMAGE"
 
