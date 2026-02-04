@@ -3226,6 +3226,13 @@ _cai_lima_create_vm() {
 
         printf '%s\n' "-> Creating Lima VM (this may take several minutes)..."
 
+        # Ensure host mount path exists for Lima template
+        # Lima requires mount source directories to pre-exist
+        if ! mkdir -p /tmp/lima 2>/dev/null; then
+            printf '%s\n' "[ERROR] Failed to create /tmp/lima (required for Lima mounts)" >&2
+            exit 1
+        fi
+
         # Create VM from template (non-interactive)
         # Put flags before positional args for compatibility
         if ! limactl create --name="$_CAI_LIMA_VM_NAME" --tty=false "$template_file"; then

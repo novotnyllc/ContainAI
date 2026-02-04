@@ -194,6 +194,18 @@ create_test_container() {
     printf '%s\n' "$container_id"
 }
 
+# Helper: create a test container without systemd (for standard Docker CI)
+# Runs link-repair once to set up symlinks, then sleeps.
+create_test_container_no_systemd() {
+    local name="${1:-}"
+    shift || true
+
+    create_test_container "$name" \
+        "$@" \
+        --entrypoint /bin/bash \
+        "$IMAGE_NAME" -c '/usr/local/lib/containai/link-repair.sh --fix --quiet || true; sleep 300'
+}
+
 # Create a test volume with labels and name prefix
 # Usage: create_test_volume NAME
 # Example: vol=$(create_test_volume "import-data")
@@ -523,6 +535,9 @@ test_dry_run() {
         info "Creating test volume (test setup, not dry-run mutation)"
         "${DOCKER_CMD[@]}" volume create "$DATA_VOLUME" >/dev/null
     fi
+    # Ensure volume is empty for a stable baseline (test setup)
+    "${DOCKER_CMD[@]}" run --rm --entrypoint /bin/sh -v "$DATA_VOLUME":/data "$RSYNC_IMAGE" \
+        -c 'find /data -mindepth 1 -delete' >/dev/null 2>&1 || true
 
     # Capture volume snapshot before dry-run using stat (BusyBox compatible)
     # Format: permissions size path
@@ -1067,7 +1082,7 @@ test_gh_cli() {
 
     # Check gh version
     local gh_version
-    gh_version=$(run_in_image_no_entrypoint 'gh --version 2>&1 | head -1')
+    gh_version=$(run_in_image_no_entrypoint 'mkdir -p /tmp/gh-empty && GH_CONFIG_DIR=/tmp/gh-empty gh --version 2>&1 | head -1')
 
     if [[ "$gh_version" == docker_error ]]; then
         fail "Docker container failed to start for gh version check"
@@ -1079,7 +1094,7 @@ test_gh_cli() {
 
     # Check gh auth status (expected to fail without credentials, but command should work)
     local gh_auth
-    gh_auth=$(run_in_image_no_entrypoint 'gh auth status 2>&1; echo "exit_code=$?"')
+    gh_auth=$(run_in_image_no_entrypoint 'mkdir -p /tmp/gh-empty && GH_CONFIG_DIR=/tmp/gh-empty gh auth status 2>&1; echo "exit_code=$?"')
 
     if [[ "$gh_auth" == docker_error ]]; then
         fail "Docker container failed to start for gh auth check"
@@ -4031,9 +4046,8 @@ test_new_volume() {
     pass "Import to new volume succeeded"
 
     # Step 2: Create container with the test volume mounted
-    if ! create_test_container "new-volume" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "new-volume" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to create test container"
         return
     fi
@@ -4243,9 +4257,8 @@ test_existing_volume() {
     pass "Pre-populated volume with test data"
 
     # Step 2: Create NEW container attaching to the existing volume
-    if ! create_test_container "existing-volume" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "existing-volume" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to create test container"
         return
     fi
@@ -4942,9 +4955,8 @@ test_hot_reload() {
     pass "Initial checksum computed: $initial_checksum"
 
     # Step 2: Create container with the test volume mounted
-    if ! create_test_container "hot-reload" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "hot-reload" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to create test container"
         return
     fi
@@ -5195,9 +5207,8 @@ test_data_migration() {
     pass "Initial import to volume succeeded"
 
     # Step 2: Create container with the test volume mounted
-    if ! create_test_container "data-migration" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "data-migration" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to create test container"
         return
     fi
@@ -5287,9 +5298,8 @@ test_data_migration() {
     pass "Removed container"
 
     # Step 5: Recreate container with SAME name and SAME volume (true recreation)
-    if ! create_test_container "data-migration" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "data-migration" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to recreate test container"
         return
     fi
@@ -5618,9 +5628,8 @@ test_no_pollution() {
     pass "Import to volume succeeded"
 
     # Step 2: Create container with the test volume mounted
-    if ! create_test_container "no-pollution" \
-        --volume "$test_vol":/mnt/agent-data \
-        "$IMAGE_NAME" /bin/bash -c "sleep 300" >/dev/null; then
+    if ! create_test_container_no_systemd "no-pollution" \
+        --volume "$test_vol":/mnt/agent-data >/dev/null; then
         fail "Failed to create test container"
         return
     fi

@@ -73,7 +73,22 @@ trap cleanup EXIT
 run_with_timeout() {
     local secs="$1"
     shift
-    _cai_timeout "$secs" "$@"
+    if [[ $# -eq 0 ]]; then
+        return 0
+    fi
+
+    local cmd="$1"
+    shift
+
+    # If the command is a shell function, run it via bash -c so timeout can exec it
+    if declare -F "$cmd" >/dev/null 2>&1; then
+        local func_def
+        func_def="$(declare -f "$cmd")"
+        FUNC_DEF="$func_def" FUNC_NAME="$cmd" \
+            _cai_timeout "$secs" bash -c 'eval "$FUNC_DEF"; "$FUNC_NAME" "$@"' -- "$@"
+    else
+        _cai_timeout "$secs" "$cmd" "$@"
+    fi
 }
 
 # Wait for dockerd to be ready inside container
