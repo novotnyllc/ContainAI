@@ -167,3 +167,10 @@ test_kimi_aliases() {
 - Tests should be hermetic (no dependency on host config)
 - Clean up test containers/volumes after each test
 - **Critical:** Include plain `ssh container 'cmd'` test - this tests the BASH_ENV path
+
+## Done summary
+Added comprehensive tests for the per-agent manifest system: unit tests for manifest parsing (parse-manifest.sh, gen-agent-wrappers.sh, gen-import-map.sh, parse-toml.py), integration tests for launch wrappers and user manifests, and Sysbox runtime tests including real SSH verification, invalid manifest handling, and optional binary behavior.
+## Evidence
+- Commits: 230d36d03fe892269f5a6d58d7c174877ae97263, 8430003, ad4235a, 6e090af, b68e65c, 1b3e92a, 3582f06, 1203403
+- Tests: ./tests/unit/test-manifest-parsing.sh, ./scripts/check-manifest-consistency.sh
+- PRs:
