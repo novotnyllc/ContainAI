@@ -76,3 +76,10 @@ optional = false                   # If true, wrap in command -v check (binary m
 - `optional` defaults to false if not specified
 - Do NOT add wrappers for commands with no default_args
 - OpenCode explicitly does not have an autonomous flag (verified)
+
+## Done summary
+Added [agent] section schema to 6 manifest files with launch configuration (name, binary, default_args, aliases, optional fields) and extended parse-toml.py with --emit-agents mode for agent section extraction and validation.
+## Evidence
+- Commits: 0489dbe27725459031614c990ed1df50d9a8f30e
+- Tests: python3 src/parse-toml.py --emit-agents validation, shellcheck
+- PRs:
