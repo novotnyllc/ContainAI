@@ -665,16 +665,24 @@ EOF
     fi
 
     # Test 6b: Check user symlinks
+    # The test created the source file in the volume, so symlink MUST exist
     local symlink_target
     symlink_target=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
         readlink -f /home/agent/.test-user-config/settings.json 2>/dev/null) || symlink_target=""
 
+    # Verify source exists in volume (sanity check)
+    local source_exists
+    source_exists=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        test -f /mnt/agent-data/test-user-config/settings.json && echo "yes" || echo "no") || source_exists="no"
+
     if [[ "$symlink_target" == "/mnt/agent-data/test-user-config/settings.json" ]]; then
         pass "User manifest symlink created correctly"
     elif [[ -n "$symlink_target" ]]; then
-        info "User manifest symlink points to: $symlink_target"
+        fail "User manifest symlink points to wrong target: $symlink_target"
+    elif [[ "$source_exists" == "yes" ]]; then
+        fail "User manifest symlink not created despite source existing in volume"
     else
-        info "User manifest symlink not created (expected for optional entries without source)"
+        fail "Test setup error: source file not found in volume"
     fi
 
     # Test 6c: Check containai-init logs for processing
@@ -927,15 +935,24 @@ EOF
         return
     fi
 
-    # Check for error in logs (containai-init should log the error)
+    # Check for error in logs (containai-init MUST log the error)
     local journal_output
     journal_output=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
         journalctl -u containai-init.service --no-pager 2>/dev/null) || journal_output=""
 
-    if printf '%s' "$journal_output" | grep -qi "error\|warn\|invalid\|malformed"; then
+    if printf '%s' "$journal_output" | grep -qi "error\|warn\|invalid\|malformed\|fail"; then
         pass "Invalid manifest logged error/warning"
     else
-        info "No explicit error logged for invalid manifest (may be silently skipped)"
+        # Also check gen-user-wrappers output if available
+        local wrapper_log
+        wrapper_log=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+            cat /tmp/gen-user-wrappers.log 2>/dev/null) || wrapper_log=""
+
+        if printf '%s' "$wrapper_log" | grep -qi "error\|warn\|invalid\|malformed\|fail"; then
+            pass "Invalid manifest logged error/warning (in wrapper log)"
+        else
+            fail "Invalid manifest did not produce error/warning in logs"
+        fi
     fi
 }
 
