@@ -218,12 +218,16 @@ optional = false
 EOF
 
 output_file="$TEST_TMPDIR/output.sh"
-"$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>/dev/null
-output=$(cat "$output_file")
-if [[ "$output" == *"testagent()"* && "$output" == *"--autonomous"* ]]; then
-    test_pass
+gen_stderr="$TEST_TMPDIR/gen_stderr.txt"
+if "$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>"$gen_stderr"; then
+    output=$(cat "$output_file")
+    if [[ "$output" == *"testagent()"* && "$output" == *"--autonomous"* ]]; then
+        test_pass
+    else
+        test_fail "expected testagent() function with --autonomous flag"
+    fi
 else
-    test_fail "expected testagent() function with --autonomous flag"
+    test_fail "gen-agent-wrappers.sh failed: $(cat "$gen_stderr")"
 fi
 teardown_tmpdir
 
@@ -243,12 +247,16 @@ optional = false
 EOF
 
 output_file="$TEST_TMPDIR/output.sh"
-"$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>/dev/null
-output=$(cat "$output_file")
-if [[ "$output" != *"noargs()"* ]]; then
-    test_pass
+gen_stderr="$TEST_TMPDIR/gen_stderr.txt"
+if "$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>"$gen_stderr"; then
+    output=$(cat "$output_file")
+    if [[ "$output" != *"noargs()"* ]]; then
+        test_pass
+    else
+        test_fail "expected no noargs() function (empty default_args)"
+    fi
 else
-    test_fail "expected no noargs() function (empty default_args)"
+    test_fail "gen-agent-wrappers.sh failed: $(cat "$gen_stderr")"
 fi
 teardown_tmpdir
 
@@ -268,12 +276,16 @@ optional = true
 EOF
 
 output_file="$TEST_TMPDIR/output.sh"
-"$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>/dev/null
-output=$(cat "$output_file")
-if [[ "$output" == *"if command -v optionalagent"* && "$output" == *"fi"* ]]; then
-    test_pass
+gen_stderr="$TEST_TMPDIR/gen_stderr.txt"
+if "$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>"$gen_stderr"; then
+    output=$(cat "$output_file")
+    if [[ "$output" == *"if command -v optionalagent"* && "$output" == *"fi"* ]]; then
+        test_pass
+    else
+        test_fail "expected command -v guard for optional agent"
+    fi
 else
-    test_fail "expected command -v guard for optional agent"
+    test_fail "gen-agent-wrappers.sh failed: $(cat "$gen_stderr")"
 fi
 teardown_tmpdir
 
@@ -293,13 +305,17 @@ optional = true
 EOF
 
 output_file="$TEST_TMPDIR/output.sh"
-"$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>/dev/null
-output=$(cat "$output_file")
-# Should have both kimi() and kimi-cli() functions
-if [[ "$output" == *"kimi()"* && "$output" == *"kimi-cli()"* ]]; then
-    test_pass
+gen_stderr="$TEST_TMPDIR/gen_stderr.txt"
+if "$REPO_ROOT/src/scripts/gen-agent-wrappers.sh" "$TEST_TMPDIR/manifests" "$output_file" 2>"$gen_stderr"; then
+    output=$(cat "$output_file")
+    # Should have both kimi() and kimi-cli() functions
+    if [[ "$output" == *"kimi()"* && "$output" == *"kimi-cli()"* ]]; then
+        test_pass
+    else
+        test_fail "expected both kimi() and kimi-cli() functions"
+    fi
 else
-    test_fail "expected both kimi() and kimi-cli() functions"
+    test_fail "gen-agent-wrappers.sh failed: $(cat "$gen_stderr")"
 fi
 teardown_tmpdir
 
@@ -442,13 +458,20 @@ teardown_tmpdir
 # ==============================================================================
 test_start "Real manifests in src/manifests/ are valid TOML"
 all_valid=1
+manifest_found=0
+# Use nullglob to handle empty directory case
+shopt -s nullglob
 for manifest in "$REPO_ROOT/src/manifests/"*.toml; do
+    manifest_found=1
     if ! python3 "$REPO_ROOT/src/parse-toml.py" --file "$manifest" --json >/dev/null 2>&1; then
         all_valid=0
         printf '    Invalid: %s\n' "$(basename "$manifest")"
     fi
 done
-if [[ $all_valid -eq 1 ]]; then
+shopt -u nullglob
+if [[ $manifest_found -eq 0 ]]; then
+    test_fail "no manifest files found in src/manifests/"
+elif [[ $all_valid -eq 1 ]]; then
     test_pass
 else
     test_fail "some manifests have invalid TOML syntax"

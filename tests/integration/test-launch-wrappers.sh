@@ -3,15 +3,12 @@
 # Integration tests for agent launch wrappers
 # ==============================================================================
 # Verifies:
-# 1. Wrappers work in non-interactive SSH (plain 'ssh container cmd')
-# 2. Wrappers work in non-interactive SSH with bash -c
-# 3. Wrappers work in interactive shell
+# 1. Wrapper file exists and is sourced via BASH_ENV
+# 2. Wrappers work in non-interactive shell (simulating ssh container 'cmd')
+# 3. Wrappers work when .bashrc is sourced
 # 4. Wrappers prepend default args to commands
 # 5. Alias functions (e.g., kimi-cli) work correctly
 # 6. Optional agent wrappers are guarded with command -v
-#
-# CRITICAL: Tests plain `ssh container 'cmd'` (not just `bash -c` variant)
-# This tests the BASH_ENV path for non-interactive SSH.
 #
 # Prerequisites:
 #   - Docker daemon running
@@ -20,7 +17,6 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Source test helpers
 source "$SCRIPT_DIR/sync-test-helpers.sh"
@@ -45,10 +41,6 @@ test_fail() {
     printf '[FAIL] %s\n' "$*" >&2
     TESTS_RUN=$((TESTS_RUN + 1))
     TESTS_FAILED=$((TESTS_FAILED + 1))
-}
-
-test_skip() {
-    printf '[SKIP] %s\n' "$*"
 }
 
 test_info() {
@@ -93,6 +85,23 @@ cleanup_wrapper_test() {
 }
 trap cleanup_wrapper_test EXIT
 
+# Helper: wait for container file to exist
+wait_for_file() {
+    local container="$1"
+    local path="$2"
+    local timeout="${3:-30}"
+    local count=0
+
+    while [[ $count -lt $timeout ]]; do
+        if "${DOCKER_CMD[@]}" exec "$container" test -f "$path" 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    return 1
+}
+
 # Create test volume and container
 WRAPPER_TEST_VOLUME="test-wrapper-data-${WRAPPER_TEST_RUN_ID}"
 "${DOCKER_CMD[@]}" volume create --label "containai.test=1" "$WRAPPER_TEST_VOLUME" >/dev/null
@@ -106,34 +115,35 @@ WRAPPER_TEST_CONTAINER="test-wrapper-${WRAPPER_TEST_RUN_ID}"
 
 "${DOCKER_CMD[@]}" start "$WRAPPER_TEST_CONTAINER" >/dev/null
 
-# Wait for container to be ready
-sleep 2
+# Wait for container to be ready by polling for expected file
+if ! wait_for_file "$WRAPPER_TEST_CONTAINER" "/home/agent/.bash_env" 10; then
+    test_fail "Container did not become ready (timeout waiting for .bash_env)"
+    exit 1
+fi
 
 test_info "Test container: $WRAPPER_TEST_CONTAINER"
 test_info "Test volume: $WRAPPER_TEST_VOLUME"
 
 # ==============================================================================
-# Helper: Execute command in container simulating plain non-interactive SSH
+# Helper: Execute command in container via bash -c (BASH_ENV sourced)
 # ==============================================================================
-# This simulates: ssh container 'command'
-# The key is BASH_ENV gets sourced, which loads .bash_env.d/*.sh
-exec_noninteractive() {
+# This simulates non-interactive SSH: ssh container 'command'
+# BASH_ENV is sourced by bash before running the command
+exec_bash_cmd() {
     local cmd="$1"
-    # Simulate non-interactive SSH: bash reads BASH_ENV before running command
-    # Use bash (not bash -c with the command in quotes - that's a different path)
     "${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent "$WRAPPER_TEST_CONTAINER" \
         bash -c "$cmd"
 }
 
 # ==============================================================================
-# Helper: Execute command in container simulating interactive shell
+# Helper: Execute command with explicit .bashrc sourcing
 # ==============================================================================
-exec_interactive() {
+# This simulates interactive shell behavior (sources .bashrc)
+# Note: We don't use -t flag to avoid TTY issues in CI
+exec_with_bashrc() {
     local cmd="$1"
-    # -it flags simulate interactive shell (sources .bashrc)
-    # -t allocates a pseudo-TTY for proper interactive behavior
-    "${DOCKER_CMD[@]}" exec -it -u agent -e HOME=/home/agent "$WRAPPER_TEST_CONTAINER" \
-        bash -i -c "$cmd" 2>/dev/null
+    "${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent "$WRAPPER_TEST_CONTAINER" \
+        bash -c "source ~/.bashrc 2>/dev/null; $cmd"
 }
 
 # ==============================================================================
@@ -150,7 +160,7 @@ fi
 # Test 2: .bash_env sources .bash_env.d scripts
 # ==============================================================================
 printf '\n=== Test: .bash_env sources .bash_env.d scripts ===\n'
-bash_env_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bash_env 2>/dev/null || true)
+bash_env_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bash_env 2>&1 || true)
 if [[ "$bash_env_content" == *'.bash_env.d'* ]]; then
     test_pass ".bash_env sources .bash_env.d scripts"
 else
@@ -161,7 +171,7 @@ fi
 # Test 3: .bashrc sources .bash_env
 # ==============================================================================
 printf '\n=== Test: .bashrc sources .bash_env ===\n'
-bashrc_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bashrc 2>/dev/null || true)
+bashrc_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bashrc 2>&1 || true)
 if [[ "$bashrc_content" == *'.bash_env'* ]]; then
     test_pass ".bashrc sources .bash_env"
 else
@@ -173,7 +183,7 @@ fi
 # ==============================================================================
 printf '\n=== Test: BASH_ENV environment variable ===\n'
 # Run as agent user to ensure we see the agent's environment
-bash_env_var=$("${DOCKER_CMD[@]}" exec -u agent "$WRAPPER_TEST_CONTAINER" printenv BASH_ENV 2>/dev/null || true)
+bash_env_var=$("${DOCKER_CMD[@]}" exec -u agent "$WRAPPER_TEST_CONTAINER" printenv BASH_ENV 2>&1 || true)
 if [[ "$bash_env_var" == "/home/agent/.bash_env" ]]; then
     test_pass "BASH_ENV is set to /home/agent/.bash_env"
 else
@@ -181,32 +191,32 @@ else
 fi
 
 # ==============================================================================
-# Test 5: Claude wrapper is a function (non-interactive)
+# Test 5: Claude wrapper is a function (via BASH_ENV)
 # ==============================================================================
-printf '\n=== Test: Claude wrapper is a function (non-interactive) ===\n'
-type_output=$(exec_noninteractive 'type claude 2>&1' || true)
+printf '\n=== Test: Claude wrapper is a function (via BASH_ENV) ===\n'
+type_output=$(exec_bash_cmd 'type claude 2>&1' || true)
 if [[ "$type_output" == *"function"* ]]; then
-    test_pass "Claude is a function in non-interactive shell"
+    test_pass "Claude is a function via BASH_ENV sourcing"
 else
-    test_fail "Claude is not a function in non-interactive shell, got: $type_output"
+    test_fail "Claude is not a function via BASH_ENV, got: $type_output"
 fi
 
 # ==============================================================================
-# Test 6: Claude wrapper is a function (interactive)
+# Test 6: Claude wrapper is a function (via .bashrc)
 # ==============================================================================
-printf '\n=== Test: Claude wrapper is a function (interactive) ===\n'
-type_output=$(exec_interactive 'type claude 2>&1' || true)
+printf '\n=== Test: Claude wrapper is a function (via .bashrc) ===\n'
+type_output=$(exec_with_bashrc 'type claude 2>&1' || true)
 if [[ "$type_output" == *"function"* ]]; then
-    test_pass "Claude is a function in interactive shell"
+    test_pass "Claude is a function via .bashrc sourcing"
 else
-    test_fail "Claude is not a function in interactive shell, got: $type_output"
+    test_fail "Claude is not a function via .bashrc, got: $type_output"
 fi
 
 # ==============================================================================
 # Test 7: Claude wrapper includes --dangerously-skip-permissions
 # ==============================================================================
 printf '\n=== Test: Claude wrapper includes default args ===\n'
-wrapper_def=$(exec_noninteractive 'declare -f claude 2>&1' || true)
+wrapper_def=$(exec_bash_cmd 'declare -f claude 2>&1' || true)
 if [[ "$wrapper_def" == *'--dangerously-skip-permissions'* ]]; then
     test_pass "Claude wrapper includes --dangerously-skip-permissions"
 else
@@ -217,7 +227,7 @@ fi
 # Test 8: Codex wrapper is a function
 # ==============================================================================
 printf '\n=== Test: Codex wrapper is a function ===\n'
-type_output=$(exec_noninteractive 'type codex 2>&1' || true)
+type_output=$(exec_bash_cmd 'type codex 2>&1' || true)
 if [[ "$type_output" == *"function"* ]]; then
     test_pass "Codex is a function"
 else
@@ -228,7 +238,7 @@ fi
 # Test 9: Codex wrapper includes --full-auto
 # ==============================================================================
 printf '\n=== Test: Codex wrapper includes default args ===\n'
-wrapper_def=$(exec_noninteractive 'declare -f codex 2>&1' || true)
+wrapper_def=$(exec_bash_cmd 'declare -f codex 2>&1' || true)
 if [[ "$wrapper_def" == *'--full-auto'* ]]; then
     test_pass "Codex wrapper includes --full-auto"
 else
@@ -236,10 +246,10 @@ else
 fi
 
 # ==============================================================================
-# Test 10: Optional agent wrappers have command -v guard (kimi/gemini)
+# Test 10: Optional agent wrappers have command -v guard (kimi)
 # ==============================================================================
 printf '\n=== Test: Optional agent wrappers have command -v guard ===\n'
-wrapper_file=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bash_env.d/containai-agents.sh 2>/dev/null || true)
+wrapper_file=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bash_env.d/containai-agents.sh 2>&1 || true)
 # Kimi is optional, should have command -v guard
 if [[ "$wrapper_file" == *'if command -v kimi'* ]]; then
     test_pass "Kimi wrapper has command -v guard (optional agent)"
@@ -252,10 +262,10 @@ fi
 # ==============================================================================
 printf '\n=== Test: Required agent wrappers do NOT have command -v guard ===\n'
 # Claude is NOT optional, should NOT be wrapped in command -v guard
-# Look for claude() function NOT preceded by "if command -v"
-# The pattern for required agents is just the function definition directly
-claude_section=$(printf '%s' "$wrapper_file" | grep -A3 "^# claude" || true)
-if [[ "$claude_section" != *'if command -v'* && "$claude_section" == *'claude()'* ]]; then
+# Look for the claude function section - it should be direct, not guarded
+# Extract lines around claude() definition
+claude_section=$(printf '%s' "$wrapper_file" | grep -A5 '^claude()' || true)
+if [[ -n "$claude_section" && "$claude_section" != *'if command -v'* ]]; then
     test_pass "Claude wrapper does NOT have command -v guard (required agent)"
 else
     test_fail "Claude wrapper incorrectly has command -v guard or is missing"
@@ -276,8 +286,8 @@ fi
 # Test 13: Kimi alias includes --yolo flag
 # ==============================================================================
 printf '\n=== Test: Kimi alias includes --yolo flag ===\n'
-# Extract kimi-cli function definition
-kimi_cli_def=$(printf '%s' "$wrapper_file" | grep -A3 'kimi-cli()' || true)
+# Extract kimi-cli function definition (get lines after kimi-cli())
+kimi_cli_def=$(printf '%s' "$wrapper_file" | grep -A5 'kimi-cli()' || true)
 if [[ "$kimi_cli_def" == *'--yolo'* ]]; then
     test_pass "kimi-cli alias includes --yolo flag"
 else
@@ -300,27 +310,12 @@ fi
 # Test 15: Wrapper file is sourced via BASH_ENV in non-interactive mode
 # ==============================================================================
 printf '\n=== Test: BASH_ENV sources wrapper in non-interactive mode ===\n'
-# Set a marker in wrapper and check if it's available
-marker_check=$(exec_noninteractive 'if type claude >/dev/null 2>&1; then echo "wrapper_loaded"; fi' || true)
+# Check if wrapper function is available via BASH_ENV sourcing
+marker_check=$(exec_bash_cmd 'if type claude >/dev/null 2>&1; then echo "wrapper_loaded"; fi' || true)
 if [[ "$marker_check" == *"wrapper_loaded"* ]]; then
-    test_pass "Wrapper is loaded in non-interactive mode via BASH_ENV"
+    test_pass "Wrapper is loaded via BASH_ENV"
 else
-    test_fail "Wrapper not loaded in non-interactive mode"
-fi
-
-# ==============================================================================
-# Test 16: Test plain SSH-style command execution (critical test)
-# ==============================================================================
-printf '\n=== Test: Plain SSH-style command execution (critical) ===\n'
-# This simulates: ssh container 'type claude'
-# The container's default BASH_ENV should be used (set via Dockerfile ENV)
-# Do NOT explicitly set BASH_ENV here - that would mask regressions
-plain_ssh_output=$("${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent \
-    "$WRAPPER_TEST_CONTAINER" bash -c 'type claude' 2>&1 || true)
-if [[ "$plain_ssh_output" == *"function"* ]]; then
-    test_pass "Plain SSH-style 'type claude' shows function (container BASH_ENV works)"
-else
-    test_fail "Plain SSH-style command does not see wrapper function, got: $plain_ssh_output"
+    test_fail "Wrapper not loaded via BASH_ENV"
 fi
 
 # ==============================================================================
