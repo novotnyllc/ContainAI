@@ -2927,6 +2927,10 @@ _import_merge_enabled_plugins() {
         _import_error "Failed to extract enabledPlugins from source settings"
         return 1
     fi
+    if echo "$host_plugins" | jq -e 'type == "object" and (length == 0)' >/dev/null 2>&1; then
+        _import_success "enabledPlugins empty, skipping merge"
+        return 0
+    fi
 
     local existing_settings
     # Use DOCKER_CONTEXT= DOCKER_HOST= prefix to neutralize env (per pitfall memory)

@@ -94,6 +94,13 @@ if [[ -n "$DOCKER_CONTEXT" ]]; then
     DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
 fi
 
+# Container user context for home-relative checks
+AGENT_USER="agent"
+AGENT_HOME="/home/agent"
+exec_as_agent() {
+    "${DOCKER_CMD[@]}" exec --user "$AGENT_USER" -e HOME="$AGENT_HOME" -e USER="$AGENT_USER" -e LOGNAME="$AGENT_USER" "$@"
+}
+
 # RSync helper image (multi-arch). Keep tests consistent with cai import.
 RSYNC_IMAGE="${CONTAINAI_RSYNC_IMAGE:-instrumentisto/rsync-ssh}"
 export CONTAINAI_RSYNC_IMAGE="$RSYNC_IMAGE"
@@ -4121,7 +4128,7 @@ test_new_volume() {
     # The container image creates symlinks from ~/.claude/* to /mnt/agent-data/claude/*
     # This is a hard requirement - symlinks must be correctly set up
     local symlink_check
-    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    symlink_check=$(exec_as_agent "$test_container_name" bash -lc '
         # Check for directory symlink first (preferred structure)
         if [ -L ~/.claude ]; then
             claude_link=$(readlink ~/.claude)
@@ -4276,7 +4283,7 @@ test_existing_volume() {
     local wait_count=0
     while [[ $wait_count -lt 30 ]]; do
         # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
-        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        if exec_as_agent "$test_container_name" bash -lc \
             '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
             break
         fi
@@ -4302,7 +4309,7 @@ test_existing_volume() {
 
     # Step 5: Assert symlinks valid and point to volume data
     local symlink_check
-    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    symlink_check=$(exec_as_agent "$test_container_name" bash -lc '
         # Check for directory symlink first (preferred structure)
         if [ -L ~/.claude ]; then
             claude_link=$(readlink ~/.claude)
@@ -4375,7 +4382,7 @@ test_existing_volume() {
     # Step 6: Assert configs accessible via symlinks AND resolve to volume path
     # Verify settings.json resolves to the volume (not a regular file copy)
     local settings_realpath
-    settings_realpath=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+    settings_realpath=$(exec_as_agent "$test_container_name" bash -lc \
         'realpath ~/.claude/settings.json 2>/dev/null || echo "resolve_failed"') || settings_realpath="exec_failed"
 
     case "$settings_realpath" in
@@ -4392,7 +4399,7 @@ test_existing_volume() {
 
     # Verify settings.json content is correct
     local settings_content
-    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || settings_content=""
+    settings_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/settings.json' 2>&1) || settings_content=""
 
     if echo "$settings_content" | grep -q "existing_volume_test"; then
         pass "settings.json accessible via symlink with correct content"
@@ -4403,7 +4410,7 @@ test_existing_volume() {
 
     # Verify skills directory accessible via symlink and resolves to volume
     local skills_realpath
-    skills_realpath=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+    skills_realpath=$(exec_as_agent "$test_container_name" bash -lc \
         'realpath ~/.claude/skills/test-skill/manifest.json 2>/dev/null || echo "resolve_failed"') || skills_realpath="exec_failed"
 
     case "$skills_realpath" in
@@ -4419,7 +4426,7 @@ test_existing_volume() {
     esac
 
     local skills_manifest
-    skills_manifest=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/test-skill/manifest.json 2>&1) || skills_manifest=""
+    skills_manifest=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/skills/test-skill/manifest.json' 2>&1) || skills_manifest=""
 
     if echo "$skills_manifest" | grep -q "test-skill"; then
         pass "Skills accessible via symlink with correct content"
@@ -5225,7 +5232,7 @@ test_data_migration() {
     local wait_count=0
     while [[ $wait_count -lt 30 ]]; do
         # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
-        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        if exec_as_agent "$test_container_name" bash -lc \
             '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
             break
         fi
@@ -5240,7 +5247,7 @@ test_data_migration() {
 
     # Verify initial marker is present via ~/.claude path (through symlink)
     local initial_content
-    initial_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || initial_content=""
+    initial_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/settings.json' 2>&1) || initial_content=""
 
     if echo "$initial_content" | grep -q "original_marker_33333"; then
         pass "Initial marker accessible via ~/.claude path"
@@ -5254,7 +5261,7 @@ test_data_migration() {
     # NOTE: ~/.claude is a real directory; only specific subdirs are symlinked to volume
     # (plugins, skills, etc.). We write to symlinked paths to test persistence.
     local modification_output modification_exit=0
-    modification_output=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    modification_output=$(exec_as_agent "$test_container_name" bash -lc '
         # Add a custom skill via symlinked ~/.claude/skills path
         mkdir -p ~/.claude/skills/user-skill
         echo "{\"name\": \"user-skill\", \"created_by\": \"user\", \"marker\": \"user_skill_44444\"}" > ~/.claude/skills/user-skill/manifest.json
@@ -5316,7 +5323,7 @@ test_data_migration() {
     wait_count=0
     while [[ $wait_count -lt 30 ]]; do
         # Check for symlink setup: either ~/.claude is a symlink, or ~/.claude/plugins is
-        if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+        if exec_as_agent "$test_container_name" bash -lc \
             '[ -L ~/.claude ] || [ -L ~/.claude/plugins ]' 2>/dev/null; then
             break
         fi
@@ -5332,7 +5339,7 @@ test_data_migration() {
     # Step 6: Assert user modifications still present via symlinked paths
     # Check user-created skill manifest
     local user_skill_content
-    user_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/user-skill/manifest.json 2>&1) || user_skill_content=""
+    user_skill_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/skills/user-skill/manifest.json' 2>&1) || user_skill_content=""
 
     if echo "$user_skill_content" | grep -q "user_skill_44444"; then
         pass "User-created skill accessible via ~/.claude/skills after recreation"
@@ -5355,7 +5362,7 @@ test_data_migration() {
 
     # Check user-created plugin
     local user_plugin_content
-    user_plugin_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/plugins/cache/user-plugin/plugin.json 2>&1) || user_plugin_content=""
+    user_plugin_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/plugins/cache/user-plugin/plugin.json' 2>&1) || user_plugin_content=""
 
     if echo "$user_plugin_content" | grep -q "user_plugin_55555"; then
         pass "User-created plugin accessible via ~/.claude/plugins after recreation"
@@ -5367,7 +5374,7 @@ test_data_migration() {
 
     # Step 7: Assert symlinks still valid (use cd -P + pwd for portability with relative symlinks)
     local symlink_check
-    symlink_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    symlink_check=$(exec_as_agent "$test_container_name" bash -lc '
         # Check for directory symlink first (preferred structure)
         if [ -L ~/.claude ]; then
             # Use cd -P + pwd to resolve symlinks (portable, works with relative symlinks)
@@ -5446,7 +5453,7 @@ test_data_migration() {
     # Step 8: Assert no data loss (original + custom files present)
     # Check original settings.json content is still there (via ~/.claude path)
     local settings_content
-    settings_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/settings.json 2>&1) || settings_content=""
+    settings_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/settings.json' 2>&1) || settings_content=""
 
     if echo "$settings_content" | grep -q "original_marker_33333"; then
         pass "Original settings.json marker accessible via ~/.claude after recreation (no data loss)"
@@ -5458,7 +5465,7 @@ test_data_migration() {
 
     # Check original skill manifest is still there
     local original_skill_content
-    original_skill_content=$("${DOCKER_CMD[@]}" exec "$test_container_name" cat ~/.claude/skills/test-skill/manifest.json 2>&1) || original_skill_content=""
+    original_skill_content=$(exec_as_agent "$test_container_name" bash -lc 'cat ~/.claude/skills/test-skill/manifest.json' 2>&1) || original_skill_content=""
 
     if echo "$original_skill_content" | grep -q "test-skill"; then
         pass "Original test-skill manifest accessible after recreation"
@@ -5469,7 +5476,7 @@ test_data_migration() {
 
     # Check original plugin is still there
     local plugin_exists
-    plugin_exists=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c \
+    plugin_exists=$(exec_as_agent "$test_container_name" bash -lc \
         'test -f ~/.claude/plugins/cache/test-plugin/plugin.json && echo "exists"' 2>&1) || plugin_exists=""
 
     if [[ "$plugin_exists" == "exists" ]]; then
@@ -5480,7 +5487,7 @@ test_data_migration() {
 
     # Verify both original AND user files coexist on volume (complete data integrity check)
     local integrity_check
-    integrity_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    integrity_check=$(exec_as_agent "$test_container_name" bash -lc '
         original_ok=0
         user_ok=0
 
@@ -5658,7 +5665,7 @@ test_no_pollution() {
 
     # Step 4: Assert ~/.claude symlink exists (expected for primary agent)
     local claude_check
-    claude_check=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -c '
+    claude_check=$(exec_as_agent "$test_container_name" bash -lc '
         if [ -L ~/.claude ]; then
             target=$(readlink ~/.claude)
             if [ "$target" = "/mnt/agent-data/claude" ]; then
@@ -5713,7 +5720,7 @@ test_no_pollution() {
     local pollution_found=0
 
     # Check ~/.cursor (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.cursor' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.cursor' 2>/dev/null; then
         fail "POLLUTION: ~/.cursor exists but should not (user has no cursor config)"
         pollution_found=1
     else
@@ -5721,7 +5728,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.kiro (directory - optional agent per spec)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.kiro' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.kiro' 2>/dev/null; then
         fail "POLLUTION: ~/.kiro exists but should not (user has no kiro config)"
         pollution_found=1
     else
@@ -5729,7 +5736,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.aider.conf.yml (file - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.aider.conf.yml' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.aider.conf.yml' 2>/dev/null; then
         fail "POLLUTION: ~/.aider.conf.yml exists but should not (user has no aider config)"
         pollution_found=1
     else
@@ -5737,7 +5744,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.continue (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.continue' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.continue' 2>/dev/null; then
         fail "POLLUTION: ~/.continue exists but should not (user has no continue config)"
         pollution_found=1
     else
@@ -5745,7 +5752,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.copilot (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.copilot' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.copilot' 2>/dev/null; then
         fail "POLLUTION: ~/.copilot exists but should not (user has no copilot config)"
         pollution_found=1
     else
@@ -5753,7 +5760,7 @@ test_no_pollution() {
     fi
 
     # Check ~/.gemini (directory - optional agent)
-    if "${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'test -e ~/.gemini' 2>/dev/null; then
+    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.gemini' 2>/dev/null; then
         fail "POLLUTION: ~/.gemini exists but should not (user has no gemini config)"
         pollution_found=1
     else
@@ -5763,7 +5770,7 @@ test_no_pollution() {
     # Step 6: Display home directory contents for visibility
     # Note: Must use 'bash -lc' to ensure ~ expands inside the container, not the host
     local home_contents
-    home_contents=$("${DOCKER_CMD[@]}" exec "$test_container_name" bash -lc 'ls -la ~' 2>&1) || home_contents="[ls failed]"
+    home_contents=$(exec_as_agent "$test_container_name" bash -lc 'ls -la ~' 2>&1) || home_contents="[ls failed]"
     info "Container home directory contents (ls -la ~):"
     printf '%s\n' "$home_contents" | while IFS= read -r line; do
         echo "    $line"
