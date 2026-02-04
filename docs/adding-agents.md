@@ -309,7 +309,7 @@ The `[agent]` section defines launch wrapper generation for agents that need def
 |-------|------|----------|-------------|
 | `name` | string | Yes | Agent name (used for function name) |
 | `binary` | string | Yes | Binary name in PATH |
-| `default_args` | array | No | Arguments prepended to all invocations |
+| `default_args` | array | Yes | Arguments prepended to all invocations (use `[]` if none) |
 | `aliases` | array | No | Additional command names to wrap |
 | `optional` | boolean | No | If true, wrapper guarded by `command -v` check |
 
@@ -430,20 +430,20 @@ The generators create container artifacts from the per-agent manifest files.
 ### Generator Commands
 
 ```bash
-# Generate import map (creates _IMPORT_SYNC_MAP in import.sh)
-./src/scripts/gen-import-map.sh
+# Generate import map (creates _IMPORT_SYNC_MAP)
+./src/scripts/gen-import-map.sh src/manifests/ src/lib/import-sync-map.sh
 
 # Generate Dockerfile symlink script
-./src/scripts/gen-dockerfile-symlinks.sh
+./src/scripts/gen-dockerfile-symlinks.sh src/manifests/ artifacts/container-generated/symlinks.sh
 
 # Generate init directory script
-./src/scripts/gen-init-dirs.sh
+./src/scripts/gen-init-dirs.sh src/manifests/ artifacts/container-generated/init-dirs.sh
 
 # Generate link spec JSON for runtime repair
-./src/scripts/gen-container-link-spec.sh
+./src/scripts/gen-container-link-spec.sh src/manifests/ artifacts/container-generated/link-spec.json
 
 # Generate agent wrapper functions
-./src/scripts/gen-agent-wrappers.sh
+./src/scripts/gen-agent-wrappers.sh src/manifests/ artifacts/container-generated/containai-agents.sh
 ```
 
 **Note**: The build script `./src/build.sh` runs these generators automatically before building the image. Manual execution is only needed for development/testing.
@@ -594,7 +594,7 @@ flags = "fj"  # file, json-init
 [agent]
 name = "codex"
 binary = "codex"
-default_args = ["--full-auto"]
+default_args = ["--dangerously-bypass-approvals-and-sandbox"]
 aliases = []
 optional = false
 
@@ -657,12 +657,19 @@ flags = "fjo"  # file, json-init, OPTIONAL
 ```toml
 # src/manifests/14-opencode.toml
 # OpenCode has no known autonomous flag, so no [agent] section
+# Selective sync: config files only, skip caches
 
 [[entries]]
-source = ".config/opencode"
-target = "config/opencode"
-container_link = ".config/opencode"
-flags = "dR"  # directory, remove existing first
+source = ".config/opencode/opencode.json"
+target = "config/opencode/opencode.json"
+container_link = ".config/opencode/opencode.json"
+flags = "fjs"  # file, JSON init, secret
+
+[[entries]]
+source = ".config/opencode/agents"
+target = "config/opencode/agents"
+container_link = ".config/opencode/agents"
+flags = "d"  # directory
 
 [[entries]]
 source = ".local/share/opencode/auth.json"

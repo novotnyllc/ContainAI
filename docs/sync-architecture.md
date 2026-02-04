@@ -153,7 +153,8 @@ The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the d
 | `/source/.claude/plugins` | `/target/claude/plugins` | `d` | Claude plugins (directory) |
 | `/source/.claude/skills` | `/target/claude/skills` | `d` | Claude skills (directory) |
 | `/source/.config/gh` | `/target/config/gh` | `ds` | GitHub CLI config (directory, secret) |
-| `/source/.config/opencode` | `/target/config/opencode` | `d` | OpenCode config (directory) |
+| `/source/.config/opencode/opencode.json` | `/target/config/opencode/opencode.json` | `fjs` | OpenCode config (file, JSON init, secret) |
+| `/source/.config/opencode/agents` | `/target/config/opencode/agents` | `d` | OpenCode agents (directory) |
 | `/source/.tmux.conf` | `/target/config/tmux/tmux.conf` | `f` | tmux legacy config (fallback) |
 | `/source/.config/tmux` | `/target/config/tmux` | `d` | tmux XDG config (preferred) |
 | `/source/.local/share/tmux` | `/target/local/share/tmux` | `d` | tmux data (directory) |
