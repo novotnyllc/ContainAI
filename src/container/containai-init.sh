@@ -316,6 +316,51 @@ setup_workspace_symlink() {
     log "[INFO] Workspace symlink created: $host_path -> $mount_path"
 }
 
+# Process user manifests (custom agent configurations)
+# User drops TOML files in ~/.config/containai/manifests/, runs import, restart
+# This generates runtime symlinks and wrappers from user manifests
+process_user_manifests() {
+    local user_manifests="${DATA_DIR}/containai/manifests"
+    local gen_links="/usr/local/lib/containai/gen-user-links.sh"
+    local gen_wrappers="/usr/local/lib/containai/gen-user-wrappers.sh"
+
+    # Check if user manifests directory exists and has content
+    if [[ ! -d "$user_manifests" ]]; then
+        return 0
+    fi
+
+    # Check for any .toml files
+    local toml_count=0
+    local f
+    for f in "$user_manifests"/*.toml; do
+        [[ -e "$f" ]] && toml_count=$((toml_count + 1))
+    done
+
+    if [[ $toml_count -eq 0 ]]; then
+        return 0
+    fi
+
+    log "[INFO] Found $toml_count user manifest(s), generating runtime configuration..."
+
+    # Generate user symlinks (validates paths, logs errors)
+    if [[ -x "$gen_links" ]]; then
+        if ! "$gen_links" "$user_manifests"; then
+            log "[WARN] User symlink generation had errors (see above)"
+        fi
+    else
+        log "[WARN] gen-user-links.sh not found or not executable"
+    fi
+
+    # Generate user launch wrappers (validates binaries, logs errors)
+    if [[ -x "$gen_wrappers" ]]; then
+        if ! "$gen_wrappers" "$user_manifests"; then
+            log "[WARN] User wrapper generation had errors (see above)"
+        fi
+    else
+        log "[WARN] gen-user-wrappers.sh not found or not executable"
+    fi
+}
+
 # Run startup hooks from a directory
 # Hooks are executable .sh files, run in sorted order (LC_ALL=C sort)
 # Non-executable files are skipped with warning, non-zero exit fails container start
@@ -367,6 +412,9 @@ main() {
     _migrate_git_config
     _setup_git_config
     setup_workspace_symlink
+
+    # Process user manifests (after built-in setup)
+    process_user_manifests
 
     # Run startup hooks: template hooks first, then workspace hooks
     run_hooks "/etc/containai/template-hooks/startup.d"

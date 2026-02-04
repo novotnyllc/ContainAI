@@ -423,6 +423,9 @@ if [[ -z "${_IMPORT_SYNC_MAP+x}" ]]; then
         # -- Common Agents Directory ---
         "/source/.agents:/target/agents:d"
 
+        # --- User Manifest Directory ---
+        "/source/.config/containai/manifests:/target/containai/manifests:do"
+
         # --- Shell ---
         "/source/.bash_aliases:/target/shell/bash_aliases:f"
         "/source/.bashrc.d:/target/shell/bashrc.d:dp"  # p = exclude *.priv.* (security)

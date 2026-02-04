@@ -54,3 +54,14 @@ source = ".agents"
 target = "agents"
 container_link = ".agents"
 flags = "d"  # directory
+
+# =============================================================================
+# USER MANIFEST DIRECTORY
+# For custom agent configurations added at runtime
+# =============================================================================
+
+[[entries]]
+source = ".config/containai/manifests"
+target = "containai/manifests"
+container_link = ".config/containai/manifests"
+flags = "do"  # directory, optional

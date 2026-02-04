@@ -155,17 +155,38 @@ RUN { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' 
       || { echo '# Source POSIX-compatible settings extracted from zsh config (Mac users)'; echo '[ -f /mnt/agent-data/shell/zsh-imported.sh ] && . /mnt/agent-data/shell/zsh-imported.sh'; } >> /home/agent/.bashrc; }
 
 # =============================================================================
-# AGENT ALIASES
-# Convenience aliases for running agents in autonomous mode
+# AGENT WRAPPER FUNCTIONS
+# Generated functions for running agents in autonomous mode
+# Functions (not aliases) work in both interactive and non-interactive SSH
 # =============================================================================
-RUN printf '%s\n' \
-    'alias claude="claude --dangerously-skip-permissions"' \
-    'alias codex="codex --dangerously-bypass-approvals-and-sandbox"' \
-    'alias copilot="copilot --yolo"' \
-    'alias gemini="gemini --yolo"' \
-    'alias kimi="kimi --yolo"' \
-    'alias kimi-cli="kimi-cli --yolo"' \
-    > /home/agent/.bash_aliases
+
+# Create .bash_env.d directory for modular BASH_ENV sourcing
+RUN mkdir -p /home/agent/.bash_env.d
+
+# Copy generated agent wrappers to .bash_env.d (for BASH_ENV non-interactive sourcing)
+COPY --chown=agent:agent artifacts/container-generated/agent-wrappers.sh /home/agent/.bash_env.d/containai-agents.sh
+
+# Update .bash_env to source all .bash_env.d/*.sh files and set guard variable
+# The base image creates .bash_env with just nvm setup; we extend it
+RUN grep -qxF 'export _BASH_ENV_SOURCED=1' /home/agent/.bash_env || \
+    printf '\n%s\n%s\n%s\n' \
+    '# Guard to prevent double-sourcing' \
+    'export _BASH_ENV_SOURCED=1' \
+    '# Source all scripts in .bash_env.d/' \
+    >> /home/agent/.bash_env && \
+    grep -qxF 'if [ -d "$HOME/.bash_env.d" ]; then for f in "$HOME"/.bash_env.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bash_env || \
+    printf '%s\n' \
+    'if [ -d "$HOME/.bash_env.d" ]; then for f in "$HOME"/.bash_env.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' \
+    >> /home/agent/.bash_env
+
+# Source .bash_env from .bashrc for interactive shells (with guard to prevent double-sourcing)
+# This ensures wrappers work in both: `ssh container 'claude --help'` (non-interactive via BASH_ENV)
+# and `ssh container` + `claude --help` (interactive via .bashrc -> .bash_env)
+RUN grep -qxF '[ -z "$_BASH_ENV_SOURCED" ] && [ -f ~/.bash_env ] && . ~/.bash_env' /home/agent/.bashrc || \
+    printf '\n%s\n%s\n' \
+    '# Source .bash_env for wrapper functions (if not already sourced via BASH_ENV)' \
+    '[ -z "$_BASH_ENV_SOURCED" ] && [ -f ~/.bash_env ] && . ~/.bash_env' \
+    >> /home/agent/.bashrc
 
 # =============================================================================
 # CONTAINAI-INIT SERVICE
@@ -189,6 +210,14 @@ COPY artifacts/container-generated/link-spec.json /usr/local/lib/containai/link-
 COPY artifacts/container-generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
 COPY artifacts/container-generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
 RUN chmod +x /usr/local/lib/containai/link-repair.sh /usr/local/lib/containai/init-dirs.sh
+
+# =============================================================================
+# USER MANIFEST RUNTIME SUPPORT
+# Runtime generators for user-defined agent manifests
+# =============================================================================
+COPY src/container/lib/gen-user-links.sh /usr/local/lib/containai/
+COPY src/container/lib/gen-user-wrappers.sh /usr/local/lib/containai/
+RUN chmod +x /usr/local/lib/containai/gen-user-links.sh /usr/local/lib/containai/gen-user-wrappers.sh
 
 # =============================================================================
 # LINK WATCHER SERVICE
