@@ -448,12 +448,12 @@ stop_test_container() {
     "${DOCKER_CMD[@]}" stop "$name" >/dev/null 2>&1 || true
 }
 
-# Execute command in a container
+# Execute command in a container as the agent user
 # Usage: exec_in_container CONTAINER CMD...
 exec_in_container() {
     local container="$1"
     shift
-    "${DOCKER_CMD[@]}" exec "$container" "$@"
+    "${DOCKER_CMD[@]}" exec -u agent "$container" "$@"
 }
 
 # ==============================================================================

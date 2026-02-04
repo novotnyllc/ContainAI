@@ -447,7 +447,7 @@ populate_fixture() {
 #
 run_cai_import() {
     # Use "$@" with proper argument passing to preserve boundaries
-    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SRC_DIR" "$@" 2>&1
 }
 
 # Hermetic cai import helper with env var overrides
@@ -457,7 +457,7 @@ run_cai_import_env() {
     local env_vars="$1"
     shift
     # shellcheck disable=SC2086
-    HOME="$FIXTURE_HOME" env $env_vars bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+    HOME="$FIXTURE_HOME" env $env_vars bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SRC_DIR" "$@" 2>&1
 }
 
 # Hermetic cai import helper for tests with temp dirs and env clearing
@@ -472,7 +472,7 @@ run_cai_import_from_dir() {
     shift 2
     # shellcheck disable=SC2086
     (cd -- "$dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG $env_spec \
-        bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SCRIPT_DIR" "$@" 2>&1)
+        bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SRC_DIR" "$@" 2>&1)
 }
 
 # ==============================================================================
@@ -1593,7 +1593,7 @@ from_host = true
     local import_output
     import_output=$(cd "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
         MULTILINE_VAR=$'line1\nline2' NORMAL_VAR=normal \
-        bash -c 'source "$1/containai.sh" && cai import' _ "$SCRIPT_DIR" 2>&1) || true
+        bash -c 'source "$1/containai.sh" && cai import' _ "$SRC_DIR" 2>&1) || true
 
     # Should warn about multiline
     if echo "$import_output" | grep -q "MULTILINE_VAR.*multiline"; then
@@ -2898,7 +2898,7 @@ from_host = true
 # Stdout: cai export output (for capture)
 #
 run_cai_export() {
-    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai export "$@"' _ "$SCRIPT_DIR" "$@" 2>&1
+    HOME="$FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai export "$@"' _ "$SRC_DIR" "$@" 2>&1
 }
 
 # ==============================================================================
@@ -2936,7 +2936,7 @@ data_volume = "'"$test_vol"'"
     local import_output import_exit=0
     # Run import with --from pointing to alternate source
     import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Import with --from directory succeeded"
@@ -3013,7 +3013,7 @@ from_host = true
     # Set env var that would normally be imported - should be skipped in restore mode
     import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
         RESTORE_MODE_TEST_VAR="should_not_appear" \
-        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$archive_path" 2>&1) || import_exit=$?
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$archive_path" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 0 ]]; then
         pass "Import with --from tgz succeeded"
@@ -3447,7 +3447,7 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && CONTAINAI_DATA_VOLUME= CONTAINAI_CONFIG= HOME="$FIXTURE_HOME" \
-        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
     if [[ $import_exit -eq 124 ]]; then
         fail "Import timed out (possible infinite loop in symlink handling)"
@@ -3595,7 +3595,7 @@ data_volume = "'"$cross_vol"'"
     # Run import
     local cross_output cross_exit=0
     cross_output=$(cd -- "$cross_test_dir" && CONTAINAI_DATA_VOLUME= CONTAINAI_CONFIG= HOME="$FIXTURE_HOME" \
-        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$cross_vol" "$cross_source_dir" 2>&1) || cross_exit=$?
+        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$cross_vol" "$cross_source_dir" 2>&1) || cross_exit=$?
 
     if [[ $cross_exit -ne 0 ]]; then
         fail "Cross-directory symlink test import failed (exit=$cross_exit)"
@@ -3671,7 +3671,7 @@ data_volume = "'"$pitfall_vol"'"
     # Run import with timeout (clear env vars inline - env -u doesn't work with shell functions)
     local pitfall_output pitfall_exit=0
     pitfall_output=$(cd -- "$pitfall_test_dir" && CONTAINAI_DATA_VOLUME= CONTAINAI_CONFIG= HOME="$FIXTURE_HOME" \
-        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
+        run_with_timeout 60 bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$pitfall_vol" "$pitfall_source_dir" 2>&1) || pitfall_exit=$?
 
     # Check import succeeded before checking filesystem
     if [[ $pitfall_exit -ne 0 ]]; then
@@ -4442,7 +4442,7 @@ data_volume = "'"$test_vol"'"
     # Run import with --from to exercise the directory source path (including mount preflight)
     local import_output import_exit=0
     import_output=$(cd -- "$test_dir" && HOME="$FIXTURE_HOME" env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SCRIPT_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
+        bash -c 'source "$1/containai.sh" && cai import --data-volume "$2" --from "$3"' _ "$SRC_DIR" "$test_vol" "$alt_source_dir" 2>&1) || import_exit=$?
 
     # Check import succeeded (must pass for meaningful test)
     if [[ $import_exit -ne 0 ]]; then
@@ -4727,7 +4727,7 @@ EOF
     local export_output export_exit=0
     export_output=$(cd -- "$test_dir" && HOME="$source_dir" \
         env -u CONTAINAI_DATA_VOLUME -u CONTAINAI_CONFIG \
-        bash -c 'source "$1/containai.sh" && cai export --data-volume "$2" --to "$3"' _ "$SRC_DIR" "$test_vol" "$tgz_file" 2>&1) || export_exit=$?
+        bash -c 'source "$1/containai.sh" && cai export --data-volume "$2" --output "$3"' _ "$SRC_DIR" "$test_vol" "$tgz_file" 2>&1) || export_exit=$?
 
     if [[ $export_exit -ne 0 ]]; then
         fail "Export failed (exit=$export_exit)"

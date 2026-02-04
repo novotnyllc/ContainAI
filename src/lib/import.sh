@@ -112,8 +112,11 @@ _import_detect_source_type() {
             printf '%s\n' "unknown"
             return 0
         fi
-        # Use -- to prevent argument injection from filenames starting with -
-        if tar -tzf -- "$source" >/dev/null 2>&1; then
+        # Prefix with ./ if path starts with - to prevent argument injection
+        # (tar -tzf -- doesn't work - -- must come before options)
+        local safe_source="$source"
+        [[ "$source" == -* ]] && safe_source="./$source"
+        if tar -tzf "$safe_source" >/dev/null 2>&1; then
             printf '%s\n' "tgz"
             return 0
         fi
@@ -3332,7 +3335,10 @@ HEADER
 
     # Check if we extracted anything useful
     local line_count
-    line_count=$(grep -c -E '^(export|alias)' "$tmp_extracted" 2>/dev/null || echo "0")
+    # Use wc -l with grep instead of grep -c to ensure single numeric output
+    # (grep -c can return multi-line output in edge cases, causing arithmetic errors)
+    # shellcheck disable=SC2126
+    line_count=$(grep -E '^(export|alias)' "$tmp_extracted" 2>/dev/null | wc -l)
     if [[ "$line_count" -eq 0 ]]; then
         rm -f "$tmp_extracted"
         # Remove any stale zsh-imported.sh from volume to reflect current host config

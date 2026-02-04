@@ -121,6 +121,9 @@ run_agent_sync_test() {
     # Set current container for assertions
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
+    # Run init script to create symlinks (since we bypassed systemd)
+    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+
     # Run test
     if "$test_fn"; then
         sync_test_pass "$test_name"
@@ -236,16 +239,17 @@ test_codex_sync_assertions() {
 # ==============================================================================
 # Test 4: Copilot (optional, not secret)
 # ==============================================================================
+# NOTE: Copilot is an optional agent (o flag), so symlinks are NOT created by
+# init.sh. We only verify volume content, not container symlinks.
 test_copilot_sync_assertions() {
-    # Verify config files synced
+    # Verify config files synced to volume
     assert_file_exists_in_volume "copilot/config.json" || return 1
     assert_file_exists_in_volume "copilot/mcp-config.json" || return 1
     assert_dir_exists_in_volume "copilot/skills" || return 1
     assert_file_exists_in_volume "copilot/skills/skill.json" || return 1
 
-    # Verify symlinks in container
-    assert_is_symlink "/home/agent/.copilot/config.json" || return 1
-    assert_is_symlink "/home/agent/.copilot/mcp-config.json" || return 1
+    # NOTE: No symlink assertions - optional agents don't have symlinks created
+    # by init.sh (they're not in link-spec.json)
 
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "copilot/config.json" "COPILOT_CONFIG_MARKER" || return 1
@@ -281,8 +285,10 @@ test_gemini_sync_assertions() {
 # ==============================================================================
 # Test 6: Aider (optional)
 # ==============================================================================
+# NOTE: Aider is an optional agent (o flag), so symlinks are NOT created by
+# init.sh. We only verify volume content, not container symlinks.
 test_aider_sync_assertions() {
-    # Verify config files synced (at root ~/)
+    # Verify config files synced to volume
     assert_file_exists_in_volume "aider/aider.conf.yml" || return 1
     assert_file_exists_in_volume "aider/aider.model.settings.yml" || return 1
 
@@ -290,9 +296,8 @@ test_aider_sync_assertions() {
     assert_permissions_in_volume "aider/aider.conf.yml" "600" || return 1
     assert_permissions_in_volume "aider/aider.model.settings.yml" "600" || return 1
 
-    # Verify symlinks at root
-    assert_is_symlink "/home/agent/.aider.conf.yml" || return 1
-    assert_is_symlink "/home/agent/.aider.model.settings.yml" || return 1
+    # NOTE: No symlink assertions - optional agents don't have symlinks created
+    # by init.sh (they're not in link-spec.json)
 
     # Verify content synced correctly (full content with --from, not placeholders)
     assert_content_marker_in_volume "aider/aider.conf.yml" "AIDER_CONF_MARKER" || return 1

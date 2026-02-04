@@ -123,6 +123,9 @@ run_flags_test() {
     # Set current container for assertions
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
+    # Run init script to create symlinks (since we bypassed systemd)
+    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+
     # Run test
     if "$test_fn"; then
         sync_test_pass "$test_name"
@@ -566,7 +569,8 @@ test_export_basic() {
     exec_in_container "$SYNC_TEST_CONTAINER" bash -c 'echo "{\"modified\": true}" > /mnt/agent-data/claude/settings.json'
 
     # Export to a .tgz archive
-    EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
+    # Use fixture home (which is under REAL_HOME) to ensure path is accessible to sibling containers
+    EXPORT_ARCHIVE="${SYNC_TEST_FIXTURE_HOME}/export-test.tgz"
     local export_output
     export_output=$(run_cai_export --output "$EXPORT_ARCHIVE" 2>&1) || {
         sync_test_fail "export-basic: export failed"
@@ -604,7 +608,8 @@ test_export_basic() {
     fi
 
     # Extract and verify content
-    EXTRACT_DIR=$(mktemp -d)
+    EXTRACT_DIR="${SYNC_TEST_FIXTURE_HOME}/extract"
+    mkdir -p "$EXTRACT_DIR"
     tar -xzf "$EXPORT_ARCHIVE" -C "$EXTRACT_DIR"
     local content
     content=$(cat "$EXTRACT_DIR/claude/settings.json" 2>/dev/null) || content=""
@@ -678,7 +683,8 @@ EOF
     exec_in_container "$SYNC_TEST_CONTAINER" bash -c 'echo "secret" > /mnt/agent-data/shell/bashrc.d/secret.priv.sh'
 
     # Export with config that has excludes
-    EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
+    # Use fixture home (which is under REAL_HOME) to ensure path is accessible to sibling containers
+    EXPORT_ARCHIVE="${SYNC_TEST_FIXTURE_HOME}/export-excludes-test.tgz"
     local export_output
     export_output=$(run_cai_export --output "$EXPORT_ARCHIVE" --config "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" 2>&1) || {
         sync_test_fail "export-config-excludes: export failed"
@@ -692,7 +698,8 @@ EOF
     }
 
     # Extract archive
-    EXTRACT_DIR=$(mktemp -d)
+    EXTRACT_DIR="${SYNC_TEST_FIXTURE_HOME}/extract"
+    mkdir -p "$EXTRACT_DIR"
     tar -xzf "$EXPORT_ARCHIVE" -C "$EXTRACT_DIR"
 
     # public.sh should be in archive
@@ -776,7 +783,8 @@ EOF
     }
 
     # Export with --no-excludes
-    EXPORT_ARCHIVE=$(mktemp --suffix=.tgz)
+    # Use fixture home (which is under REAL_HOME) to ensure path is accessible to sibling containers
+    EXPORT_ARCHIVE="${SYNC_TEST_FIXTURE_HOME}/export-no-excludes-test.tgz"
     local export_output
     export_output=$(run_cai_export --output "$EXPORT_ARCHIVE" --config "$SYNC_TEST_FIXTURE_HOME/.config/containai/containai.toml" --no-excludes 2>&1) || {
         sync_test_fail "export-no-excludes: export failed"

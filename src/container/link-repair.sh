@@ -94,14 +94,14 @@ for i in $(seq 0 $((links_count - 1))); do
             # Target text matches - but is the symlink dangling?
             if [[ ! -e "$link" ]]; then
                 log "[BROKEN] $link -> $target (dangling symlink)"
-                ((broken++))
+                ((broken++)) || true
             else
-                ((ok++))
+                ((ok++)) || true
                 continue
             fi
         else
             log "[WRONG_TARGET] $link -> $current_target (expected: $target)"
-            ((broken++))
+            ((broken++)) || true
         fi
     elif [[ -e "$link" ]]; then
         # Exists but is not a symlink - check if it's a file or directory
@@ -110,21 +110,21 @@ for i in $(seq 0 $((links_count - 1))); do
             # remove_first can be true, false, 1, or 0 depending on JSON format
             if [[ "$remove_first" == "true" || "$remove_first" == "1" || "$remove_first" -eq 1 ]] 2>/dev/null; then
                 log "[EXISTS_DIR] $link is a directory (will remove with R flag)"
-                ((broken++))
+                ((broken++)) || true
             else
                 log "[CONFLICT] $link exists as directory (no R flag - cannot fix)"
-                ((errors++))
+                ((errors++)) || true
                 continue
             fi
         else
             # Regular file - ln -sfn can replace it without R flag
             log "[EXISTS_FILE] $link is a regular file (will replace)"
-            ((broken++))
+            ((broken++)) || true
         fi
     else
         # Does not exist
         log "[MISSING] $link -> $target"
-        ((missing++))
+        ((missing++)) || true
     fi
 
     # Fix mode (or dry-run)
@@ -137,7 +137,7 @@ for i in $(seq 0 $((links_count - 1))); do
             else
                 if ! mkdir -p "$parent"; then
                     log_err "ERROR: Failed to create parent: $parent"
-                    ((errors++))
+                    ((errors++)) || true
                     continue
                 fi
             fi
@@ -163,13 +163,13 @@ for i in $(seq 0 $((links_count - 1))); do
                     else
                         if ! rm -rf "$link"; then
                             log_err "ERROR: Failed to remove directory: $link"
-                            ((errors++))
+                            ((errors++)) || true
                             continue
                         fi
                     fi
                 else
                     log_err "ERROR: Cannot fix - directory exists without R flag: $link"
-                    ((errors++))
+                    ((errors++)) || true
                     continue
                 fi
             elif [[ -L "$link" ]]; then
@@ -190,14 +190,14 @@ for i in $(seq 0 $((links_count - 1))); do
         # Create symlink
         if [[ "$MODE" == "dry-run" ]]; then
             log "[WOULD] Create symlink: $link -> $target"
-            ((fixed++))
+            ((fixed++)) || true
         else
             if ln -sfn "$target" "$link"; then
                 log "[FIXED] $link -> $target"
-                ((fixed++))
+                ((fixed++)) || true
             else
                 log_err "ERROR: Failed to create symlink: $link -> $target"
-                ((errors++))
+                ((errors++)) || true
             fi
         fi
     fi

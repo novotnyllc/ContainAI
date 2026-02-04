@@ -109,6 +109,9 @@ run_edge_test() {
     # Set current container for assertions
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
+    # Run init script to create symlinks (since we bypassed systemd)
+    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+
     # Run test
     if "$test_fn"; then
         sync_test_pass "$test_name"
