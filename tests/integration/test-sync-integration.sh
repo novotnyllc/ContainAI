@@ -5714,57 +5714,88 @@ test_no_pollution() {
             ;;
     esac
 
-    # Step 5: Assert optional agent paths do NOT exist (no pollution)
-    # These are all marked with 'o' flag in sync-manifest.toml
+    # Step 5: Assert optional agent paths are symlinked to the data volume
+    # Optional entries still get symlinks so all agent data lives in the volume.
     # Note: Must use 'bash -lc' to ensure ~ expands inside the container, not the host
     local pollution_found=0
 
-    # Check ~/.cursor (directory - optional agent)
-    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.cursor' 2>/dev/null; then
-        fail "POLLUTION: ~/.cursor exists but should not (user has no cursor config)"
-        pollution_found=1
-    else
-        pass "~/.cursor does NOT exist (no pollution)"
-    fi
+    local -a optional_links=(
+        ".copilot/config.json|/mnt/agent-data/copilot/config.json"
+        ".copilot/mcp-config.json|/mnt/agent-data/copilot/mcp-config.json"
+        ".copilot/skills|/mnt/agent-data/copilot/skills"
+        ".gemini/google_accounts.json|/mnt/agent-data/gemini/google_accounts.json"
+        ".gemini/oauth_creds.json|/mnt/agent-data/gemini/oauth_creds.json"
+        ".gemini/settings.json|/mnt/agent-data/gemini/settings.json"
+        ".gemini/GEMINI.md|/mnt/agent-data/gemini/GEMINI.md"
+        ".aider.conf.yml|/mnt/agent-data/aider/aider.conf.yml"
+        ".aider.model.settings.yml|/mnt/agent-data/aider/aider.model.settings.yml"
+        ".continue/config.yaml|/mnt/agent-data/continue/config.yaml"
+        ".continue/config.json|/mnt/agent-data/continue/config.json"
+        ".cursor/mcp.json|/mnt/agent-data/cursor/mcp.json"
+        ".cursor/rules|/mnt/agent-data/cursor/rules"
+        ".cursor/extensions|/mnt/agent-data/cursor/extensions"
+        ".pi/agent/settings.json|/mnt/agent-data/pi/settings.json"
+        ".pi/agent/models.json|/mnt/agent-data/pi/models.json"
+        ".pi/agent/keybindings.json|/mnt/agent-data/pi/keybindings.json"
+        ".pi/agent/skills|/mnt/agent-data/pi/skills"
+        ".pi/agent/extensions|/mnt/agent-data/pi/extensions"
+        ".kimi/config.toml|/mnt/agent-data/kimi/config.toml"
+        ".kimi/mcp.json|/mnt/agent-data/kimi/mcp.json"
+    )
 
-    # Check ~/.kiro (directory - optional agent per spec)
+    local entry path target link_check
+    for entry in "${optional_links[@]}"; do
+        IFS='|' read -r path target <<< "$entry"
+        link_check=$(exec_as_agent "$test_container_name" bash -lc '
+            path="$1"
+            target="$2"
+            if [ -L "$path" ]; then
+                actual=$(readlink "$path")
+                if [ "$actual" = "$target" ]; then
+                    echo "ok"
+                else
+                    echo "wrong:$actual"
+                fi
+            elif [ -e "$path" ]; then
+                echo "not_symlink"
+            else
+                echo "missing"
+            fi
+        ' -- "$path" "$target" 2>/dev/null) || link_check="exec_failed"
+
+        case "$link_check" in
+            ok)
+                pass "$path symlink points to volume"
+                ;;
+            wrong:*)
+                fail "$path symlink points to wrong target: ${link_check#wrong:}"
+                pollution_found=1
+                ;;
+            not_symlink)
+                fail "$path exists but is not a symlink"
+                pollution_found=1
+                ;;
+            missing)
+                fail "$path symlink missing"
+                pollution_found=1
+                ;;
+            exec_failed)
+                fail "Docker exec failed while checking $path"
+                pollution_found=1
+                ;;
+            *)
+                fail "Unexpected symlink check result for $path: $link_check"
+                pollution_found=1
+                ;;
+        esac
+    done
+
+    # Unsupported agent paths must not appear
     if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.kiro' 2>/dev/null; then
-        fail "POLLUTION: ~/.kiro exists but should not (user has no kiro config)"
+        fail "POLLUTION: ~/.kiro exists but is unsupported"
         pollution_found=1
     else
-        pass "~/.kiro does NOT exist (no pollution)"
-    fi
-
-    # Check ~/.aider.conf.yml (file - optional agent)
-    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.aider.conf.yml' 2>/dev/null; then
-        fail "POLLUTION: ~/.aider.conf.yml exists but should not (user has no aider config)"
-        pollution_found=1
-    else
-        pass "~/.aider.conf.yml does NOT exist (no pollution)"
-    fi
-
-    # Check ~/.continue (directory - optional agent)
-    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.continue' 2>/dev/null; then
-        fail "POLLUTION: ~/.continue exists but should not (user has no continue config)"
-        pollution_found=1
-    else
-        pass "~/.continue does NOT exist (no pollution)"
-    fi
-
-    # Check ~/.copilot (directory - optional agent)
-    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.copilot' 2>/dev/null; then
-        fail "POLLUTION: ~/.copilot exists but should not (user has no copilot config)"
-        pollution_found=1
-    else
-        pass "~/.copilot does NOT exist (no pollution)"
-    fi
-
-    # Check ~/.gemini (directory - optional agent)
-    if exec_as_agent "$test_container_name" bash -lc 'test -e ~/.gemini' 2>/dev/null; then
-        fail "POLLUTION: ~/.gemini exists but should not (user has no gemini config)"
-        pollution_found=1
-    else
-        pass "~/.gemini does NOT exist (no pollution)"
+        pass "~/.kiro does NOT exist (unsupported agent)"
     fi
 
     # Step 6: Display home directory contents for visibility
@@ -5778,9 +5809,9 @@ test_no_pollution() {
 
     # Final summary
     if [[ $pollution_found -eq 0 ]]; then
-        pass "No home directory pollution detected - only configured agents have entries"
+        pass "Optional agent symlinks point to data volume (no stray files)"
     else
-        fail "Home directory pollution detected - optional agents created without source"
+        fail "Optional agent path checks failed"
     fi
 
     # Cleanup happens automatically via RETURN trap

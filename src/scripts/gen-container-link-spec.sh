@@ -36,8 +36,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     [[ -z "$container_link" ]] && continue
     # Skip dynamic pattern entries (G flag)
     [[ "$flags" == *G* ]] && continue
-    # Skip optional entries (o flag) - link repair only for non-optional entries
-    [[ "$optional" == "true" ]] && continue
+    # Optional entries are still included so symlinks are enforced
 
     needs_rm=0
     [[ "$flags" == *R* ]] && needs_rm=1

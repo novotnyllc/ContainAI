@@ -38,8 +38,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     [[ -z "$target" ]] && continue
     # Skip dynamic pattern entries (G flag)
     [[ "$flags" == *G* ]] && continue
-    # Skip optional entries (o flag) - they are created only if source exists at import time
-    [[ "$optional" == "true" ]] && continue
+    # Optional entries are still initialized so data lives in the volume
     # Skip entries that only have container_link (container_symlinks section)
     # We still process them for volume initialization
     [[ "$entry_type" == "symlink" ]] && continue
@@ -91,8 +90,7 @@ done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
 while IFS='|' read -r source target container_link flags disabled entry_type optional; do
     [[ "$entry_type" != "symlink" ]] && continue
     [[ -z "$target" ]] && continue
-    # Skip optional entries (o flag)
-    [[ "$optional" == "true" ]] && continue
+    # Optional entries are still initialized so data lives in the volume
 
     is_file=0
     is_json=0

@@ -50,11 +50,9 @@ USER agent
 WORKDIR /home/agent
 
 # Create agent data directories for config/auth file symlinks
-# Note: Only primary agents (.claude, .codex) are pre-created here.
-# Optional agents (.copilot, .gemini, .continue, .cursor, .aider) are NOT
-# pre-created to prevent home directory pollution. Users who configure
-# optional agents inside the container should run `cai sync` to persist
-# their configuration to the data volume.
+# Note: Primary agents are pre-created; optional agent paths are still
+# symlinked to the data volume so all agent data lives there, but remain
+# empty until configured by the user.
 RUN mkdir -p \
     /home/agent/.claude \
     /home/agent/.codex \
