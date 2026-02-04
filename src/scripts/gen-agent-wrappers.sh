@@ -53,8 +53,9 @@ parse_agent_section() {
         # Exit [agent] section on any other section header
         if [[ "$line" == "["*"]" || "$line" == "[["*"]]" ]]; then
             if [[ $in_agent -eq 1 ]]; then
-                # Emit the agent and reset (emit if name and binary are set, even with empty default_args)
-                if [[ -n "$name" && -n "$binary" ]]; then
+                # Emit the agent only if name, binary, AND default_args are set
+                # Per spec: wrappers only generated when default_args is non-empty
+                if [[ -n "$name" && -n "$binary" && -n "$default_args" ]]; then
                     printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
                 fi
                 return
@@ -103,8 +104,9 @@ parse_agent_section() {
         fi
     done < "$manifest_file"
 
-    # Emit if we reached EOF while in [agent] section (emit if name and binary are set)
-    if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" ]]; then
+    # Emit if we reached EOF while in [agent] section
+    # Per spec: wrappers only generated when default_args is non-empty
+    if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" && -n "$default_args" ]]; then
         printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
     fi
 }
@@ -159,20 +161,25 @@ generate_output() {
         IFS='|' read -r name binary default_args aliases optional <<< "$agent_info"
 
         # Convert comma-separated args to shell-quoted format
-        local args_array=()
-        IFS=',' read -ra args_array <<< "$default_args"
-
-        # Build the args string with robust shell escaping (single-quote each arg)
+        # Skip if default_args is empty (no wrapper args needed)
         local args_str=""
-        for arg in "${args_array[@]}"; do
-            # Shell-escape using single quotes (escape any embedded single quotes)
-            local escaped_arg="'${arg//\'/\'\\\'\'}'"
-            if [[ -n "$args_str" ]]; then
-                args_str="${args_str} ${escaped_arg}"
-            else
-                args_str="${escaped_arg}"
-            fi
-        done
+        if [[ -n "$default_args" ]]; then
+            local args_array=()
+            IFS=',' read -ra args_array <<< "$default_args"
+
+            # Build the args string with robust shell escaping (single-quote each arg)
+            for arg in "${args_array[@]}"; do
+                # Skip empty args (defensive)
+                [[ -z "$arg" ]] && continue
+                # Shell-escape using single quotes (escape any embedded single quotes)
+                local escaped_arg="'${arg//\'/\'\\\'\'}'"
+                if [[ -n "$args_str" ]]; then
+                    args_str="${args_str} ${escaped_arg}"
+                else
+                    args_str="${escaped_arg}"
+                fi
+            done
+        fi
 
         # Generate wrapper function using name (calls binary)
         # This supports cases where name != binary
