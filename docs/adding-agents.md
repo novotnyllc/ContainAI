@@ -225,7 +225,7 @@ RUN ( <installation-command> && agent --version ) \
 
 The examples below show the general pattern. For the canonical source, see `src/container/Dockerfile.agents`.
 
-**Note**: The `o` flag in sync-manifest.toml refers to whether host configs are *synced*, not whether the CLI is installed. All these CLIs are installed with fail-fast verification.
+**Note**: The `o` flag in the manifest refers to whether host configs are *synced*, not whether the CLI is installed. All these CLIs are installed with fail-fast verification.
 
 **Claude Code** (configs always synced):
 
@@ -458,14 +458,14 @@ After creating your manifest, run the consistency check:
 
 This script:
 - Parses all entries from `src/manifests/*.toml`
-- Compares against the generated `_IMPORT_SYNC_MAP`
+- Compares against the generated `src/lib/import-sync-map.sh`
 - Reports any mismatches
 
 CI enforces this check - builds will fail if manifests and generated code diverge.
 
 ### What the Generators Create
 
-- **import-map**: Updates `_IMPORT_SYNC_MAP` in `src/lib/import.sh` from manifest entries
+- **import-sync-map.sh**: Generated `_IMPORT_SYNC_MAP` array from manifest entries
 - **symlinks.sh**: Shell script run during Docker build to create symlinks from container home to data volume paths
 - **init-dirs.sh**: Shell script run on container first boot to create directory structure with correct permissions
 - **link-spec.json**: JSON specification for runtime link verification and repair
@@ -704,7 +704,8 @@ cat src/container/Dockerfile.agents
 | File | Purpose |
 |------|---------|
 | `src/manifests/*.toml` | Per-agent manifest files (authoritative source) |
-| `src/lib/import.sh` | Contains generated `_IMPORT_SYNC_MAP` |
+| `src/lib/import-sync-map.sh` | Generated `_IMPORT_SYNC_MAP` from manifests |
+| `src/lib/import.sh` | Import implementation (uses `_IMPORT_SYNC_MAP`) |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
 | `src/scripts/gen-*.sh` | Generator scripts for container artifacts |
 | `scripts/check-manifest-consistency.sh` | Manifest/import map consistency check |

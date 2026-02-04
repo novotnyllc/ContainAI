@@ -142,7 +142,7 @@ The `[agent]` section is only present for agents that need launch wrappers (agen
 
 ### 1. Import Sync Map (import.sh)
 
-The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the data volume.
+The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the data volume. This table shows representative examples; see `src/manifests/*.toml` for the complete list.
 
 | Source | Target | Flags | Description |
 |--------|--------|-------|-------------|

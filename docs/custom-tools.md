@@ -151,7 +151,7 @@ flags = "fjo"                          # f=file, j=json-init, o=optional
 | `aliases` | array | Additional command names to wrap |
 | `optional` | boolean | If true, skip wrapper if binary not installed |
 
-If `default_args` is empty or omitted, no wrapper is generated.
+**Note:** A wrapper function is generated if the `[agent]` section is present and the binary exists, even if `default_args` is empty. Use an empty array `[]` if you want a wrapper without default arguments.
 
 #### `[[entries]]` Section
 

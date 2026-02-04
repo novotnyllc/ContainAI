@@ -73,7 +73,7 @@ docs/                   # Architecture, config, quickstart
 
 - **`src/manifests/*.toml` are the authoritative source** for what gets synced between host and container
 - Per-agent files with numeric prefixes ensure deterministic processing order
-- `_IMPORT_SYNC_MAP` in `src/lib/import.sh` is generated from manifests
+- `src/lib/import-sync-map.sh` is generated from manifests (contains `_IMPORT_SYNC_MAP`)
 - Run `scripts/check-manifest-consistency.sh` to verify alignment (CI enforces this)
 - Generator scripts (`src/scripts/gen-*.sh`) read manifests to produce container artifacts
 - User manifests go in `~/.config/containai/manifests/` (processed at runtime)
