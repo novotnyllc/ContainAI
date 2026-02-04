@@ -240,6 +240,8 @@ env_file = ".env.local"
 
 Configuration for additional files and directories to sync via `cai import`. This allows users to specify custom dotfiles or tool configurations beyond the built-in sync map.
 
+> **Need a launch wrapper with default args?** For tools that need shell wrappers (like autonomous mode flags), create a user manifest instead. See [Custom Tools Guide](custom-tools.md).
+
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `additional_paths` | array of strings | `[]` | Additional files/directories to sync from host |

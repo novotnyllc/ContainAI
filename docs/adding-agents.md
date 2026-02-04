@@ -2,9 +2,11 @@
 
 This guide explains how to add support for a new AI coding agent to ContainAI.
 
+> **User looking to add a custom tool?** This guide is for contributors adding built-in agents to ContainAI. If you want to sync your own tool's config files, see [Custom Tools Guide](custom-tools.md) instead.
+
 ## Overview
 
-Adding an agent involves six steps:
+Adding an agent involves five steps:
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -20,31 +22,27 @@ Adding an agent involves six steps:
 flowchart LR
     S1["1. Research<br/>Installation & config"]
     S2["2. Dockerfile<br/>Add to Dockerfile.agents"]
-    S3["3. Manifest<br/>sync-manifest.toml"]
-    S4["4. Import Map<br/>_IMPORT_SYNC_MAP"]
-    S5["5. Generators<br/>Run & check consistency"]
-    S6["6. Test<br/>Verify in container"]
+    S3["3. Manifest<br/>Create per-agent file"]
+    S4["4. Generators<br/>Run & check consistency"]
+    S5["5. Test<br/>Verify in container"]
 
     S1 --> S2
     S2 --> S3
     S3 --> S4
     S4 --> S5
-    S5 --> S6
 
     style S1 fill:#1a1a2e,stroke:#16213e,color:#fff
     style S2 fill:#0f3460,stroke:#16213e,color:#fff
     style S3 fill:#1a1a2e,stroke:#16213e,color:#fff
     style S4 fill:#0f3460,stroke:#16213e,color:#fff
     style S5 fill:#1a1a2e,stroke:#16213e,color:#fff
-    style S6 fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 1. **Research** - Understand the agent's installation and configuration
 2. **Dockerfile** - Add installation to `Dockerfile.agents`
-3. **Manifest** - Add config entries to `sync-manifest.toml`
-4. **Import map** - Update `_IMPORT_SYNC_MAP` in `import.sh`
-5. **Generators** - Run generators and consistency check
-6. **Test** - Verify in container
+3. **Manifest** - Create per-agent manifest file in `src/manifests/`
+4. **Generators** - Run generators and consistency check
+5. **Test** - Verify in container
 
 ## Conventions
 
@@ -154,34 +152,6 @@ container_link = ".codex/config.toml"
 flags = "f"  # file only
 ```
 
-### _IMPORT_SYNC_MAP Alignment
-
-The manifest and import map must stay in sync. This is enforced by CI.
-
-**Workflow:**
-
-1. Add entries to `src/sync-manifest.toml`
-2. Add matching entries to `_IMPORT_SYNC_MAP` in `src/lib/import.sh`
-3. Run `./scripts/check-manifest-consistency.sh` to verify
-4. Fix any reported mismatches before committing
-
-**Entry format in _IMPORT_SYNC_MAP:**
-
-```bash
-"/source/.agent/config.json:/target/agent/config.json:fjs"
-#   ^source path              ^target path             ^flags
-```
-
-**What's excluded from comparison:**
-- Entries with `disabled = true` (opt-in via `additional_paths`)
-- Entries with `G` flag (glob patterns discovered at runtime)
-- `[[container_symlinks]]` section (container-only, not imported)
-- `.gitconfig` (handled by special `_cai_import_git_config()` function)
-
-**Flags not compared:**
-- `R` (remove existing) - only affects container link creation
-- `g` (git filter) - handled by special gitconfig logic
-
 ### Directory Flags
 
 Special flags for directory entries:
@@ -281,19 +251,80 @@ RUN uv tool install --python 3.13 kimi-cli && \
     kimi --version
 ```
 
-## Step 3: Add to sync-manifest.toml
+## Step 3: Create Per-Agent Manifest File
 
-Add entries for each config file/directory in `src/sync-manifest.toml`.
+Create a new manifest file in `src/manifests/` for your agent.
 
-### Entry Format
+### Directory Structure
+
+Manifests are organized with numeric prefixes for deterministic processing order:
+
+```
+src/manifests/
+├── 00-common.toml    # Shared entries (fonts, agents directory)
+├── 01-shell.toml     # Shell configuration
+├── 02-git.toml       # Git configuration
+├── ...
+├── 10-claude.toml    # Claude Code agent
+├── 11-codex.toml     # Codex agent
+├── 12-gemini.toml    # Gemini agent
+└── XX-myagent.toml   # Your new agent
+```
+
+Choose a numeric prefix that places your agent in the correct order. Agents typically start at 10+.
+
+### Manifest File Format
+
+Each agent has its own TOML file with optional `[agent]` section and `[[entries]]`:
 
 ```toml
+# src/manifests/XX-myagent.toml
 # =============================================================================
-# AGENT NAME
+# MY AGENT
 # Description of what agent does
 # Docs: https://agent.example.com
 # =============================================================================
 
+# [agent] section is ONLY needed if the agent needs a launch wrapper
+# (for autonomous mode flags like --dangerously-skip-permissions or --yolo)
+[agent]
+name = "myagent"
+binary = "myagent"                     # Command name in PATH
+default_args = ["--auto-mode"]         # Wrapper only generated if non-empty
+aliases = []                           # Additional command aliases (optional)
+optional = true                        # If true, wrapper guarded by command -v check
+
+[[entries]]
+source = ".agent/config.json"         # Path on host (relative to $HOME)
+target = "agent/config.json"          # Path in data volume (/mnt/agent-data)
+container_link = ".agent/config.json" # Symlink in container home
+flags = "fjos"                        # Flags (see reference below)
+```
+
+### The `[agent]` Section
+
+The `[agent]` section defines launch wrapper generation for agents that need default arguments (typically autonomous mode flags).
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Agent name (used for function name) |
+| `binary` | string | Yes | Binary name in PATH |
+| `default_args` | array | No | Arguments prepended to all invocations |
+| `aliases` | array | No | Additional command names to wrap |
+| `optional` | boolean | No | If true, wrapper guarded by `command -v` check |
+
+**When to include `[agent]` section:**
+- Agent has an autonomous/yolo mode flag you want as default
+- Example: Claude uses `--dangerously-skip-permissions`, Gemini uses `--yolo`
+
+**When to omit `[agent]` section:**
+- Config-only tools (editors, shell configs, VS Code)
+- Agents without autonomous mode flags (OpenCode)
+- Tools that don't need a launch wrapper
+
+### Entry Format
+
+```toml
 [[entries]]
 source = ".agent/config.json"         # Path on host (relative to $HOME)
 target = "agent/config.json"          # Path in data volume (/mnt/agent-data)
@@ -392,77 +423,55 @@ Disabled entries:
 
 SSH is a common example - disabled by default for security, but users can opt-in.
 
-## Step 4: Update _IMPORT_SYNC_MAP
+## Step 4: Run Generators
 
-After modifying `sync-manifest.toml`, update the corresponding import map in `src/lib/import.sh`.
+The generators create container artifacts from the per-agent manifest files.
 
-The `_IMPORT_SYNC_MAP` array must match the manifest for comparable entries. The consistency checker normalizes flags and skips certain entries:
-
-**Excluded from comparison:**
-- Entries with `disabled = true`
-- Entries with `G` flag (glob/dynamic patterns)
-- `container_symlinks` section (container-only, not imported)
-- `.gitconfig` (handled specially by `_cai_import_git_config()`)
-
-**Flags not compared:**
-- `R` (remove existing) - affects container link creation/repair, not host import
-- `g` (git filter) - handled by special gitconfig logic
-
-### Entry Format
+### Generator Commands
 
 ```bash
-_IMPORT_SYNC_MAP=(
-    # --- Agent Name ---
-    # Comment describing what this entry syncs
-    "/source/.agent/config.json:/target/agent/config.json:fjs"
-    "/source/.agent/auth.json:/target/agent/auth.json:fs"
-    "/source/.agent/plugins:/target/agent/plugins:do"
-)
+# Generate import map (creates _IMPORT_SYNC_MAP in import.sh)
+./src/scripts/gen-import-map.sh
+
+# Generate Dockerfile symlink script
+./src/scripts/gen-dockerfile-symlinks.sh
+
+# Generate init directory script
+./src/scripts/gen-init-dirs.sh
+
+# Generate link spec JSON for runtime repair
+./src/scripts/gen-container-link-spec.sh
+
+# Generate agent wrapper functions
+./src/scripts/gen-agent-wrappers.sh
 ```
 
-**Format**: `/source/<host-path>:/target/<volume-path>:<flags>`
+**Note**: The build script `./src/build.sh` runs these generators automatically before building the image. Manual execution is only needed for development/testing.
 
 ### Consistency Check
 
-After updating both files, run the consistency check:
+After creating your manifest, run the consistency check:
 
 ```bash
 ./scripts/check-manifest-consistency.sh
 ```
 
 This script:
-- Parses all entries from `sync-manifest.toml`
-- Extracts all entries from `_IMPORT_SYNC_MAP`
-- Reports any mismatches (missing entries, flag differences)
+- Parses all entries from `src/manifests/*.toml`
+- Compares against the generated `_IMPORT_SYNC_MAP`
+- Reports any mismatches
 
-CI enforces this check - builds will fail if the manifest and import map diverge.
-
-## Step 5: Run Generators
-
-The generators create container artifacts from the manifest.
-
-### Generator Commands
-
-```bash
-# Generate Dockerfile symlink script
-./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml artifacts/container-generated/symlinks.sh
-
-# Generate init directory script
-./src/scripts/gen-init-dirs.sh src/sync-manifest.toml artifacts/container-generated/init-dirs.sh
-
-# Generate link spec JSON for runtime repair
-./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml artifacts/container-generated/link-spec.json
-```
-
-**Note**: The build script `./src/build.sh` runs these generators automatically before building the image. Manual execution is only needed for development/testing.
+CI enforces this check - builds will fail if manifests and generated code diverge.
 
 ### What the Generators Create
 
+- **import-map**: Updates `_IMPORT_SYNC_MAP` in `src/lib/import.sh` from manifest entries
 - **symlinks.sh**: Shell script run during Docker build to create symlinks from container home to data volume paths
 - **init-dirs.sh**: Shell script run on container first boot to create directory structure with correct permissions
 - **link-spec.json**: JSON specification for runtime link verification and repair
+- **containai-agents.sh**: Shell functions for agent launch wrappers (prepend autonomous flags)
 
-## Step 6: Test
+## Step 5: Test
 
 Testing follows the tiered strategy documented in [docs/testing.md](testing.md).
 
@@ -543,10 +552,21 @@ ssh test-agent 'ls -la ~/.newagent/'
 
 ### Always-Sync Agents (no `o` flag)
 
-**Claude Code** - Primary supported agent:
+**Claude Code** (`src/manifests/10-claude.toml`) - Primary supported agent with launch wrapper:
 
 ```toml
-# In sync-manifest.toml
+# src/manifests/10-claude.toml
+# =============================================================================
+# CLAUDE CODE
+# =============================================================================
+
+[agent]
+name = "claude"
+binary = "claude"
+default_args = ["--dangerously-skip-permissions"]
+aliases = []
+optional = false
+
 [[entries]]
 source = ".claude.json"
 target = "claude/claude.json"
@@ -566,9 +586,18 @@ container_link = ".claude/settings.json"
 flags = "fj"  # file, json-init
 ```
 
-**Codex** - Primary supported agent:
+**Codex** (`src/manifests/11-codex.toml`) - Primary supported agent:
 
 ```toml
+# src/manifests/11-codex.toml
+
+[agent]
+name = "codex"
+binary = "codex"
+default_args = ["--full-auto"]
+aliases = []
+optional = false
+
 [[entries]]
 source = ".codex/config.toml"
 target = "codex/config.toml"
@@ -590,9 +619,18 @@ flags = "dxR"  # directory, exclude .system/, remove existing first
 
 ### Optional-Sync Agents (with `o` flag)
 
-**Gemini** - Optional sync:
+**Gemini** (`src/manifests/12-gemini.toml`) - Optional sync with launch wrapper:
 
 ```toml
+# src/manifests/12-gemini.toml
+
+[agent]
+name = "gemini"
+binary = "gemini"
+default_args = ["--yolo"]
+aliases = []
+optional = true
+
 [[entries]]
 source = ".gemini/google_accounts.json"
 target = "gemini/google_accounts.json"
@@ -612,64 +650,25 @@ container_link = ".gemini/settings.json"
 flags = "fjo"  # file, json-init, OPTIONAL
 ```
 
-**Pi** - Optional sync:
+### Config-Only Manifests (no `[agent]` section)
+
+**OpenCode** (`src/manifests/14-opencode.toml`) - No launch wrapper needed:
 
 ```toml
-[[entries]]
-source = ".pi/agent/settings.json"
-target = "pi/settings.json"
-container_link = ".pi/agent/settings.json"
-flags = "fjo"  # file, json-init, optional
+# src/manifests/14-opencode.toml
+# OpenCode has no known autonomous flag, so no [agent] section
 
 [[entries]]
-source = ".pi/agent/models.json"
-target = "pi/models.json"
-container_link = ".pi/agent/models.json"
-flags = "fjso"  # file, json-init, SECRET, optional
+source = ".config/opencode"
+target = "config/opencode"
+container_link = ".config/opencode"
+flags = "dR"  # directory, remove existing first
 
 [[entries]]
-source = ".pi/agent/skills"
-target = "pi/skills"
-container_link = ".pi/agent/skills"
-flags = "dxRo"  # directory, exclude .system/, remove-first, optional
-```
-
-**Copilot** - Optional sync:
-
-```toml
-[[entries]]
-source = ".copilot/config.json"
-target = "copilot/config.json"
-container_link = ".copilot/config.json"
-flags = "fo"  # file, optional
-
-[[entries]]
-source = ".copilot/mcp-config.json"
-target = "copilot/mcp-config.json"
-container_link = ".copilot/mcp-config.json"
-flags = "fo"  # file, optional
-
-[[entries]]
-source = ".copilot/skills"
-target = "copilot/skills"
-container_link = ".copilot/skills"
-flags = "dRo"  # directory, remove existing first, optional
-```
-
-**Kimi** - Optional sync:
-
-```toml
-[[entries]]
-source = ".kimi/config.toml"
-target = "kimi/config.toml"
-container_link = ".kimi/config.toml"
-flags = "fso"  # file, SECRET, optional
-
-[[entries]]
-source = ".kimi/mcp.json"
-target = "kimi/mcp.json"
-container_link = ".kimi/mcp.json"
-flags = "fjso"  # file, json-init, SECRET, optional
+source = ".local/share/opencode/auth.json"
+target = "local/share/opencode/auth.json"
+container_link = ".local/share/opencode/auth.json"
+flags = "fs"  # file, secret
 ```
 
 ## Quick Reference
@@ -677,10 +676,16 @@ flags = "fjso"  # file, json-init, SECRET, optional
 ### View Existing Agent Patterns
 
 ```bash
-# View agent sections in manifest (using rg for POSIX portability)
-rg -A5 'CLAUDE|CODEX|GEMINI|PI$|COPILOT|KIMI' src/sync-manifest.toml
+# List all per-agent manifests
+ls src/manifests/
 
-# View Dockerfile.agents patterns
+# View a specific agent manifest
+cat src/manifests/10-claude.toml
+
+# Search for patterns across all manifests
+rg '\[agent\]' src/manifests/
+
+# View Dockerfile.agents installation patterns
 cat src/container/Dockerfile.agents
 
 # Check manifest/import map consistency
@@ -691,12 +696,13 @@ cat src/container/Dockerfile.agents
 
 | File | Purpose |
 |------|---------|
-| `src/sync-manifest.toml` | Authoritative source for sync configuration |
-| `src/lib/import.sh` | Contains `_IMPORT_SYNC_MAP` (must match manifest) |
+| `src/manifests/*.toml` | Per-agent manifest files (authoritative source) |
+| `src/lib/import.sh` | Contains generated `_IMPORT_SYNC_MAP` |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
 | `src/scripts/gen-*.sh` | Generator scripts for container artifacts |
 | `scripts/check-manifest-consistency.sh` | Manifest/import map consistency check |
 | `docs/testing.md` | Testing tier documentation |
+| `docs/custom-tools.md` | User guide for adding custom tools |
 
 ## Related Documentation
 

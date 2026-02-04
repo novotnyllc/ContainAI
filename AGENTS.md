@@ -40,6 +40,11 @@ shellcheck -x src/*.sh src/lib/*.sh
 ```
 src/
 ├── containai.sh        # Main CLI entry point (source this)
+├── manifests/          # Per-agent manifest files (sync config source)
+│   ├── 00-common.toml  # Shared entries (fonts, agents dir)
+│   ├── 10-claude.toml  # Claude Code agent
+│   ├── 11-codex.toml   # Codex agent
+│   └── ...             # Other agents/tools
 ├── lib/                # Modular shell libraries
 │   ├── core.sh         # Logging utilities
 │   ├── config.sh       # TOML config parsing
@@ -53,6 +58,10 @@ src/
 │   ├── Dockerfile.sdks    # SDK layer
 │   ├── Dockerfile.agents  # Agent layer
 │   └── Dockerfile         # Final image
+├── scripts/            # Generator scripts
+│   ├── gen-import-map.sh      # Generate _IMPORT_SYNC_MAP
+│   ├── gen-agent-wrappers.sh  # Generate launch wrappers
+│   └── gen-*.sh               # Other generators
 └── build.sh            # Build script
 
 tests/integration/      # Integration tests (require Docker)
@@ -62,10 +71,12 @@ docs/                   # Architecture, config, quickstart
 
 ## Config Sync Architecture
 
-- **`src/sync-manifest.toml` is the authoritative source** for what gets synced between host and container
-- `_IMPORT_SYNC_MAP` in `src/lib/import.sh` must match the manifest
+- **`src/manifests/*.toml` are the authoritative source** for what gets synced between host and container
+- Per-agent files with numeric prefixes ensure deterministic processing order
+- `_IMPORT_SYNC_MAP` in `src/lib/import.sh` is generated from manifests
 - Run `scripts/check-manifest-consistency.sh` to verify alignment (CI enforces this)
-- Generator scripts (`src/scripts/gen-*.sh`) read the manifest to produce container artifacts
+- Generator scripts (`src/scripts/gen-*.sh`) read manifests to produce container artifacts
+- User manifests go in `~/.config/containai/manifests/` (processed at runtime)
 
 ## Code Conventions
 

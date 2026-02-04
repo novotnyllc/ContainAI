@@ -32,10 +32,38 @@ This directory contains the ContainAI sandbox implementation:
 - VS Code Server support
 
 **Key Files:**
-- `container/Dockerfile*` - Container image definitions
 - `containai.sh` - CLI entry point (sources `lib/*.sh` modules)
-- `container/entrypoint.sh` - Container entrypoint with security validation
 - `lib/` - Modular shell libraries
+- `container/Dockerfile*` - Container image definitions
+- `container/entrypoint.sh` - Container entrypoint with security validation
+
+**Manifest Files (`manifests/`):**
+
+Per-agent manifest files define what config files are synced between host and container:
+
+| File | Purpose |
+|------|---------|
+| `00-common.toml` | Shared entries (fonts, agents directory) |
+| `01-shell.toml` | Shell configuration (bash, zsh, inputrc) |
+| `02-git.toml` | Git configuration |
+| `03-gh.toml` | GitHub CLI |
+| `04-editors.toml` | Vim, Neovim |
+| `05-vscode.toml` | VS Code Server |
+| `06-ssh.toml` | SSH (disabled by default) |
+| `07-tmux.toml` | tmux |
+| `08-prompt.toml` | Starship, oh-my-posh |
+| `10-claude.toml` | Claude Code agent |
+| `11-codex.toml` | Codex agent |
+| `12-gemini.toml` | Gemini agent |
+| `13-copilot.toml` | GitHub Copilot |
+| `14-opencode.toml` | OpenCode |
+| `15-kimi.toml` | Kimi CLI |
+| `16-pi.toml` | Pi agent |
+| `17-aider.toml` | Aider |
+| `18-continue.toml` | Continue |
+| `19-cursor.toml` | Cursor |
+
+Numeric prefixes ensure deterministic processing order. See [docs/adding-agents.md](../docs/adding-agents.md) for the manifest format.
 
 ## Quick Start
 

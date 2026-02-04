@@ -60,33 +60,83 @@ The import/sync system has three main components that must stay synchronized:
 }}}%%
 flowchart TB
     subgraph Source["Single Source of Truth"]
-        Manifest["sync-manifest.toml"]
+        Manifests["src/manifests/*.toml<br/>(per-agent files)"]
     end
 
     subgraph Components["Generated Components"]
         Import["import.sh<br/>_IMPORT_SYNC_MAP"]
         Dockerfile["Dockerfile.agents<br/>Symlink creation"]
         Init["containai-init.sh<br/>Directory structure"]
+        Wrappers["containai-agents.sh<br/>Launch wrappers"]
     end
 
     subgraph Artifacts["Container Artifacts"]
         SymlinksScript["generated/symlinks.sh"]
         InitDirs["generated/init-dirs.sh"]
         LinkSpec["generated/link-spec.json"]
+        AgentWrappers["generated/containai-agents.sh"]
     end
 
-    Manifest -->|"gen-dockerfile-symlinks.sh"| SymlinksScript
-    Manifest -->|"gen-init-dirs.sh"| InitDirs
-    Manifest -->|"gen-container-link-spec.sh"| LinkSpec
-    Manifest -->|"manual sync"| Import
+    Manifests -->|"gen-import-map.sh"| Import
+    Manifests -->|"gen-dockerfile-symlinks.sh"| SymlinksScript
+    Manifests -->|"gen-init-dirs.sh"| InitDirs
+    Manifests -->|"gen-container-link-spec.sh"| LinkSpec
+    Manifests -->|"gen-agent-wrappers.sh"| AgentWrappers
 
     SymlinksScript --> Dockerfile
     InitDirs --> Init
+    AgentWrappers --> Wrappers
 
     style Source fill:#e94560,stroke:#16213e,color:#fff
     style Components fill:#0f3460,stroke:#16213e,color:#fff
     style Artifacts fill:#16213e,stroke:#0f3460,color:#fff
 ```
+
+## Per-Agent Manifest Structure
+
+Configuration is split into per-agent manifest files for maintainability:
+
+```
+src/manifests/
+├── 00-common.toml    # Shared entries (fonts, agents directory)
+├── 01-shell.toml     # Shell configuration (bash, zsh)
+├── 02-git.toml       # Git configuration
+├── 03-gh.toml        # GitHub CLI
+├── 04-editors.toml   # Vim, Neovim
+├── 05-vscode.toml    # VS Code Server
+├── 06-ssh.toml       # SSH (disabled by default)
+├── 07-tmux.toml      # tmux
+├── 08-prompt.toml    # Starship, oh-my-posh
+├── 10-claude.toml    # Claude Code
+├── 11-codex.toml     # Codex
+├── 12-gemini.toml    # Gemini
+├── ...               # Other agents
+```
+
+Numeric prefixes ensure deterministic processing order matching the original monolithic manifest section order.
+
+### Manifest File Format
+
+Each manifest can have an optional `[agent]` section and `[[entries]]`:
+
+```toml
+# src/manifests/10-claude.toml
+
+[agent]
+name = "claude"
+binary = "claude"
+default_args = ["--dangerously-skip-permissions"]
+aliases = []
+optional = false
+
+[[entries]]
+source = ".claude.json"
+target = "claude/claude.json"
+container_link = ".claude.json"
+flags = "fjs"
+```
+
+The `[agent]` section is only present for agents that need launch wrappers (agents with autonomous mode flags).
 
 ## Component Analysis
 
@@ -313,9 +363,117 @@ source:target:flags:excludes_b64
 2. **No-slash WITHOUT glob metacharacters** (`claude`, `config`): Root prefixes that skip matching entries
 3. **Path patterns** (`claude/plugins/.system`): Bidirectional parent/child matching
 
+## User Manifest Processing
+
+Users can add custom tool configurations by creating manifest files in `~/.config/containai/manifests/`.
+
+### Runtime Processing
+
+User manifests are processed at container startup (not build time):
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#1a1a2e',
+  'primaryTextColor': '#ffffff',
+  'primaryBorderColor': '#16213e',
+  'secondaryColor': '#0f3460',
+  'tertiaryColor': '#1a1a2e',
+  'lineColor': '#a0a0a0',
+  'textColor': '#ffffff',
+  'background': '#0d1117'
+}}}%%
+flowchart LR
+    subgraph Host["Host System"]
+        UserManifests["~/.config/containai/manifests/*.toml"]
+    end
+
+    subgraph Import["cai import"]
+        SyncOp["rsync to volume"]
+    end
+
+    subgraph Volume["Data Volume"]
+        VolManifests["/mnt/agent-data/containai/manifests/"]
+    end
+
+    subgraph Container["Container Startup"]
+        GenLinks["gen-user-links.sh"]
+        GenWrappers["gen-user-wrappers.sh"]
+    end
+
+    subgraph Runtime["Runtime Artifacts"]
+        Symlinks["User symlinks in ~/"]
+        WrapperFuncs["~/.bash_env.d/containai-user-agents.sh"]
+        LinkSpec["user-link-spec.json"]
+    end
+
+    UserManifests -->|"cai import"| SyncOp
+    SyncOp --> VolManifests
+    VolManifests -->|"containai-init.sh"| GenLinks
+    VolManifests -->|"containai-init.sh"| GenWrappers
+    GenLinks --> Symlinks
+    GenLinks --> LinkSpec
+    GenWrappers --> WrapperFuncs
+
+    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
+    style Import fill:#0f3460,stroke:#16213e,color:#fff
+    style Volume fill:#16213e,stroke:#0f3460,color:#fff
+    style Container fill:#0f3460,stroke:#16213e,color:#fff
+    style Runtime fill:#1a1a2e,stroke:#16213e,color:#fff
+```
+
+1. User creates `~/.config/containai/manifests/mytool.toml`
+2. `cai import` syncs to `/mnt/agent-data/containai/manifests/`
+3. On container start, `containai-init.sh` calls:
+   - `gen-user-links.sh`: Creates symlinks, writes `user-link-spec.json`
+   - `gen-user-wrappers.sh`: Creates launch wrapper functions
+
+### Security Constraints
+
+User manifests have security restrictions enforced at runtime:
+
+| Constraint | Enforcement |
+|------------|-------------|
+| `target` must resolve under `/mnt/agent-data` | Path validation with `realpath -m` |
+| `container_link` must be relative, no `..` | Pattern matching |
+| Binary must exist for wrapper generation | `command -v` check |
+| Invalid TOML files | Logged and skipped |
+| Invalid entries | Logged and skipped (fail-safe) |
+
+### Generated Artifacts
+
+**User symlinks**: Created in `~/` pointing to volume paths
+
+**User link spec** (`/mnt/agent-data/containai/user-link-spec.json`):
+```json
+{
+  "version": 1,
+  "data_mount": "/mnt/agent-data",
+  "home_dir": "/home/agent",
+  "links": [
+    {"link": "/home/agent/.mytool/config.json", "target": "/mnt/agent-data/mytool/config.json", "remove_first": 0}
+  ]
+}
+```
+
+**User wrappers** (`~/.bash_env.d/containai-user-agents.sh`):
+```bash
+# Generated user agent launch wrappers
+mytool() {
+    command mytool '--auto' "$@"
+}
+```
+
+### Link Repair
+
+The `link-repair.sh` script reads both built-in and user link specs to repair symlinks:
+- Built-in: `/usr/local/lib/containai/link-spec.json`
+- User: `/mnt/agent-data/containai/user-link-spec.json`
+
 ## References
 
 - Import implementation: `src/lib/import.sh`
 - Container symlinks: `src/container/Dockerfile.agents`
 - Runtime init: `src/container/containai-init.sh`
-- Sync manifest: `src/sync-manifest.toml` (single source of truth)
+- Per-agent manifests: `src/manifests/*.toml` (single source of truth)
+- User manifest generators: `src/container/lib/gen-user-links.sh`, `src/container/lib/gen-user-wrappers.sh`
+- User guide: [Custom Tools Guide](custom-tools.md)
