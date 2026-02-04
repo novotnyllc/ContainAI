@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-51-per-agent-manifest-files-and-launch",
+  "created_at": "2026-02-04T18:56:38.196868Z",
+  "depends_on_epics": [],
+  "id": "fn-51-per-agent-manifest-files-and-launch",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-51-per-agent-manifest-files-and-launch.md",
+  "status": "open",
+  "title": "Per-Agent Manifest Files and Launch Aliases",
+  "updated_at": "2026-02-04T18:56:38.196904Z"
+}

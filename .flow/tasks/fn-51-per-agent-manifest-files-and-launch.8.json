@@ -1,0 +1,19 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-04T18:56:51.583829Z",
+  "depends_on": [
+    "fn-51-per-agent-manifest-files-and-launch.5",
+    "fn-51-per-agent-manifest-files-and-launch.6",
+    "fn-51-per-agent-manifest-files-and-launch.7",
+    "fn-51-per-agent-manifest-files-and-launch.9"
+  ],
+  "epic": "fn-51-per-agent-manifest-files-and-launch",
+  "id": "fn-51-per-agent-manifest-files-and-launch.8",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.8.md",
+  "status": "todo",
+  "title": "Update documentation for per-agent manifest structure",
+  "updated_at": "2026-02-04T19:08:07.190274Z"
+}
