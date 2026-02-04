@@ -188,10 +188,7 @@ parse_entries() {
             continue
         fi
 
-        # Skip lines if not in [[entries]] section
-        [[ $in_entries -eq 0 ]] && continue
-
-        # Track if line was parsed
+        # Track if line was parsed (check ALL sections for TOML validity)
         local parsed=0
 
         # Parse key = "value" (quoted string)
@@ -199,14 +196,27 @@ parse_entries() {
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
             parsed=1
-            case "$key" in
-                target) target="$value" ;;
-                container_link) container_link="$value" ;;
-                flags) flags="$value" ;;
-            esac
+            # Only capture values if in [[entries]] section
+            if [[ $in_entries -eq 1 ]]; then
+                case "$key" in
+                    target) target="$value" ;;
+                    container_link) container_link="$value" ;;
+                    flags) flags="$value" ;;
+                esac
+            fi
+        # Parse key = [...] (array) - valid TOML syntax
+        elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\[.*\][[:space:]]*(#.*)?$ ]]; then
+            parsed=1
+        # Parse key = true/false (boolean) - valid TOML syntax
+        elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*(#.*)?$ ]]; then
+            parsed=1
+        # Parse key = number - valid TOML syntax
+        elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*(#.*)?$ ]]; then
+            parsed=1
         fi
 
         # Track unparsed lines that look like key=value (potential TOML errors)
+        # Check ALL lines regardless of section to detect invalid TOML anywhere
         if [[ $parsed -eq 0 && "$line" == *"="* ]]; then
             unparsed_lines=$((unparsed_lines + 1))
         fi
