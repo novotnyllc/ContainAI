@@ -215,9 +215,10 @@ parse_entries() {
             parsed=1
         fi
 
-        # Track unparsed lines that look like key=value (potential TOML errors)
+        # Track unparsed lines as potential TOML errors
         # Check ALL lines regardless of section to detect invalid TOML anywhere
-        if [[ $parsed -eq 0 && "$line" == *"="* ]]; then
+        # Any non-comment, non-section-header line that doesn't match a valid pattern is invalid
+        if [[ $parsed -eq 0 ]]; then
             unparsed_lines=$((unparsed_lines + 1))
         fi
     done < "$manifest_file"

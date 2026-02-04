@@ -94,10 +94,7 @@ parse_agent_section() {
             continue
         fi
 
-        # Skip lines if not in [agent] section
-        [[ $in_agent -eq 0 ]] && continue
-
-        # Track if line looks like a key-value but doesn't parse
+        # Track if line is valid TOML (check ALL sections for validity)
         local parsed=0
 
         # Parse key = "value" (quoted string)
@@ -105,43 +102,57 @@ parse_agent_section() {
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
             parsed=1
-            case "$key" in
-                name) name="$value" ;;
-                binary) binary="$value" ;;
-            esac
+            # Only capture values if in [agent] section
+            if [[ $in_agent -eq 1 ]]; then
+                case "$key" in
+                    name) name="$value" ;;
+                    binary) binary="$value" ;;
+                esac
+            fi
         # Parse key = [...] (array on single line)
         elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\[(.*)\][[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             local array_content="${BASH_REMATCH[2]}"
             parsed=1
-            # Extract quoted strings from array, join with comma
-            local items=""
-            local item
-            # Use grep to extract quoted strings (|| true to handle empty arrays)
-            while read -r item; do
-                [[ -z "$item" ]] && continue
-                if [[ -n "$items" ]]; then
-                    items="${items},${item}"
-                else
-                    items="$item"
-                fi
-            done < <(printf '%s' "$array_content" | grep -oE '"[^"]*"' | tr -d '"' || true)
-            case "$key" in
-                default_args) default_args="$items" ;;
-                aliases) aliases="$items" ;;
-            esac
+            # Only capture values if in [agent] section
+            if [[ $in_agent -eq 1 ]]; then
+                # Extract quoted strings from array, join with comma
+                local items=""
+                local item
+                # Use grep to extract quoted strings (|| true to handle empty arrays)
+                while read -r item; do
+                    [[ -z "$item" ]] && continue
+                    if [[ -n "$items" ]]; then
+                        items="${items},${item}"
+                    else
+                        items="$item"
+                    fi
+                done < <(printf '%s' "$array_content" | grep -oE '"[^"]*"' | tr -d '"' || true)
+                case "$key" in
+                    default_args) default_args="$items" ;;
+                    aliases) aliases="$items" ;;
+                esac
+            fi
         # Parse key = true/false (boolean)
         elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
             parsed=1
-            case "$key" in
-                optional) optional="$value" ;;
-            esac
+            # Only capture values if in [agent] section
+            if [[ $in_agent -eq 1 ]]; then
+                case "$key" in
+                    optional) optional="$value" ;;
+                esac
+            fi
+        # Parse key = number (valid TOML syntax)
+        elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*[0-9]+[[:space:]]*(#.*)?$ ]]; then
+            parsed=1
         fi
 
-        # Track unparsed lines that look like key=value (potential TOML errors)
-        if [[ $parsed -eq 0 && "$line" == *"="* ]]; then
+        # Track unparsed lines as potential TOML errors
+        # Check ALL sections to detect invalid TOML anywhere in file
+        # Any non-comment, non-section-header line that doesn't match a valid pattern is invalid
+        if [[ $parsed -eq 0 ]]; then
             unparsed_lines=$((unparsed_lines + 1))
         fi
     done < "$manifest_file"
