@@ -970,11 +970,12 @@ test_bashrc_sourcing() {
     local source_test
     source_test=$(run_in_image_no_entrypoint '
         # Ensure directory exists (since we bypass entrypoint)
-        mkdir -p /mnt/agent-data/shell/.bashrc.d
+        # Note: Container .bashrc sources from bashrc.d (no leading dot)
+        mkdir -p /mnt/agent-data/shell/bashrc.d
 
         # Create test script
-        echo "export TEST_VAR=success" > /mnt/agent-data/shell/.bashrc.d/test.sh
-        chmod +x /mnt/agent-data/shell/.bashrc.d/test.sh
+        echo "export TEST_VAR=success" > /mnt/agent-data/shell/bashrc.d/test.sh
+        chmod +x /mnt/agent-data/shell/bashrc.d/test.sh
 
         # Test in interactive shell
         # Use unique marker to filter out Ubuntu welcome/sudo messages from interactive bash
@@ -982,7 +983,7 @@ test_bashrc_sourcing() {
             sed -n "/MARKER_START/,/MARKER_END/{/MARKER/d;p;}")
 
         # Cleanup
-        rm -f /mnt/agent-data/shell/.bashrc.d/test.sh
+        rm -f /mnt/agent-data/shell/bashrc.d/test.sh
 
         echo "$result"
     ')
@@ -3578,8 +3579,9 @@ data_volume = "'"$test_vol"'"
     # -------------------------------------------------------------------------
     section "Test 50b: Symlink relinking - cross-directory with depth"
 
-    # Create test fixture: .config/nvim -> dotfiles/nvim
-    # Uses a separate volume to avoid interference
+    # Test symlink INSIDE a synced directory that points to another synced directory
+    # Note: Symlink relinking only works for symlinks inside synced directories (:d flag),
+    # not for the sync entry itself being a symlink (that's treated as source missing)
     local cross_vol cross_source_dir
     cross_vol="containai-test-symlink-cross-${TEST_RUN_ID}"
     cross_source_dir=$(mktemp -d "${REAL_HOME}/.containai-cross-test-XXXXXX")
@@ -3587,15 +3589,14 @@ data_volume = "'"$test_vol"'"
     "${DOCKER_CMD[@]}" volume create "$cross_vol" >/dev/null
     register_test_volume "$cross_vol"
 
-    # Create .config/nvim as a symlink to dotfiles/nvim (both synced entries)
-    # SYNC_MAP has:
-    #   /source/.config/nvim:/target/config/nvim
-    #   /source/.vim:/target/editors/vim
-    # We need dotfiles which isn't synced, so use .vim as target
-    mkdir -p "$cross_source_dir/.vim/nvim-config"
-    echo "nvim settings" > "$cross_source_dir/.vim/nvim-config/init.lua"
-    mkdir -p "$cross_source_dir/.config"
-    ln -s "$cross_source_dir/.vim/nvim-config" "$cross_source_dir/.config/nvim"
+    # Create .vim with real content and a symlink inside pointing to another location
+    # .vim is synced as a directory (:d flag)
+    # Inside .vim, create a symlink to another directory also inside .vim
+    mkdir -p "$cross_source_dir/.vim/plugins"
+    mkdir -p "$cross_source_dir/.vim/custom-plugins/myplugin"
+    echo "plugin content" > "$cross_source_dir/.vim/custom-plugins/myplugin/init.vim"
+    # Create symlink inside .vim: plugins/myplugin -> ../custom-plugins/myplugin
+    ln -s "$cross_source_dir/.vim/custom-plugins/myplugin" "$cross_source_dir/.vim/plugins/myplugin"
 
     # Create config for cross test
     local cross_test_dir
@@ -3614,22 +3615,20 @@ data_volume = "'"$cross_vol"'"
         fail "Cross-directory symlink test import failed (exit=$cross_exit)"
         info "Output: $cross_output"
     else
-        # First verify the symlink exists
+        # Verify the symlink was copied and relinked
         local cross_exists
-        cross_exists=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 sh -c 'test -L /data/config/nvim && echo yes || echo no' 2>/dev/null) || cross_exists="no"
+        cross_exists=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 sh -c 'test -L /data/editors/vim/plugins/myplugin && echo yes || echo no' 2>/dev/null) || cross_exists="no"
 
         if [[ "$cross_exists" != "yes" ]]; then
-            fail "Cross-directory symlink was not created at /data/config/nvim"
+            fail "Cross-directory symlink was not created at /data/editors/vim/plugins/myplugin"
         else
             # Check the symlink target - should be relative with ../ prefix
-            # /data/config/nvim -> ../editors/vim/nvim-config
-            # (.config/nvim is depth=1 from /target, vim is in editors/vim)
             local cross_target
-            cross_target=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 readlink /data/config/nvim 2>/dev/null) || cross_target=""
+            cross_target=$("${DOCKER_CMD[@]}" run --rm -v "$cross_vol":/data alpine:3.19 readlink /data/editors/vim/plugins/myplugin 2>/dev/null) || cross_target=""
 
             if [[ -z "$cross_target" ]]; then
                 fail "Cross-directory symlink exists but readlink failed"
-            elif [[ "$cross_target" == "../editors/vim/nvim-config" ]]; then
+            elif [[ "$cross_target" == "../custom-plugins/myplugin" ]]; then
                 pass "Cross-directory symlink converted with correct depth (../)"
             elif [[ "$cross_target" == *"../"* ]]; then
                 # Has ../ but different path - still validates depth calculation works
@@ -3637,7 +3636,7 @@ data_volume = "'"$cross_vol"'"
             elif [[ "$cross_target" == "/"* ]]; then
                 fail "Cross-directory symlink still absolute (got: $cross_target)"
             else
-                # Could be relative but without ../ if structure changed
+                # Could be relative without ../ if in same directory
                 info "Cross-directory symlink target: $cross_target"
                 pass "Cross-directory symlink is relative"
             fi
