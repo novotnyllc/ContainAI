@@ -635,6 +635,11 @@ EOF
     wrapper_file=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
         cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null) || wrapper_file=""
 
+    # Check if 'echo' binary exists in container (it always should)
+    local echo_exists
+    echo_exists=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        command -v echo 2>/dev/null) || echo_exists=""
+
     if [[ -n "$wrapper_file" ]]; then
         pass "User agent wrapper file exists"
 
@@ -642,9 +647,8 @@ EOF
         if printf '%s' "$wrapper_file" | grep -q "test-user-agent()"; then
             pass "User agent wrapper function defined"
         else
-            # Note: optional=true with binary="echo" means wrapper is only created if echo exists
             # echo is always available, so wrapper should be created
-            fail "User agent wrapper function not found"
+            fail "User agent wrapper function not found (binary 'echo' exists)"
         fi
 
         # Check if alias is defined
@@ -653,8 +657,11 @@ EOF
         else
             fail "User agent alias function not found"
         fi
+    elif [[ -n "$echo_exists" ]]; then
+        # Binary exists but wrapper file missing - this is a regression
+        fail "User agent wrapper file not created despite binary 'echo' being available"
     else
-        info "User agent wrapper file not created (may be expected if binary check failed)"
+        info "User agent wrapper file not created (binary check failed)"
     fi
 
     # Test 6b: Check user symlinks
@@ -766,54 +773,285 @@ test_ssh_wrapper_behavior() {
     container_ip=$(docker --context "$CONTEXT_NAME" inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container_name" 2>/dev/null) || container_ip=""
 
     if [[ -z "$container_ip" ]]; then
-        info "Could not get container IP - skipping SSH-specific tests"
-        # Fall back to docker exec to test BASH_ENV behavior
-        local bash_env_check
-        bash_env_check=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
-            bash -c 'echo "BASH_ENV=$BASH_ENV"' 2>/dev/null) || bash_env_check=""
+        fail "Could not get container IP - cannot test SSH"
+        return
+    fi
 
-        if [[ "$bash_env_check" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
-            pass "BASH_ENV is set correctly in container"
-        else
-            fail "BASH_ENV not set correctly: $bash_env_check"
-        fi
+    info "Container IP: $container_ip"
 
-        # Test wrapper function via bash -c (simulates ssh container 'cmd')
-        local type_output
-        type_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
-            bash -c 'type claude 2>&1' 2>/dev/null) || type_output=""
+    # Generate temporary SSH key for testing
+    local ssh_key_dir="/tmp/$TEST_RUN_ID/ssh"
+    mkdir -p "$ssh_key_dir"
+    ssh-keygen -t ed25519 -f "$ssh_key_dir/test_key" -N "" -q
 
-        if [[ "$type_output" == *"function"* ]]; then
-            pass "Claude wrapper is a function via bash -c"
-        else
-            fail "Claude wrapper not found via bash -c: $type_output"
-        fi
+    # Copy public key to container's authorized_keys
+    local pubkey
+    pubkey=$(cat "$ssh_key_dir/test_key.pub")
+    docker --context "$CONTEXT_NAME" exec "$container_name" \
+        bash -c "mkdir -p /home/agent/.ssh && echo '$pubkey' >> /home/agent/.ssh/authorized_keys && chmod 600 /home/agent/.ssh/authorized_keys && chown -R agent:agent /home/agent/.ssh" 2>/dev/null
+
+    # Wait a moment for SSH to pick up the new key
+    sleep 1
+
+    # Test 7a: Real SSH with plain command (tests BASH_ENV path)
+    # This is the CRITICAL test - plain 'ssh container cmd' without bash -c wrapper
+    local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i $ssh_key_dir/test_key"
+    local ssh_output ssh_rc
+
+    # shellcheck disable=SC2086
+    ssh_output=$(ssh $ssh_opts agent@"$container_ip" 'type claude' 2>&1) && ssh_rc=0 || ssh_rc=$?
+
+    if [[ $ssh_rc -eq 0 ]] && [[ "$ssh_output" == *"function"* ]]; then
+        pass "CRITICAL: Plain SSH 'type claude' shows function (BASH_ENV works via real SSH)"
     else
-        info "Container IP: $container_ip"
+        fail "CRITICAL: Plain SSH 'type claude' failed (rc=$ssh_rc): $ssh_output"
+    fi
 
-        # Test SSH with plain command (this tests the BASH_ENV path)
-        # Note: SSH key setup may be required for actual SSH test
-        # For now, use docker exec with bash -c which simulates the behavior
-        local ssh_sim_output
-        ssh_sim_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
-            bash -c 'type claude 2>&1' 2>/dev/null) || ssh_sim_output=""
+    # Test 7b: Check BASH_ENV value via real SSH
+    local bash_env_ssh
+    # shellcheck disable=SC2086
+    bash_env_ssh=$(ssh $ssh_opts agent@"$container_ip" 'echo "BASH_ENV=$BASH_ENV"' 2>&1) || bash_env_ssh=""
 
-        if [[ "$ssh_sim_output" == *"function"* ]]; then
-            pass "Claude wrapper is a function (simulated SSH via bash -c)"
-        else
-            fail "Claude wrapper not found (simulated SSH): $ssh_sim_output"
+    if [[ "$bash_env_ssh" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
+        pass "BASH_ENV is correctly set via real SSH"
+    else
+        fail "BASH_ENV not correctly set via SSH: $bash_env_ssh"
+    fi
+
+    # Test 7c: Verify wrapper default args via SSH
+    local declare_ssh
+    # shellcheck disable=SC2086
+    declare_ssh=$(ssh $ssh_opts agent@"$container_ip" 'declare -f claude' 2>&1) || declare_ssh=""
+
+    if [[ "$declare_ssh" == *"--dangerously-skip-permissions"* ]]; then
+        pass "Claude wrapper includes default args via SSH"
+    else
+        fail "Claude wrapper missing default args via SSH: $declare_ssh"
+    fi
+
+    # Clean up SSH key
+    rm -rf "$ssh_key_dir"
+}
+
+# ==============================================================================
+# Test 8: Invalid user manifest handling (requires Docker/Sysbox)
+# ==============================================================================
+test_invalid_user_manifest() {
+    section "Test 8: Invalid user manifest handling (requires Docker/Sysbox)"
+
+    # Skip Sysbox-based container test when already inside a container
+    if _cai_is_container; then
+        skip "Running inside a container - skipping Sysbox container verification"
+        return
+    fi
+
+    # Check prerequisites
+    if ! command -v docker >/dev/null 2>&1; then
+        skip "Docker not available"
+        return
+    fi
+    if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+        skip "Context '$CONTEXT_NAME' not found"
+        return
+    fi
+    local runtimes_json
+    runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null) || runtimes_json=""
+    if [[ -z "$runtimes_json" ]] || ! printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        skip "sysbox-runc runtime not available"
+        return
+    fi
+    if ! docker --context "$CONTEXT_NAME" image inspect "$TEST_IMAGE" >/dev/null 2>&1; then
+        skip "Test image not available"
+        return
+    fi
+
+    # Create test data volume with INVALID manifest
+    local test_volume="${TEST_RUN_ID}-invalid-manifest-data"
+    docker --context "$CONTEXT_NAME" volume create --label "test_run=$TEST_RUN_ID" "$test_volume" >/dev/null
+
+    # Populate volume with malformed TOML
+    docker --context "$CONTEXT_NAME" run --rm \
+        -v "$test_volume:/data" \
+        alpine:latest /bin/sh -c '
+            mkdir -p /data/containai/manifests
+            cat > /data/containai/manifests/99-broken.toml << EOF
+# Intentionally malformed TOML
+[agent
+name = "broken"
+EOF
+        ' 2>/dev/null
+
+    # Start container
+    local container_name="${TEST_RUN_ID}-invalid-manifest"
+    local run_output run_rc
+    run_output=$(docker --context "$CONTEXT_NAME" run -d \
+        --runtime=sysbox-runc \
+        --name "$container_name" \
+        --label "test_run=$TEST_RUN_ID" \
+        -v "$test_volume:/mnt/agent-data:rw" \
+        --stop-timeout 10 \
+        "$TEST_IMAGE" 2>&1) && run_rc=0 || run_rc=$?
+
+    if [[ $run_rc -ne 0 ]]; then
+        fail "Failed to start test container: $run_output"
+        return
+    fi
+
+    # Wait for container to initialize
+    local wait_timeout=30
+    local wait_elapsed=0
+    while [[ $wait_elapsed -lt $wait_timeout ]]; do
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active containai-init.service >/dev/null 2>&1; then
+            break
         fi
-
-        # Test that BASH_ENV is respected
-        local bash_env_output
-        bash_env_output=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
-            bash -c 'echo "BASH_ENV=$BASH_ENV"; type claude 2>&1 | head -1' 2>/dev/null) || bash_env_output=""
-
-        if [[ "$bash_env_output" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
-            pass "BASH_ENV is set correctly"
-        else
-            fail "BASH_ENV not correctly set: $bash_env_output"
+        # Check container is still running
+        local status
+        status=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || status=""
+        if [[ "$status" != "running" ]]; then
+            fail "Container stopped unexpectedly (status: $status)"
+            return
         fi
+        sleep 2
+        wait_elapsed=$((wait_elapsed + 2))
+    done
+
+    # Container should still be running despite invalid manifest
+    local container_status
+    container_status=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_status=""
+
+    if [[ "$container_status" == "running" ]]; then
+        pass "Container started successfully despite invalid manifest"
+    else
+        fail "Container failed to start with invalid manifest (status: $container_status)"
+        return
+    fi
+
+    # Check for error in logs (containai-init should log the error)
+    local journal_output
+    journal_output=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        journalctl -u containai-init.service --no-pager 2>/dev/null) || journal_output=""
+
+    if printf '%s' "$journal_output" | grep -qi "error\|warn\|invalid\|malformed"; then
+        pass "Invalid manifest logged error/warning"
+    else
+        info "No explicit error logged for invalid manifest (may be silently skipped)"
+    fi
+}
+
+# ==============================================================================
+# Test 9: Optional binary not installed - no wrapper (requires Docker/Sysbox)
+# ==============================================================================
+test_optional_binary_not_installed() {
+    section "Test 9: Optional binary not installed - no wrapper (requires Docker/Sysbox)"
+
+    # Skip Sysbox-based container test when already inside a container
+    if _cai_is_container; then
+        skip "Running inside a container - skipping Sysbox container verification"
+        return
+    fi
+
+    # Check prerequisites
+    if ! command -v docker >/dev/null 2>&1; then
+        skip "Docker not available"
+        return
+    fi
+    if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+        skip "Context '$CONTEXT_NAME' not found"
+        return
+    fi
+    local runtimes_json
+    runtimes_json=$(docker --context "$CONTEXT_NAME" info --format '{{json .Runtimes}}' 2>/dev/null) || runtimes_json=""
+    if [[ -z "$runtimes_json" ]] || ! printf '%s' "$runtimes_json" | grep -q "sysbox-runc"; then
+        skip "sysbox-runc runtime not available"
+        return
+    fi
+    if ! docker --context "$CONTEXT_NAME" image inspect "$TEST_IMAGE" >/dev/null 2>&1; then
+        skip "Test image not available"
+        return
+    fi
+
+    # Create test data volume with manifest for non-existent binary
+    local test_volume="${TEST_RUN_ID}-missing-binary-data"
+    docker --context "$CONTEXT_NAME" volume create --label "test_run=$TEST_RUN_ID" "$test_volume" >/dev/null
+
+    # Populate volume with manifest for a binary that doesn't exist
+    docker --context "$CONTEXT_NAME" run --rm \
+        -v "$test_volume:/data" \
+        alpine:latest /bin/sh -c '
+            mkdir -p /data/containai/manifests
+            cat > /data/containai/manifests/99-nonexistent.toml << EOF
+# User manifest with non-existent binary
+[agent]
+name = "nonexistent-agent"
+binary = "this-binary-does-not-exist-xyz123"
+default_args = ["--test"]
+aliases = []
+optional = true
+EOF
+        ' 2>/dev/null
+
+    # Start container
+    local container_name="${TEST_RUN_ID}-missing-binary"
+    local run_output run_rc
+    run_output=$(docker --context "$CONTEXT_NAME" run -d \
+        --runtime=sysbox-runc \
+        --name "$container_name" \
+        --label "test_run=$TEST_RUN_ID" \
+        -v "$test_volume:/mnt/agent-data:rw" \
+        --stop-timeout 10 \
+        "$TEST_IMAGE" 2>&1) && run_rc=0 || run_rc=$?
+
+    if [[ $run_rc -ne 0 ]]; then
+        fail "Failed to start test container: $run_output"
+        return
+    fi
+
+    # Wait for container to initialize
+    local wait_timeout=30
+    local wait_elapsed=0
+    while [[ $wait_elapsed -lt $wait_timeout ]]; do
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active containai-init.service >/dev/null 2>&1; then
+            break
+        fi
+        sleep 2
+        wait_elapsed=$((wait_elapsed + 2))
+    done
+
+    # Container should start successfully
+    local container_status
+    container_status=$(docker --context "$CONTEXT_NAME" inspect --format '{{.State.Status}}' "$container_name" 2>/dev/null) || container_status=""
+
+    if [[ "$container_status" == "running" ]]; then
+        pass "Container started despite missing optional binary"
+    else
+        fail "Container failed to start (status: $container_status)"
+        return
+    fi
+
+    # Check that NO wrapper was created for the non-existent binary
+    local wrapper_file
+    wrapper_file=$(docker --context "$CONTEXT_NAME" exec -u agent "$container_name" \
+        cat /home/agent/.bash_env.d/containai-user-agents.sh 2>/dev/null) || wrapper_file=""
+
+    if [[ -z "$wrapper_file" ]]; then
+        pass "No user wrapper file created (expected for missing optional binary)"
+    elif printf '%s' "$wrapper_file" | grep -q "nonexistent-agent()"; then
+        fail "Wrapper function created for non-existent binary (should be skipped)"
+    else
+        pass "User wrapper file exists but does not contain function for missing binary"
+    fi
+
+    # Verify binary does not exist in container
+    local binary_check
+    binary_check=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        command -v this-binary-does-not-exist-xyz123 2>/dev/null) || binary_check=""
+
+    if [[ -z "$binary_check" ]]; then
+        pass "Confirmed binary does not exist in container"
+    else
+        fail "Binary unexpectedly exists: $binary_check"
     fi
 }
 
@@ -836,6 +1074,8 @@ test_failed_hook_exits_nonzero
 test_hooks_in_container
 test_user_manifest_runtime
 test_ssh_wrapper_behavior
+test_invalid_user_manifest
+test_optional_binary_not_installed
 
 # Summary
 printf '\n'

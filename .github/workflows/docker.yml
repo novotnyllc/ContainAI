@@ -598,6 +598,15 @@ jobs:
           echo "============================================="
           ./tests/integration/test-dind.sh
 
+      - name: Run startup hooks tests (Sysbox)
+        env:
+          CONTAINAI_TEST_IMAGE: containai/base:latest
+        run: |
+          echo "============================================="
+          echo "Running startup hooks tests (requires Sysbox)"
+          echo "============================================="
+          ./tests/integration/test-startup-hooks.sh
+
       - name: Collect sysbox logs
         if: failure()
         run: |
@@ -805,6 +814,15 @@ jobs:
           echo "Running Docker-in-Docker E2E tests (${{ matrix.arch }})"
           echo "============================================="
           ./tests/integration/test-dind.sh
+
+      - name: Run startup hooks tests (Sysbox)
+        env:
+          CONTAINAI_TEST_IMAGE: containai/base:latest
+        run: |
+          echo "============================================="
+          echo "Running startup hooks tests (${{ matrix.arch }})"
+          echo "============================================="
+          ./tests/integration/test-startup-hooks.sh
 
       - name: Collect logs on failure
         if: failure()
