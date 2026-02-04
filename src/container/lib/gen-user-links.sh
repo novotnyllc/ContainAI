@@ -67,12 +67,53 @@ validate_container_link() {
     return 0
 }
 
+# Verify container path resolves under HOME_DIR (prevents symlink traversal)
+verify_path_under_home_dir() {
+    local path="$1"
+    local parent resolved
+
+    # Get parent directory for resolution check
+    parent="$(dirname "$path")"
+
+    # If parent doesn't exist yet, walk up to find existing ancestor
+    while [[ ! -e "$parent" && "$parent" != "/" ]]; do
+        parent="$(dirname "$parent")"
+    done
+
+    # Resolve the existing ancestor
+    resolved="$(realpath -m "$parent" 2>/dev/null)" || {
+        log "[WARN] Cannot resolve parent path: $parent"
+        return 1
+    }
+
+    # Check that resolved path is under HOME_DIR
+    if [[ "$resolved" != "${HOME_DIR}" && "$resolved" != "${HOME_DIR}/"* ]]; then
+        log "[WARN] Container path escapes home directory: $path -> $resolved"
+        return 1
+    fi
+
+    return 0
+}
+
 # Validate flag characters (only known flags allowed)
+# Requires non-empty flags with at least f (file) or d (directory)
 validate_flags() {
     local flags="$1"
-    local valid_flags="fdjsmxgRGo"
+    local valid_flags="fdjsmxgRo"  # Note: G (glob) excluded for user manifests
 
-    local char
+    # Require non-empty flags
+    if [[ -z "$flags" ]]; then
+        log "[WARN] Missing required flags field"
+        return 1
+    fi
+
+    # Require at least f or d to specify type
+    if [[ "$flags" != *f* && "$flags" != *d* ]]; then
+        log "[WARN] Flags must include 'f' (file) or 'd' (directory): $flags"
+        return 1
+    fi
+
+    local char i
     for ((i=0; i<${#flags}; i++)); do
         char="${flags:i:1}"
         if [[ "$valid_flags" != *"$char"* ]]; then
@@ -228,6 +269,13 @@ for manifest in "${MANIFEST_FILES[@]}"; do
         # Validate target path stays under DATA_DIR
         if ! verify_path_under_data_dir "$volume_path"; then
             log "[WARN] Target path escapes data dir in $manifest_basename: $target - skipping entry"
+            errors_count=$((errors_count + 1))
+            continue
+        fi
+
+        # Validate container path stays under HOME_DIR (prevent symlink traversal)
+        if ! verify_path_under_home_dir "$container_path"; then
+            log "[WARN] Container path escapes home dir in $manifest_basename: $container_link - skipping entry"
             errors_count=$((errors_count + 1))
             continue
         fi

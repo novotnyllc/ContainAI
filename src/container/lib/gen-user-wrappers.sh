@@ -19,14 +19,44 @@ readonly OUTPUT_FILE="${BASH_ENV_DIR}/containai-user-agents.sh"
 
 log() { printf '%s\n' "$*" >&2; }
 
+# Validate identifier for use as function/command name
+# Allows: letters, digits, underscore, hyphen (for names like kimi-cli)
+# Must start with letter or underscore
+validate_identifier() {
+    local id="$1"
+    local context="$2"
+
+    if [[ -z "$id" ]]; then
+        log "[WARN] Empty $context - skipping"
+        return 1
+    fi
+
+    # Safe pattern: starts with letter/underscore, contains only alnum/underscore/hyphen
+    if [[ ! "$id" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
+        log "[WARN] Invalid $context (unsafe characters): $id - skipping"
+        return 1
+    fi
+
+    # Reject shell metacharacters and control characters
+    if [[ "$id" == *[$'\t\n\r !\"#$%&'\''()*+,/:;<=>?@[\\]^`{|}~']* ]]; then
+        log "[WARN] Invalid $context (contains metacharacters): $id - skipping"
+        return 1
+    fi
+
+    return 0
+}
+
 # Parse [agent] section from a single manifest file
 # Outputs: name|binary|default_args|aliases|optional
 # where default_args and aliases are comma-separated
+# Returns 0 if valid agent found, 1 if [agent] section found but invalid, 2 if no [agent]
 parse_agent_section() {
     local manifest_file="$1"
     local in_agent=0
+    local found_agent_section=0
     local name="" binary="" default_args="" aliases="" optional="false"
     local line key value
+    local unparsed_lines=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
         # Strip leading/trailing whitespace
@@ -39,17 +69,22 @@ parse_agent_section() {
         # Check for [agent] section start
         if [[ "$line" == "[agent]" ]]; then
             in_agent=1
+            found_agent_section=1
             continue
         fi
 
         # Exit [agent] section on any other section header
         if [[ "$line" == "["*"]" || "$line" == "[["*"]]" ]]; then
             if [[ $in_agent -eq 1 ]]; then
-                # Emit the agent if name and binary are set
+                # Check if we got required fields
                 if [[ -n "$name" && -n "$binary" ]]; then
                     printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
+                    return 0
+                elif [[ $found_agent_section -eq 1 ]]; then
+                    # Found [agent] but missing required fields
+                    return 1
                 fi
-                return
+                return 2
             fi
             continue
         fi
@@ -57,22 +92,27 @@ parse_agent_section() {
         # Skip lines if not in [agent] section
         [[ $in_agent -eq 0 ]] && continue
 
+        # Track if line looks like a key-value but doesn't parse
+        local parsed=0
+
         # Parse key = "value" (quoted string)
         if [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
+            parsed=1
             case "$key" in
                 name) name="$value" ;;
                 binary) binary="$value" ;;
             esac
-        # Parse key = [...] (array)
+        # Parse key = [...] (array on single line)
         elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\[(.*)\][[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             local array_content="${BASH_REMATCH[2]}"
+            parsed=1
             # Extract quoted strings from array, join with comma
             local items=""
             local item
-            # Use grep to extract quoted strings
+            # Use grep to extract quoted strings (|| true to handle empty arrays)
             while read -r item; do
                 [[ -z "$item" ]] && continue
                 if [[ -n "$items" ]]; then
@@ -80,7 +120,7 @@ parse_agent_section() {
                 else
                     items="$item"
                 fi
-            done < <(printf '%s' "$array_content" | grep -oE '"[^"]*"' | tr -d '"')
+            done < <(printf '%s' "$array_content" | grep -oE '"[^"]*"' | tr -d '"' || true)
             case "$key" in
                 default_args) default_args="$items" ;;
                 aliases) aliases="$items" ;;
@@ -89,16 +129,29 @@ parse_agent_section() {
         elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*(true|false)[[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
+            parsed=1
             case "$key" in
                 optional) optional="$value" ;;
             esac
+        fi
+
+        # Track unparsed lines that look like key=value (potential TOML errors)
+        if [[ $parsed -eq 0 && "$line" == *"="* ]]; then
+            unparsed_lines=$((unparsed_lines + 1))
         fi
     done < "$manifest_file"
 
     # Emit if we reached EOF while in [agent] section
     if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" ]]; then
         printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
+        return 0
+    elif [[ $found_agent_section -eq 1 ]]; then
+        # Found [agent] but missing required fields - treat as invalid
+        return 1
     fi
+
+    # No [agent] section found
+    return 2
 }
 
 # Main
@@ -135,13 +188,28 @@ mapfile -t MANIFEST_FILES <<< "$sorted_files"
 declare -a agents=()
 for manifest in "${MANIFEST_FILES[@]}"; do
     agent_info=""
-    if ! agent_info=$(parse_agent_section "$manifest" 2>&1); then
-        log "[WARN] Failed to parse [agent] from $(basename "$manifest") - skipping"
-        continue
-    fi
-    if [[ -n "$agent_info" ]]; then
-        agents+=("$agent_info")
-    fi
+    parse_rc=0
+    agent_info=$(parse_agent_section "$manifest") || parse_rc=$?
+
+    case $parse_rc in
+        0)
+            # Valid agent found
+            if [[ -n "$agent_info" ]]; then
+                agents+=("$agent_info")
+            fi
+            ;;
+        1)
+            # [agent] section found but invalid (missing required fields)
+            log "[WARN] Invalid [agent] section in $(basename "$manifest") (missing name or binary) - skipping"
+            ;;
+        2)
+            # No [agent] section - that's fine, not all manifests have agents
+            ;;
+        *)
+            # Parse error
+            log "[WARN] Failed to parse $(basename "$manifest") - skipping"
+            ;;
+    esac
 done
 
 if [[ ${#agents[@]} -eq 0 ]]; then
@@ -171,6 +239,18 @@ generate_output() {
 
     for agent_info in "${agents[@]}"; do
         IFS='|' read -r name binary default_args aliases optional <<< "$agent_info"
+
+        # Validate name is a safe function identifier
+        if ! validate_identifier "$name" "agent name"; then
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Validate binary is a safe command token
+        if ! validate_identifier "$binary" "binary"; then
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
 
         # Check if binary exists (required for wrapper)
         if ! command -v "$binary" >/dev/null 2>&1; then
@@ -212,6 +292,10 @@ generate_output() {
             local alias_array=()
             IFS=',' read -ra alias_array <<< "$aliases"
             for alias_name in "${alias_array[@]}"; do
+                # Validate alias is a safe function identifier
+                if ! validate_identifier "$alias_name" "alias"; then
+                    continue
+                fi
                 printf '%s() {\n' "$alias_name"
                 printf '    command %s %s "$@"\n' "$binary" "$args_str"
                 printf '}\n'

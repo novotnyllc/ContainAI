@@ -228,9 +228,11 @@ fi
 # Process built-in links
 process_link_spec "$BUILTIN_SPEC" "built-in links"
 
-# Process user links if spec exists
+# Process user links if spec exists (non-fatal - don't let user spec break built-in repairs)
 if [[ -f "$USER_SPEC" ]]; then
-    process_link_spec "$USER_SPEC" "user-defined links"
+    if ! process_link_spec "$USER_SPEC" "user-defined links"; then
+        log_err "[WARN] Failed to process user link spec (continuing with built-in links)"
+    fi
 fi
 
 # Update checked-at timestamp after any successful run (fix mode only, not dry-run)
