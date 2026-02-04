@@ -62,3 +62,10 @@ The current `sync-manifest.toml` (628 lines) mixes all agents/tools together. Sp
 - Do NOT modify `_IMPORT_SYNC_MAP` in import.sh yet (Task 3 handles this)
 - Do NOT delete `sync-manifest.toml` yet (deleted in Task 3 after verification)
 - Do NOT add new comments, doc links, or headers - just move existing content
+
+## Done summary
+Split monolithic sync-manifest.toml into 19 per-agent manifest files in src/manifests/ with numeric prefixes for deterministic sorted iteration. All 74 entries and 4 container_symlinks preserved exactly; original sync-manifest.toml retained for verification.
+## Evidence
+- Commits: 189a39f6dbc132c62255bdb329356f3fb4a0f7bd, 533fcfd33188c736c0a141e08d39390a81454e22
+- Tests: python3 TOML validation, shellcheck
+- PRs:
