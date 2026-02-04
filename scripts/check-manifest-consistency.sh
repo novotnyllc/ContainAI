@@ -177,22 +177,73 @@ else
     sync_map_passed=1
 fi
 
-# Check if import.sh has a fallback _IMPORT_SYNC_MAP that might drift
-# This is a warning only - the generated file is authoritative
+# Validate fallback _IMPORT_SYNC_MAP in import.sh matches generated version
+# During transition, import.sh contains a fallback map that must stay in sync
 IMPORT_SH="${REPO_ROOT}/src/lib/import.sh"
+fallback_passed=0
+fallback_failed=0
+
 if [[ -f "$IMPORT_SH" ]] && grep -q '_IMPORT_SYNC_MAP=(' "$IMPORT_SH"; then
-    printf '\n=== Note ===\n'
-    printf 'import.sh contains a fallback _IMPORT_SYNC_MAP.\n'
-    printf 'During transition, ensure import.sh sources import-sync-map.sh\n'
-    printf 'or keep the fallback synchronized manually.\n'
+    printf '\n=== Verifying fallback _IMPORT_SYNC_MAP in import.sh ===\n'
+
+    # Extract entries from import.sh fallback map
+    fallback_entries=$(mktemp)
+    in_sync_map=0
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        if [[ "$line" =~ _IMPORT_SYNC_MAP=\( ]]; then
+            in_sync_map=1
+            continue
+        fi
+        if [[ $in_sync_map -eq 1 && "$line" =~ ^\) ]]; then
+            break
+        fi
+        if [[ $in_sync_map -eq 1 ]]; then
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            if [[ "$line" =~ ^\"(/source/[^\"]+)\" ]]; then
+                printf '%s\n' "${BASH_REMATCH[1]}"
+            fi
+        fi
+    done < "$IMPORT_SH" | sort > "$fallback_entries"
+
+    # Extract entries from generated import-sync-map.sh
+    generated_entries=$(mktemp)
+    grep -oE '"/source/[^"]+"' "$IMPORT_SYNC_MAP" | tr -d '"' | sort > "$generated_entries" || true
+
+    # Compare
+    if ! diff -q "$fallback_entries" "$generated_entries" >/dev/null 2>&1; then
+        printf 'ERROR: fallback _IMPORT_SYNC_MAP in import.sh differs from generated version\n' >&2
+        printf 'Update import.sh to source import-sync-map.sh or sync the fallback map.\n' >&2
+        printf '\nDifferences:\n' >&2
+
+        # Show entries only in fallback (stale)
+        while IFS= read -r entry; do
+            printf '  EXTRA in import.sh (stale): %s\n' "$entry" >&2
+        done < <(comm -23 "$fallback_entries" "$generated_entries")
+
+        # Show entries only in generated (missing from fallback)
+        while IFS= read -r entry; do
+            printf '  MISSING from import.sh: %s\n' "$entry" >&2
+        done < <(comm -13 "$fallback_entries" "$generated_entries")
+
+        fallback_failed=1
+    else
+        printf 'fallback _IMPORT_SYNC_MAP in import.sh is synchronized\n'
+        fallback_passed=1
+    fi
+
+    rm -f "$fallback_entries" "$generated_entries"
 fi
 
 printf '\n=== Summary ===\n'
-total_passed=$((toml_passed + agent_passed + sync_map_passed))
-total_failed=$((toml_failed + agent_failed + sync_map_failed))
+total_passed=$((toml_passed + agent_passed + sync_map_passed + fallback_passed))
+total_failed=$((toml_failed + agent_failed + sync_map_failed + fallback_failed))
 printf 'TOML syntax:        %d passed, %d failed\n' "$toml_passed" "$toml_failed"
 printf '[agent] validation: %d passed, %d failed\n' "$agent_passed" "$agent_failed"
 printf 'Import map:         %d passed, %d failed\n' "$sync_map_passed" "$sync_map_failed"
+if [[ $fallback_passed -gt 0 || $fallback_failed -gt 0 ]]; then
+    printf 'Fallback map:       %d passed, %d failed\n' "$fallback_passed" "$fallback_failed"
+fi
 printf 'Total:              %d passed, %d failed\n' "$total_passed" "$total_failed"
 
 if [[ $total_failed -gt 0 ]]; then
