@@ -1,3 +1,40 @@
+# ContainAI Sync Manifest
+# ==============================================================================
+# AUTHORITATIVE SOURCE: Per-agent manifests in src/manifests/ are the source
+# of truth for config sync. Files are processed in sorted order by filename.
+# ==============================================================================
+#
+# If you modify manifests, regenerate _IMPORT_SYNC_MAP via gen-import-map.sh.
+# Run `scripts/check-manifest-consistency.sh` to verify alignment.
+# CI enforces consistency between manifests and the import map.
+#
+# This manifest defines:
+# - What gets synced from host $HOME to the data volume
+# - What symlinks are created in the container image
+# - What directory structure is initialized on first boot
+#
+# Flags:
+#   f = file
+#   d = directory
+#   j = json-init (create {} if empty)
+#   s = secret (600 for files, 700 for dirs; skipped with --no-secrets)
+#   m = mirror mode (--delete to remove files not in source)
+#   x = exclude .system/ subdirectory
+#   g = git-filter (strip credential.helper and signing config from .gitconfig)
+#   R = remove existing path first (rm -rf before ln -sfn)
+#   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
+#   o = optional (skip if source doesn't exist; don't pre-create in Dockerfile/init)
+#
+# Optional fields:
+#   disabled = true  # Entry excluded from _IMPORT_SYNC_MAP (not synced by default)
+#                    # but still generates symlinks/init (for use with additional_paths)
+#
+# Fields:
+#   source = path relative to $HOME (includes leading dot, e.g., ".claude.json")
+#   target = path relative to /mnt/agent-data (volume)
+#   container_link = path relative to ~ where symlink is created (optional)
+#   flags = combination of flags above
+
 # =============================================================================
 # FONTS
 # =============================================================================
