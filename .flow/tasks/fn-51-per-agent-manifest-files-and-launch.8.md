@@ -128,3 +128,10 @@ Target audience: Users who installed a tool and want it to work in ContainAI.
 - Keep docs concise - don't over-document
 - Link to sync-architecture.md for technical details
 - Include practical examples users can copy
+
+## Done summary
+Updated all documentation to reflect per-agent manifest structure.
+## Evidence
+- Commits: dc18570, 478b01a, 3ff15d4
+- Tests:
+- PRs:
