@@ -429,6 +429,29 @@ jobs:
           export IMAGE_NAME="containai:latest"
           ./tests/integration/test-sync-integration.sh
 
+      - name: Run manifest parsing unit tests
+        run: |
+          echo "============================================="
+          echo "Running manifest parsing unit tests"
+          echo "============================================="
+          ./tests/unit/test-manifest-parsing.sh
+
+      - name: Run launch wrapper tests
+        run: |
+          echo "============================================="
+          echo "Running launch wrapper tests (${{ matrix.arch }})"
+          echo "============================================="
+          export IMAGE_NAME="containai:latest"
+          ./tests/integration/test-launch-wrappers.sh
+
+      - name: Run user manifest tests
+        run: |
+          echo "============================================="
+          echo "Running user manifest tests (${{ matrix.arch }})"
+          echo "============================================="
+          export IMAGE_NAME="containai:latest"
+          ./tests/integration/test-user-manifests.sh
+
       - name: Run .NET unit tests (if test projects exist)
         run: |
           echo "============================================="

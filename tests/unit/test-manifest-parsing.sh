@@ -6,10 +6,14 @@
 # 1. parse-manifest.sh correctly parses entries from per-agent manifest files
 # 2. parse-manifest.sh handles directory input (iterates *.toml in sorted order)
 # 3. [agent] section parsing extracts name, binary, default_args, aliases, optional
-# 4. Invalid TOML produces error (doesn't silently skip)
+# 4. parse-toml.py rejects invalid TOML syntax (validation layer)
 # 5. gen-agent-wrappers.sh produces expected output for agents with default_args
 # 6. gen-agent-wrappers.sh skips agents without default_args
 # 7. gen-import-map.sh produces expected _IMPORT_SYNC_MAP format
+# 8. check-manifest-consistency.sh validates manifests
+#
+# Note: parse-manifest.sh is a regex-based parser for speed; TOML validation
+# is handled by parse-toml.py which check-manifest-consistency.sh invokes.
 # ==============================================================================
 set -euo pipefail
 

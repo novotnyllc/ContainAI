@@ -130,8 +130,9 @@ exec_noninteractive() {
 # ==============================================================================
 exec_interactive() {
     local cmd="$1"
-    # -i flag simulates interactive shell (sources .bashrc)
-    "${DOCKER_CMD[@]}" exec -u agent -e HOME=/home/agent "$WRAPPER_TEST_CONTAINER" \
+    # -it flags simulate interactive shell (sources .bashrc)
+    # -t allocates a pseudo-TTY for proper interactive behavior
+    "${DOCKER_CMD[@]}" exec -it -u agent -e HOME=/home/agent "$WRAPPER_TEST_CONTAINER" \
         bash -i -c "$cmd" 2>/dev/null
 }
 
