@@ -173,11 +173,17 @@ else
             test_fail "User manifest not found in container volume"
         fi
 
-        # Verify symlink exists in container
+        # Check for symlink to manifests directory in container home
+        # Note: Without systemd/containai-init, symlinks are only created if
+        # the Dockerfile pre-creates them. This is a sanity check, not a requirement.
+        # Full symlink testing requires Sysbox/systemd (see test-startup-hooks.sh).
         if exec_in_container "$test_container_name" test -L /home/agent/.config/containai/manifests 2>/dev/null; then
-            test_pass "User manifest symlink created in container home"
+            test_pass "User manifest symlink exists in container home"
+        elif exec_in_container "$test_container_name" test -d /home/agent/.config/containai/manifests 2>/dev/null; then
+            test_info "User manifest path is a directory (symlink created at runtime by containai-init)"
         else
-            test_info "User manifest path may be a directory (symlink not found)"
+            # Path doesn't exist yet - expected in sync-only tests
+            test_info "User manifest symlink not yet created (requires containai-init runtime)"
         fi
     else
         test_fail "Container did not become ready"

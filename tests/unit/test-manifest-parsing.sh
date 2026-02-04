@@ -112,7 +112,8 @@ flags = "fso"
 EOF
 
 output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/test.toml")
-entry_count=$(printf '%s\n' "$output" | wc -l | tr -d ' ')
+# Count non-empty lines to avoid miscounting empty output
+entry_count=$(printf '%s\n' "$output" | sed '/^$/d' | wc -l | tr -d ' ')
 if [[ "$entry_count" == "2" ]]; then
     test_pass
 else
@@ -193,7 +194,8 @@ flags = "f"
 EOF
 
 output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/test.toml")
-entry_count=$(printf '%s\n' "$output" | wc -l | tr -d ' ')
+# Count non-empty lines to avoid miscounting empty output
+entry_count=$(printf '%s\n' "$output" | sed '/^$/d' | wc -l | tr -d ' ')
 # Should only have 1 entry (the [[entries]] section, not [agent])
 if [[ "$entry_count" == "1" ]]; then
     test_pass

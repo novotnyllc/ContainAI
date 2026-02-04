@@ -4,11 +4,17 @@
 # ==============================================================================
 # Verifies:
 # 1. Wrapper file exists and is sourced via BASH_ENV
-# 2. Wrappers work in non-interactive shell (simulating ssh container 'cmd')
+# 2. Wrappers work in non-interactive shell (via docker exec bash -c)
 # 3. Wrappers work when .bashrc is sourced
 # 4. Wrappers prepend default args to commands
 # 5. Alias functions (e.g., kimi-cli) work correctly
 # 6. Optional agent wrappers are guarded with command -v
+#
+# Limitation: These tests use `docker exec` which inherits Docker ENV variables.
+# Real SSH sessions may not inherit Docker ENV unless PATH/BASH_ENV are set in
+# shell init files. The Dockerfile sets BASH_ENV in the image, and these tests
+# verify that bash -c respects it. For true SSH-based E2E tests (via cai shell),
+# see test-startup-hooks.sh or similar sysbox-enabled test suites.
 #
 # Prerequisites:
 #   - Docker daemon running
@@ -161,7 +167,11 @@ fi
 # ==============================================================================
 printf '\n=== Test: .bash_env sources .bash_env.d scripts ===\n'
 bash_env_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bash_env 2>&1 || true)
-if [[ "$bash_env_content" == *'.bash_env.d'* ]]; then
+# Match the actual sourcing loop, not just any mention of .bash_env.d
+# The file should contain: for f in "$HOME"/.bash_env.d/*.sh; do
+if [[ "$bash_env_content" == *'for f in'*'.bash_env.d/'*'.sh'* ]] || \
+   [[ "$bash_env_content" == *'source'*'.bash_env.d/'* ]] || \
+   [[ "$bash_env_content" == *'. "'*'.bash_env.d/'* ]]; then
     test_pass ".bash_env sources .bash_env.d scripts"
 else
     test_fail ".bash_env does not source .bash_env.d scripts"
@@ -172,7 +182,11 @@ fi
 # ==============================================================================
 printf '\n=== Test: .bashrc sources .bash_env ===\n'
 bashrc_content=$("${DOCKER_CMD[@]}" exec "$WRAPPER_TEST_CONTAINER" cat /home/agent/.bashrc 2>&1 || true)
-if [[ "$bashrc_content" == *'.bash_env'* ]]; then
+# Match actual sourcing line, not just any mention of .bash_env
+# The file should contain: [ -f ~/.bash_env ] && . ~/.bash_env
+if [[ "$bashrc_content" == *'. ~/.bash_env'* ]] || \
+   [[ "$bashrc_content" == *'source ~/.bash_env'* ]] || \
+   [[ "$bashrc_content" == *'. "$HOME/.bash_env"'* ]]; then
     test_pass ".bashrc sources .bash_env"
 else
     test_fail ".bashrc does not source .bash_env"
