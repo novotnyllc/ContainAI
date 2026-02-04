@@ -3337,17 +3337,30 @@ _cai_lima_wait_socket() {
         fi
     done
 
-    # Verify Docker is accessible via the socket
+    # Verify Docker is accessible via the socket (may lag behind socket creation)
     local docker_output docker_rc
-    docker_output=$(DOCKER_HOST="unix://$socket_path" docker info 2>&1) && docker_rc=0 || docker_rc=$?
+    local verify_elapsed=0
+    local verify_interval=1
+    local repaired="false"
 
-    if [[ $docker_rc -ne 0 ]]; then
+    while [[ $verify_elapsed -lt $timeout ]]; do
+        docker_output=$(DOCKER_HOST="unix://$socket_path" docker info 2>&1) && docker_rc=0 || docker_rc=$?
+
+        if [[ $docker_rc -eq 0 ]]; then
+            _cai_ok "Lima Docker socket ready"
+            return 0
+        fi
+
         # Diagnose the failure mode
         if printf '%s' "$docker_output" | grep -qi "permission denied"; then
+            if [[ "$repaired" == "true" ]]; then
+                _cai_error "Docker still permission denied after repair"
+                return 1
+            fi
+
             _cai_warn "Docker permission denied - user likely not in docker group"
             _cai_info "Attempting automatic repair..."
 
-            # Try to repair docker access
             if _cai_lima_repair_docker_access "$dry_run"; then
                 # Wait for socket to come back after VM restart (reuse caller's timeout)
                 _cai_step "Waiting for socket after VM restart"
@@ -3361,32 +3374,25 @@ _cai_lima_wait_socket() {
                     fi
                 done
 
-                # Verify again
-                if DOCKER_HOST="unix://$socket_path" docker info >/dev/null 2>&1; then
-                    _cai_ok "Lima Docker socket ready (after repair)"
-                    return 0
-                else
-                    _cai_error "Docker still not accessible after repair"
-                    return 1
-                fi
+                # Retry after repair
+                repaired="true"
+                verify_elapsed=0
+                continue
             else
                 _cai_error "Automatic repair failed"
                 return 1
             fi
-        elif printf '%s' "$docker_output" | grep -qi "connection refused"; then
-            _cai_error "Docker daemon not running inside Lima VM"
-            _cai_error "  Try: limactl shell $_CAI_LIMA_VM_NAME sudo systemctl start docker"
-            return 1
-        else
-            _cai_error "Docker not accessible via Lima socket"
-            _cai_error "  Socket exists but docker info failed"
-            _cai_error "  Error: $docker_output"
-            return 1
         fi
-    fi
 
-    _cai_ok "Lima Docker socket ready"
-    return 0
+        # Transient errors: docker daemon may not be ready yet (EOF, connection refused, etc.)
+        sleep "$verify_interval"
+        verify_elapsed=$((verify_elapsed + verify_interval))
+    done
+
+    _cai_error "Docker not accessible via Lima socket after ${timeout}s"
+    _cai_error "  Socket exists but docker info failed"
+    _cai_error "  Error: $docker_output"
+    return 1
 }
 
 # Create containai-docker Docker context for Lima (macOS)

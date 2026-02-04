@@ -54,6 +54,9 @@ fi
 # User-specific paths for path transformation (guarded for re-sourcing)
 : "${_IMPORT_HOST_PATH_PREFIX:=$HOME/.claude/plugins/}"
 : "${_IMPORT_CONTAINER_PATH_PREFIX:=/home/agent/.claude/plugins/}"
+# RSync helper image (multi-arch). Override with CONTAINAI_RSYNC_IMAGE if needed.
+: "${CONTAINAI_RSYNC_IMAGE:=instrumentisto/rsync-ssh}"
+_CAI_RSYNC_IMAGE="$CONTAINAI_RSYNC_IMAGE"
 
 # ==============================================================================
 # Volume name validation (local copy for independence from config.sh)
@@ -1230,7 +1233,7 @@ _import_apply_overrides() {
                 --mount "type=bind,src=$override_dir,dst=/overrides,readonly" \
                 --mount "type=volume,src=$volume,dst=/target" \
                 --entrypoint rsync \
-                eeacms/rsync -a -- "/overrides/$rel_path" "/target/$target_path"; then
+                "$_CAI_RSYNC_IMAGE" -a -- "/overrides/$rel_path" "/target/$target_path"; then
                 _import_error "Failed to apply override: $rel_path"
                 error_count=$((error_count + 1))
                 continue
@@ -1318,6 +1321,9 @@ _containai_import() {
     local from_source="${7:-}"
     local no_secrets="${8:-false}"
     local verbose="${9:-false}"
+
+    # Refresh rsync image from environment at call time
+    _CAI_RSYNC_IMAGE="${CONTAINAI_RSYNC_IMAGE:-instrumentisto/rsync-ssh}"
 
     # Build docker command prefix based on context (needed early for source validation)
     # All docker calls in this function MUST use docker_cmd and neutralize DOCKER_CONTEXT/DOCKER_HOST
@@ -1465,16 +1471,17 @@ _containai_import() {
                 # Use --mount instead of -v to avoid colon parsing issues
                 # Use --network=none for consistency with rest of import pipeline
                 # Note: DOCKER_CONTEXT/DOCKER_HOST neutralization still needed since docker_cmd may use --context
-                # Use eeacms/rsync (same image as actual sync) to avoid introducing new image dependency
+                # Use rsync helper image (same image as actual sync) to avoid introducing new image dependency
                 local mount_error
                 if ! mount_error=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none \
                     --mount "type=bind,src=$from_source,dst=/test,readonly" \
                     --entrypoint /bin/sh \
-                    eeacms/rsync -c "true" 2>&1); then
+                    "$_CAI_RSYNC_IMAGE" -c "true" 2>&1); then
                     # Distinguish image pull failure from mount failure
                     if [[ "$mount_error" == *"Unable to find image"* ]] || [[ "$mount_error" == *"pull access denied"* ]] || [[ "$mount_error" == *"manifest unknown"* ]]; then
-                        _import_error "Failed to pull eeacms/rsync image (required for import)"
-                        _import_info "Check network connectivity or pre-pull the image: docker pull eeacms/rsync"
+                        _import_error "Failed to pull rsync image (required for import): $_CAI_RSYNC_IMAGE"
+                        _import_info "Check network connectivity or pre-pull the image: docker pull $_CAI_RSYNC_IMAGE"
+                        _import_info "Override with CONTAINAI_RSYNC_IMAGE=<image> if needed"
                     else
                         _import_error "Cannot mount '$from_source' - ensure it's within Docker's file-sharing paths"
                         _import_info "On macOS/Windows, add the path in Docker Desktop Settings > Resources > File Sharing"
@@ -1626,13 +1633,13 @@ _containai_import() {
 
     # Build map data and pass via heredoc inside the script
     # NOTE: MANIFEST_DATA_B64 is built later from rewritten_entries (after --no-secrets and excludes filtering)
-    # Note: This script runs inside eeacms/rsync with POSIX sh (not bash)
+    # Note: This script runs inside the rsync helper image with POSIX sh (not bash)
     # All code must be strictly POSIX-compliant (no arrays, no local in functions)
     local script_with_data
     # shellcheck disable=SC2016,SC1012,SC2289
     script_with_data='
 # ==============================================================================
-# Functions for rsync-based sync (runs inside eeacms/rsync container)
+# Functions for rsync-based sync (runs inside rsync helper container)
 # ==============================================================================
 # IMPORTANT: This runs under POSIX sh, not bash. No arrays or bash-isms allowed.
 
@@ -2663,7 +2670,7 @@ done <<'"'"'MAP_DATA'"'"'
         --mount type=bind,src="$source_root",dst=/source,readonly \
         --mount type=volume,src="$volume",dst=/target \
         "${env_args[@]}" \
-        eeacms/rsync -e -c "$script_with_data"; then
+        "$_CAI_RSYNC_IMAGE" -e -c "$script_with_data"; then
         _import_error "Rsync sync failed"
         return 1
     fi
@@ -2725,7 +2732,7 @@ done <<'"'"'MAP_DATA'"'"'
         if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
             --mount type=volume,src="$volume",dst=/target \
             --entrypoint /bin/sh \
-            eeacms/rsync -c '
+            "$_CAI_RSYNC_IMAGE" -c '
                 ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                 tmp="/target/.containai-imported-at.tmp.$$"
                 if printf "%s\n" "$ts" > "$tmp" && mv "$tmp" "/target/.containai-imported-at"; then
@@ -3351,7 +3358,7 @@ HEADER
         if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --network=none --user 0:0 \
             --mount type=volume,src="$volume",dst=/target \
             --entrypoint /bin/sh \
-            eeacms/rsync -c 'rm -f /target/shell/zsh-imported.sh' 2>/dev/null; then
+            "$_CAI_RSYNC_IMAGE" -c 'rm -f /target/shell/zsh-imported.sh' 2>/dev/null; then
             : # Ignore errors - file may not exist
         fi
         _import_info "No POSIX-compatible exports or aliases found in zsh config"
@@ -3363,7 +3370,7 @@ HEADER
         --mount type=bind,src="$tmp_extracted",dst=/source/.zsh-imported.sh,readonly \
         --mount type=volume,src="$volume",dst=/target \
         --entrypoint /bin/sh \
-        eeacms/rsync -c '
+        "$_CAI_RSYNC_IMAGE" -c '
             mkdir -p /target/shell
             chown 1000:1000 /target/shell
 

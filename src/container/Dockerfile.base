@@ -184,6 +184,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY src/services/docker.service.d/ /etc/systemd/system/docker.service.d/
 
 # =============================================================================
+# CONTAINAI-INIT SERVICE (required by docker.service drop-in)
+# =============================================================================
+COPY src/container/containai-init.sh /usr/local/lib/containai/init.sh
+COPY src/services/containai-init.service /etc/systemd/system/containai-init.service
+RUN chmod +x /usr/local/lib/containai/init.sh && \
+    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+    ln -sf /etc/systemd/system/containai-init.service /etc/systemd/system/multi-user.target.wants/containai-init.service
+
+# =============================================================================
 # ESSENTIAL TOOLS
 # tmux, jq, yq, ripgrep, git, unzip, etc.
 # =============================================================================

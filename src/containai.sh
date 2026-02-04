@@ -1215,8 +1215,19 @@ _containai_import_cmd() {
         if selected_context=$(DOCKER_CONTEXT= DOCKER_HOST= _cai_select_context "$config_context_override" ""); then
             : # success - selected_context is isolated context (Sysbox)
         else
-            echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
-            return 1
+            if [[ "$hot_reload" == "true" ]]; then
+                echo "[ERROR] No isolation available. Run 'cai doctor' for setup instructions." >&2
+                return 1
+            fi
+
+            # Volume-only import can run on the default Docker context when Sysbox is unavailable
+            if [[ -n "$config_context_override" ]] && docker context inspect "$config_context_override" >/dev/null 2>&1; then
+                selected_context="$config_context_override"
+                _cai_warn "No isolation available; using docker context '$config_context_override' for volume-only import"
+            else
+                selected_context=""
+                _cai_warn "No isolation available; using default Docker context for volume-only import"
+            fi
         fi
 
         # === NESTED WORKSPACE DETECTION ===

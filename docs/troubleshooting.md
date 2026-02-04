@@ -1106,7 +1106,7 @@ cai import
 **Diagnosis:**
 ```bash
 # Check if rsync image is available
-docker --context containai-docker pull eeacms/rsync
+docker --context containai-docker pull instrumentisto/rsync-ssh
 
 # Check volume status
 docker --context containai-docker volume inspect containai-data
@@ -1117,9 +1117,13 @@ docker --context containai-docker volume inspect containai-data
 1. Ensure Docker daemon is running
 2. Pull the rsync image:
    ```bash
-   docker --context containai-docker pull eeacms/rsync
+   docker --context containai-docker pull instrumentisto/rsync-ssh
    ```
 3. Check disk space: `docker --context containai-docker system df`
+4. (Optional) Override the image used by import:
+   ```bash
+   export CONTAINAI_RSYNC_IMAGE=instrumentisto/rsync-ssh
+   ```
 
 ---
 

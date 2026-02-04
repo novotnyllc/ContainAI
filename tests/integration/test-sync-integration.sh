@@ -94,6 +94,10 @@ if [[ -n "$DOCKER_CONTEXT" ]]; then
     DOCKER_CMD=(docker --context "$DOCKER_CONTEXT")
 fi
 
+# RSync helper image (multi-arch). Keep tests consistent with cai import.
+RSYNC_IMAGE="${CONTAINAI_RSYNC_IMAGE:-instrumentisto/rsync-ssh}"
+export CONTAINAI_RSYNC_IMAGE="$RSYNC_IMAGE"
+
 # Check docker daemon is running (don't hide regressions)
 if ! "${DOCKER_CMD[@]}" info &>/dev/null; then
     echo "[WARN] docker daemon not running (docker info failed)" >&2
@@ -326,7 +330,7 @@ FAILED=0
 # Captures docker exit code to avoid false positives
 run_in_rsync() {
     local output exit_code
-    output=$("${DOCKER_CMD[@]}" run --rm --entrypoint /bin/sh -v "$DATA_VOLUME":/data eeacms/rsync -c "$1" 2>&1) || exit_code=$?
+    output=$("${DOCKER_CMD[@]}" run --rm --entrypoint /bin/sh -v "$DATA_VOLUME":/data "$RSYNC_IMAGE" -c "$1" 2>&1) || exit_code=$?
     if [[ ${exit_code:-0} -ne 0 && ${exit_code:-0} -ne 1 ]]; then
         echo "docker_run_failed:$exit_code"
         return 1
