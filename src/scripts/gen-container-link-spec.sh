@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Generate JSON link specification for container runtime verification
-# Usage: gen-container-link-spec.sh <manifest_path> <output_path>
-# Reads sync-manifest.toml and outputs JSON for link-repair.sh / cai links check
+# Usage: gen-container-link-spec.sh <manifest_path_or_dir> <output_path>
+# Reads manifest TOML file(s) and outputs JSON for link-repair.sh / cai links check
+# When given a directory, iterates *.toml files in sorted order for deterministic output.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFEST_FILE="${1:-}"
+MANIFEST_PATH="${1:-}"
 OUTPUT_FILE="${2:-}"
 
-if [[ -z "$MANIFEST_FILE" || ! -f "$MANIFEST_FILE" ]]; then
-    printf 'ERROR: manifest file required as first argument\n' >&2
+if [[ -z "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest file or directory required as first argument\n' >&2
+    exit 1
+fi
+if [[ ! -e "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest path not found: %s\n' "$MANIFEST_PATH" >&2
     exit 1
 fi
 if [[ -z "$OUTPUT_FILE" ]]; then
@@ -55,7 +60,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     link_json="    {\"link\": \"${container_path_escaped}\", \"target\": \"${volume_path_escaped}\", \"remove_first\": ${needs_rm}}"
     links+=("$link_json")
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
 
 # Write output
 {

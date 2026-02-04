@@ -437,35 +437,35 @@ local_image_exists() {
 # Run manifest-driven generators for full/all layer builds
 # ==============================================================================
 generate_container_files() {
-    local manifest="${SCRIPT_DIR}/sync-manifest.toml"
+    local manifests_dir="${SCRIPT_DIR}/manifests"
     local gen_dir="${REPO_ROOT}/artifacts/container-generated"
     local scripts_dir="${SCRIPT_DIR}/scripts"
 
-    if [[ ! -f "$manifest" ]]; then
-        printf 'ERROR: sync-manifest.toml not found: %s\n' "$manifest" >&2
+    if [[ ! -d "$manifests_dir" ]]; then
+        printf 'ERROR: manifests directory not found: %s\n' "$manifests_dir" >&2
         return 1
     fi
 
     echo ""
-    echo "=== Generating container files from manifest ==="
+    echo "=== Generating container files from manifests ==="
     echo ""
 
     mkdir -p "$gen_dir"
 
     # Generate symlinks shell script (COPY'd and RUN in Dockerfile)
-    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifest" "${gen_dir}/symlinks.sh"; then
+    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifests_dir" "${gen_dir}/symlinks.sh"; then
         printf 'ERROR: Failed to generate symlinks.sh\n' >&2
         return 1
     fi
 
     # Generate init-dirs script
-    if ! "${scripts_dir}/gen-init-dirs.sh" "$manifest" "${gen_dir}/init-dirs.sh"; then
+    if ! "${scripts_dir}/gen-init-dirs.sh" "$manifests_dir" "${gen_dir}/init-dirs.sh"; then
         printf 'ERROR: Failed to generate init-dirs.sh\n' >&2
         return 1
     fi
 
     # Generate link-spec.json
-    if ! "${scripts_dir}/gen-container-link-spec.sh" "$manifest" "${gen_dir}/link-spec.json"; then
+    if ! "${scripts_dir}/gen-container-link-spec.sh" "$manifests_dir" "${gen_dir}/link-spec.json"; then
         printf 'ERROR: Failed to generate link-spec.json\n' >&2
         return 1
     fi
@@ -473,12 +473,18 @@ generate_container_files() {
     # Copy link-repair.sh to generated dir so it gets included in build context
     cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
 
-    # Verify generated files are newer than manifest (staleness check)
+    # Verify generated files are newer than any manifest (staleness check)
+    local newest_manifest_mtime=0
     local manifest_mtime gen_file_mtime
-    manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)
+    for manifest in "${manifests_dir}"/*.toml; do
+        manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)
+        if [[ "$manifest_mtime" -gt "$newest_manifest_mtime" ]]; then
+            newest_manifest_mtime="$manifest_mtime"
+        fi
+    done
     for gen_file in "${gen_dir}/symlinks.sh" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json"; do
         gen_file_mtime=$(stat -c %Y "$gen_file" 2>/dev/null || stat -f %m "$gen_file" 2>/dev/null)
-        if [[ "$gen_file_mtime" -lt "$manifest_mtime" ]]; then
+        if [[ "$gen_file_mtime" -lt "$newest_manifest_mtime" ]]; then
             printf 'ERROR: Generated file is stale: %s\n' "$gen_file" >&2
             return 1
         fi

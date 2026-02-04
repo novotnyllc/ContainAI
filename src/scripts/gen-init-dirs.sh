@@ -1,20 +1,32 @@
 #!/usr/bin/env bash
 # Generate init script for creating volume directory structure from manifest
-# Usage: gen-init-dirs.sh <manifest_path> <output_path>
-# Reads sync-manifest.toml and outputs shell script fragment for containai-init.sh
+# Usage: gen-init-dirs.sh <manifest_path_or_dir> <output_path>
+# Reads manifest TOML file(s) and outputs shell script fragment for containai-init.sh
+# When given a directory, iterates *.toml files in sorted order for deterministic output.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFEST_FILE="${1:-}"
+MANIFEST_PATH="${1:-}"
 OUTPUT_FILE="${2:-}"
 
-if [[ -z "$MANIFEST_FILE" || ! -f "$MANIFEST_FILE" ]]; then
-    printf 'ERROR: manifest file required as first argument\n' >&2
+if [[ -z "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest file or directory required as first argument\n' >&2
+    exit 1
+fi
+if [[ ! -e "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest path not found: %s\n' "$MANIFEST_PATH" >&2
     exit 1
 fi
 if [[ -z "$OUTPUT_FILE" ]]; then
     printf 'ERROR: output file required as second argument\n' >&2
     exit 1
+fi
+
+# Determine header text based on whether input is file or directory
+if [[ -d "$MANIFEST_PATH" ]]; then
+    HEADER_SOURCE="src/manifests/"
+else
+    HEADER_SOURCE="$(basename "$MANIFEST_PATH")"
 fi
 
 # Parse manifest
@@ -84,7 +96,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
         fi
     fi
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
 
 # Also process container_symlinks section for volume-only entries
 while IFS='|' read -r source target container_link flags disabled entry_type optional; do
@@ -107,12 +119,12 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
         fi
     fi
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
 
 # Write output
 {
     printf '#!/usr/bin/env bash\n'
-    printf '# Generated from %s - DO NOT EDIT\n' "$(basename "$MANIFEST_FILE")"
+    printf '# Generated from %s - DO NOT EDIT\n' "$HEADER_SOURCE"
     printf '# Regenerate with: src/scripts/gen-init-dirs.sh\n'
     printf '#\n'
     printf '# This script is sourced by containai-init.sh to create volume structure.\n'

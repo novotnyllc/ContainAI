@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
 # Generate shell script for container symlinks from manifest
-# Usage: gen-dockerfile-symlinks.sh <manifest_path> <output_path>
-# Reads sync-manifest.toml and outputs executable shell script for symlink creation
+# Usage: gen-dockerfile-symlinks.sh <manifest_path_or_dir> <output_path>
+# Reads manifest TOML file(s) and outputs executable shell script for symlink creation
+# When given a directory, iterates *.toml files in sorted order for deterministic output.
 # The script is COPY'd into the container and RUN during build
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MANIFEST_FILE="${1:-}"
+MANIFEST_PATH="${1:-}"
 OUTPUT_FILE="${2:-}"
 
-if [[ -z "$MANIFEST_FILE" || ! -f "$MANIFEST_FILE" ]]; then
-    printf 'ERROR: manifest file required as first argument\n' >&2
+if [[ -z "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest file or directory required as first argument\n' >&2
+    exit 1
+fi
+if [[ ! -e "$MANIFEST_PATH" ]]; then
+    printf 'ERROR: manifest path not found: %s\n' "$MANIFEST_PATH" >&2
     exit 1
 fi
 if [[ -z "$OUTPUT_FILE" ]]; then
     printf 'ERROR: output file required as second argument\n' >&2
     exit 1
+fi
+
+# Determine header text based on whether input is file or directory
+if [[ -d "$MANIFEST_PATH" ]]; then
+    HEADER_SOURCE="src/manifests/"
+else
+    HEADER_SOURCE="$(basename "$MANIFEST_PATH")"
 fi
 
 # Parse manifest
@@ -67,7 +79,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     # R flag means "remove existing path first" for any entry type (file or directory)
     symlink_cmds+=("${volume_path}|${container_path}|${needs_rm}")
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_FILE")
+done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
 
 # Deduplicate mkdir targets
 declare -A seen_dirs=()
@@ -82,7 +94,7 @@ done
 # Write output as executable bash script with logging
 {
     printf '#!/usr/bin/env bash\n'
-    printf '# Generated from %s - DO NOT EDIT\n' "$(basename "$MANIFEST_FILE")"
+    printf '# Generated from %s - DO NOT EDIT\n' "$HEADER_SOURCE"
     printf '# Regenerate with: src/scripts/gen-dockerfile-symlinks.sh\n'
     printf '# This script is COPY'"'"'d into the container and RUN during build\n'
     printf 'set -euo pipefail\n\n'

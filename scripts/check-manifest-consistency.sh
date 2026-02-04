@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Check consistency between sync-manifest.toml and _IMPORT_SYNC_MAP in import.sh
+# Check consistency between src/manifests/ and _IMPORT_SYNC_MAP in import.sh
 #
-# sync-manifest.toml is the authoritative source of truth for:
+# src/manifests/ is the authoritative source of truth for:
 # - What gets synced from host $HOME to the data volume
 # - What symlinks are created in the container image
 # - What directory structure is initialized on first boot
 #
 # This script verifies that the hardcoded _IMPORT_SYNC_MAP in src/lib/import.sh
-# matches the manifest, catching drift between the two.
+# matches the manifests, catching drift between the two.
 #
 # Usage: scripts/check-manifest-consistency.sh
 # Exit codes:
@@ -19,13 +19,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-MANIFEST_FILE="${REPO_ROOT}/src/sync-manifest.toml"
+MANIFESTS_DIR="${REPO_ROOT}/src/manifests"
 IMPORT_SH="${REPO_ROOT}/src/lib/import.sh"
 PARSE_SCRIPT="${REPO_ROOT}/src/scripts/parse-manifest.sh"
 
 # Validate prerequisites
-if [[ ! -f "$MANIFEST_FILE" ]]; then
-    printf 'ERROR: manifest not found: %s\n' "$MANIFEST_FILE" >&2
+if [[ ! -d "$MANIFESTS_DIR" ]]; then
+    printf 'ERROR: manifests directory not found: %s\n' "$MANIFESTS_DIR" >&2
     exit 2
 fi
 if [[ ! -f "$IMPORT_SH" ]]; then
@@ -68,7 +68,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
 
     norm_flags=$(normalize_flags "$flags")
     manifest_entries["$source"]="$target:$norm_flags"
-done < <("$PARSE_SCRIPT" "$MANIFEST_FILE")
+done < <("$PARSE_SCRIPT" "$MANIFESTS_DIR")
 
 # Extract _IMPORT_SYNC_MAP entries from import.sh
 # Format: "/source/<path>:/target/<path>:<flags>"
@@ -145,10 +145,10 @@ for source in "${!import_map_entries[@]}"; do
 done
 
 if [[ $errors -gt 0 ]]; then
-    printf '\n%d inconsistencies found between manifest and import map.\n' "$errors" >&2
-    printf 'sync-manifest.toml is the authoritative source - update _IMPORT_SYNC_MAP to match.\n' >&2
+    printf '\n%d inconsistencies found between manifests and import map.\n' "$errors" >&2
+    printf 'src/manifests/ is the authoritative source - update _IMPORT_SYNC_MAP to match.\n' >&2
     exit 1
 else
-    printf 'OK: manifest and import map are consistent (%d entries checked)\n' "${#manifest_entries[@]}"
+    printf 'OK: manifests and import map are consistent (%d entries checked)\n' "${#manifest_entries[@]}"
     exit 0
 fi
