@@ -1,0 +1,34 @@
+# =============================================================================
+# SSH
+# NOTE: SSH is NOT imported by default for security reasons.
+# Users who need SSH keys in containers should add ~/.ssh to
+# [import].additional_paths in containai.toml.
+# Agent forwarding (ssh -A) is the preferred approach.
+#
+# These entries document the link structure but are NOT in _IMPORT_SYNC_MAP.
+# If users add ~/.ssh via additional_paths, these links will be created.
+# =============================================================================
+
+[[entries]]
+source = ".ssh/config"
+target = "ssh/config"
+container_link = ".ssh/config"
+flags = "f"  # file (not secret - SSH config is public)
+disabled = true  # Not imported by default; add via additional_paths if needed
+
+[[entries]]
+source = ".ssh/known_hosts"
+target = "ssh/known_hosts"
+container_link = ".ssh/known_hosts"
+flags = "f"  # file (not secret - host keys are public)
+disabled = true  # Not imported by default; add via additional_paths if needed
+
+# SSH private keys pattern (for reference only)
+# If users add ~/.ssh via additional_paths, all files including keys are synced.
+# additional_paths are NOT marked as secrets, so --no-secrets won't skip them.
+[[entries]]
+source = ".ssh/id_*"
+target = "ssh/"
+container_link = ".ssh/"
+flags = "Gs"  # G=glob/dynamic pattern, s=secret (private keys)
+disabled = true  # Not imported by default; add via additional_paths if needed

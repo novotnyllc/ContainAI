@@ -1,0 +1,19 @@
+# =============================================================================
+# FONTS
+# =============================================================================
+
+[[entries]]
+source = ".local/share/fonts"
+target = "local/share/fonts"
+container_link = ".local/share/fonts"
+flags = "d"  # directory
+
+# =============================================================================
+# COMMON AGENTS DIRECTORY
+# =============================================================================
+
+[[entries]]
+source = ".agents"
+target = "agents"
+container_link = ".agents"
+flags = "d"  # directory

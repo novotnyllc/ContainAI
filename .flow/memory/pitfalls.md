@@ -437,3 +437,9 @@ Python sys.exit() raises SystemExit caught by bare 'except:' - use 'except Excep
 
 ## 2026-02-03 manual [pitfall]
 ((var++)) exits with status 1 when var is 0 under set -e; use var=$((var + 1)) instead
+
+## 2026-02-04 manual [pitfall]
+Non-interactive SSH (ssh host 'cmd') does NOT source /etc/profile.d - use BASH_ENV for shell wrappers
+
+## 2026-02-04 manual [pitfall]
+When splitting files for deterministic processing, use numeric prefixes (00-, 01-) to control iteration order rather than relying on alphabetical

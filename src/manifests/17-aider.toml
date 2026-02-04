@@ -1,0 +1,17 @@
+# =============================================================================
+# AIDER (optional - only sync if user has it configured)
+# Simple config files (no directory structure)
+# May contain API keys (openai-api-key, etc.)
+# =============================================================================
+
+[[entries]]
+source = ".aider.conf.yml"
+target = "aider/aider.conf.yml"
+container_link = ".aider.conf.yml"
+flags = "fso"  # file, secret, optional
+
+[[entries]]
+source = ".aider.model.settings.yml"
+target = "aider/aider.model.settings.yml"
+container_link = ".aider.model.settings.yml"
+flags = "fso"  # file, secret, optional

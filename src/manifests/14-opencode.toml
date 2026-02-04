@@ -1,0 +1,53 @@
+# =============================================================================
+# OPENCODE
+# Selective sync: config files only, skip caches
+# opencode.json may contain API keys/tokens
+# =============================================================================
+
+[[entries]]
+source = ".config/opencode/opencode.json"
+target = "config/opencode/opencode.json"
+container_link = ".config/opencode/opencode.json"
+flags = "fjs"  # file, JSON init, secret
+
+[[entries]]
+source = ".config/opencode/agents"
+target = "config/opencode/agents"
+container_link = ".config/opencode/agents"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/commands"
+target = "config/opencode/commands"
+container_link = ".config/opencode/commands"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/skills"
+target = "config/opencode/skills"
+container_link = ".config/opencode/skills"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/modes"
+target = "config/opencode/modes"
+container_link = ".config/opencode/modes"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/plugins"
+target = "config/opencode/plugins"
+container_link = ".config/opencode/plugins"
+flags = "d"  # directory
+
+[[entries]]
+source = ".config/opencode/instructions.md"
+target = "config/opencode/instructions.md"
+container_link = ".config/opencode/instructions.md"
+flags = "f"  # file
+
+[[entries]]
+source = ".local/share/opencode/auth.json"
+target = "local/share/opencode/auth.json"
+container_link = ".local/share/opencode/auth.json"
+flags = "fs"  # file, secret

@@ -1,0 +1,20 @@
+# =============================================================================
+# GITHUB CLI
+# hosts.yml contains OAuth tokens (secret)
+# Other files (config.yml, etc.) are not secrets
+# =============================================================================
+
+[[entries]]
+source = ".config/gh/hosts.yml"
+target = "config/gh/hosts.yml"
+container_link = ".config/gh/hosts.yml"
+flags = "fs"  # file, secret (OAuth tokens)
+
+[[entries]]
+source = ".config/gh/config.yml"
+target = "config/gh/config.yml"
+container_link = ".config/gh/config.yml"
+flags = "f"  # file (user preferences, not secret)
+
+# Note: Container Dockerfile symlinks entire .config/gh directory.
+# The individual file entries here ensure --no-secrets only skips hosts.yml.

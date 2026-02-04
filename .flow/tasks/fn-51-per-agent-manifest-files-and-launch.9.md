@@ -22,7 +22,7 @@ test_parse_manifest_directory() {
 
 # Test [agent] section parsing
 test_parse_agent_section() {
-    # Assert: name, binary, default_args, optional extracted correctly
+    # Assert: name, binary, default_args, aliases, optional extracted correctly
 }
 
 # Test invalid TOML handling
@@ -48,6 +48,7 @@ test_launch_wrappers_generated() {
     # Assert: all agents with [agent] section produce wrappers
     # Assert: default_args included in wrapper
     # Assert: optional agents have command -v guard
+    # Assert: aliases (e.g., kimi-cli) also generate wrappers
 }
 ```
 
@@ -101,17 +102,39 @@ test_user_manifest_optional_binary() {
 
 Location: `tests/integration/test-launch-wrappers.sh` (new)
 
+**Critical: Test plain `ssh container 'cmd'` without extra shell wrapper**
+
 ```bash
-# Test wrapper prepends default args
-test_wrapper_prepends_args() {
-    # ssh container 'claude --version'
-    # Assert: works (--dangerously-skip-permissions prepended)
+# Test wrapper works in non-interactive SSH (plain command)
+# THIS IS THE CRITICAL TEST - ssh without bash -c wrapper
+test_wrapper_plain_noninteractive_ssh() {
+    # ssh container 'claude --version'   # <-- plain, no bash -c
+    # Assert: wrapper still invoked, default args applied
 }
 
-# Test wrapper works in non-interactive SSH
-test_wrapper_noninteractive_ssh() {
+# Test wrapper works in non-interactive SSH (with bash -c)
+test_wrapper_bash_c_noninteractive_ssh() {
     # ssh container bash -c 'claude --version'
     # Assert: wrapper still invoked
+}
+
+# Test wrapper works in interactive shell
+test_wrapper_interactive() {
+    # ssh container (interactive) then run claude --version
+    # Assert: wrapper invoked
+}
+
+# Test wrapper prepends default args
+test_wrapper_prepends_args() {
+    # ssh container 'type claude'
+    # Assert: shows function definition with --dangerously-skip-permissions
+}
+
+# Test kimi aliases work
+test_kimi_aliases() {
+    # ssh container 'type kimi'
+    # ssh container 'type kimi-cli'
+    # Assert: both are functions with --yolo
 }
 ```
 
@@ -134,6 +157,7 @@ test_wrapper_noninteractive_ssh() {
 - [ ] Directory pollution tests updated
 - [ ] User manifest integration tests added
 - [ ] Launch wrapper E2E tests added
+- [ ] **Plain `ssh container 'cmd'` test included** (not just `bash -c` variant)
 - [ ] All existing tests still pass
 - [ ] CI runs new tests
 
@@ -142,3 +166,4 @@ test_wrapper_noninteractive_ssh() {
 - Use existing test patterns from `tests/integration/`
 - Tests should be hermetic (no dependency on host config)
 - Clean up test containers/volumes after each test
+- **Critical:** Include plain `ssh container 'cmd'` test - this tests the BASH_ENV path

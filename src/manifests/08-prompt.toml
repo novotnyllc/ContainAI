@@ -1,0 +1,15 @@
+# =============================================================================
+# PROMPT CUSTOMIZATION
+# =============================================================================
+
+[[entries]]
+source = ".config/starship.toml"
+target = "config/starship.toml"
+container_link = ".config/starship.toml"
+flags = "f"  # file
+
+[[entries]]
+source = ".config/oh-my-posh"
+target = "config/oh-my-posh"
+container_link = ".config/oh-my-posh"
+flags = "dR"  # directory, remove existing first

@@ -1,0 +1,19 @@
+# =============================================================================
+# GIT
+# .gitconfig: filtered to strip credential.helper and signing config (g flag)
+#   - Stored in git/gitconfig, symlinked to ~/.gitconfig
+#   - Changes inside container persist across restarts
+# .gitignore_global: synced as-is (no filtering)
+# =============================================================================
+
+[[entries]]
+source = ".gitconfig"
+target = "git/gitconfig"
+container_link = ".gitconfig"
+flags = "fg"  # file, git-filter (strip credential.helper and signing config)
+
+[[entries]]
+source = ".gitignore_global"
+target = "git/gitignore_global"
+container_link = ".gitignore_global"
+flags = "f"  # file

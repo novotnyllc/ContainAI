@@ -1,0 +1,17 @@
+# =============================================================================
+# KIMI CLI (MoonshotAI) - Optional
+# Config location: ~/.kimi/
+# Docs: https://github.com/MoonshotAI/kimi-cli
+# =============================================================================
+
+[[entries]]
+source = ".kimi/config.toml"
+target = "kimi/config.toml"
+container_link = ".kimi/config.toml"
+flags = "fso"  # file, SECRET, optional
+
+[[entries]]
+source = ".kimi/mcp.json"
+target = "kimi/mcp.json"
+container_link = ".kimi/mcp.json"
+flags = "fjso"  # file, json-init, SECRET, optional

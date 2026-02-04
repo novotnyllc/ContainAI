@@ -1,0 +1,21 @@
+# =============================================================================
+# COPILOT (optional - only sync if user has it configured)
+# =============================================================================
+
+[[entries]]
+source = ".copilot/config.json"
+target = "copilot/config.json"
+container_link = ".copilot/config.json"
+flags = "fo"  # file, optional
+
+[[entries]]
+source = ".copilot/mcp-config.json"
+target = "copilot/mcp-config.json"
+container_link = ".copilot/mcp-config.json"
+flags = "fo"  # file, optional
+
+[[entries]]
+source = ".copilot/skills"
+target = "copilot/skills"
+container_link = ".copilot/skills"
+flags = "dRo"  # directory, remove existing first, optional

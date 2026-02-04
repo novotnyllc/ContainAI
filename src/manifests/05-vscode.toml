@@ -1,0 +1,84 @@
+# =============================================================================
+# VS CODE SERVER (STABLE)
+# =============================================================================
+
+[[entries]]
+source = ".vscode-server/extensions"
+target = "vscode-server/extensions"
+container_link = ".vscode-server/extensions"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/Machine"
+target = "vscode-server/data/Machine"
+container_link = ""  # Only settings.json is symlinked, not the whole dir
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/User/mcp"
+target = "vscode-server/data/User/mcp"
+container_link = ".vscode-server/data/User/mcp"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server/data/User/prompts"
+target = "vscode-server/data/User/prompts"
+container_link = ".vscode-server/data/User/prompts"
+flags = "d"  # directory
+
+# =============================================================================
+# VS CODE SERVER (INSIDERS)
+# =============================================================================
+
+[[entries]]
+source = ".vscode-server-insiders/extensions"
+target = "vscode-server-insiders/extensions"
+container_link = ".vscode-server-insiders/extensions"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/Machine"
+target = "vscode-server-insiders/data/Machine"
+container_link = ""  # Only settings.json is symlinked, not the whole dir
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/User/mcp"
+target = "vscode-server-insiders/data/User/mcp"
+container_link = ".vscode-server-insiders/data/User/mcp"
+flags = "d"  # directory
+
+[[entries]]
+source = ".vscode-server-insiders/data/User/prompts"
+target = "vscode-server-insiders/data/User/prompts"
+container_link = ".vscode-server-insiders/data/User/prompts"
+flags = "d"  # directory
+
+# =============================================================================
+# ADDITIONAL SYMLINKS (container-only, no host import)
+# These are created in the Dockerfile but have no corresponding import entry
+# =============================================================================
+
+# VS Code Machine settings.json symlinks (the directory is imported, but
+# only the settings.json file is symlinked individually)
+# container_link_only entries have empty source
+
+[[container_symlinks]]
+target = "vscode-server/data/Machine/settings.json"
+container_link = ".vscode-server/data/Machine/settings.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server/data/User/mcp.json"
+container_link = ".vscode-server/data/User/mcp.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server-insiders/data/Machine/settings.json"
+container_link = ".vscode-server-insiders/data/Machine/settings.json"
+flags = "fj"
+
+[[container_symlinks]]
+target = "vscode-server-insiders/data/User/mcp.json"
+container_link = ".vscode-server-insiders/data/User/mcp.json"
+flags = "fj"

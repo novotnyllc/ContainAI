@@ -1,0 +1,45 @@
+# =============================================================================
+# SHELL
+# =============================================================================
+
+[[entries]]
+source = ".bash_aliases"
+target = "shell/bash_aliases"
+container_link = ".bash_aliases_imported"  # Different name to preserve user's original
+flags = "fR"  # file, remove existing first (Dockerfile uses rm -rf before ln)
+
+[[entries]]
+source = ".bashrc.d"
+target = "shell/bashrc.d"
+container_link = ""  # Sourced via .bashrc hook, not directly symlinked
+flags = "dp"  # directory, exclude *.priv.* files (security)
+
+[[entries]]
+source = ".zshrc"
+target = "shell/zshrc"
+container_link = ".zshrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".zprofile"
+target = "shell/zprofile"
+container_link = ".zprofile"
+flags = "f"  # file
+
+[[entries]]
+source = ".zshenv"
+target = "shell/zshenv"
+container_link = ".zshenv"
+flags = "f"  # file
+
+[[entries]]
+source = ".inputrc"
+target = "shell/inputrc"
+container_link = ".inputrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".oh-my-zsh/custom"
+target = "shell/oh-my-zsh-custom"
+container_link = ".oh-my-zsh/custom"
+flags = "dR"  # directory, remove existing first (may be pre-populated)

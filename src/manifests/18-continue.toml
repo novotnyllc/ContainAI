@@ -1,0 +1,17 @@
+# =============================================================================
+# CONTINUE (optional - only sync if user has it configured)
+# Selective sync: config files only, skip sessions/index
+# May contain API keys/tokens
+# =============================================================================
+
+[[entries]]
+source = ".continue/config.yaml"
+target = "continue/config.yaml"
+container_link = ".continue/config.yaml"
+flags = "fso"  # file, secret, optional
+
+[[entries]]
+source = ".continue/config.json"
+target = "continue/config.json"
+container_link = ".continue/config.json"
+flags = "fjso"  # file, JSON init, secret, optional

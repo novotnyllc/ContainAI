@@ -1,0 +1,27 @@
+# =============================================================================
+# GEMINI (optional - only sync if user has it configured)
+# =============================================================================
+
+[[entries]]
+source = ".gemini/google_accounts.json"
+target = "gemini/google_accounts.json"
+container_link = ".gemini/google_accounts.json"
+flags = "fso"  # file, secret, optional
+
+[[entries]]
+source = ".gemini/oauth_creds.json"
+target = "gemini/oauth_creds.json"
+container_link = ".gemini/oauth_creds.json"
+flags = "fso"  # file, secret, optional
+
+[[entries]]
+source = ".gemini/settings.json"
+target = "gemini/settings.json"
+container_link = ".gemini/settings.json"
+flags = "fjo"  # file, json-init, optional
+
+[[entries]]
+source = ".gemini/GEMINI.md"
+target = "gemini/GEMINI.md"
+container_link = ".gemini/GEMINI.md"
+flags = "fo"  # file, optional

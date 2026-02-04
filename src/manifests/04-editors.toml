@@ -1,0 +1,21 @@
+# =============================================================================
+# EDITORS (VIM / NEOVIM)
+# =============================================================================
+
+[[entries]]
+source = ".vimrc"
+target = "editors/vimrc"
+container_link = ".vimrc"
+flags = "f"  # file
+
+[[entries]]
+source = ".vim"
+target = "editors/vim"
+container_link = ".vim"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".config/nvim"
+target = "config/nvim"
+container_link = ".config/nvim"
+flags = "dR"  # directory, remove existing first

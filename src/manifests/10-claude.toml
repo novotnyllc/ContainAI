@@ -1,0 +1,63 @@
+# =============================================================================
+# CLAUDE CODE
+# =============================================================================
+
+[[entries]]
+source = ".claude.json"
+target = "claude/claude.json"
+container_link = ".claude.json"
+flags = "fjs"  # file, json-init, secret
+
+[[entries]]
+source = ".claude/.credentials.json"
+target = "claude/credentials.json"
+container_link = ".claude/.credentials.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".claude/settings.json"
+target = "claude/settings.json"
+container_link = ".claude/settings.json"
+flags = "fj"  # file, json-init
+
+[[entries]]
+source = ".claude/settings.local.json"
+target = "claude/settings.local.json"
+container_link = ".claude/settings.local.json"
+flags = "f"  # file
+
+[[entries]]
+source = ".claude/plugins"
+target = "claude/plugins"
+container_link = ".claude/plugins"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".claude/skills"
+target = "claude/skills"
+container_link = ".claude/skills"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".claude/commands"
+target = "claude/commands"
+container_link = ".claude/commands"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".claude/agents"
+target = "claude/agents"
+container_link = ".claude/agents"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".claude/hooks"
+target = "claude/hooks"
+container_link = ".claude/hooks"
+flags = "dR"  # directory, remove existing first
+
+[[entries]]
+source = ".claude/CLAUDE.md"
+target = "claude/CLAUDE.md"
+container_link = ".claude/CLAUDE.md"
+flags = "f"  # file

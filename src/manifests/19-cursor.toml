@@ -1,0 +1,23 @@
+# =============================================================================
+# CURSOR (optional - only sync if user has it configured)
+# Selective sync: mcp.json, rules, extensions
+# mcp.json may contain API keys/tokens
+# =============================================================================
+
+[[entries]]
+source = ".cursor/mcp.json"
+target = "cursor/mcp.json"
+container_link = ".cursor/mcp.json"
+flags = "fjso"  # file, JSON init, secret, optional
+
+[[entries]]
+source = ".cursor/rules"
+target = "cursor/rules"
+container_link = ".cursor/rules"
+flags = "dRo"  # directory, remove existing first, optional
+
+[[entries]]
+source = ".cursor/extensions"
+target = "cursor/extensions"
+container_link = ".cursor/extensions"
+flags = "dRo"  # directory, remove existing first, optional

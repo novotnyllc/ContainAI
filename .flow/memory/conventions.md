@@ -54,3 +54,6 @@ When doctor uses docker context, derive it from _cai_select_context() not hardco
 
 ## 2026-02-01 manual [convention]
 Use file mtime (via stat) for timestamp checks instead of file content - more reliable, avoids race conditions during file writes
+
+## 2026-02-04 manual [convention]
+When epic and task specs define schemas, ensure field names match exactly (e.g., link-spec schema: link, target, remove_first)

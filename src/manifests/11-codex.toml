@@ -1,0 +1,21 @@
+# =============================================================================
+# CODEX
+# =============================================================================
+
+[[entries]]
+source = ".codex/config.toml"
+target = "codex/config.toml"
+container_link = ".codex/config.toml"
+flags = "f"  # file
+
+[[entries]]
+source = ".codex/auth.json"
+target = "codex/auth.json"
+container_link = ".codex/auth.json"
+flags = "fs"  # file, secret
+
+[[entries]]
+source = ".codex/skills"
+target = "codex/skills"
+container_link = ".codex/skills"
+flags = "dxR"  # directory, exclude .system/, remove existing first

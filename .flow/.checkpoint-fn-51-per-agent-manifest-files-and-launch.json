@@ -1,0 +1,220 @@
+{
+  "created_at": "2026-02-04T19:13:48.846821Z",
+  "epic": {
+    "data": {
+      "branch_name": "fn-51-per-agent-manifest-files-and-launch",
+      "created_at": "2026-02-04T18:56:38.196868Z",
+      "depends_on_epics": [],
+      "id": "fn-51-per-agent-manifest-files-and-launch",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-51-per-agent-manifest-files-and-launch.md",
+      "status": "open",
+      "title": "Per-Agent Manifest Files and Launch Aliases",
+      "updated_at": "2026-02-04T18:56:38.196904Z"
+    },
+    "spec": "# fn-51: Per-Agent Manifest Files and Launch Aliases\n\n**Status:** draft\n**Priority:** medium\n**Blocked by:** none\n\n## Problem Statement\n\nCurrently:\n1. `sync-manifest.toml` is a monolithic file with all agent/tool entries mixed together\n2. Agent aliases (e.g., `alias claude=\"claude --dangerously-skip-permissions\"`) are hardcoded in Dockerfile.agents\n3. No extension point for user-defined agents/tools\n\nThis creates maintenance burden and prevents users from adding their own agents without modifying core files.\n\n## Solution Overview\n\nSplit the monolithic manifest into per-agent files and generate launch wrappers that handle:\n1. Default launch parameters (yolo/autonomous mode flags)\n2. User-extensible agent definitions\n\n## Architecture\n\n### Directory Structure\n\n```\nsrc/manifests/                    # Built-in agent manifests\n\u251c\u2500\u2500 claude.toml                   # Claude Code entries + launch config\n\u251c\u2500\u2500 codex.toml                    # Codex entries + launch config\n\u251c\u2500\u2500 gemini.toml                   # Gemini CLI entries + launch config\n\u251c\u2500\u2500 copilot.toml                  # Copilot entries + launch config\n\u251c\u2500\u2500 opencode.toml                 # OpenCode entries + launch config\n\u251c\u2500\u2500 kimi.toml                     # Kimi CLI entries + launch config\n\u251c\u2500\u2500 pi.toml                       # Pi entries + launch config\n\u251c\u2500\u2500 aider.toml                    # Aider entries + launch config\n\u251c\u2500\u2500 continue.toml                 # Continue entries + launch config\n\u251c\u2500\u2500 cursor.toml                   # Cursor entries + launch config\n\u251c\u2500\u2500 git.toml                      # Git config entries (no launch)\n\u251c\u2500\u2500 gh.toml                       # GitHub CLI entries + launch config\n\u251c\u2500\u2500 shell.toml                    # Shell config entries (no launch)\n\u251c\u2500\u2500 editors.toml                  # Vim/Neovim entries (no launch)\n\u251c\u2500\u2500 vscode.toml                   # VS Code Server entries (no launch)\n\u251c\u2500\u2500 ssh.toml                      # SSH entries (disabled, no launch)\n\u2514\u2500\u2500 common.toml                   # tmux, fonts, starship, etc. (no launch)\n\n~/.config/containai/manifests/    # User-defined agent manifests (host)\n/mnt/agent-data/containai/manifests/  # User manifests in container\n```\n\n### Per-Agent Manifest Format\n\n```toml\n# claude.toml\n[agent]\nname = \"claude\"\nbinary = \"claude\"                          # Command to invoke\ndefault_args = [\"--dangerously-skip-permissions\"]  # Default launch params\noptional = false                           # Primary agent, always synced\n\n[[entries]]\nsource = \".claude.json\"\ntarget = \"claude/claude.json\"\ncontainer_link = \".claude.json\"\nflags = \"fjs\"\n\n[[entries]]\nsource = \".claude/.credentials.json\"\ntarget = \"claude/credentials.json\"\ncontainer_link = \".claude/.credentials.json\"\nflags = \"fs\"\n\n# ... more entries\n```\n\n### Launch Wrapper Behavior\n\nFor each agent with `[agent]` section, generate a shell function:\n\n```bash\n# Auto-generated in /etc/profile.d/containai-agents.sh\nclaude() {\n    command claude --dangerously-skip-permissions \"$@\"\n}\n```\n\n- Works in interactive shells (bashrc.d sourced)\n- Works in non-interactive SSH (profile.d sourced)\n- User can override by passing conflicting flags\n\n### No Intermediate File\n\n- Generators read directly from `src/manifests/*.toml`\n- `_IMPORT_SYNC_MAP` generated from per-agent files\n- `sync-manifest.toml` deleted after migration\n\n### Runtime Hook for User Manifests\n\n- User drops TOML in `~/.config/containai/manifests/`\n- `cai import` syncs to container volume\n- `containai-init.sh` (startup) detects user manifests\n- Lightweight runtime generators create symlinks + wrappers\n- No Dockerfile knowledge needed - just works\n\n## Acceptance Criteria\n\n1. Each agent/tool has its own manifest file in `src/manifests/`\n2. Per-agent files include `[agent]` section with launch config\n3. Generators read directly from per-agent files (no intermediate)\n4. Launch functions generated in container for all agents with `[agent]` section\n5. Aliases removed from Dockerfile.agents (replaced by launch functions)\n6. User can add custom manifests in `~/.config/containai/manifests/`\n7. `scripts/check-manifest-consistency.sh` works with new structure\n8. All existing tests pass\n9. Documentation updated\n\n## Out of Scope\n\n- Runtime editing of manifests (build-time only for now)\n- Per-agent enable/disable toggles (handled by `o` flag)\n- Agent installation management (remains in Dockerfile)\n"
+  },
+  "epic_id": "fn-51-per-agent-manifest-files-and-launch",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.026567Z",
+        "depends_on": [],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.1.md",
+        "status": "todo",
+        "title": "Create per-agent manifest directory structure and split sync-manifest.toml",
+        "updated_at": "2026-02-04T18:56:51.026579Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.1",
+      "runtime": null,
+      "spec": "# Task fn-51.1: Create per-agent manifest directory structure and split sync-manifest.toml\n\n**Status:** pending\n**Depends on:** none\n\n## Objective\n\nSplit the monolithic `src/sync-manifest.toml` into per-agent files in `src/manifests/`.\n\n## Context\n\nThe current `sync-manifest.toml` (628 lines) mixes all agents/tools together. Splitting allows:\n- Easier maintenance per agent\n- Clear ownership boundaries\n- User-extensible via additional manifest files\n\n## Implementation\n\n1. Create directory `src/manifests/`\n\n2. Split into these files (based on current section headers in sync-manifest.toml):\n   - `claude.toml` - Claude Code entries (lines 37-99)\n   - `gh.toml` - GitHub CLI entries (lines 101-120)\n   - `git.toml` - Git config entries (lines 122-140)\n   - `ssh.toml` - SSH entries, disabled (lines 142-175)\n   - `opencode.toml` - OpenCode entries (lines 177-229)\n   - `tmux.toml` - tmux entries (lines 231-253)\n   - `common.toml` - Fonts, agents directory (lines 255-273)\n   - `shell.toml` - Shell config entries (lines 275-319)\n   - `editors.toml` - Vim/Neovim entries (lines 321-341)\n   - `prompt.toml` - Starship/oh-my-posh (lines 343-357)\n   - `vscode.toml` - VS Code Server entries (lines 359-413)\n   - `copilot.toml` - Copilot entries, optional (lines 415-435)\n   - `gemini.toml` - Gemini entries, optional (lines 437-463)\n   - `codex.toml` - Codex entries (lines 465-485)\n   - `aider.toml` - Aider entries, optional (lines 487-503)\n   - `continue.toml` - Continue entries, optional (lines 505-521)\n   - `cursor.toml` - Cursor entries, optional (lines 523-545)\n   - `pi.toml` - Pi entries, optional (lines 547-581)\n   - `kimi.toml` - Kimi entries, optional (lines 583-600)\n\n3. Each file includes header comment with agent name and docs link\n\n4. Preserve all existing entries, flags, comments exactly\n\n5. Add `[[container_symlinks]]` entries to appropriate agent files (currently at end of manifest)\n\n## Acceptance Criteria\n\n- [ ] `src/manifests/` directory created with 19 files\n- [ ] Each file contains only entries for that agent/tool\n- [ ] All entries from original manifest preserved (no content lost)\n- [ ] Header comments preserved with agent name\n- [ ] `cat src/manifests/*.toml` produces equivalent content to original\n- [ ] Original `sync-manifest.toml` untouched (for now)\n\n## Notes\n\n- Do NOT modify `_IMPORT_SYNC_MAP` in import.sh yet\n- Do NOT delete `sync-manifest.toml` yet\n- Aggregation script (Task 3) will combine these files\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.103253Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.1"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.2.md",
+        "status": "todo",
+        "title": "Add [agent] section schema with launch configuration",
+        "updated_at": "2026-02-04T18:57:15.323013Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.2",
+      "runtime": null,
+      "spec": "# Task fn-51.2: Add [agent] section schema with launch configuration\n\n**Status:** pending\n**Depends on:** fn-51.1\n\n## Objective\n\nExtend per-agent manifest format with `[agent]` section for launch configuration.\n\n## Context\n\nCurrently aliases are hardcoded in Dockerfile.agents (line 161-168):\n```bash\nalias claude=\"claude --dangerously-skip-permissions\"\nalias codex=\"codex --dangerously-bypass-approvals-and-sandbox\"\nalias copilot=\"copilot --yolo\"\nalias gemini=\"gemini --yolo\"\nalias kimi=\"kimi --yolo\"\n```\n\nThis should come from the manifest files so users can customize and add their own.\n\n## Implementation\n\n1. Define `[agent]` section schema:\n\n```toml\n[agent]\nname = \"claude\"                    # Display name\nbinary = \"claude\"                  # Command to invoke (must exist in PATH)\ndefault_args = [\"--dangerously-skip-permissions\"]  # Prepended to user args\noptional = false                   # If true, no error when binary missing\n```\n\n2. Add `[agent]` sections to relevant manifest files:\n   - `claude.toml`: `default_args = [\"--dangerously-skip-permissions\"]`\n   - `codex.toml`: `default_args = [\"--dangerously-bypass-approvals-and-sandbox\"]`\n   - `copilot.toml`: `default_args = [\"--yolo\"]`, `optional = true`\n   - `gemini.toml`: `default_args = [\"--yolo\"]`, `optional = true`\n   - `kimi.toml`: `default_args = [\"--yolo\"]`, `optional = true`\n   - `gh.toml`: no default_args (just `binary = \"gh\"`)\n   - `opencode.toml`: check if it has autonomous flag\n\n3. Files without executable agents (editors, shell, vscode, etc.) do NOT get `[agent]` section\n\n4. Update `parse-manifest.sh` to extract `[agent]` section fields (or create new parser)\n\n## Acceptance Criteria\n\n- [ ] `[agent]` section added to 6+ manifest files\n- [ ] Schema documented in manifest file comments\n- [ ] Parser can extract agent name, binary, default_args, optional\n- [ ] Existing `[[entries]]` parsing unchanged\n- [ ] Non-agent manifests (shell, vscode, etc.) remain unchanged\n\n## Notes\n\n- TOML arrays use `[\"arg1\", \"arg2\"]` syntax\n- Optional flag defaults to false if not specified\n- Pi agent has `--yolo` flag too (verify)\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.182270Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.1",
+          "fn-51-per-agent-manifest-files-and-launch.2"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.3.md",
+        "status": "todo",
+        "title": "Update generators to read from per-agent manifest files",
+        "updated_at": "2026-02-04T18:57:15.490823Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.3",
+      "runtime": null,
+      "spec": "# Task fn-51.3: Update generators to read from per-agent manifest files\n\n**Status:** pending\n**Depends on:** fn-51.1, fn-51.2\n\n## Objective\n\nUpdate existing generator scripts to read directly from `src/manifests/*.toml` instead of single `sync-manifest.toml`.\n\n## Context\n\nCurrent generators:\n- `gen-dockerfile-symlinks.sh` - generates symlink creation script\n- `gen-init-dirs.sh` - generates directory initialization script\n- `gen-container-link-spec.sh` - generates link spec JSON\n\nAll currently read from single `sync-manifest.toml`. They need to iterate over `src/manifests/*.toml` files directly.\n\n## Implementation\n\n1. Update `src/scripts/parse-manifest.sh`:\n   - Accept directory path OR file path\n   - When given directory, iterate `*.toml` files in sorted order\n   - Skip `[agent]` sections (not needed for sync entries)\n   - Output same format as before\n\n2. Update each generator to use directory mode:\n```bash\n# Before\n./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml output.sh\n\n# After\n./src/scripts/gen-dockerfile-symlinks.sh src/manifests/ output.sh\n```\n\n3. Update `build.sh` to pass directory instead of file:\n```bash\n./src/scripts/gen-dockerfile-symlinks.sh src/manifests artifacts/container-generated/symlinks.sh\n./src/scripts/gen-init-dirs.sh src/manifests artifacts/container-generated/init-dirs.sh\n./src/scripts/gen-container-link-spec.sh src/manifests artifacts/container-generated/link-spec.json\n```\n\n4. Delete `src/sync-manifest.toml` after all generators updated\n\n## Acceptance Criteria\n\n- [ ] `parse-manifest.sh` accepts directory path\n- [ ] All three generators work with `src/manifests/` directory\n- [ ] `build.sh` updated to use directory path\n- [ ] Generated artifacts identical to before (byte-for-byte or equivalent)\n- [ ] `sync-manifest.toml` deleted\n- [ ] Image builds successfully\n\n## Verification\n\n```bash\n# Generate with old method (before deletion)\n./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml /tmp/old-symlinks.sh\n\n# Generate with new method\n./src/scripts/gen-dockerfile-symlinks.sh src/manifests /tmp/new-symlinks.sh\n\n# Compare (should be equivalent)\ndiff /tmp/old-symlinks.sh /tmp/new-symlinks.sh\n```\n\n## Notes\n\n- Sorted order ensures deterministic output\n- `[agent]` sections filtered out by parse-manifest.sh\n- Backward compat: if single file passed, use old behavior\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.262672Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.2",
+          "fn-51-per-agent-manifest-files-and-launch.3"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.4.md",
+        "status": "todo",
+        "title": "Generate launch wrapper functions from manifest [agent] sections",
+        "updated_at": "2026-02-04T18:57:15.647925Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.4",
+      "runtime": null,
+      "spec": "# Task fn-51.4: Generate launch wrapper functions from manifest [agent] sections\n\n**Status:** pending\n**Depends on:** fn-51.2, fn-51.3\n\n## Objective\n\nCreate generator script that produces shell functions for agent launch with default args.\n\n## Context\n\nReplace hardcoded aliases with generated functions that:\n- Prepend default args from manifest\n- Can be extended to run pre-launch hooks (symlink setup)\n- Work in interactive and non-interactive shells\n\n## Implementation\n\n1. Create `src/scripts/gen-agent-wrappers.sh`:\n\n```bash\n#!/usr/bin/env bash\n# Generate agent launch wrapper functions\n# Usage: gen-agent-wrappers.sh <manifests-dir> <output-file>\n#\n# Reads [agent] sections from manifests and generates shell functions\n```\n\n2. Output format (`artifacts/container-generated/agent-wrappers.sh`):\n\n```bash\n# Generated agent launch wrappers\n# Source this file for agent commands with default autonomous flags\n\n# Claude Code\nclaude() {\n    command claude --dangerously-skip-permissions \"$@\"\n}\n\n# Codex\ncodex() {\n    command codex --dangerously-bypass-approvals-and-sandbox \"$@\"\n}\n\n# Gemini (optional)\nif command -v gemini >/dev/null 2>&1; then\ngemini() {\n    command gemini --yolo \"$@\"\n}\nfi\n\n# ... etc\n```\n\n3. Function characteristics:\n   - Use `command` builtin to invoke real binary (avoid recursion)\n   - Optional agents wrapped in `command -v` check\n   - Prepend default_args, then \"$@\" for user args\n   - Comment with agent name before each function\n\n4. Update `Dockerfile.agents`:\n   - Copy generated wrappers to `/etc/profile.d/containai-agents.sh`\n   - Remove hardcoded alias block\n\n5. Update `build.sh` to run generator before Docker build\n\n## Acceptance Criteria\n\n- [ ] `src/scripts/gen-agent-wrappers.sh` created\n- [ ] Generates functions for all agents with `[agent]` section\n- [ ] Optional agents wrapped in command -v check\n- [ ] Output file sourced from `/etc/profile.d/` in container\n- [ ] Functions work in interactive bash\n- [ ] Functions work in SSH non-interactive commands\n\n## Notes\n\n- `/etc/profile.d/` is sourced by login shells\n- For non-login interactive shells, `.bashrc` sources `/etc/profile.d/` on this image\n- `command` builtin prevents function recursion\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.339828Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.4"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.5.md",
+        "status": "todo",
+        "title": "Remove hardcoded aliases from Dockerfile.agents, use generated wrappers",
+        "updated_at": "2026-02-04T18:57:15.723576Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.5",
+      "runtime": null,
+      "spec": "# Task fn-51.5: Remove hardcoded aliases from Dockerfile.agents, use generated wrappers\n\n**Status:** pending\n**Depends on:** fn-51.4\n\n## Objective\n\nReplace hardcoded alias block in Dockerfile with generated wrapper script.\n\n## Context\n\nCurrent Dockerfile.agents lines 161-168:\n```dockerfile\nRUN printf '%s\\n' \\\n    'alias claude=\"claude --dangerously-skip-permissions\"' \\\n    'alias codex=\"codex --dangerously-bypass-approvals-and-sandbox\"' \\\n    ...\n    > /home/agent/.bash_aliases\n```\n\nThis should use the generated wrappers instead.\n\n## Implementation\n\n1. Remove the alias `RUN` block from Dockerfile.agents (lines 157-168)\n\n2. Add new block to copy generated wrappers:\n\n```dockerfile\n# =============================================================================\n# AGENT LAUNCH WRAPPERS\n# Generated from manifest [agent] sections\n# =============================================================================\nCOPY artifacts/container-generated/agent-wrappers.sh /etc/profile.d/containai-agents.sh\n```\n\n3. Ensure wrappers are sourced:\n   - Login shells: `/etc/profile.d/` is automatic\n   - Interactive non-login: `.bashrc` already sources profile.d on this image\n   - Non-interactive SSH: Verify `bash -c` picks up profile.d\n\n4. Update build.sh to generate wrappers before Docker build:\n```bash\n./src/scripts/gen-agent-wrappers.sh src/manifests artifacts/container-generated/agent-wrappers.sh\n```\n\n## Acceptance Criteria\n\n- [ ] Hardcoded alias block removed from Dockerfile.agents\n- [ ] Generated wrappers copied to container\n- [ ] `ssh container claude --help` works (non-interactive)\n- [ ] Interactive `claude --help` works\n- [ ] All agent commands invoke with default autonomous flags\n- [ ] Image builds successfully\n\n## Test Cases\n\n```bash\n# Build image\n./src/build.sh\n\n# Test interactive\ncai run --container test\nssh test 'claude --help'\nssh test 'codex --help'\nssh test 'gemini --help'\n\n# Test non-interactive\nssh test bash -c 'claude --help'\n```\n\n## Notes\n\n- Must run gen-agent-wrappers.sh before Docker build in build.sh\n- Verify kimi-cli alias also works (was `alias kimi-cli=\"kimi-cli --yolo\"`)\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.419861Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.1",
+          "fn-51-per-agent-manifest-files-and-launch.3"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.6.md",
+        "status": "todo",
+        "title": "Add user-defined manifest support from ~/.config/containai/manifests/",
+        "updated_at": "2026-02-04T18:57:15.876163Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.6",
+      "runtime": null,
+      "spec": "# Task fn-51.6: Add user-defined manifest support via runtime hook\n\n**Status:** pending\n**Depends on:** fn-51.1, fn-51.3\n\n## Objective\n\nAllow users to add custom agent manifests that get processed at container startup.\n\n## Context\n\nUsers drop a TOML file in `~/.config/containai/manifests/`, run `cai import`, restart container - their agent just works. No Dockerfile knowledge needed.\n\n## Implementation\n\n1. Add user manifest directory to sync (in common.toml):\n```toml\n[[entries]]\nsource = \".config/containai/manifests\"\ntarget = \"containai/manifests\"\ncontainer_link = \".config/containai/manifests\"\nflags = \"do\"  # directory, optional\n```\n\n2. Update `containai-init.sh` (runs at container startup):\n```bash\n# After built-in setup, check for user manifests\nUSER_MANIFESTS=\"/mnt/agent-data/containai/manifests\"\nif [[ -d \"$USER_MANIFESTS\" ]] && ls \"$USER_MANIFESTS\"/*.toml >/dev/null 2>&1; then\n    # Generate user symlinks (append to link-spec or run directly)\n    /usr/local/lib/containai/gen-user-links.sh \"$USER_MANIFESTS\"\n\n    # Generate user launch wrappers (append to profile.d script)\n    /usr/local/lib/containai/gen-user-wrappers.sh \"$USER_MANIFESTS\"\nfi\n```\n\n3. Create lightweight runtime generators:\n   - `gen-user-links.sh` - creates symlinks for user manifest entries\n   - `gen-user-wrappers.sh` - appends functions to `/etc/profile.d/containai-user-agents.sh`\n\n4. These use same parsing logic as build-time generators but run in container\n\n## Flow\n\n```\ncai run (or cai run --fresh)\n    \u2502\n    \u251c\u2500> import (automatic)\n    \u2502     \u2514\u2500> syncs ~/.config/containai/manifests/ to volume\n    \u2502\n    \u2514\u2500> container starts\n          \u2502\n          \u2514\u2500> containai-init.sh (systemd oneshot)\n                \u2502\n                \u251c\u2500> built-in setup (existing)\n                \u2502\n                \u2514\u2500> if user manifests exist:\n                      \u251c\u2500> gen-user-links.sh creates symlinks\n                      \u2514\u2500> gen-user-wrappers.sh creates functions\n                            \u2502\n                            \u25bc\n                      myagent() wrapper available in shell\n```\n\n## Acceptance Criteria\n\n- [ ] User manifest directory synced to container\n- [ ] `containai-init.sh` checks for user manifests\n- [ ] User symlinks created at startup\n- [ ] User launch wrappers generated at startup\n- [ ] Invalid user manifests logged, don't block startup\n- [ ] Empty directory doesn't cause errors\n- [ ] Works without container rebuild\n\n## User Experience\n\n```bash\n# On host - create manifest once\ncat > ~/.config/containai/manifests/myagent.toml << 'EOF'\n[agent]\nname = \"myagent\"\nbinary = \"myagent\"\ndefault_args = [\"--auto\"]\noptional = true\n\n[[entries]]\nsource = \".myagent/config.json\"\ntarget = \"myagent/config.json\"\ncontainer_link = \".myagent/config.json\"\nflags = \"fjo\"\nEOF\n\n# Works on fresh container (cai run does import automatically)\ncai run --fresh\n\n# In container\nmyagent --help  # works with --auto prepended\nls ~/.myagent/  # symlink exists\n```\n\nNo manual `cai import` needed - `cai run` handles it automatically.\n\n## Notes\n\n- Runtime generators are lightweight (bash, no Python)\n- Reuse `parse-manifest.sh` logic\n- User wrappers go to separate file to avoid clobbering built-in\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.499767Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.1",
+          "fn-51-per-agent-manifest-files-and-launch.3",
+          "fn-51-per-agent-manifest-files-and-launch.6"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.7.md",
+        "status": "todo",
+        "title": "Update check-manifest-consistency.sh for new structure",
+        "updated_at": "2026-02-04T18:57:16.112063Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.7",
+      "runtime": null,
+      "spec": "# Task fn-51.7: Update check-manifest-consistency.sh for new structure\n\n**Status:** pending\n**Depends on:** fn-51.1, fn-51.3, fn-51.6\n\n## Objective\n\nUpdate consistency checker to work with per-agent manifests directory.\n\n## Context\n\nCurrent `scripts/check-manifest-consistency.sh`:\n- Reads entries from `src/sync-manifest.toml`\n- Compares against `_IMPORT_SYNC_MAP` in `src/lib/import.sh`\n- CI enforces this check\n\nNew structure:\n- Source of truth is `src/manifests/*.toml`\n- No intermediate file\n- Import map must still match\n\nNote: User manifests (`~/.config/containai/manifests/`) are runtime-only and don't need CI consistency checks.\n\n## Implementation\n\n1. Update consistency check to:\n   - Read from `src/manifests/*.toml` directly\n   - Compare against `_IMPORT_SYNC_MAP` in import.sh\n   - Report which source file contains mismatches\n\n2. Add validation for per-agent files:\n   - Valid TOML syntax\n   - Required fields present (source, target, flags)\n   - `[agent]` section has required fields if present\n\n3. Update error messages to show source file:\n```\nMISMATCH in claude.toml:\n  Entry: .claude/settings.json\n  Manifest flags: fj\n  Import map flags: f\n```\n\n## Acceptance Criteria\n\n- [ ] Consistency check reads from `src/manifests/` directory\n- [ ] Error messages show source manifest file\n- [ ] TOML syntax validation added\n- [ ] `[agent]` section validation added\n- [ ] CI continues to enforce consistency\n- [ ] Existing mismatches still caught\n\n## Notes\n\n- Remove references to `sync-manifest.toml`\n- Use `parse-manifest.sh` with directory mode\n- User manifests are runtime-only, not checked by CI\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T18:56:51.583829Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.5",
+          "fn-51-per-agent-manifest-files-and-launch.6",
+          "fn-51-per-agent-manifest-files-and-launch.7",
+          "fn-51-per-agent-manifest-files-and-launch.9"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.8.md",
+        "status": "todo",
+        "title": "Update documentation for per-agent manifest structure",
+        "updated_at": "2026-02-04T19:08:07.190274Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.8",
+      "runtime": null,
+      "spec": "# Task fn-51.8: Update documentation for per-agent manifest structure\n\n**Status:** pending\n**Depends on:** fn-51.5, fn-51.6, fn-51.7\n\n## Objective\n\nUpdate all documentation to reflect per-agent manifest structure.\n\n## Files to Update\n\n1. **docs/adding-agents.md** - Contributor guide (for adding built-in agents)\n   - Update directory structure diagram\n   - Change workflow to create per-agent file\n   - Document `[agent]` section format\n   - Update examples to show file-based approach\n   - Remove references to editing monolithic manifest\n\n2. **docs/custom-tools.md** - NEW: User guide for adding custom tools\n   - When to create a manifest vs just use `additional_paths`\n   - Step-by-step: \"I installed tool X, now what?\"\n   - Complete examples for common scenarios\n   - Troubleshooting section\n\n3. **docs/sync-architecture.md** - Technical deep-dive\n   - Document build-time vs runtime generation\n   - Document user manifest processing in containai-init.sh\n\n4. **AGENTS.md** - Quick reference\n   - Update sync manifest path references\n   - Note per-agent structure\n\n5. **src/README.md** - Source layout\n   - Document `src/manifests/` directory\n   - List all manifest files\n\n6. **docs/configuration.md** - User config\n   - Link to custom-tools.md for manifest guide\n   - Document user manifest location briefly\n\n## Content to Add\n\n### Per-Agent Manifest Format\n\n```toml\n# src/manifests/myagent.toml\n# =============================================================================\n# MY AGENT\n# Description and docs link\n# =============================================================================\n\n[agent]\nname = \"myagent\"\nbinary = \"myagent\"\ndefault_args = [\"--auto\"]\noptional = true\n\n[[entries]]\nsource = \".myagent/config.json\"\ntarget = \"myagent/config.json\"\ncontainer_link = \".myagent/config.json\"\nflags = \"fj\"\n```\n\n### User Guide: Adding Custom Tools (docs/custom-tools.md)\n\nTarget audience: Users who installed a tool and want it to work in ContainAI.\n\n**Structure:**\n\n1. **Do I need a manifest?**\n   - Just syncing config files? \u2192 Use `additional_paths` in containai.toml (simpler)\n   - Need launch wrapper with default args? \u2192 Create a manifest\n   - Decision flowchart\n\n2. **Quick Start**\n   ```bash\n   # 1. Find where your tool stores config\n   ls -la ~/.mytool/\n\n   # 2. Create manifest\n   cat > ~/.config/containai/manifests/mytool.toml << 'EOF'\n   [agent]\n   name = \"mytool\"\n   binary = \"mytool\"\n   default_args = [\"--headless\"]\n   optional = true\n\n   [[entries]]\n   source = \".mytool/config.json\"\n   target = \"mytool/config.json\"\n   container_link = \".mytool/config.json\"\n   flags = \"fjo\"\n   EOF\n\n   # 3. Start container - it just works\n   cai run --fresh\n   ```\n\n3. **Common Scenarios**\n   - Tool with single config file\n   - Tool with config directory\n   - Tool with credentials (use `s` flag)\n   - Tool with cache dir (don't sync cache, only config)\n\n4. **Reference**\n   - All flags explained\n   - `[agent]` section fields\n   - Where files end up (host \u2192 volume \u2192 container symlink)\n\n5. **Troubleshooting**\n   - \"Symlink not created\" \u2192 check flags, check source exists\n   - \"Wrapper not working\" \u2192 check binary name, check PATH\n   - \"Config not persisting\" \u2192 check target path\n\n## Acceptance Criteria\n\n- [ ] All docs reference per-agent files, not monolithic manifest\n- [ ] `[agent]` section documented\n- [ ] **docs/custom-tools.md created** with user-friendly guide\n- [ ] Decision flowchart: manifest vs additional_paths\n- [ ] Common scenarios with copy-paste examples\n- [ ] Examples updated in existing docs\n- [ ] No stale references to old structure\n\n## Notes\n\n- Keep docs concise - don't over-document\n- Link to sync-architecture.md for technical details\n- Include practical examples users can copy\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-04T19:07:55.311558Z",
+        "depends_on": [
+          "fn-51-per-agent-manifest-files-and-launch.5",
+          "fn-51-per-agent-manifest-files-and-launch.6",
+          "fn-51-per-agent-manifest-files-and-launch.7"
+        ],
+        "epic": "fn-51-per-agent-manifest-files-and-launch",
+        "id": "fn-51-per-agent-manifest-files-and-launch.9",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.9.md",
+        "status": "todo",
+        "title": "Add tests for per-agent manifests and update directory pollution tests",
+        "updated_at": "2026-02-04T19:08:02.486001Z"
+      },
+      "id": "fn-51-per-agent-manifest-files-and-launch.9",
+      "runtime": null,
+      "spec": "# Task fn-51.9: Add tests for per-agent manifests and update directory pollution tests\n\n**Status:** pending\n**Depends on:** fn-51.5, fn-51.6, fn-51.7\n\n## Objective\n\nAdd comprehensive tests for the new per-agent manifest system and update existing tests.\n\n## Test Categories\n\n### 1. Unit Tests: Manifest Parsing\n\nLocation: `tests/unit/` (new)\n\n```bash\n# Test parse-manifest.sh with directory input\ntest_parse_manifest_directory() {\n    # Setup: create temp manifests dir with test files\n    # Assert: output matches expected entries\n}\n\n# Test [agent] section parsing\ntest_parse_agent_section() {\n    # Assert: name, binary, default_args, optional extracted correctly\n}\n\n# Test invalid TOML handling\ntest_invalid_toml_fails() {\n    # Assert: malformed TOML produces error, doesn't silently skip\n}\n```\n\n### 2. Generator Tests\n\nLocation: `tests/integration/`\n\n```bash\n# Test generators produce equivalent output\ntest_generators_equivalent_output() {\n    # Generate from old sync-manifest.toml (if kept for comparison)\n    # Generate from new src/manifests/\n    # Assert: outputs are equivalent (modulo ordering/comments)\n}\n\n# Test launch wrapper generation\ntest_launch_wrappers_generated() {\n    # Assert: all agents with [agent] section produce wrappers\n    # Assert: default_args included in wrapper\n    # Assert: optional agents have command -v guard\n}\n```\n\n### 3. Integration Tests: Directory Pollution\n\nLocation: `tests/integration/test-sync-integration.sh` (update existing)\n\n```bash\n# Existing test - update to use new structure\ntest_optional_agents_no_empty_dirs() {\n    # Fresh container without optional agent configs on host\n    # Assert: no ~/.gemini, ~/.copilot, ~/.pi, ~/.kimi dirs created\n}\n\n# Test optional flag respected\ntest_optional_flag_skips_missing() {\n    # Host missing ~/.gemini/\n    # Assert: import succeeds, no gemini entries synced\n}\n```\n\n### 4. Integration Tests: User Manifests\n\nLocation: `tests/integration/test-user-manifests.sh` (new)\n\n```bash\n# Test user manifest synced and processed\ntest_user_manifest_processed() {\n    # Create user manifest on host\n    # cai run --fresh\n    # Assert: symlinks created in container\n    # Assert: wrapper function available\n}\n\n# Test invalid user manifest doesn't break startup\ntest_invalid_user_manifest_logged() {\n    # Create malformed user manifest\n    # cai run --fresh\n    # Assert: container starts successfully\n    # Assert: error logged\n}\n\n# Test user manifest with optional binary\ntest_user_manifest_optional_binary() {\n    # User manifest with optional=true, binary not installed\n    # Assert: no wrapper created (no error)\n}\n```\n\n### 5. E2E Tests: Launch Wrappers Work\n\nLocation: `tests/integration/test-launch-wrappers.sh` (new)\n\n```bash\n# Test wrapper prepends default args\ntest_wrapper_prepends_args() {\n    # ssh container 'claude --version'\n    # Assert: works (--dangerously-skip-permissions prepended)\n}\n\n# Test wrapper works in non-interactive SSH\ntest_wrapper_noninteractive_ssh() {\n    # ssh container bash -c 'claude --version'\n    # Assert: wrapper still invoked\n}\n```\n\n## Existing Tests to Update\n\n1. `tests/integration/test-sync-integration.sh`\n   - Update paths from `sync-manifest.toml` to `src/manifests/`\n   - Add directory pollution assertions for optional agents\n\n2. `tests/integration/test-sync-e2e.sh`\n   - Verify still passes with new structure\n\n3. `scripts/check-manifest-consistency.sh`\n   - Already updated in Task 7, verify tests pass\n\n## Acceptance Criteria\n\n- [ ] Unit tests for manifest parsing added\n- [ ] Generator equivalence tests added\n- [ ] Directory pollution tests updated\n- [ ] User manifest integration tests added\n- [ ] Launch wrapper E2E tests added\n- [ ] All existing tests still pass\n- [ ] CI runs new tests\n\n## Notes\n\n- Use existing test patterns from `tests/integration/`\n- Tests should be hermetic (no dependency on host config)\n- Clean up test containers/volumes after each test\n"
+    }
+  ]
+}

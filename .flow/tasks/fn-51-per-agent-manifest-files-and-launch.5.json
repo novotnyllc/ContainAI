@@ -12,5 +12,5 @@
   "spec_path": ".flow/tasks/fn-51-per-agent-manifest-files-and-launch.5.md",
   "status": "todo",
   "title": "Remove hardcoded aliases from Dockerfile.agents, use generated wrappers",
-  "updated_at": "2026-02-04T18:57:15.723576Z"
+  "updated_at": "2026-02-04T19:33:41.704199Z"
 }

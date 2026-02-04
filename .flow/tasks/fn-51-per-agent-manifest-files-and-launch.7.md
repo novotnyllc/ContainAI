@@ -5,53 +5,48 @@
 
 ## Objective
 
-Update consistency checker to work with per-agent manifests directory.
+Update the consistency checker to work with per-agent manifest files and generated import map.
 
 ## Context
 
-Current `scripts/check-manifest-consistency.sh`:
-- Reads entries from `src/sync-manifest.toml`
-- Compares against `_IMPORT_SYNC_MAP` in `src/lib/import.sh`
-- CI enforces this check
-
-New structure:
-- Source of truth is `src/manifests/*.toml`
-- No intermediate file
-- Import map must still match
-
-Note: User manifests (`~/.config/containai/manifests/`) are runtime-only and don't need CI consistency checks.
+`scripts/check-manifest-consistency.sh` verifies that `_IMPORT_SYNC_MAP` in `import.sh` matches the manifest. After splitting manifests and adding import map generation, the checker needs updates.
 
 ## Implementation
 
-1. Update consistency check to:
-   - Read from `src/manifests/*.toml` directly
-   - Compare against `_IMPORT_SYNC_MAP` in import.sh
-   - Report which source file contains mismatches
+1. Update script to read from `src/manifests/` directory instead of single file
 
-2. Add validation for per-agent files:
-   - Valid TOML syntax
-   - Required fields present (source, target, flags)
-   - `[agent]` section has required fields if present
+2. Verify generated `_IMPORT_SYNC_MAP` matches manifest entries:
+   - Run `gen-import-map.sh` to generate expected map
+   - Compare against actual map in `import.sh`
+   - Report mismatches with source file path
 
-3. Update error messages to show source file:
-```
-MISMATCH in claude.toml:
-  Entry: .claude/settings.json
-  Manifest flags: fj
-  Import map flags: f
-```
+3. Add TOML syntax validation for all manifests:
+   - Use `parse-toml.py --validate` mode
+   - Report which file has syntax errors
+
+4. Verify required fields in `[agent]` sections:
+   - `name` required
+   - `binary` required
+   - `default_args` must be array (if present)
+   - `aliases` must be array (if present)
+
+5. Output improvements:
+   - Show which source file contains each mismatch
+   - Clear error messages for TOML syntax errors
+   - Summary at end with pass/fail count
 
 ## Acceptance Criteria
 
-- [ ] Consistency check reads from `src/manifests/` directory
-- [ ] Error messages show source manifest file
-- [ ] TOML syntax validation added
-- [ ] `[agent]` section validation added
-- [ ] CI continues to enforce consistency
-- [ ] Existing mismatches still caught
+- [ ] Script works with `src/manifests/` directory
+- [ ] Validates TOML syntax for all manifest files
+- [ ] Validates `[agent]` section schema
+- [ ] Reports source file for each mismatch
+- [ ] Verifies `_IMPORT_SYNC_MAP` matches generated version
+- [ ] CI integration works (exit code 1 on failure)
+- [ ] Clear, actionable error messages
 
 ## Notes
 
-- Remove references to `sync-manifest.toml`
-- Use `parse-manifest.sh` with directory mode
-- User manifests are runtime-only, not checked by CI
+- Reuse `parse-toml.py` for validation
+- Add `--emit-source-file` support to track entry origins
+- Keep backward compat if possible (single file mode)

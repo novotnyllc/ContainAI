@@ -1,0 +1,35 @@
+# =============================================================================
+# PI (Mario Zechner's pi-coding-agent) - Optional
+# Config location: ~/.pi/agent/
+# Docs: https://github.com/badlogic/pi-mono
+# =============================================================================
+
+[[entries]]
+source = ".pi/agent/settings.json"
+target = "pi/settings.json"
+container_link = ".pi/agent/settings.json"
+flags = "fjo"  # file, json-init, optional
+
+[[entries]]
+source = ".pi/agent/models.json"
+target = "pi/models.json"
+container_link = ".pi/agent/models.json"
+flags = "fjso"  # file, json-init, SECRET, optional
+
+[[entries]]
+source = ".pi/agent/keybindings.json"
+target = "pi/keybindings.json"
+container_link = ".pi/agent/keybindings.json"
+flags = "fjo"  # file, json-init, optional
+
+[[entries]]
+source = ".pi/agent/skills"
+target = "pi/skills"
+container_link = ".pi/agent/skills"
+flags = "dxRo"  # directory, exclude .system/, remove-first, optional
+
+[[entries]]
+source = ".pi/agent/extensions"
+target = "pi/extensions"
+container_link = ".pi/agent/extensions"
+flags = "dRo"  # directory, remove-first, optional
