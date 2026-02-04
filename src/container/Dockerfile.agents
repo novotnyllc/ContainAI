@@ -95,7 +95,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Install Copilot CLI via official installer
 RUN curl -fsSL https://gh.io/copilot-install | bash && \
     # Verify copilot installed correctly
-    copilot --version
+    copilot --version && \
+    # Remove optional agent home dir to avoid pollution when no config is present
+    rm -rf /home/agent/.copilot
 
 # Install OpenCode via official installer
 RUN curl -fsSL https://opencode.ai/install | bash && \

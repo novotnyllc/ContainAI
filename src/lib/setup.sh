@@ -525,6 +525,7 @@ _cai_macos_ensure_homebrew() {
 _cai_macos_ensure_host_tools() {
     local dry_run="${1:-false}"
     local -a missing_pkgs=()
+    local need_qemu=0
 
     if ! command -v jq >/dev/null 2>&1; then
         missing_pkgs+=(jq)
@@ -537,6 +538,14 @@ _cai_macos_ensure_host_tools() {
     fi
     if ! command -v wget >/dev/null 2>&1; then
         missing_pkgs+=(wget)
+    fi
+    if [[ "${CONTAINAI_LIMA_VM_TYPE:-}" == "qemu" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        need_qemu=1
+    fi
+    if [[ $need_qemu -eq 1 ]]; then
+        if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
+            missing_pkgs+=(qemu)
+        fi
     fi
 
     if ((${#missing_pkgs[@]} == 0)); then
@@ -569,6 +578,7 @@ _cai_macos_ensure_host_tools() {
 _cai_install_plan_prepare_macos() {
     local dry_run="${1:-false}"
     local -a brew_missing=()
+    local need_qemu=0
 
     if ! command -v brew >/dev/null 2>&1; then
         _cai_install_plan_add "Homebrew"
@@ -587,6 +597,14 @@ _cai_install_plan_prepare_macos() {
     fi
     if ! command -v limactl >/dev/null 2>&1; then
         brew_missing+=(lima)
+    fi
+    if [[ "${CONTAINAI_LIMA_VM_TYPE:-}" == "qemu" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+        need_qemu=1
+    fi
+    if [[ $need_qemu -eq 1 ]]; then
+        if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
+            brew_missing+=(qemu)
+        fi
     fi
 
     _cai_install_plan_add_list "Homebrew packages" "${brew_missing[@]}"

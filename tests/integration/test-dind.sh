@@ -121,6 +121,11 @@ exec_in_container() {
     docker --context "$CONTEXT_NAME" exec "$TEST_CONTAINER_NAME" "$@"
 }
 
+# Execute command inside the system container with stdin attached
+exec_in_container_stdin() {
+    docker --context "$CONTEXT_NAME" exec -i "$TEST_CONTAINER_NAME" "$@"
+}
+
 # ==============================================================================
 # Test 1: Start system container with sysbox-runc
 # ==============================================================================
@@ -284,7 +289,7 @@ CMD ["echo", "containai-dind-build-test"]'
         return 1
     fi
 
-    if ! printf '%s\n' "$dockerfile_content" | exec_in_container tee /tmp/dind-build-test/Dockerfile >/dev/null; then
+    if ! printf '%s\n' "$dockerfile_content" | exec_in_container_stdin tee /tmp/dind-build-test/Dockerfile >/dev/null; then
         fail "Failed to create Dockerfile in container"
         return 1
     fi
@@ -376,32 +381,47 @@ test_nested_networking() {
 }
 
 # ==============================================================================
-# Test 7: Inner Docker uses sysbox-runc by default (security verification)
+# Test 7: Outer/inner Docker runtime configuration
 # ==============================================================================
 test_inner_docker_runtime() {
-    section "Test 7: Inner Docker runtime configuration"
+    section "Test 7: Outer/inner Docker runtime configuration"
 
-    # Verify inner Docker is configured with sysbox-runc as default
+    # Verify outer (host) container runtime is sysbox-runc
+    local outer_runtime
+    outer_runtime=$(docker --context "$CONTEXT_NAME" inspect --format '{{.HostConfig.Runtime}}' "$TEST_CONTAINER_NAME" 2>/dev/null) || outer_runtime=""
+
+    if [[ "$outer_runtime" == "sysbox-runc" ]]; then
+        pass "Outer container runtime is sysbox-runc"
+    elif [[ -n "$outer_runtime" ]]; then
+        fail "Outer container runtime is $outer_runtime (expected: sysbox-runc)"
+        return 1
+    else
+        fail "Could not determine outer container runtime"
+        return 1
+    fi
+
+    # Inner Docker default runtime should be runc (sysbox-inside-sysbox not supported)
     local default_runtime
     default_runtime=$(exec_in_container docker info --format '{{.DefaultRuntime}}' 2>/dev/null) || default_runtime=""
 
-    if [[ "$default_runtime" == "sysbox-runc" ]]; then
-        pass "Inner Docker uses sysbox-runc as default runtime"
-        info "  This enables secure nested containers"
-    else
-        warn "Inner Docker default runtime: $default_runtime (expected: sysbox-runc)"
+    if [[ "$default_runtime" == "runc" ]]; then
+        pass "Inner Docker default runtime is runc (expected)"
+    elif [[ -n "$default_runtime" ]]; then
+        warn "Inner Docker default runtime: $default_runtime (expected: runc)"
         info "  Nested containers may have different isolation characteristics"
+    else
+        warn "Could not determine inner Docker default runtime"
     fi
 
-    # Verify sysbox-runc is available as a runtime option
+    # Check inner runtimes for sysbox (should generally be absent)
     local runtimes
     runtimes=$(exec_in_container docker info --format '{{json .Runtimes}}' 2>/dev/null) || runtimes="{}"
 
-    if printf '%s' "$runtimes" | grep -q "sysbox-runc"; then
-        pass "sysbox-runc runtime is available in inner Docker"
-    else
-        warn "sysbox-runc not found in inner Docker runtimes"
+    if printf '%s' "$runtimes" | grep -q "sysbox"; then
+        warn "sysbox runtime exposed in inner Docker (unexpected)"
         info "  Available runtimes: $runtimes"
+    else
+        pass "sysbox runtime not exposed in inner Docker (expected)"
     fi
 }
 
