@@ -141,10 +141,11 @@ parse_entries() {
             printf '%s|%s|%s\n' "$target" "$container_link" "$flags"
         elif [[ $found_entries -eq 1 ]]; then
             # Found [[entries]] but missing required fields - log to stderr
+            # Note: log() already writes to stderr
             if [[ -z "$target" ]]; then
-                log "[WARN] Entry missing required 'target' field - skipping" >&2
+                log "[WARN] Entry missing required 'target' field - skipping"
             elif [[ -z "$container_link" ]]; then
-                log "[WARN] Entry missing required 'container_link' field - skipping" >&2
+                log "[WARN] Entry missing required 'container_link' field - skipping"
             fi
         fi
         target=""
@@ -263,10 +264,10 @@ for manifest in "${MANIFEST_FILES[@]}"; do
     log "[INFO] Processing user manifest: $manifest_basename"
 
     # Parse entries from manifest
-    # Capture stdout (entries) separately from return code
+    # Capture stdout (entries) only - let warnings go to stderr
     entries_output=""
     parse_rc=0
-    entries_output=$(parse_entries "$manifest" 2>&1) || parse_rc=$?
+    entries_output=$(parse_entries "$manifest") || parse_rc=$?
 
     if [[ $parse_rc -ne 0 ]]; then
         log "[WARN] Invalid TOML syntax in $manifest_basename - skipping file"

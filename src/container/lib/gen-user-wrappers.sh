@@ -78,6 +78,11 @@ parse_agent_section() {
             if [[ $in_agent -eq 1 ]]; then
                 # Check if we got required fields
                 if [[ -n "$name" && -n "$binary" ]]; then
+                    # Check for unparsed lines indicating invalid TOML
+                    if [[ $unparsed_lines -gt 0 ]]; then
+                        printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
+                        return 3
+                    fi
                     printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
                     return 0
                 elif [[ $found_agent_section -eq 1 ]]; then
