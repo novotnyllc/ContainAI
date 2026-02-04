@@ -126,16 +126,26 @@ validate_flags() {
 
 # Parse [[entries]] from a single manifest file
 # Outputs: target|container_link|flags (one per entry with container_link)
+# Returns 0 on success, 1 if TOML parsing errors detected
 parse_entries() {
     local manifest_file="$1"
     local in_entries=0
     local in_agent=0
     local target="" container_link="" flags=""
     local line key value
+    local unparsed_lines=0
+    local found_entries=0
 
     emit_entry() {
         if [[ -n "$container_link" && -n "$target" ]]; then
             printf '%s|%s|%s\n' "$target" "$container_link" "$flags"
+        elif [[ $found_entries -eq 1 ]]; then
+            # Found [[entries]] but missing required fields - log to stderr
+            if [[ -z "$target" ]]; then
+                log "[WARN] Entry missing required 'target' field - skipping" >&2
+            elif [[ -z "$container_link" ]]; then
+                log "[WARN] Entry missing required 'container_link' field - skipping" >&2
+            fi
         fi
         target=""
         container_link=""
@@ -156,6 +166,7 @@ parse_entries() {
                 emit_entry
             fi
             in_entries=1
+            found_entries=1
             in_agent=0
             continue
         fi
@@ -179,15 +190,24 @@ parse_entries() {
         # Skip lines if not in [[entries]] section
         [[ $in_entries -eq 0 ]] && continue
 
+        # Track if line was parsed
+        local parsed=0
+
         # Parse key = "value" (quoted string)
         if [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\"[[:space:]]*(#.*)?$ ]]; then
             key="${BASH_REMATCH[1]}"
             value="${BASH_REMATCH[2]}"
+            parsed=1
             case "$key" in
                 target) target="$value" ;;
                 container_link) container_link="$value" ;;
                 flags) flags="$value" ;;
             esac
+        fi
+
+        # Track unparsed lines that look like key=value (potential TOML errors)
+        if [[ $parsed -eq 0 && "$line" == *"="* ]]; then
+            unparsed_lines=$((unparsed_lines + 1))
         fi
     done < "$manifest_file"
 
@@ -195,6 +215,12 @@ parse_entries() {
     if [[ $in_entries -eq 1 ]]; then
         emit_entry
     fi
+
+    # Return non-zero if we detected unparseable TOML-like lines
+    if [[ $unparsed_lines -gt 0 ]]; then
+        return 1
+    fi
+    return 0
 }
 
 # Main
@@ -236,10 +262,14 @@ for manifest in "${MANIFEST_FILES[@]}"; do
     manifest_basename=$(basename "$manifest")
     log "[INFO] Processing user manifest: $manifest_basename"
 
-    # Parse entries from manifest (capture output with error check)
+    # Parse entries from manifest
+    # Capture stdout (entries) separately from return code
     entries_output=""
-    if ! entries_output=$(parse_entries "$manifest" 2>&1); then
-        log "[WARN] Failed to parse manifest: $manifest_basename - skipping"
+    parse_rc=0
+    entries_output=$(parse_entries "$manifest" 2>&1) || parse_rc=$?
+
+    if [[ $parse_rc -ne 0 ]]; then
+        log "[WARN] Invalid TOML syntax in $manifest_basename - skipping file"
         errors_count=$((errors_count + 1))
         continue
     fi

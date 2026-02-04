@@ -143,6 +143,12 @@ parse_agent_section() {
 
     # Emit if we reached EOF while in [agent] section
     if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" ]]; then
+        # Check for unparsed lines indicating invalid TOML
+        if [[ $unparsed_lines -gt 0 ]]; then
+            # Valid agent found but file has TOML errors - return 3 to indicate warning
+            printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
+            return 3
+        fi
         printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
         return 0
     elif [[ $found_agent_section -eq 1 ]]; then
@@ -204,6 +210,10 @@ for manifest in "${MANIFEST_FILES[@]}"; do
             ;;
         2)
             # No [agent] section - that's fine, not all manifests have agents
+            ;;
+        3)
+            # Valid agent found but file has TOML errors - skip to comply with spec
+            log "[WARN] Invalid TOML syntax in $(basename "$manifest") - skipping file"
             ;;
         *)
             # Parse error
