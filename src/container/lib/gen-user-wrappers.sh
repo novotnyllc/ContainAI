@@ -49,11 +49,13 @@ validate_identifier() {
 # Parse [agent] section from a single manifest file
 # Outputs: name|binary|default_args|aliases|optional
 # where default_args and aliases are comma-separated
-# Returns 0 if valid agent found, 1 if [agent] section found but invalid, 2 if no [agent]
+# Returns 0 if valid agent found, 1 if [agent] section found but invalid, 2 if no [agent], 3 if TOML errors
+# IMPORTANT: Scans entire file to validate ALL lines before returning
 parse_agent_section() {
     local manifest_file="$1"
     local in_agent=0
     local found_agent_section=0
+    local agent_complete=0
     local name="" binary="" default_args="" aliases="" optional="false"
     local line key value
     local unparsed_lines=0
@@ -73,24 +75,13 @@ parse_agent_section() {
             continue
         fi
 
-        # Exit [agent] section on any other section header
+        # Track section transitions (but don't return - continue scanning)
         if [[ "$line" == "["*"]" || "$line" == "[["*"]]" ]]; then
             if [[ $in_agent -eq 1 ]]; then
-                # Check if we got required fields
-                if [[ -n "$name" && -n "$binary" ]]; then
-                    # Check for unparsed lines indicating invalid TOML
-                    if [[ $unparsed_lines -gt 0 ]]; then
-                        printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
-                        return 3
-                    fi
-                    printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
-                    return 0
-                elif [[ $found_agent_section -eq 1 ]]; then
-                    # Found [agent] but missing required fields
-                    return 1
-                fi
-                return 2
+                # Mark agent section as complete (we have the data)
+                agent_complete=1
             fi
+            in_agent=0
             continue
         fi
 
@@ -157,14 +148,18 @@ parse_agent_section() {
         fi
     done < "$manifest_file"
 
-    # Emit if we reached EOF while in [agent] section
-    if [[ $in_agent -eq 1 && -n "$name" && -n "$binary" ]]; then
-        # Check for unparsed lines indicating invalid TOML
-        if [[ $unparsed_lines -gt 0 ]]; then
-            # Valid agent found but file has TOML errors - return 3 to indicate warning
+    # After scanning entire file, check for TOML errors first
+    if [[ $unparsed_lines -gt 0 ]]; then
+        # File has TOML errors
+        if [[ -n "$name" && -n "$binary" ]]; then
+            # Valid agent found but file has TOML errors - output agent but return error code
             printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
-            return 3
         fi
+        return 3
+    fi
+
+    # No TOML errors - check if we found a valid agent
+    if [[ -n "$name" && -n "$binary" ]]; then
         printf '%s|%s|%s|%s|%s\n' "$name" "$binary" "$default_args" "$aliases" "$optional"
         return 0
     elif [[ $found_agent_section -eq 1 ]]; then
