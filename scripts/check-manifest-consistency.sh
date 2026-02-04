@@ -54,6 +54,18 @@ normalize_flags() {
     printf '%s' "$result"
 }
 
+# Verify manifests exist before parsing
+if ! compgen -G "${MANIFESTS_DIR}/*.toml" >/dev/null; then
+    printf 'ERROR: no .toml files found in manifests directory: %s\n' "$MANIFESTS_DIR" >&2
+    exit 2
+fi
+
+# Parse manifest with explicit error check (process substitution hides failures)
+MANIFEST_OUTPUT=$("$PARSE_SCRIPT" "$MANIFESTS_DIR") || {
+    printf 'ERROR: parse-manifest.sh failed\n' >&2
+    exit 2
+}
+
 # Parse manifest into associative array: key=source, value="target:flags"
 declare -A manifest_entries
 while IFS='|' read -r source target container_link flags disabled entry_type optional; do
@@ -68,7 +80,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
 
     norm_flags=$(normalize_flags "$flags")
     manifest_entries["$source"]="$target:$norm_flags"
-done < <("$PARSE_SCRIPT" "$MANIFESTS_DIR")
+done <<< "$MANIFEST_OUTPUT"
 
 # Extract _IMPORT_SYNC_MAP entries from import.sh
 # Format: "/source/<path>:/target/<path>:<flags>"

@@ -48,8 +48,8 @@ fi
 MANIFEST_FILES=()
 if [[ -d "$MANIFEST_PATH" ]]; then
     # Directory mode: iterate *.toml files in sorted order
-    # Use bash globbing which is already lexicographically sorted (portable)
-    # LC_ALL=C ensures consistent ordering across locales
+    # Use bash globbing and LC_ALL=C for consistent ordering across locales
+    # Glob order is locale-dependent, so we sort explicitly
     shopt -s nullglob
     for file in "$MANIFEST_PATH"/*.toml; do
         MANIFEST_FILES+=("$file")
@@ -60,7 +60,12 @@ if [[ -d "$MANIFEST_PATH" ]]; then
         exit 1
     fi
     # Sort the array for deterministic order (LC_ALL=C for consistency)
-    mapfile -t MANIFEST_FILES < <(printf '%s\n' "${MANIFEST_FILES[@]}" | LC_ALL=C sort)
+    # Capture sort output with explicit error check
+    sorted_files=$(printf '%s\n' "${MANIFEST_FILES[@]}" | LC_ALL=C sort) || {
+        printf 'ERROR: failed to sort manifest files\n' >&2
+        exit 1
+    }
+    mapfile -t MANIFEST_FILES <<< "$sorted_files"
 elif [[ -f "$MANIFEST_PATH" ]]; then
     # Single file mode (backward compatibility)
     MANIFEST_FILES=("$MANIFEST_PATH")

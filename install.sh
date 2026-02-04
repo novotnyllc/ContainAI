@@ -646,6 +646,10 @@ install_from_local() {
     chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
 
     # Manifests directory
+    if ! compgen -G "$SCRIPT_DIR/manifests/*.toml" >/dev/null; then
+        error "No manifest files found in $SCRIPT_DIR/manifests/"
+        exit 1
+    fi
     cp "$SCRIPT_DIR/manifests/"*.toml "$INSTALL_DIR/manifests/"
 
     # Templates

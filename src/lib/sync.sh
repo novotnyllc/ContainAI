@@ -378,11 +378,11 @@ _cai_sync_cmd() {
         return 1
     fi
 
-    # Find manifest and parser
+    # Find manifests directory and parser
     local manifest
     local parser
     if ! manifest="$(_cai_sync_get_manifest)"; then
-        printf '[ERROR] Cannot find sync-manifest.toml\n' >&2
+        printf '[ERROR] Cannot find manifests directory (searched: %s, %s/manifests)\n' "$_CAI_SYNC_MANIFESTS" "${_CAI_SCRIPT_DIR:-}" >&2
         return 1
     fi
     if ! parser="$(_cai_sync_get_parse_script)"; then

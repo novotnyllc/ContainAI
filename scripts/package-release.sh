@@ -20,7 +20,7 @@
 #   ├── lib/                    # Shell libraries
 #   ├── scripts/
 #   │   └── parse-manifest.sh   # ONLY this runtime script
-#   ├── sync-manifest.toml      # Required by sync.sh
+#   ├── manifests/              # Per-agent manifest files (required by sync.sh)
 #   ├── templates/              # User templates
 #   ├── acp-proxy               # AOT binary
 #   ├── install.sh              # Installer (works locally)
@@ -144,6 +144,10 @@ chmod +x "$PACKAGE_DIR/scripts/parse-manifest.sh"
 
 # Copy manifests directory (runtime dependency of sync.sh)
 printf '  Copying manifests/...\n'
+if ! compgen -G "$SRC_DIR/manifests/*.toml" >/dev/null; then
+    printf 'ERROR: no .toml files found in manifests directory: %s/manifests/\n' "$SRC_DIR" >&2
+    exit 1
+fi
 cp "$SRC_DIR/manifests/"*.toml "$PACKAGE_DIR/manifests/"
 
 # Copy templates
