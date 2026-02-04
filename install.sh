@@ -618,7 +618,7 @@ install_from_local() {
 
         # For updates, wipe the runtime directories to remove stale files
         # Keep the install dir itself but remove subdirs we manage
-        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" 2>/dev/null || true
+        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" "${INSTALL_DIR:?}/manifests" 2>/dev/null || true
     else
         IS_FRESH_INSTALL="true"
         info "Installing to $INSTALL_DIR"
@@ -629,6 +629,7 @@ install_from_local() {
     mkdir -p "$INSTALL_DIR/lib"
     mkdir -p "$INSTALL_DIR/scripts"
     mkdir -p "$INSTALL_DIR/templates"
+    mkdir -p "$INSTALL_DIR/manifests"
 
     # Copy files from tarball to install directory
     info "Copying files..."
@@ -644,8 +645,8 @@ install_from_local() {
     cp "$SCRIPT_DIR/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
     chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
 
-    # Sync manifest
-    cp "$SCRIPT_DIR/sync-manifest.toml" "$INSTALL_DIR/"
+    # Manifests directory
+    cp "$SCRIPT_DIR/manifests/"*.toml "$INSTALL_DIR/manifests/"
 
     # Templates
     if [[ -d "$SCRIPT_DIR/templates" ]]; then

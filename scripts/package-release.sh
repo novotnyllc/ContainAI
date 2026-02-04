@@ -126,6 +126,7 @@ mkdir -p "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/lib"
 mkdir -p "$PACKAGE_DIR/scripts"
 mkdir -p "$PACKAGE_DIR/templates"
+mkdir -p "$PACKAGE_DIR/manifests"
 
 # Copy main CLI entry point
 printf '  Copying containai.sh...\n'
@@ -141,9 +142,9 @@ printf '  Copying scripts/parse-manifest.sh...\n'
 cp "$SRC_DIR/scripts/parse-manifest.sh" "$PACKAGE_DIR/scripts/"
 chmod +x "$PACKAGE_DIR/scripts/parse-manifest.sh"
 
-# Copy sync-manifest.toml (runtime dependency of sync.sh)
-printf '  Copying sync-manifest.toml...\n'
-cp "$SRC_DIR/sync-manifest.toml" "$PACKAGE_DIR/"
+# Copy manifests directory (runtime dependency of sync.sh)
+printf '  Copying manifests/...\n'
+cp "$SRC_DIR/manifests/"*.toml "$PACKAGE_DIR/manifests/"
 
 # Copy templates
 printf '  Copying templates/...\n'

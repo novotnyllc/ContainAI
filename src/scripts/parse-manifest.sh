@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# Parse sync-manifest.toml and output entries in machine-readable format
+# Parse manifest TOML files and output entries in machine-readable format
 # Usage: parse-manifest.sh [--include-disabled] [--emit-source-file] <manifest_path_or_dir>
+#
+# Accepts either:
+#   - A single .toml file (backward compatibility)
+#   - A directory containing *.toml files (iterated in sorted order)
+#
 # Output: One line per entry with fields: source|target|container_link|flags|disabled|type|optional[|source_file]
 #   type: "entry" for [[entries]], "symlink" for [[container_symlinks]]
 #   disabled: "true" or "false"
 #   optional: "true" if flags contains 'o', "false" otherwise
 #   source_file: path to originating manifest file (only with --emit-source-file)
+#
 # By default, disabled entries are excluded. Use --include-disabled to include them.
 # When given a directory, iterates *.toml files in sorted order for deterministic output.
 # The [agent] section is skipped (not needed for sync entries).
@@ -42,14 +48,19 @@ fi
 MANIFEST_FILES=()
 if [[ -d "$MANIFEST_PATH" ]]; then
     # Directory mode: iterate *.toml files in sorted order
-    # Note: read returns non-zero on EOF, so we guard with || true
-    while IFS= read -r -d '' file || [[ -n "$file" ]]; do
+    # Use bash globbing which is already lexicographically sorted (portable)
+    # LC_ALL=C ensures consistent ordering across locales
+    shopt -s nullglob
+    for file in "$MANIFEST_PATH"/*.toml; do
         MANIFEST_FILES+=("$file")
-    done < <(find "$MANIFEST_PATH" -maxdepth 1 -name '*.toml' -type f -print0 | sort -z)
+    done
+    shopt -u nullglob
     if [[ ${#MANIFEST_FILES[@]} -eq 0 ]]; then
         printf 'ERROR: no .toml files found in directory: %s\n' "$MANIFEST_PATH" >&2
         exit 1
     fi
+    # Sort the array for deterministic order (LC_ALL=C for consistency)
+    mapfile -t MANIFEST_FILES < <(printf '%s\n' "${MANIFEST_FILES[@]}" | LC_ALL=C sort)
 elif [[ -f "$MANIFEST_PATH" ]]; then
     # Single file mode (backward compatibility)
     MANIFEST_FILES=("$MANIFEST_PATH")

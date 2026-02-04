@@ -33,6 +33,12 @@ fi
 DATA_MOUNT="/mnt/agent-data"
 HOME_DIR="/home/agent"
 
+# Parse manifest with explicit error check (process substitution hides failures)
+MANIFEST_OUTPUT=$("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH") || {
+    printf 'ERROR: parse-manifest.sh failed\n' >&2
+    exit 1
+}
+
 # Collect link specs
 declare -a links=()
 
@@ -60,7 +66,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     link_json="    {\"link\": \"${container_path_escaped}\", \"target\": \"${volume_path_escaped}\", \"remove_first\": ${needs_rm}}"
     links+=("$link_json")
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
+done <<< "$MANIFEST_OUTPUT"
 
 # Write output
 {

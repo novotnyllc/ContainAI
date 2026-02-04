@@ -39,6 +39,12 @@ fi
 # Constants
 DATA_DIR="\${DATA_DIR}"
 
+# Parse manifest with explicit error check (process substitution hides failures)
+MANIFEST_OUTPUT=$("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH") || {
+    printf 'ERROR: parse-manifest.sh failed\n' >&2
+    exit 1
+}
+
 # Collect directories and files
 declare -a dir_cmds=()
 declare -a file_cmds=()
@@ -96,7 +102,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
         fi
     fi
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
+done <<< "$MANIFEST_OUTPUT"
 
 # Also process container_symlinks section for volume-only entries
 while IFS='|' read -r source target container_link flags disabled entry_type optional; do
@@ -119,7 +125,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
         fi
     fi
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
+done <<< "$MANIFEST_OUTPUT"
 
 # Write output
 {

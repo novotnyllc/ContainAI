@@ -18,8 +18,8 @@
 # Data directory constant
 readonly _CAI_SYNC_DATA_DIR="/mnt/agent-data"
 
-# Manifest location (built into container image)
-readonly _CAI_SYNC_MANIFEST="/opt/containai/sync-manifest.toml"
+# Manifests directory (built into container image)
+readonly _CAI_SYNC_MANIFESTS="/opt/containai/manifests"
 
 # Parse manifest script location (container vs development)
 _cai_sync_get_parse_script() {
@@ -37,17 +37,18 @@ _cai_sync_get_parse_script() {
     fi
 }
 
-# Get manifest path (container vs development)
+# Get manifests path (container vs development)
+# Returns a directory containing *.toml manifest files
 _cai_sync_get_manifest() {
     # In container, use installed location first
-    if [[ -f "$_CAI_SYNC_MANIFEST" ]]; then
-        printf '%s' "$_CAI_SYNC_MANIFEST"
+    if [[ -d "$_CAI_SYNC_MANIFESTS" ]]; then
+        printf '%s' "$_CAI_SYNC_MANIFESTS"
     # In development, use repo location
-    elif [[ -f "${_CAI_SCRIPT_DIR}/sync-manifest.toml" ]]; then
-        printf '%s' "${_CAI_SCRIPT_DIR}/sync-manifest.toml"
+    elif [[ -d "${_CAI_SCRIPT_DIR}/manifests" ]]; then
+        printf '%s' "${_CAI_SCRIPT_DIR}/manifests"
     # Fallback - try parent directory
-    elif [[ -f "${_CAI_SCRIPT_DIR}/../sync-manifest.toml" ]]; then
-        printf '%s' "${_CAI_SCRIPT_DIR}/../sync-manifest.toml"
+    elif [[ -d "${_CAI_SCRIPT_DIR}/../manifests" ]]; then
+        printf '%s' "${_CAI_SCRIPT_DIR}/../manifests"
     else
         return 1
     fi

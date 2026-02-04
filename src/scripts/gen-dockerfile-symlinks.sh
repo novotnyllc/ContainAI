@@ -41,6 +41,12 @@ fi
 DATA_MOUNT="/mnt/agent-data"
 HOME_DIR="/home/agent"
 
+# Parse manifest with explicit error check (process substitution hides failures)
+MANIFEST_OUTPUT=$("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH") || {
+    printf 'ERROR: parse-manifest.sh failed\n' >&2
+    exit 1
+}
+
 # Collect mkdir commands and symlink commands
 declare -a mkdir_targets=()
 declare -a symlink_cmds=()
@@ -79,7 +85,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     # R flag means "remove existing path first" for any entry type (file or directory)
     symlink_cmds+=("${volume_path}|${container_path}|${needs_rm}")
 # Include disabled entries - they document optional paths that may be imported via additional_paths
-done < <("$PARSE_SCRIPT" --include-disabled "$MANIFEST_PATH")
+done <<< "$MANIFEST_OUTPUT"
 
 # Deduplicate mkdir targets
 declare -A seen_dirs=()

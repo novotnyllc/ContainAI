@@ -474,6 +474,11 @@ generate_container_files() {
     cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
 
     # Verify generated files are newer than any manifest (staleness check)
+    # First check that manifests exist
+    if ! compgen -G "${manifests_dir}/*.toml" >/dev/null; then
+        printf 'ERROR: no .toml files found in manifests directory: %s\n' "$manifests_dir" >&2
+        return 1
+    fi
     local newest_manifest_mtime=0
     local manifest_mtime gen_file_mtime
     for manifest in "${manifests_dir}"/*.toml; do

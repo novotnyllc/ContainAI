@@ -40,10 +40,14 @@ else
     HEADER_SOURCE="$(basename "$MANIFEST_PATH")"
 fi
 
+# Parse manifest with explicit error check (process substitution hides failures)
+MANIFEST_OUTPUT=$("$PARSE_SCRIPT" "$MANIFEST_PATH") || {
+    printf 'ERROR: parse-manifest.sh failed\n' >&2
+    exit 1
+}
+
 # Collect entries
 declare -a entries=()
-declare -a comments=()
-current_section=""
 
 while IFS='|' read -r source target container_link flags disabled entry_type optional; do
     # Skip disabled entries (they're not in _IMPORT_SYNC_MAP)
@@ -52,8 +56,12 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     # Skip container_symlinks (no import entry)
     [[ "$entry_type" == "symlink" ]] && continue
 
-    # Skip entries without target
+    # Skip entries without target or source
     [[ -z "$target" ]] && continue
+    [[ -z "$source" ]] && continue
+
+    # Skip dynamic pattern entries (G flag) - discovered at runtime
+    [[ "$flags" == *G* ]] && continue
 
     # Skip entries with 'g' flag (git-filter) - handled separately by _cai_import_git_config()
     [[ "$flags" == *g* ]] && continue
@@ -64,7 +72,7 @@ while IFS='|' read -r source target container_link flags disabled entry_type opt
     # Build the entry in format: /source/<source>:/target/<target>:<flags>
     entry="/source/${source}:/target/${target}:${import_flags}"
     entries+=("$entry")
-done < <("$PARSE_SCRIPT" "$MANIFEST_PATH")
+done <<< "$MANIFEST_OUTPUT"
 
 # Generate output
 generate_output() {
