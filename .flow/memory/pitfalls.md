@@ -452,3 +452,6 @@ Shell wrapper alias functions must call the primary binary (command $binary), no
 
 ## 2026-02-04 manual [pitfall]
 With set -euo pipefail, diagnostic pipelines (cmd | head) for already-failed commands need || true to prevent script exit
+
+## 2026-02-04 manual [pitfall]
+Bash 'read -ra array <<< "$empty_var"' creates array with one empty element, not empty array; guard before loop
