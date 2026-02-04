@@ -4,6 +4,13 @@
 # Docs: https://github.com/badlogic/pi-mono
 # =============================================================================
 
+[agent]
+name = "pi"
+binary = "pi"
+default_args = ["--yolo"]
+aliases = []
+optional = true
+
 [[entries]]
 source = ".pi/agent/settings.json"
 target = "pi/settings.json"

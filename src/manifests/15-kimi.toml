@@ -4,6 +4,13 @@
 # Docs: https://github.com/MoonshotAI/kimi-cli
 # =============================================================================
 
+[agent]
+name = "kimi"
+binary = "kimi"
+default_args = ["--yolo"]
+aliases = ["kimi-cli"]
+optional = true
+
 [[entries]]
 source = ".kimi/config.toml"
 target = "kimi/config.toml"

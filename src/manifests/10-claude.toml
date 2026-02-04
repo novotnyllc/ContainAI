@@ -2,6 +2,13 @@
 # CLAUDE CODE
 # =============================================================================
 
+[agent]
+name = "claude"
+binary = "claude"
+default_args = ["--dangerously-skip-permissions"]
+aliases = []
+optional = false
+
 [[entries]]
 source = ".claude.json"
 target = "claude/claude.json"

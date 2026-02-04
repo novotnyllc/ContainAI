@@ -970,6 +970,130 @@ def set_workspace_key(file_path: Path, workspace_path: str, key: str, value: str
     return True
 
 
+def validate_agent_section(config: dict, source_file: str) -> dict | None:
+    """
+    Validate and extract the [agent] section from a manifest config.
+
+    Args:
+        config: The parsed TOML config dict
+        source_file: The source file path (for error messages and output)
+
+    Returns:
+        Validated agent config dict with fields:
+        - name: str (required)
+        - binary: str (required)
+        - default_args: list[str] (required, can be empty)
+        - aliases: list[str] (optional, defaults to [])
+        - optional: bool (optional, defaults to False)
+        - source_file: str (the source file path)
+        Returns None if [agent] section is missing.
+
+    Raises:
+        SystemExit: If validation fails for required fields or types
+    """
+    agent_section = config.get("agent")
+
+    # Missing [agent] section - return None (not error)
+    if agent_section is None:
+        return None
+
+    # [agent] exists but is not a dict - error
+    if not isinstance(agent_section, dict):
+        print(f"Error: [agent] section must be a table/dict in {source_file}", file=sys.stderr)
+        sys.exit(1)
+
+    result = {"source_file": source_file}
+
+    # Validate 'name' - required, must be string
+    name = agent_section.get("name")
+    if name is None:
+        print(f"Error: [agent].name is required in {source_file}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(name, str):
+        print(
+            f"Error: [agent].name must be a string, got {type(name).__name__} in {source_file}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not name:
+        print(f"Error: [agent].name cannot be empty in {source_file}", file=sys.stderr)
+        sys.exit(1)
+    result["name"] = name
+
+    # Validate 'binary' - required, must be string
+    binary = agent_section.get("binary")
+    if binary is None:
+        print(f"Error: [agent].binary is required in {source_file}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(binary, str):
+        print(
+            f"Error: [agent].binary must be a string, got {type(binary).__name__} in {source_file}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not binary:
+        print(f"Error: [agent].binary cannot be empty in {source_file}", file=sys.stderr)
+        sys.exit(1)
+    result["binary"] = binary
+
+    # Validate 'default_args' - required, must be list of strings
+    default_args = agent_section.get("default_args")
+    if default_args is None:
+        print(f"Error: [agent].default_args is required in {source_file}", file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(default_args, list):
+        print(
+            f"Error: [agent].default_args must be a list, got {type(default_args).__name__} in {source_file}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    # Validate each item is a string
+    validated_args = []
+    for i, item in enumerate(default_args):
+        if not isinstance(item, str):
+            print(
+                f"Error: [agent].default_args[{i}] must be a string, got {type(item).__name__} in {source_file}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        validated_args.append(item)
+    result["default_args"] = validated_args
+
+    # Validate 'aliases' - optional, must be list of strings, defaults to []
+    aliases = agent_section.get("aliases", [])
+    if not isinstance(aliases, list):
+        print(
+            f"Error: [agent].aliases must be a list, got {type(aliases).__name__} in {source_file}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    validated_aliases = []
+    for i, item in enumerate(aliases):
+        if not isinstance(item, str):
+            print(
+                f"Error: [agent].aliases[{i}] must be a string, got {type(item).__name__} in {source_file}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not item:
+            print(f"Error: [agent].aliases[{i}] cannot be empty in {source_file}", file=sys.stderr)
+            sys.exit(1)
+        validated_aliases.append(item)
+    result["aliases"] = validated_aliases
+
+    # Validate 'optional' - optional, must be boolean, defaults to False
+    optional = agent_section.get("optional", False)
+    if not isinstance(optional, bool):
+        print(
+            f"Error: [agent].optional must be a boolean, got {type(optional).__name__} in {source_file}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    result["optional"] = optional
+
+    return result
+
+
 class ErrorExitParser(argparse.ArgumentParser):
     """ArgumentParser that exits with code 1 on errors (not 2)."""
 
@@ -1040,6 +1164,11 @@ def main():
         metavar="KEY",
         help="Unset a global key: --unset-key key",
     )
+    parser.add_argument(
+        "--emit-agents",
+        action="store_true",
+        help="Extract and validate [agent] section from manifest file (output as JSON, null if missing)",
+    )
 
     args = parser.parse_args()
 
@@ -1056,11 +1185,12 @@ def main():
             args.unset_workspace_key is not None,
             args.set_key is not None,
             args.unset_key is not None,
+            args.emit_agents,
         ]
     )
     if mode_count == 0:
         print(
-            "Error: Must specify one of --key, --json, --exists, --env, --get-workspace, --set-workspace-key, --unset-workspace-key, --set-key, or --unset-key",
+            "Error: Must specify one of --key, --json, --exists, --env, --get-workspace, --set-workspace-key, --unset-workspace-key, --set-key, --unset-key, or --emit-agents",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1160,6 +1290,17 @@ def main():
             print(json.dumps(env_config, separators=(",", ":")))
         except Exception as e:
             print(f"Error: Cannot serialize env config: {e}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
+    # Handle --emit-agents mode (extract and validate [agent] section)
+    if args.emit_agents:
+        agent_config = validate_agent_section(config, args.file)
+        # Output as JSON: validated dict or null if section missing
+        try:
+            print(json.dumps(agent_config, separators=(",", ":")))
+        except Exception as e:
+            print(f"Error: Cannot serialize agent config: {e}", file=sys.stderr)
             sys.exit(1)
         sys.exit(0)
 

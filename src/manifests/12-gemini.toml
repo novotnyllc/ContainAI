@@ -2,6 +2,13 @@
 # GEMINI (optional - only sync if user has it configured)
 # =============================================================================
 
+[agent]
+name = "gemini"
+binary = "gemini"
+default_args = ["--yolo"]
+aliases = []
+optional = true
+
 [[entries]]
 source = ".gemini/google_accounts.json"
 target = "gemini/google_accounts.json"

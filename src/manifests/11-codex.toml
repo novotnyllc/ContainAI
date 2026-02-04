@@ -2,6 +2,13 @@
 # CODEX
 # =============================================================================
 
+[agent]
+name = "codex"
+binary = "codex"
+default_args = ["--dangerously-bypass-approvals-and-sandbox"]
+aliases = []
+optional = false
+
 [[entries]]
 source = ".codex/config.toml"
 target = "codex/config.toml"
