@@ -1671,7 +1671,11 @@ ensure() {
         *s*)
             case "$_flags" in
                 *d*) chmod 700 "$_path" ;;
-                *f*) chmod 600 "$_path" ;;
+                *f*)
+                    chmod 600 "$_path"
+                    # Also restrict parent directory of secret files to 700
+                    chmod 700 "${_path%/*}"
+                    ;;
             esac
             ;;
     esac
@@ -1796,6 +1800,8 @@ copy() {
                             *s*)
                                 if [ -e "$_dst" ]; then
                                     chmod 600 "$_dst"
+                                    # Also restrict parent directory of secret files to 700
+                                    chmod 700 "${_dst%/*}"
                                 else
                                     echo "[WARN] Secret target missing: $_dst" >&2
                                 fi

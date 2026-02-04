@@ -724,13 +724,14 @@ test_secret_permissions() {
     section "Test 4: Secret permissions correct"
 
     # Secret files should be 600 - these MUST exist after sync (per spec, sync ensures targets even when source missing)
+    # Note: optional secret files (with 'o' flag) are NOT ensured if source is missing - that's intentional
+    # Only non-optional secret files are checked here
     local secret_files=(
         "/data/claude/credentials.json"
         "/data/codex/auth.json"
-        "/data/gemini/oauth_creds.json"
-        "/data/gemini/google_accounts.json"
         "/data/local/share/opencode/auth.json"
     )
+    # Optional secret files (gemini/*) are NOT checked - they're only created if user has them
 
     for file in "${secret_files[@]}"; do
         local perm
