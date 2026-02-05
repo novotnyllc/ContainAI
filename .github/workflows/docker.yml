@@ -430,13 +430,6 @@ jobs:
           echo "Running manifest parsing unit tests"
           echo "============================================="
           ./tests/unit/test-manifest-parsing.sh
-      - name: Run Lima socket unit tests (macOS only)
-        if: runner.os == 'macOS'
-        run: |
-          echo "============================================="
-          echo "Running Lima socket unit tests"
-          echo "============================================="
-          ./tests/unit/test-lima-wait-socket.sh
 
       - name: Run launch wrapper tests
         run: |

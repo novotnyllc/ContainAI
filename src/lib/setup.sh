@@ -2900,6 +2900,7 @@ _cai_lima_template() {
     # Lima template with Docker + Sysbox provisioning
     # Per task spec: Sysbox is NOT set as default runtime
     local vm_type="${CONTAINAI_LIMA_VM_TYPE:-}"
+    local mount_type=""
     local sysbox_url_amd64 sysbox_url_arm64 sysbox_version
 
     if ! _cai_resolve_sysbox_download_url "amd64" "false"; then
@@ -2916,13 +2917,8 @@ _cai_lima_template() {
     sysbox_url_arm64="$_CAI_SYSBOX_DOWNLOAD_URL"
     if [[ -z "$vm_type" && "${GITHUB_ACTIONS:-}" == "true" ]]; then
         if _cai_is_macos; then
-            local host_arch
-            host_arch=$(uname -m 2>/dev/null || printf '%s' "")
-            if [[ "$host_arch" == "arm64" || "$host_arch" == "aarch64" ]]; then
-                vm_type="vz"
-            else
-                vm_type="qemu"
-            fi
+            vm_type="vz"
+            mount_type="virtiofs"
         else
             vm_type="qemu"
         fi
@@ -2935,6 +2931,9 @@ LIMA_YAML
 
     if [[ -n "$vm_type" ]]; then
         printf 'vmType: "%s"\n\n' "$vm_type"
+    fi
+    if [[ -n "$mount_type" ]]; then
+        printf 'mountType: "%s"\n\n' "$mount_type"
     fi
 
     cat <<'LIMA_YAML'
@@ -3013,6 +3012,9 @@ LIMA_YAML
 portForwards:
   - guestSocket: "/var/run/docker.sock"
     hostSocket: "{{.Dir}}/sock/docker.sock"
+  - guestPortRange: [1, 65535]
+    hostPortRange: [1, 65535]
+    hostIP: "127.0.0.1"
 LIMA_YAML
 }
 
@@ -3252,64 +3254,10 @@ _cai_lima_create_vm() {
     return $rc
 }
 
-# Repair Docker access in existing Lima VM
-# Handles the case where socket exists but docker info fails due to permission issues
-# (user not in docker group, or group membership not picked up by SSH session)
-# Arguments: $1 = dry_run flag ("true" to simulate)
-# Returns: 0=repaired, 1=failed
-# Note: This function restarts the Lima VM to apply group changes
-_cai_lima_repair_docker_access() {
-    local dry_run="${1:-false}"
-
-    _cai_step "Repairing Docker access in Lima VM"
-
-    if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would check and repair docker group membership"
-        _cai_dryrun " Would restart Lima VM to apply changes"
-        return 0
-    fi
-
-    # Check if VM exists and is running
-    if ! _cai_lima_vm_exists "$_CAI_LIMA_VM_NAME"; then
-        _cai_error "Lima VM '$_CAI_LIMA_VM_NAME' does not exist"
-        return 1
-    fi
-
-    local status
-    status=$(_cai_lima_vm_status "$_CAI_LIMA_VM_NAME")
-    if [[ "$status" != "Running" ]]; then
-        _cai_error "Lima VM is not running (status: $status)"
-        return 1
-    fi
-
-    # Add user to docker group inside VM (idempotent)
-    _cai_step "Ensuring user is in docker group"
-    if ! limactl shell "$_CAI_LIMA_VM_NAME" sudo usermod -aG docker "\$USER" 2>/dev/null; then
-        _cai_warn "Could not modify docker group (may already be configured)"
-    fi
-
-    # Restart VM to apply group changes
-    # SSH master socket persists old group membership - must restart VM
-    _cai_step "Restarting Lima VM to apply group changes"
-    if ! limactl stop "$_CAI_LIMA_VM_NAME"; then
-        _cai_error "Failed to stop Lima VM"
-        return 1
-    fi
-
-    if ! limactl start "$_CAI_LIMA_VM_NAME"; then
-        _cai_error "Failed to start Lima VM after repair"
-        return 1
-    fi
-
-    _cai_ok "Lima VM restarted - Docker group membership should now be active"
-    return 0
-}
-
 # Wait for Lima Docker socket to be available
 # Arguments: $1 = timeout in seconds
 #            $2 = dry_run flag
 # Returns: 0=socket ready, 1=timeout
-# Note: If socket exists but docker info fails, attempts automatic repair
 _cai_lima_wait_socket() {
     local timeout="${1:-60}"
     local dry_run="${2:-false}"
@@ -3338,8 +3286,6 @@ _cai_lima_wait_socket() {
     local docker_output docker_rc
     local verify_elapsed=0
     local verify_interval=1
-    local repaired="false"
-    local eof_repair_after="${CONTAINAI_LIMA_EOF_REPAIR_AFTER:-15}"
 
     while [[ $verify_elapsed -lt $timeout ]]; do
         docker_output=$(DOCKER_HOST="unix://$socket_path" docker info 2>&1) && docker_rc=0 || docker_rc=$?
@@ -3347,72 +3293,6 @@ _cai_lima_wait_socket() {
         if [[ $docker_rc -eq 0 ]]; then
             _cai_ok "Lima Docker socket ready"
             return 0
-        fi
-
-        # Diagnose the failure mode
-        if printf '%s' "$docker_output" | grep -qi "permission denied"; then
-            if [[ "$repaired" == "true" ]]; then
-                _cai_error "Docker still permission denied after repair"
-                return 1
-            fi
-
-            _cai_warn "Docker permission denied - user likely not in docker group"
-            _cai_info "Attempting automatic repair..."
-
-            if _cai_lima_repair_docker_access "$dry_run"; then
-                # Wait for socket to come back after VM restart (reuse caller's timeout)
-                _cai_step "Waiting for socket after VM restart"
-                wait_count=0
-                while [[ ! -S "$socket_path" ]]; do
-                    sleep 1
-                    wait_count=$((wait_count + 1))
-                    if [[ $wait_count -ge $timeout ]]; then
-                        _cai_error "Socket did not reappear after repair (waited ${timeout}s)"
-                        return 1
-                    fi
-                done
-
-                # Retry after repair
-                repaired="true"
-                verify_elapsed=0
-                continue
-            else
-                _cai_error "Automatic repair failed"
-                return 1
-            fi
-        fi
-
-        if printf '%s' "$docker_output" | grep -qiE "EOF|connection reset by peer"; then
-            if [[ "$repaired" == "true" ]]; then
-                _cai_error "Docker still failing after repair"
-                return 1
-            fi
-            if [[ $verify_elapsed -ge $eof_repair_after ]]; then
-                _cai_warn "Docker socket returned EOF - refreshing Lima VM to rebuild SSH forward"
-                _cai_info "Attempting automatic repair..."
-
-                if _cai_lima_repair_docker_access "$dry_run"; then
-                    # Wait for socket to come back after VM restart (reuse caller's timeout)
-                    _cai_step "Waiting for socket after VM restart"
-                    wait_count=0
-                    while [[ ! -S "$socket_path" ]]; do
-                        sleep 1
-                        wait_count=$((wait_count + 1))
-                        if [[ $wait_count -ge $timeout ]]; then
-                            _cai_error "Socket did not reappear after repair (waited ${timeout}s)"
-                            return 1
-                        fi
-                    done
-
-                    # Retry after repair
-                    repaired="true"
-                    verify_elapsed=0
-                    continue
-                else
-                    _cai_error "Automatic repair failed"
-                    return 1
-                fi
-            fi
         fi
 
         # Transient errors: docker daemon may not be ready yet (EOF, connection refused, etc.)
