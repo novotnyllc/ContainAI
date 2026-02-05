@@ -641,6 +641,7 @@ jobs:
           mkdir -p /tmp/containai-logs
           cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
           cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          cp -a /tmp/containai-docker-info.log /tmp/containai-logs/ 2>/dev/null || true
           docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
           docker --context containai-docker info > /tmp/containai-logs/containai-docker-info.log 2>&1 || true
 
@@ -730,48 +731,64 @@ jobs:
             exit 1
           done
 
-      - name: Ensure Lima VM is ready
+      - name: Ensure containai-docker context is ready
         run: |
           set -euo pipefail
-          VM_NAME="${{ env.CONTAINAI_DOCKER_CONTEXT }}"
-          if [[ -z "$VM_NAME" ]]; then
-            VM_NAME="containai-docker"
+          CONTEXT_NAME="${{ env.CONTAINAI_DOCKER_CONTEXT }}"
+          if [[ -z "$CONTEXT_NAME" ]]; then
+            CONTEXT_NAME="containai-docker"
           fi
 
           echo "============================================="
-          echo "Lima diagnostics + readiness checks"
+          echo "Context diagnostics + readiness checks"
           echo "============================================="
-          command -v limactl
-          limactl --version || true
-          limactl list || true
-          limactl list --json || true
-
-          vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | awk -F'\t' -v name="$VM_NAME" '$1 == name {print $2}')
-          if [[ "$vm_status" != "Running" ]]; then
-            echo "Lima VM '$VM_NAME' status: ${vm_status:-missing} - starting..."
-            limactl start "$VM_NAME"
-          fi
-
-          socket_path="$HOME/.lima/$VM_NAME/sock/docker.sock"
-          echo "Waiting for Lima socket: $socket_path"
-          for i in $(seq 1 60); do
-            if [[ -S "$socket_path" ]]; then
-              echo "Socket ready"
-              break
-            fi
-            sleep 2
-          done
-          if [[ ! -S "$socket_path" ]]; then
-            echo "::error::Lima socket not available: $socket_path"
-            limactl list || true
-            limactl info "$VM_NAME" || true
+          docker context ls || true
+          if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+            echo "::error::Docker context '$CONTEXT_NAME' not found after cai setup"
+            docker context ls || true
             exit 1
           fi
-          ls -la "$HOME/.lima/$VM_NAME/sock/" || true
 
-          echo "Checking Docker inside Lima VM"
-          limactl shell "$VM_NAME" -- sudo systemctl start docker || true
-          limactl shell "$VM_NAME" -- docker info
+          context_host=$(docker context inspect "$CONTEXT_NAME" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)
+          echo "Context '$CONTEXT_NAME' endpoint: ${context_host:-unknown}"
+
+          if [[ "$context_host" == unix://* ]]; then
+            socket_path="${context_host#unix://}"
+            echo "Waiting for context socket: $socket_path"
+            for i in $(seq 1 60); do
+              if [[ -S "$socket_path" ]]; then
+                echo "Socket ready"
+                break
+              fi
+              sleep 2
+            done
+            if [[ ! -S "$socket_path" ]]; then
+              echo "::error::Context socket not available: $socket_path"
+              ls -la "$(dirname "$socket_path")" || true
+              exit 1
+            fi
+          fi
+
+          echo "Waiting for Docker API via context '$CONTEXT_NAME'"
+          for i in $(seq 1 60); do
+            if docker --context "$CONTEXT_NAME" info >/tmp/containai-docker-info.log 2>&1; then
+              echo "Docker context '$CONTEXT_NAME' is ready"
+              break
+            fi
+            echo "Attempt $i/60: context not ready yet"
+            tail -n 5 /tmp/containai-docker-info.log 2>/dev/null || true
+            sleep 2
+          done
+
+          if ! docker --context "$CONTEXT_NAME" info >/dev/null 2>&1; then
+            echo "::error::Docker context '$CONTEXT_NAME' not reachable"
+            cat /tmp/containai-docker-info.log || true
+            docker --context "$CONTEXT_NAME" version || true
+            if command -v limactl >/dev/null 2>&1; then
+              limactl list || true
+            fi
+            exit 1
+          fi
 
       - name: Log in to Container Registry (containai-docker)
         run: |
