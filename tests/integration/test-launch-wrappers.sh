@@ -253,14 +253,14 @@ else
 fi
 
 # ==============================================================================
-# Test 9: Codex wrapper includes --full-auto
+# Test 9: Codex wrapper includes default args
 # ==============================================================================
 printf '\n=== Test: Codex wrapper includes default args ===\n'
 wrapper_def=$(exec_bash_cmd 'declare -f codex 2>&1' || true)
-if [[ "$wrapper_def" == *'--full-auto'* ]]; then
-    test_pass "Codex wrapper includes --full-auto"
+if [[ "$wrapper_def" == *'--dangerously-bypass-approvals-and-sandbox'* ]]; then
+    test_pass "Codex wrapper includes --dangerously-bypass-approvals-and-sandbox"
 else
-    test_fail "Codex wrapper missing --full-auto, got: $wrapper_def"
+    test_fail "Codex wrapper missing --dangerously-bypass-approvals-and-sandbox, got: $wrapper_def"
 fi
 
 # ==============================================================================
