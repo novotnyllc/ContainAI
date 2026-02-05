@@ -145,11 +145,11 @@ container_has_command() {
 
 # Check if we can run iptables (requires root or CAP_NET_ADMIN)
 can_run_iptables() {
-    if ! command -v iptables >/dev/null 2>&1; then
+    if ! _cai_iptables_available; then
         return 1
     fi
     # Try a read-only iptables command
-    if _cai_iptables -S >/dev/null 2>&1; then
+    if _cai_iptables_can_run; then
         return 0
     fi
     return 1
@@ -178,13 +178,23 @@ check_prerequisites() {
     fi
     pass "Docker context '$CONTEXT_NAME' exists"
 
-    # Check if iptables is available on host
-    if ! command -v iptables >/dev/null 2>&1; then
-        fail "iptables is not installed on host"
-        info "  Remediation: Install iptables package"
+    # Check if iptables is available in the active engine environment
+    # macOS: this means inside the Lima VM, not the host.
+    if ! _cai_iptables_available; then
+        if _cai_is_macos; then
+            fail "iptables is not available in Lima VM"
+            info "  Remediation: Ensure containai-docker Lima VM is running and healthy"
+        else
+            fail "iptables is not installed"
+            info "  Remediation: Install iptables package"
+        fi
         return 1
     fi
-    pass "iptables is installed"
+    if _cai_is_macos; then
+        pass "iptables is available in Lima VM"
+    else
+        pass "iptables is available"
+    fi
 
     # Check if we can run iptables
     if ! can_run_iptables; then
@@ -234,6 +244,20 @@ test_iptables_rules_present() {
         pass "All network security rules are present"
         IPTABLES_VERIFIED=true
     else
+        # Rules are missing or incomplete; try one in-place remediation pass.
+        # This handles cases where bridge/rules were not ready during setup.
+        case "${_CAI_NETWORK_RULES_STATUS:-}" in
+            partial|none|no_chain)
+                warn "Network rules incomplete (${_CAI_NETWORK_RULES_STATUS}), attempting remediation"
+                if _cai_apply_network_rules "false" && _cai_check_network_rules "true"; then
+                    pass "Network security rules remediated and verified"
+                    IPTABLES_VERIFIED=true
+                    return 0
+                fi
+                warn "Automatic remediation did not fully restore rules"
+                ;;
+        esac
+
         case "${_CAI_NETWORK_RULES_STATUS:-}" in
             partial)
                 fail "Some network security rules are missing"
