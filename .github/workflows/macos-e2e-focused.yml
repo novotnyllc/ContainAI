@@ -106,7 +106,7 @@ jobs:
           fi
 
           mkdir -p /tmp/tarball
-          gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" --output /tmp/tarball/artifact.zip
+          gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" > /tmp/tarball/artifact.zip
           unzip -q /tmp/tarball/artifact.zip -d /tmp/tarball
           ls -la /tmp/tarball
 
