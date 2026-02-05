@@ -692,8 +692,10 @@ _cai_install_plan_prepare_linux() {
 
 # ContainAI GitHub repository for custom sysbox builds
 _CAI_SYSBOX_CONTAINAI_REPO="novotnyllc/ContainAI"
-# Pinned ContainAI sysbox release tag (update this to use a new build)
+# Pinned ContainAI sysbox release tag (independent from main ContainAI releases)
 _CAI_SYSBOX_CONTAINAI_TAG="sysbox-build-20260127-10"
+# Pinned ContainAI sysbox version (matches release asset filenames)
+_CAI_SYSBOX_CONTAINAI_VERSION="0.6.7+containai.20260127"
 
 # ==============================================================================
 # Sysbox Version Utility Functions
@@ -810,7 +812,7 @@ _cai_sysbox_bundled_version() {
         return 1
     fi
 
-    # Only cache if we got a ContainAI build (not upstream fallback)
+    # Only cache if we got a ContainAI build
     if [[ "$_CAI_SYSBOX_SOURCE" == "containai" ]]; then
         _CAI_SYSBOX_BUNDLED_VERSION_CACHE="$_CAI_SYSBOX_VERSION"
     fi
@@ -905,18 +907,16 @@ _cai_sysbox_needs_update() {
 
 # Resolve sysbox download URL from multiple sources with priority:
 #   1. CAI_SYSBOX_URL environment variable (explicit override)
-#   2. CAI_SYSBOX_VERSION environment variable (pin specific upstream version)
-#   3. ContainAI GitHub releases (custom build with openat2 fix)
+#   2. ContainAI GitHub release (pinned tag + version)
 #
-# If ContainAI release is unavailable and no override is set, returns error.
-# No fallback to upstream nestybox releases - ContainAI builds are required.
+# No fallback to upstream sysbox releases - ContainAI builds are required.
 #
 # Arguments: $1 = architecture (amd64 or arm64)
 #            $2 = verbose flag ("true" for verbose output)
 # Outputs: Sets the following global variables:
 #   _CAI_SYSBOX_DOWNLOAD_URL   - URL to download the deb package
 #   _CAI_SYSBOX_VERSION        - Version string (may include +containai suffix)
-#   _CAI_SYSBOX_SOURCE         - Source identifier: "override", "pinned", "containai"
+#   _CAI_SYSBOX_SOURCE         - Source identifier: "override", "containai"
 # Returns: 0=success, 1=failure
 _cai_resolve_sysbox_download_url() {
     local arch="${1:-}"
@@ -946,114 +946,38 @@ _cai_resolve_sysbox_download_url() {
         return 0
     fi
 
-    # Priority 2: Pinned version via CAI_SYSBOX_VERSION
-    # This takes precedence over ContainAI builds to maintain backward compatibility
-    local pinned_version="${CAI_SYSBOX_VERSION:-}"
-    if [[ -n "$pinned_version" ]]; then
-        local pinned_download_url="https://github.com/nestybox/sysbox/releases/download/v${pinned_version}/sysbox-ce_${pinned_version}-0.linux_${arch}.deb"
-        _CAI_SYSBOX_DOWNLOAD_URL="$pinned_download_url"
-        _CAI_SYSBOX_VERSION="$pinned_version"
-        _CAI_SYSBOX_SOURCE="pinned"
-        _cai_info "Using pinned sysbox version: $pinned_version"
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "Pinned download URL: $pinned_download_url"
-        fi
-        return 0
-    fi
-
-    # Priority 3: Use pinned ContainAI GitHub release for custom build
+    # Priority 2: Use pinned ContainAI GitHub release for custom build
     # The custom build includes the openat2 fix for runc 1.3.3+ compatibility
-    # Fetches a specific release by tag for reproducibility
-    local containai_release_url="https://api.github.com/repos/${_CAI_SYSBOX_CONTAINAI_REPO}/releases/tags/${_CAI_SYSBOX_CONTAINAI_TAG}"
-    local containai_json=""
-    local containai_download_url=""
-    local containai_version=""
-    local fetch_rc
-
-    if [[ "$verbose" == "true" ]]; then
-        _cai_info "Fetching ContainAI sysbox release: ${_CAI_SYSBOX_CONTAINAI_TAG}..."
+    local containai_tag="${CAI_SYSBOX_TAG:-${_CAI_SYSBOX_CONTAINAI_TAG}}"
+    local containai_version="${CAI_SYSBOX_VERSION:-${_CAI_SYSBOX_CONTAINAI_VERSION}}"
+    if [[ -z "$containai_tag" ]]; then
+        _cai_error "ContainAI sysbox release tag is not configured"
+        _cai_error "  Expected CAI_SYSBOX_TAG or _CAI_SYSBOX_CONTAINAI_TAG"
+        return 1
     fi
-
-    # Fetch pinned ContainAI release (with timeout to avoid hanging)
-    # Handle _cai_timeout exit code 125 (no timeout mechanism available)
-    containai_json=$(_cai_timeout 15 wget -qO- "$containai_release_url" 2>/dev/null) && fetch_rc=0 || fetch_rc=$?
-    if [[ $fetch_rc -eq 0 ]]; then
-        # Look for sysbox release assets matching the architecture
-        # ContainAI builds use: sysbox-ce_VERSION+containai.DATE.linux_ARCH.deb
-        containai_download_url=$(printf '%s' "$containai_json" | jq -r \
-            --arg suffix ".linux_${arch}.deb" \
-            '.assets[]? | select(.name | endswith($suffix)) | .browser_download_url // empty' 2>/dev/null | head -1)
-
-        if [[ -n "$containai_download_url" ]] && [[ "$containai_download_url" != "null" ]]; then
-            # Extract version from filename: sysbox-ce_VERSION.linux_ARCH.deb
-            # URL-decode filename first (%2B -> +)
-            local filename filename_decoded
-            filename=$(printf '%s' "$containai_download_url" | sed 's|.*/||')
-            filename_decoded=$(printf '%b' "${filename//%/\\x}")
-            containai_version=$(printf '%s' "$filename_decoded" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
-
-            _CAI_SYSBOX_DOWNLOAD_URL="$containai_download_url"
-            _CAI_SYSBOX_VERSION="$containai_version"
-            _CAI_SYSBOX_SOURCE="containai"
-            _cai_info "Using ContainAI sysbox build (includes openat2 fix for runc 1.3.3+)"
-            if [[ "$verbose" == "true" ]]; then
-                _cai_info "ContainAI release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
-                _cai_info "ContainAI download URL: $containai_download_url"
-            fi
-            return 0
-        fi
-        # Package not found for this architecture - fall through to error at end of function
-    elif [[ $fetch_rc -eq 125 ]]; then
-        # Exit code 125 means no timeout mechanism available
-        if [[ "$verbose" == "true" ]]; then
-            _cai_info "Timeout utility not available; fetching ContainAI release without timeout"
-        fi
-        # Retry without timeout wrapper
-        if containai_json=$(wget -qO- "$containai_release_url" 2>/dev/null); then
-            containai_download_url=$(printf '%s' "$containai_json" | jq -r \
-                --arg suffix ".linux_${arch}.deb" \
-                '.assets[]? | select(.name | endswith($suffix)) | .browser_download_url // empty' 2>/dev/null | head -1)
-            if [[ -n "$containai_download_url" ]] && [[ "$containai_download_url" != "null" ]]; then
-                # URL-decode filename first (%2B -> +)
-                local filename filename_decoded
-                filename=$(printf '%s' "$containai_download_url" | sed 's|.*/||')
-                filename_decoded=$(printf '%b' "${filename//%/\\x}")
-                containai_version=$(printf '%s' "$filename_decoded" | sed -n 's/sysbox-ce_\(.*\)\.linux_.*/\1/p' | head -1)
-                _CAI_SYSBOX_DOWNLOAD_URL="$containai_download_url"
-                _CAI_SYSBOX_VERSION="$containai_version"
-                _CAI_SYSBOX_SOURCE="containai"
-                _cai_info "Using ContainAI sysbox build (includes openat2 fix for runc 1.3.3+)"
-                return 0
-            fi
-            # Package not found for this architecture - fall through to error at end of function
-        else
-            _cai_error "Failed to fetch ContainAI sysbox release"
-            _cai_error "  Release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
-            _cai_error "  This may be due to GitHub API rate limiting or network issues"
-            _cai_error "  Workarounds:"
-            _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-            _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
-            _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
-            return 1
-        fi
-    else
-        _cai_error "Failed to fetch ContainAI sysbox release"
-        _cai_error "  Release tag: ${_CAI_SYSBOX_CONTAINAI_TAG}"
-        _cai_error "  This may be due to GitHub API rate limiting or network issues"
-        _cai_error "  Workarounds:"
-        _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-        _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
-        _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
+    if [[ -z "$containai_version" ]]; then
+        _cai_error "ContainAI sysbox version is not configured"
+        _cai_error "  Expected CAI_SYSBOX_VERSION or _CAI_SYSBOX_CONTAINAI_VERSION"
         return 1
     fi
 
-    # ContainAI release fetched but no packages found for this architecture
-    _cai_error "No sysbox packages found in ContainAI release ${_CAI_SYSBOX_CONTAINAI_TAG} for architecture: $arch"
-    _cai_error "  Workarounds:"
-    _cai_error "    1. Set CAI_SYSBOX_URL to a direct download URL"
-    _cai_error "    2. Set CAI_SYSBOX_VERSION to pin a specific upstream version (e.g., 0.6.7)"
-    _cai_error "  Find releases at: https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases"
-    return 1
+    if [[ -n "${CAI_SYSBOX_TAG:-}" && -z "${CAI_SYSBOX_VERSION:-}" ]]; then
+        _cai_warn "CAI_SYSBOX_TAG set without CAI_SYSBOX_VERSION; using bundled version ${_CAI_SYSBOX_CONTAINAI_VERSION}"
+    elif [[ -n "${CAI_SYSBOX_VERSION:-}" && -z "${CAI_SYSBOX_TAG:-}" ]]; then
+        _cai_warn "CAI_SYSBOX_VERSION set without CAI_SYSBOX_TAG; using bundled tag ${_CAI_SYSBOX_CONTAINAI_TAG}"
+    fi
+
+    local containai_download_url="https://github.com/${_CAI_SYSBOX_CONTAINAI_REPO}/releases/download/${containai_tag}/sysbox-ce_${containai_version}.linux_${arch}.deb"
+
+    _CAI_SYSBOX_DOWNLOAD_URL="$containai_download_url"
+    _CAI_SYSBOX_VERSION="$containai_version"
+    _CAI_SYSBOX_SOURCE="containai"
+    _cai_info "Using ContainAI sysbox build (includes openat2 fix for runc 1.3.3+)"
+    if [[ "$verbose" == "true" ]]; then
+        _cai_info "ContainAI release tag: ${containai_tag}"
+        _cai_info "ContainAI download URL: $containai_download_url"
+    fi
+    return 0
 }
 
 # Download and install Sysbox on WSL2/Ubuntu/Debian
@@ -1232,14 +1156,14 @@ _cai_install_sysbox_wsl2() {
     # Note: arch already determined earlier in this function
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would resolve sysbox download URL (ContainAI first, then upstream)"
+        _cai_dryrun " Would resolve sysbox download URL (ContainAI release or CAI_SYSBOX_URL override)"
         _cai_dryrun " Would download Sysbox .deb for architecture: $arch"
         _cai_dryrun " Would install with: dpkg -i sysbox-ce.deb"
         _cai_dryrun "Sysbox installation complete"
         return 0
     fi
 
-    # Resolve download URL using priority: CAI_SYSBOX_URL > ContainAI releases > upstream
+    # Resolve download URL using priority: CAI_SYSBOX_URL > ContainAI release
     if ! _cai_resolve_sysbox_download_url "$arch" "$verbose"; then
         return 1
     fi
@@ -2976,6 +2900,20 @@ _cai_lima_template() {
     # Lima template with Docker + Sysbox provisioning
     # Per task spec: Sysbox is NOT set as default runtime
     local vm_type="${CONTAINAI_LIMA_VM_TYPE:-}"
+    local sysbox_url_amd64 sysbox_url_arm64 sysbox_version
+
+    if ! _cai_resolve_sysbox_download_url "amd64" "false"; then
+        _cai_error "Failed to resolve Sysbox download URL for amd64"
+        return 1
+    fi
+    sysbox_url_amd64="$_CAI_SYSBOX_DOWNLOAD_URL"
+    sysbox_version="$_CAI_SYSBOX_VERSION"
+
+    if ! _cai_resolve_sysbox_download_url "arm64" "false"; then
+        _cai_error "Failed to resolve Sysbox download URL for arm64"
+        return 1
+    fi
+    sysbox_url_arm64="$_CAI_SYSBOX_DOWNLOAD_URL"
     if [[ -z "$vm_type" && "${GITHUB_ACTIONS:-}" == "true" ]]; then
         if _cai_is_macos; then
             local host_arch
@@ -3030,8 +2968,20 @@ provision:
 
       # Install Sysbox (architecture-specific)
       ARCH=$(dpkg --print-architecture)
-      SYSBOX_VERSION="0.6.7"
-      wget -q -O /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" || {
+LIMA_YAML
+    printf '      SYSBOX_URL_AMD64="%s"\n' "$sysbox_url_amd64"
+    printf '      SYSBOX_URL_ARM64="%s"\n' "$sysbox_url_arm64"
+    printf '      SYSBOX_VERSION="%s"\n' "$sysbox_version"
+    cat <<'LIMA_YAML'
+      case "$ARCH" in
+          amd64) SYSBOX_URL="$SYSBOX_URL_AMD64" ;;
+          arm64) SYSBOX_URL="$SYSBOX_URL_ARM64" ;;
+          *)
+              echo "Unsupported architecture for Sysbox: $ARCH" >&2
+              exit 1
+              ;;
+      esac
+      wget -q -O /tmp/sysbox.deb "$SYSBOX_URL" || {
           echo "Failed to download Sysbox for ${ARCH}" >&2
           exit 1
       }
@@ -3890,14 +3840,14 @@ _cai_install_sysbox_linux() {
     esac
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would resolve sysbox download URL (ContainAI first, then upstream)"
+        _cai_dryrun " Would resolve sysbox download URL (ContainAI release or CAI_SYSBOX_URL override)"
         _cai_dryrun " Would download Sysbox .deb for architecture: $arch"
         _cai_dryrun " Would install with: dpkg -i sysbox-ce.deb"
         _cai_dryrun "Sysbox installation complete"
         return 0
     fi
 
-    # Resolve download URL using priority: CAI_SYSBOX_URL > ContainAI releases > upstream
+    # Resolve download URL using priority: CAI_SYSBOX_URL > ContainAI release
     if ! _cai_resolve_sysbox_download_url "$arch" "$verbose"; then
         return 1
     fi

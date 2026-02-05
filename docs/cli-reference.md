@@ -1367,7 +1367,8 @@ These variables are used during `cai setup` for advanced configuration.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CAI_SYSBOX_URL` | Override Sysbox download URL | (ContainAI release) |
-| `CAI_SYSBOX_VERSION` | Pin specific Sysbox version | (bundled version) |
+| `CAI_SYSBOX_TAG` | Pin ContainAI Sysbox release tag | (bundled tag) |
+| `CAI_SYSBOX_VERSION` | Pin ContainAI Sysbox package version | (bundled version) |
 | `CAI_WSL_SSH_PORT` | SSH port for WSL2 setup | `2222` |
 
 ### Debugging and Testing

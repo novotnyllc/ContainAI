@@ -57,7 +57,7 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
         docker-ce-cli \
         containerd.io
 
-# Install Sysbox CE (for sysbox-runc binary only, services NOT started)
+# Install Sysbox CE (ContainAI build, for sysbox-runc binary only; services NOT started)
 #
 # DECISION: The spec has contradictory requirements:
 #   1. "Sysbox installation removed" (host provides isolation)
@@ -68,15 +68,16 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
 # provides coordination when this container runs with --runtime=sysbox-runc.
 # This satisfies both requirements: no redundant services, but inner Docker
 # can use sysbox-runc as default runtime.
-ARG SYSBOX_VERSION=0.6.7
-ARG SYSBOX_SHA256_AMD64=b7ac389e5a19592cadf16e0ca30e40919516128f6e1b7f99e1cb4ff64554172e
-ARG SYSBOX_SHA256_ARM64=16d80123ba53058cf90f5a68686e297621ea97942602682e34b3352783908f91
+ARG SYSBOX_TAG=sysbox-build-20260127-10
+ARG SYSBOX_VERSION=0.6.7+containai.20260127
+ARG SYSBOX_SHA256_AMD64=322a6a50144dac3245c69d7d416f623effdf29e289ac586935f083af23866627
+ARG SYSBOX_SHA256_ARM64=22c7cc9bcf48780e92c81918c6865f39cfd863fd5dae39a518834b0abf3496bd
 
 RUN ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "amd64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_AMD64}"; \
     elif [ "$ARCH" = "arm64" ]; then EXPECTED_SHA256="${SYSBOX_SHA256_ARM64}"; \
     else echo "Unsupported architecture: $ARCH" && exit 1; fi && \
-    curl -fsSL -o /tmp/sysbox.deb "https://downloads.nestybox.com/sysbox/releases/v${SYSBOX_VERSION}/sysbox-ce_${SYSBOX_VERSION}-0.linux_${ARCH}.deb" && \
+    curl -fsSL -o /tmp/sysbox.deb "https://github.com/novotnyllc/ContainAI/releases/download/${SYSBOX_TAG}/sysbox-ce_${SYSBOX_VERSION}.linux_${ARCH}.deb" && \
     echo "${EXPECTED_SHA256}  /tmp/sysbox.deb" | sha256sum -c - && \
     apt-get install -y /tmp/sysbox.deb && \
     rm /tmp/sysbox.deb
