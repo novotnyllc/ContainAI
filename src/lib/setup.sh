@@ -3389,6 +3389,7 @@ _cai_lima_wait_socket() {
     local verify_elapsed=0
     local verify_interval=1
     local repaired="false"
+    local eof_repair_after="${CONTAINAI_LIMA_EOF_REPAIR_AFTER:-15}"
 
     while [[ $verify_elapsed -lt $timeout ]]; do
         docker_output=$(DOCKER_HOST="unix://$socket_path" docker info 2>&1) && docker_rc=0 || docker_rc=$?
@@ -3428,6 +3429,39 @@ _cai_lima_wait_socket() {
             else
                 _cai_error "Automatic repair failed"
                 return 1
+            fi
+        fi
+
+        if printf '%s' "$docker_output" | grep -qiE "EOF|connection reset by peer"; then
+            if [[ "$repaired" == "true" ]]; then
+                _cai_error "Docker still failing after repair"
+                return 1
+            fi
+            if [[ $verify_elapsed -ge $eof_repair_after ]]; then
+                _cai_warn "Docker socket returned EOF - refreshing Lima VM to rebuild SSH forward"
+                _cai_info "Attempting automatic repair..."
+
+                if _cai_lima_repair_docker_access "$dry_run"; then
+                    # Wait for socket to come back after VM restart (reuse caller's timeout)
+                    _cai_step "Waiting for socket after VM restart"
+                    wait_count=0
+                    while [[ ! -S "$socket_path" ]]; do
+                        sleep 1
+                        wait_count=$((wait_count + 1))
+                        if [[ $wait_count -ge $timeout ]]; then
+                            _cai_error "Socket did not reappear after repair (waited ${timeout}s)"
+                            return 1
+                        fi
+                    done
+
+                    # Retry after repair
+                    repaired="true"
+                    verify_elapsed=0
+                    continue
+                else
+                    _cai_error "Automatic repair failed"
+                    return 1
+                fi
             fi
         fi
 

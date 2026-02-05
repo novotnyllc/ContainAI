@@ -430,6 +430,7 @@ jobs:
           echo "Running manifest parsing unit tests"
           echo "============================================="
           ./tests/unit/test-manifest-parsing.sh
+          ./tests/unit/test-lima-wait-socket.sh
 
       - name: Run launch wrapper tests
         run: |
@@ -652,12 +653,11 @@ jobs:
           if-no-files-found: ignore
 
   # ============================================================================
-  # E2E Tests (macOS + Lima)
+  # E2E Tests (macOS + Lima) - Intel (enabled)
   # ============================================================================
-  e2e-test-macos:
+  e2e-test-macos-intel:
     needs: [lint, build-push, build-tarballs]
-    if: ${{ matrix.enabled }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: macos-15-intel
     timeout-minutes: 60
     permissions:
       contents: read
@@ -666,21 +666,9 @@ jobs:
       IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
       IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
       CONTAINAI_TEST_IMAGE: ${{ needs.build-push.outputs.image_prefix }}/base:${{ needs.build-push.outputs.tag_suffix }}
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-15-intel
-            image_arch: amd64
-            tarball_arch: macos-x64
-            expected_uname: x86_64
-            enabled: true
-          - runner: macos-26
-            image_arch: arm64
-            tarball_arch: macos-arm64
-            expected_uname: arm64
-            enabled: false
+      IMAGE_ARCH: amd64
+      TARBALL_ARCH: macos-x64
+      EXPECTED_UNAME: x86_64
 
     steps:
       - name: Checkout repository
@@ -691,13 +679,11 @@ jobs:
       - name: Verify runner architecture
         run: |
           machine="$(uname -m)"
-          expected="${{ matrix.expected_uname }}"
+          expected="${EXPECTED_UNAME}"
           if [[ "$machine" != "$expected" ]]; then
             echo "::error::Runner arch mismatch. Expected $expected, got $machine"
             exit 1
           fi
-          echo "IMAGE_ARCH=${{ matrix.image_arch }}" >> "$GITHUB_ENV"
-          echo "TARBALL_ARCH=${{ matrix.tarball_arch }}" >> "$GITHUB_ENV"
 
       - name: Download tarball artifact
         uses: actions/download-artifact@v4
@@ -833,7 +819,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: lima-logs-${{ matrix.runner }}-${{ github.run_id }}
+          name: lima-logs-macos-15-intel-${{ github.run_id }}
           path: /tmp/lima-logs/
           retention-days: 7
           if-no-files-found: ignore
@@ -851,7 +837,23 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: containai-logs-macos-${{ matrix.runner }}-${{ github.run_id }}
+          name: containai-logs-macos-macos-15-intel-${{ github.run_id }}
           path: /tmp/containai-logs/
           retention-days: 7
           if-no-files-found: ignore
+
+  # ============================================================================
+  # E2E Tests (macOS + Lima) - ARM (disabled)
+  # ============================================================================
+  e2e-test-macos-arm:
+    if: ${{ false }}
+    needs: [lint, build-push, build-tarballs]
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Skip macOS ARM E2E
+        run: |
+          echo "macOS ARM E2E is disabled on GitHub-hosted runners."
