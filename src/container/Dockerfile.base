@@ -138,6 +138,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         '# DisableForwarding covers: TCP, streamlocal, X11, agent forwarding' \
         'DisableForwarding yes' \
         'PermitTunnel no' \
+        'SetEnv BASH_ENV=/etc/containai/bash_env' \
         > /etc/ssh/sshd_config.d/99-containai-security.conf && \
     # Remove baked-in host keys - will be generated on first boot
     rm -f /etc/ssh/ssh_host_* && \
