@@ -2977,7 +2977,17 @@ _cai_lima_template() {
     # Per task spec: Sysbox is NOT set as default runtime
     local vm_type="${CONTAINAI_LIMA_VM_TYPE:-}"
     if [[ -z "$vm_type" && "${GITHUB_ACTIONS:-}" == "true" ]]; then
-        vm_type="qemu"
+        if _cai_is_macos; then
+            local host_arch
+            host_arch=$(uname -m 2>/dev/null || printf '%s' "")
+            if [[ "$host_arch" == "arm64" || "$host_arch" == "aarch64" ]]; then
+                vm_type="vz"
+            else
+                vm_type="qemu"
+            fi
+        else
+            vm_type="qemu"
+        fi
     fi
 
     cat <<'LIMA_YAML'

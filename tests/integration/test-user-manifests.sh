@@ -81,39 +81,32 @@ test_info "Run ID: $SYNC_TEST_RUN_ID"
 # Test counter for unique volume names
 TEST_COUNTER=0
 
-# Helper: wait for container file/directory to exist
-wait_for_container_path() {
-    local container="$1"
-    local path="$2"
-    local timeout="${3:-30}"
-    local count=0
+# Helper: probe volume contents without starting systemd containers.
+# Use a small non-systemd image to inspect the data volume.
+VOLUME_PROBE_IMAGE="${CONTAINAI_VOLUME_PROBE_IMAGE:-alpine:3.20}"
 
-    while [[ $count -lt $timeout ]]; do
-        if "${DOCKER_CMD[@]}" exec "$container" test -e "$path" 2>/dev/null; then
-            return 0
-        fi
-        sleep 1
-        count=$((count + 1))
-    done
-    test_info "Timeout waiting for path: $path"
-    return 1
+ensure_probe_image() {
+    if ! "${DOCKER_CMD[@]}" image inspect "$VOLUME_PROBE_IMAGE" >/dev/null 2>&1; then
+        test_info "Pulling volume probe image: $VOLUME_PROBE_IMAGE"
+        "${DOCKER_CMD[@]}" pull "$VOLUME_PROBE_IMAGE" >/dev/null
+    fi
 }
 
-# Helper: wait for container to be running
-wait_for_container_running() {
-    local container="$1"
-    local timeout="${2:-30}"
-    local count=0
+volume_exec() {
+    local cmd="$1"
+    "${DOCKER_CMD[@]}" run --rm \
+        -v "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
+        "$VOLUME_PROBE_IMAGE" /bin/sh -c "$cmd"
+}
 
-    while [[ $count -lt $timeout ]]; do
-        if "${DOCKER_CMD[@]}" ps -q -f name="$container" | grep -q .; then
-            return 0
-        fi
-        sleep 1
-        count=$((count + 1))
-    done
-    test_info "Timeout waiting for container to be running"
-    return 1
+volume_path_exists() {
+    local path="$1"
+    volume_exec "test -e \"/mnt/agent-data/$path\""
+}
+
+volume_cat() {
+    local path="$1"
+    volume_exec "cat \"/mnt/agent-data/$path\""
 }
 
 # ==============================================================================
@@ -146,14 +139,6 @@ EOF
 # Also create Claude fixture (required agent)
 create_claude_fixture
 
-# Create the container using helper (uses SYNC_TEST_RUN_ID internally)
-create_test_container "user-manifest-sync" \
-    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-    "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
-
-# Derive correct container name (matches helper's naming)
-test_container_name="test-user-manifest-sync-${SYNC_TEST_RUN_ID}"
-
 # Run import
 import_exit=0
 import_output=$(run_cai_import_from 2>&1) || import_exit=$?
@@ -161,40 +146,17 @@ import_output=$(run_cai_import_from 2>&1) || import_exit=$?
 if [[ $import_exit -ne 0 ]]; then
     test_fail "Import failed: $import_output"
 else
-    # Start container
-    start_test_container "$test_container_name"
+    ensure_probe_image
 
-    # Wait for container to be ready (poll instead of fixed sleep)
-    if wait_for_container_path "$test_container_name" "/mnt/agent-data" 10; then
-
-        # Verify user manifest was synced to volume
-        SYNC_TEST_CONTAINER="$test_container_name"
-        if assert_file_exists_in_volume "containai/manifests/99-custom.toml"; then
-            test_pass "User manifest synced to /mnt/agent-data/containai/manifests/"
-        else
-            test_fail "User manifest not found in container volume"
-        fi
-
-        # Check for symlink to manifests directory in container home
-        # Note: Without systemd/containai-init, symlinks are only created if
-        # the Dockerfile pre-creates them. This is a sanity check, not a requirement.
-        # Full symlink testing requires Sysbox/systemd (see test-startup-hooks.sh).
-        if exec_in_container "$test_container_name" test -L /home/agent/.config/containai/manifests 2>/dev/null; then
-            test_pass "User manifest symlink exists in container home"
-        elif exec_in_container "$test_container_name" test -d /home/agent/.config/containai/manifests 2>/dev/null; then
-            test_info "User manifest path is a directory (symlink created at runtime by containai-init)"
-        else
-            # Path doesn't exist yet - expected in sync-only tests
-            test_info "User manifest symlink not yet created (requires containai-init runtime)"
-        fi
+    # Verify user manifest was synced to volume (no system container required)
+    if volume_path_exists "containai/manifests/99-custom.toml"; then
+        test_pass "User manifest synced to /mnt/agent-data/containai/manifests/"
     else
-        test_fail "Container did not become ready"
+        test_fail "User manifest not found in volume"
     fi
 fi
 
 # Cleanup test 1
-stop_test_container "$test_container_name"
-"${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
@@ -217,13 +179,6 @@ EOF
 # Create Claude fixture (valid, should still work)
 create_claude_fixture
 
-# Create container
-create_test_container "user-manifest-invalid" \
-    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-    "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
-
-test_container_name="test-user-manifest-invalid-${SYNC_TEST_RUN_ID}"
-
 # Run import - user manifests are just files, sync should succeed
 # The validation happens at runtime, not during import
 import_exit=0
@@ -232,30 +187,19 @@ import_output=$(run_cai_import_from 2>&1) || import_exit=$?
 if [[ $import_exit -eq 0 ]]; then
     test_pass "Import succeeded with invalid user manifest file"
 
-    # Start container
-    start_test_container "$test_container_name"
+    ensure_probe_image
 
-    # Wait for container to be ready
-    if wait_for_container_running "$test_container_name" 10; then
-        test_pass "Container started successfully"
-
-        # Verify Claude data was still synced (invalid manifest shouldn't break valid data)
-        SYNC_TEST_CONTAINER="$test_container_name"
-        if assert_file_exists_in_volume "claude/settings.json"; then
-            test_pass "Valid agent data synced despite invalid user manifest"
-        else
-            test_fail "Valid agent data was not synced"
-        fi
+    # Verify Claude data was still synced (invalid manifest shouldn't break valid data)
+    if volume_path_exists "claude/settings.json"; then
+        test_pass "Valid agent data synced despite invalid user manifest"
     else
-        test_fail "Container failed to start"
+        test_fail "Valid agent data was not synced"
     fi
 else
     test_fail "Import failed unexpectedly: $import_output"
 fi
 
 # Cleanup test 2
-stop_test_container "$test_container_name"
-"${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
@@ -285,13 +229,6 @@ printf '%s\n' '{"user": "config", "_marker": "USER_CONFIG_MARKER"}' > "$SYNC_TES
 # Create Claude fixture
 create_claude_fixture
 
-# Create container
-create_test_container "user-manifest-data" \
-    --volume "$SYNC_TEST_DATA_VOLUME:/mnt/agent-data" \
-    "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
-
-test_container_name="test-user-manifest-data-${SYNC_TEST_RUN_ID}"
-
 # Run import
 import_exit=0
 import_output=$(run_cai_import_from 2>&1) || import_exit=$?
@@ -299,36 +236,25 @@ import_output=$(run_cai_import_from 2>&1) || import_exit=$?
 if [[ $import_exit -ne 0 ]]; then
     test_fail "Import failed: $import_output"
 else
-    # Start container
-    start_test_container "$test_container_name"
+    ensure_probe_image
 
-    # Wait for container to be ready
-    if wait_for_container_path "$test_container_name" "/mnt/agent-data" 10; then
+    # Check if user config was synced
+    if volume_path_exists "myconfig/settings.json"; then
+        test_pass "User config synced to volume"
 
-        SYNC_TEST_CONTAINER="$test_container_name"
-
-        # Check if user config was synced
-        if assert_file_exists_in_volume "myconfig/settings.json"; then
-            test_pass "User config synced to volume"
-
-            # Check content
-            content=$(cat_from_volume "myconfig/settings.json" 2>/dev/null || true)
-            if [[ "$content" == *"USER_CONFIG_MARKER"* ]]; then
-                test_pass "User config content is correct"
-            else
-                test_fail "User config content mismatch"
-            fi
+        # Check content
+        content=$(volume_cat "myconfig/settings.json" 2>/dev/null || true)
+        if [[ "$content" == *"USER_CONFIG_MARKER"* ]]; then
+            test_pass "User config content is correct"
         else
-            test_fail "User config not synced to volume"
+            test_fail "User config content mismatch"
         fi
     else
-        test_fail "Container did not become ready"
+        test_fail "User config not synced to volume"
     fi
 fi
 
 # Cleanup test 3
-stop_test_container "$test_container_name"
-"${DOCKER_CMD[@]}" rm -f "$test_container_name" 2>/dev/null || true
 "${DOCKER_CMD[@]}" volume rm "$SYNC_TEST_DATA_VOLUME" 2>/dev/null || true
 find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
 
