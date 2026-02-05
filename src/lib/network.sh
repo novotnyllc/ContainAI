@@ -348,8 +348,15 @@ _cai_iptables_available() {
         if [[ "$vm_status" != "Running" ]]; then
             return 1
         fi
-        # Check if iptables is available inside the VM
-        limactl shell "$vm_name" -- command -v iptables >/dev/null 2>&1
+        # Check if iptables is available inside the VM.
+        # Use explicit sbin fallbacks because non-interactive PATH in Lima may
+        # omit /usr/sbin and /sbin even when iptables is installed.
+        limactl shell "$vm_name" -- sh -c '
+            command -v iptables >/dev/null 2>&1 ||
+            [ -x /usr/sbin/iptables ] ||
+            [ -x /sbin/iptables ] ||
+            [ -x /usr/bin/iptables ]
+        ' >/dev/null 2>&1
     else
         command -v iptables >/dev/null 2>&1
     fi
