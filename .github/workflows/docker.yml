@@ -326,6 +326,9 @@ jobs:
     needs: build-push
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
       IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
@@ -345,6 +348,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -441,6 +451,9 @@ jobs:
     needs: [build-push, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
       IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
@@ -461,6 +474,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download tarball artifact
         uses: actions/download-artifact@v4
@@ -558,6 +578,9 @@ jobs:
     needs: [lint, build-push, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
       IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
@@ -581,6 +604,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify runner architecture
         run: |
@@ -658,6 +688,9 @@ jobs:
     if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
     runs-on: [self-hosted, linux, sysbox, '${{ matrix.arch }}']
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
     env:
       IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
       IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
@@ -674,6 +707,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # Try to download tarball artifact (from Task 5's PR artifact upload)
       # This tests the install path; repo checkout above provides build/test scripts
