@@ -49,6 +49,7 @@ CONTAINER_STOP_TIMEOUT=30
 
 # Test container name (unique per run to avoid conflicts)
 TEST_CONTAINER_NAME="containai-dind-runc133-test-$$"
+export CONTEXT_NAME TEST_CONTAINER_NAME
 
 # ContainAI base image for system container testing
 TEST_IMAGE="${CONTAINAI_TEST_IMAGE:-ghcr.io/novotnyllc/containai/base:latest}"
