@@ -3024,10 +3024,19 @@ LIMA_YAML
           "sysbox-runc": {
             "path": "/usr/bin/sysbox-runc"
           }
-        },
-        "hosts": ["unix:///var/run/docker.sock","tcp://0.0.0.0:${_CAI_LIMA_TCP_PORT}"]
+        }
       }
       EOF
+
+      # Enable Docker TCP listener via systemd override
+      # (Cannot use daemon.json "hosts" — conflicts with -H fd:// in service unit)
+      mkdir -p /etc/systemd/system/docker.service.d
+      cat > /etc/systemd/system/docker.service.d/containai-tcp.conf << 'OVERRIDE'
+      [Service]
+      ExecStart=
+      ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:${_CAI_LIMA_TCP_PORT} --containerd=/run/containerd/containerd.sock
+      OVERRIDE
+      systemctl daemon-reload
 LIMA_YAML
     else
         cat <<'LIMA_YAML'
