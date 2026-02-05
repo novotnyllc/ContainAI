@@ -80,10 +80,10 @@ jobs:
             exit 0
           fi
 
-          echo "Resolving latest completed docker.yml run for branch: ${INPUT_SOURCE_BRANCH}"
-          run_id="$(gh api "repos/${REPO}/actions/workflows/docker.yml/runs?branch=${INPUT_SOURCE_BRANCH}&per_page=30" --jq '.workflow_runs | map(select(.status=="completed" and .conclusion=="success")) | .[0].id')"
+          echo "Resolving latest completed non-cancelled docker.yml run for branch: ${INPUT_SOURCE_BRANCH}"
+          run_id="$(gh api "repos/${REPO}/actions/workflows/docker.yml/runs?branch=${INPUT_SOURCE_BRANCH}&per_page=30" --jq '.workflow_runs | map(select(.status=="completed" and .conclusion!="cancelled")) | .[0].id')"
           if [[ -z "$run_id" || "$run_id" == "null" ]]; then
-            echo "::error::No completed docker.yml run found for branch ${INPUT_SOURCE_BRANCH}"
+            echo "::error::No completed non-cancelled docker.yml run found for branch ${INPUT_SOURCE_BRANCH}"
             exit 1
           fi
 
