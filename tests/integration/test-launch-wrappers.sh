@@ -120,7 +120,8 @@ WRAPPER_TEST_CONTAINER="test-wrapper-${WRAPPER_TEST_RUN_ID}"
     --label "containai.test=1" \
     --name "$WRAPPER_TEST_CONTAINER" \
     --volume "$WRAPPER_TEST_VOLUME:/mnt/agent-data" \
-    "$SYNC_TEST_IMAGE_NAME" tail -f /dev/null >/dev/null
+    --entrypoint /bin/bash \
+    "$SYNC_TEST_IMAGE_NAME" -lc "tail -f /dev/null" >/dev/null
 
 "${DOCKER_CMD[@]}" start "$WRAPPER_TEST_CONTAINER" >/dev/null
 
