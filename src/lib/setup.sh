@@ -86,6 +86,9 @@ _CAI_LIMA_VM_NAME="${_CAI_CONTAINAI_DOCKER_CONTEXT:-containai-docker}"
 # Lima socket path (uses VM name from above)
 _CAI_LIMA_SOCKET_PATH="$HOME/.lima/$_CAI_LIMA_VM_NAME/sock/docker.sock"
 
+# Lima TCP port for Docker API (used on CI to avoid socket forwarding issues)
+_CAI_LIMA_TCP_PORT="${CONTAINAI_LIMA_TCP_PORT:-2375}"
+
 # Legacy Lima VM name (for migration from old installs)
 _CAI_LEGACY_LIMA_VM_NAME="containai-secure"
 
@@ -2311,7 +2314,7 @@ _cai_create_containai_context() {
     local expected_host="unix://$socket_path"
 
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "Expected socket: $expected_host"
+        _cai_info "Expected endpoint: $expected_host"
     fi
 
     # Check if context already exists
@@ -2892,6 +2895,24 @@ _cai_spacing
 # macOS Lima VM Setup
 # ==============================================================================
 
+# Determine whether Lima should expose Docker over TCP (CI-friendly)
+# Returns: 0=true, 1=false
+_cai_lima_use_tcp() {
+    if [[ "${CONTAINAI_LIMA_USE_TCP:-}" == "1" ]] || [[ "${CONTAINAI_LIMA_USE_TCP:-}" == "true" ]]; then
+        return 0
+    fi
+    [[ "${GITHUB_ACTIONS:-}" == "true" ]]
+}
+
+# Get Docker host endpoint for Lima (unix socket or TCP)
+_cai_lima_docker_host() {
+    if _cai_lima_use_tcp; then
+        printf 'tcp://127.0.0.1:%s' "$_CAI_LIMA_TCP_PORT"
+    else
+        printf 'unix://%s' "$_CAI_LIMA_SOCKET_PATH"
+    fi
+}
+
 # Generate Lima VM template YAML for Docker + Sysbox
 # Arguments: none
 # Outputs: Lima YAML to stdout
@@ -2990,7 +3011,26 @@ LIMA_YAML
           apt-get install -y /tmp/sysbox.deb
       }
       rm -f /tmp/sysbox.deb
+LIMA_YAML
 
+    if _cai_lima_use_tcp; then
+        cat <<LIMA_YAML
+      # Configure Docker with Sysbox runtime (NOT as default)
+      # Note: Inside Lima VM, /etc/containai/docker is the isolated path
+      mkdir -p /etc/containai/docker
+      cat > /etc/containai/docker/daemon.json << 'EOF'
+      {
+        "runtimes": {
+          "sysbox-runc": {
+            "path": "/usr/bin/sysbox-runc"
+          }
+        },
+        "hosts": ["unix:///var/run/docker.sock","tcp://0.0.0.0:${_CAI_LIMA_TCP_PORT}"]
+      }
+      EOF
+LIMA_YAML
+    else
+        cat <<'LIMA_YAML'
       # Configure Docker with Sysbox runtime (NOT as default)
       # Note: Inside Lima VM, /etc/containai/docker is the isolated path
       mkdir -p /etc/containai/docker
@@ -3003,6 +3043,10 @@ LIMA_YAML
         }
       }
       EOF
+LIMA_YAML
+    fi
+
+    cat <<'LIMA_YAML'
 
       systemctl restart docker
 
@@ -3262,25 +3306,33 @@ _cai_lima_wait_socket() {
     local timeout="${1:-60}"
     local dry_run="${2:-false}"
     local socket_path="$_CAI_LIMA_SOCKET_PATH"
+    local docker_host
+    docker_host=$(_cai_lima_docker_host)
 
     if [[ "$dry_run" == "true" ]]; then
-        _cai_dryrun " Would wait for socket: $socket_path"
+        _cai_dryrun " Would wait for Docker endpoint: $docker_host"
         return 0
     fi
 
-    _cai_step "Waiting for Lima Docker socket: $socket_path"
+    if _cai_lima_use_tcp; then
+        _cai_step "Waiting for Lima Docker TCP endpoint: $docker_host"
+    else
+        _cai_step "Waiting for Lima Docker socket: $socket_path"
+    fi
 
     local wait_count=0
-    while [[ ! -S "$socket_path" ]]; do
-        sleep 1
-        wait_count=$((wait_count + 1))
-        if [[ $wait_count -ge $timeout ]]; then
-            _cai_error "Lima Docker socket did not appear after ${timeout}s"
-            _cai_error "  Expected: $socket_path"
-            _cai_error "  Check: limactl shell $_CAI_LIMA_VM_NAME"
-            return 1
-        fi
-    done
+    if ! _cai_lima_use_tcp; then
+        while [[ ! -S "$socket_path" ]]; do
+            sleep 1
+            wait_count=$((wait_count + 1))
+            if [[ $wait_count -ge $timeout ]]; then
+                _cai_error "Lima Docker socket did not appear after ${timeout}s"
+                _cai_error "  Expected: $socket_path"
+                _cai_error "  Check: limactl shell $_CAI_LIMA_VM_NAME"
+                return 1
+            fi
+        done
+    fi
 
     # Verify Docker is accessible via the socket (may lag behind socket creation)
     local docker_output docker_rc
@@ -3288,10 +3340,10 @@ _cai_lima_wait_socket() {
     local verify_interval=1
 
     while [[ $verify_elapsed -lt $timeout ]]; do
-        docker_output=$(DOCKER_HOST="unix://$socket_path" docker info 2>&1) && docker_rc=0 || docker_rc=$?
+        docker_output=$(DOCKER_HOST="$docker_host" docker info 2>&1) && docker_rc=0 || docker_rc=$?
 
         if [[ $docker_rc -eq 0 ]]; then
-            _cai_ok "Lima Docker socket ready"
+            _cai_ok "Lima Docker endpoint ready"
             return 0
         fi
 
@@ -3300,8 +3352,12 @@ _cai_lima_wait_socket() {
         verify_elapsed=$((verify_elapsed + verify_interval))
     done
 
-    _cai_error "Docker not accessible via Lima socket after ${timeout}s"
-    _cai_error "  Socket exists but docker info failed"
+    if _cai_lima_use_tcp; then
+        _cai_error "Docker not accessible via Lima TCP endpoint after ${timeout}s"
+    else
+        _cai_error "Docker not accessible via Lima socket after ${timeout}s"
+        _cai_error "  Socket exists but docker info failed"
+    fi
     _cai_error "  Error: $docker_output"
     return 1
 }
@@ -3313,15 +3369,15 @@ _cai_lima_wait_socket() {
 _cai_lima_create_context() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
-    local socket_path="$_CAI_LIMA_SOCKET_PATH"
     local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
 
     _cai_step "Creating $context_name Docker context (macOS/Lima)"
 
-    local expected_host="unix://$socket_path"
+    local expected_host
+    expected_host=$(_cai_lima_docker_host)
 
     if [[ "$verbose" == "true" ]]; then
-        _cai_info "Expected socket: $expected_host"
+        _cai_info "Expected endpoint: $expected_host"
     fi
 
     # Check if context already exists
@@ -3355,6 +3411,16 @@ _cai_lima_create_context() {
         fi
     fi
 
+    # Handle stale context entries (context listed but metadata missing)
+    # If inspect failed above, attempt a best-effort removal before create.
+    if ! docker context inspect "$context_name" >/dev/null 2>&1; then
+        if [[ "$dry_run" == "true" ]]; then
+            _cai_dryrun " Would remove stale context entry (if present)"
+        else
+            docker context rm -f "$context_name" >/dev/null 2>&1 || true
+        fi
+    fi
+
     if [[ "$dry_run" == "true" ]]; then
         _cai_dryrun " Would run: docker context create $context_name --docker host=$expected_host"
     else
@@ -3375,8 +3441,9 @@ _cai_lima_create_context() {
 _cai_lima_verify_install() {
     local dry_run="${1:-false}"
     local verbose="${2:-false}"
-    local socket_path="$_CAI_LIMA_SOCKET_PATH"
     local context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
+    local docker_host
+    docker_host=$(_cai_lima_docker_host)
 
     _cai_step "Verifying Lima + Sysbox installation"
 
@@ -3400,11 +3467,11 @@ _cai_lima_verify_install() {
         _cai_info "Lima VM status: $status"
     fi
 
-    # Check Docker recognizes sysbox-runc runtime via Lima socket
+    # Check Docker recognizes sysbox-runc runtime via Lima endpoint
     local docker_runtimes
-    docker_runtimes=$(DOCKER_HOST="unix://$socket_path" docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
+    docker_runtimes=$(DOCKER_HOST="$docker_host" docker info --format '{{json .Runtimes}}' 2>/dev/null || true)
     if [[ -z "$docker_runtimes" ]] || [[ "$docker_runtimes" == "null" ]]; then
-        _cai_error "Could not query Docker runtimes via Lima socket"
+        _cai_error "Could not query Docker runtimes via Lima endpoint"
         return 1
     fi
 
@@ -4964,7 +5031,7 @@ _cai_spacing
                 ;;
             macos)
                 context_name="$_CAI_CONTAINAI_DOCKER_CONTEXT"
-                expected_socket="unix://$_CAI_LIMA_SOCKET_PATH"
+                expected_socket=$(_cai_lima_docker_host)
                 sysbox_is_default="false"
                 ;;
             *)

@@ -905,6 +905,67 @@ _import_generate_additional_entries() {
 }
 
 # ==============================================================================
+# User manifest entries
+# ==============================================================================
+
+# Resolve parse-manifest.sh path (container vs development)
+_import_get_parse_manifest_script() {
+    if [[ -f "/opt/containai/scripts/parse-manifest.sh" ]]; then
+        printf '%s' "/opt/containai/scripts/parse-manifest.sh"
+    elif [[ -f "${_CAI_SCRIPT_DIR}/scripts/parse-manifest.sh" ]]; then
+        printf '%s' "${_CAI_SCRIPT_DIR}/scripts/parse-manifest.sh"
+    elif [[ -f "${_CAI_SCRIPT_DIR}/../scripts/parse-manifest.sh" ]]; then
+        printf '%s' "${_CAI_SCRIPT_DIR}/../scripts/parse-manifest.sh"
+    else
+        return 1
+    fi
+}
+
+# Generate sync map entries from user manifests at ~/.config/containai/manifests
+# Arguments:
+#   $1 = source directory (e.g., $HOME or custom --from path)
+# Output (stdout): newline-delimited entries in format:
+#   /source/.my-tool/config.json:/target/my-tool/config.json:f
+_import_generate_user_manifest_entries() {
+    local source_root="$1"
+    local manifest_dir="$source_root/.config/containai/manifests"
+
+    [[ -d "$manifest_dir" ]] || return 0
+
+    # Skip if no manifest files present
+    local manifest_files=()
+    shopt -s nullglob
+    manifest_files=("$manifest_dir"/*.toml)
+    shopt -u nullglob
+    if [[ ${#manifest_files[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    local parse_script
+    if ! parse_script=$(_import_get_parse_manifest_script); then
+        printf '[WARN] parse-manifest.sh not found; skipping user manifests\n' >&2
+        return 0
+    fi
+
+    local source target _container_link flags _disabled type _optional
+    while IFS='|' read -r source target _container_link flags _disabled type _optional; do
+        [[ -z "$source" || -z "$target" ]] && continue
+        [[ "$type" != "entry" ]] && continue
+        if [[ "$source" == /* ]]; then
+            printf '[WARN] Skipping user manifest entry with absolute source: %s\n' "$source" >&2
+            continue
+        fi
+        if [[ -z "$flags" ]]; then
+            printf '[WARN] Skipping user manifest entry missing flags: %s -> %s\n' "$source" "$target" >&2
+            continue
+        fi
+        # Normalize target to be relative
+        target="${target#/}"
+        printf '/source/%s:/target/%s:%s\n' "$source" "$target" "$flags"
+    done < <("$parse_script" "$manifest_dir" 2>/dev/null || true)
+}
+
+# ==============================================================================
 # Import overrides
 # ==============================================================================
 
@@ -2611,6 +2672,30 @@ done <<'"'"'MAP_DATA'"'"'
         fi
         sync_map_entries+="$additional_entry"$'\n'
     done <<<"$additional_entries"
+
+    # Dynamically discover user manifest entries (~/.config/containai/manifests)
+    local user_manifest_entries user_manifest_entry
+    if user_manifest_entries=$(_import_generate_user_manifest_entries "$source_root"); then
+        while IFS= read -r user_manifest_entry; do
+            [[ -z "$user_manifest_entry" ]] && continue
+            entry_src="${user_manifest_entry%%:*}"
+            entry_flags="${user_manifest_entry##*:}"
+            if [[ "$no_secrets" == "true" && "$entry_flags" == *s* ]]; then
+                entry_path_display="~${entry_src#/source}"
+                if [[ "$dry_run" == "true" ]]; then
+                    echo "[DRY-RUN] Skipping secret user manifest entry: $entry_path_display (--no-secrets)"
+                else
+                    _import_info "Skipping secret user manifest entry: $entry_path_display (--no-secrets)"
+                fi
+                continue
+            fi
+            if [[ "$dry_run" == "true" ]]; then
+                entry_path_display="~${entry_src#/source}"
+                echo "[DRY-RUN] User manifest entry: $entry_path_display"
+            fi
+            sync_map_entries+="$user_manifest_entry"$'\n'
+        done <<<"$user_manifest_entries"
+    fi
 
     # If we have excludes, use destination-relative rewriting
     # Otherwise, just pass entries as-is (with empty 4th field for excludes)
