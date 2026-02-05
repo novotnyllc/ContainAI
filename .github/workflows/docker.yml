@@ -557,7 +557,7 @@ jobs:
           ./tests/integration/test-startup-hooks.sh
 
       - name: Collect sysbox logs
-        if: failure()
+        if: always()
         run: |
           mkdir -p /tmp/sysbox-logs
           journalctl -u sysbox-mgr --no-pager > /tmp/sysbox-logs/sysbox-mgr.log 2>&1 || true
@@ -565,7 +565,7 @@ jobs:
           sudo cp -r /var/log/sysbox/ /tmp/sysbox-logs/ 2>/dev/null || true
 
       - name: Upload E2E test logs on failure
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-test-logs-${{ matrix.arch }}-${{ github.run_id }}
@@ -646,6 +646,46 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           cai setup --verbose
 
+      - name: Ensure Lima VM is ready
+        run: |
+          set -euo pipefail
+          VM_NAME="${{ env.CONTAINAI_DOCKER_CONTEXT }}"
+          if [[ -z "$VM_NAME" ]]; then
+            VM_NAME="containai-docker"
+          fi
+
+          echo "============================================="
+          echo "Lima diagnostics + readiness checks"
+          echo "============================================="
+          command -v limactl
+          limactl list || true
+
+          vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | awk -F'\t' -v name="$VM_NAME" '$1 == name {print $2}')
+          if [[ "$vm_status" != "Running" ]]; then
+            echo "Lima VM '$VM_NAME' status: ${vm_status:-missing} - starting..."
+            limactl start "$VM_NAME"
+          fi
+
+          socket_path="$HOME/.lima/$VM_NAME/sock/docker.sock"
+          echo "Waiting for Lima socket: $socket_path"
+          for i in $(seq 1 60); do
+            if [[ -S "$socket_path" ]]; then
+              echo "Socket ready"
+              break
+            fi
+            sleep 2
+          done
+          if [[ ! -S "$socket_path" ]]; then
+            echo "::error::Lima socket not available: $socket_path"
+            limactl list || true
+            limactl info "$VM_NAME" || true
+            exit 1
+          fi
+
+          echo "Checking Docker inside Lima VM"
+          limactl shell "$VM_NAME" -- sudo systemctl start docker || true
+          limactl shell "$VM_NAME" -- docker info
+
       - name: Log in to Container Registry (containai-docker)
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
@@ -662,3 +702,31 @@ jobs:
           "$BASH_BIN" -lc './tests/integration/test-dind.sh'
           "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
           "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+
+      - name: Collect Lima diagnostics
+        if: always()
+        run: |
+          set +e
+          VM_NAME="${{ env.CONTAINAI_DOCKER_CONTEXT }}"
+          if [[ -z "$VM_NAME" ]]; then
+            VM_NAME="containai-docker"
+          fi
+          echo "============================================="
+          echo "Lima diagnostics (failure)"
+          echo "============================================="
+          mkdir -p /tmp/lima-logs
+          limactl list > /tmp/lima-logs/limactl-list.log 2>&1 || true
+          limactl info "$VM_NAME" > /tmp/lima-logs/limactl-info.log 2>&1 || true
+          limactl shell "$VM_NAME" -- systemctl status docker > /tmp/lima-logs/docker-status.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u docker --no-pager > /tmp/lima-logs/docker-journal.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u sysbox-mgr --no-pager > /tmp/lima-logs/sysbox-mgr-journal.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u sysbox-fs --no-pager > /tmp/lima-logs/sysbox-fs-journal.log 2>&1 || true
+
+      - name: Upload Lima logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lima-logs-${{ matrix.runner }}-${{ github.run_id }}
+          path: /tmp/lima-logs/
+          retention-days: 7
+          if-no-files-found: ignore
