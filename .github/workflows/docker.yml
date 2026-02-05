@@ -712,13 +712,37 @@ jobs:
           echo "Running cai setup"
           echo "============================================="
           export PATH="$HOME/.local/bin:$PATH"
+          setup_timeout_secs=1200
+
+          run_cai_setup_with_timeout() {
+            if command -v gtimeout >/dev/null 2>&1; then
+              gtimeout "$setup_timeout_secs" cai setup --verbose
+            else
+              # macOS runners always have perl; use alarm() as a timeout fallback.
+              perl -e 'alarm shift; exec @ARGV or die $!' "$setup_timeout_secs" cai setup --verbose
+            fi
+          }
+
           for attempt in 1 2; do
-            echo "Attempt $attempt: cai setup --verbose"
-            if cai setup --verbose; then
+            echo "Attempt $attempt: cai setup --verbose (timeout ${setup_timeout_secs}s)"
+            if run_cai_setup_with_timeout; then
               echo "cai setup succeeded"
               break
             fi
-            echo "::warning::cai setup failed on attempt $attempt"
+            setup_rc=$?
+            if [[ $setup_rc -eq 124 || $setup_rc -eq 142 ]]; then
+              echo "::warning::cai setup timed out on attempt $attempt after ${setup_timeout_secs}s"
+            else
+              echo "::warning::cai setup failed on attempt $attempt (rc=$setup_rc)"
+            fi
+            if [[ -d "$HOME/.config/containai/logs" ]]; then
+              echo "Recent ContainAI logs:"
+              while IFS= read -r file; do
+                echo "--- $file (tail) ---"
+                tail -n 20 "$file" || true
+              done < <(find "$HOME/.config/containai/logs" -type f -name '*.log' 2>/dev/null | head -20 || true)
+            fi
+            limactl list || true
             if [[ "$attempt" -lt 2 ]]; then
               if command -v limactl >/dev/null 2>&1; then
                 limactl delete -f containai-docker || true

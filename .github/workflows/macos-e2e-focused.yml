@@ -1,0 +1,301 @@
+name: macOS Focused E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Optional docker.yml run ID to source containai-tarball-macos-x64 artifact from"
+        required: false
+        type: string
+      source_branch:
+        description: "Branch to search when source_run_id is not provided"
+        required: false
+        default: "main"
+        type: string
+      image_prefix:
+        description: "Image prefix for pre-built images"
+        required: false
+        default: "ghcr.io/novotnyllc/containai"
+        type: string
+      image_tag:
+        description: "Image tag for pre-built images"
+        required: false
+        default: "nightly"
+        type: string
+
+concurrency:
+  group: macos-focused-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+  actions: read
+
+env:
+  REGISTRY: ghcr.io
+  CONTAINAI_VERBOSE: "1"
+
+jobs:
+  e2e-test-macos-intel-focused:
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    env:
+      IMAGE_PREFIX: ${{ inputs.image_prefix }}
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      CONTAINAI_TEST_IMAGE: ${{ inputs.image_prefix }}/base:${{ inputs.image_tag }}
+      TARBALL_ARTIFACT_NAME: containai-tarball-macos-x64
+      EXPECTED_UNAME: x86_64
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify runner architecture
+        run: |
+          machine="$(uname -m)"
+          expected="${EXPECTED_UNAME}"
+          if [[ "$machine" != "$expected" ]]; then
+            echo "::error::Runner arch mismatch. Expected $expected, got $machine"
+            exit 1
+          fi
+
+      - name: Resolve source run
+        id: source_run
+        env:
+          INPUT_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          INPUT_SOURCE_BRANCH: ${{ inputs.source_branch }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          command -v gh >/dev/null 2>&1 || { echo "::error::gh CLI not found"; exit 1; }
+          gh auth status -h github.com
+
+          if [[ -n "${INPUT_SOURCE_RUN_ID}" ]]; then
+            echo "Using provided source run id: ${INPUT_SOURCE_RUN_ID}"
+            echo "run_id=${INPUT_SOURCE_RUN_ID}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Resolving latest completed docker.yml run for branch: ${INPUT_SOURCE_BRANCH}"
+          run_id="$(gh api "repos/${REPO}/actions/workflows/docker.yml/runs?branch=${INPUT_SOURCE_BRANCH}&per_page=30" --jq '.workflow_runs | map(select(.status=="completed" and .conclusion=="success")) | .[0].id')"
+          if [[ -z "$run_id" || "$run_id" == "null" ]]; then
+            echo "::error::No completed docker.yml run found for branch ${INPUT_SOURCE_BRANCH}"
+            exit 1
+          fi
+
+          echo "Resolved source run id: ${run_id}"
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS tarball artifact from source run
+        env:
+          REPO: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ steps.source_run.outputs.run_id }}
+        run: |
+          set -euo pipefail
+
+          echo "Looking up artifact '${TARBALL_ARTIFACT_NAME}' in run ${SOURCE_RUN_ID}"
+          artifact_id="$(gh api "repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" --jq ".artifacts[] | select(.name==\"${TARBALL_ARTIFACT_NAME}\" and .expired==false) | .id" | head -1)"
+          if [[ -z "$artifact_id" ]]; then
+            echo "::error::Artifact '${TARBALL_ARTIFACT_NAME}' not found in run ${SOURCE_RUN_ID}"
+            gh api "repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" --jq '.artifacts[] | .name' || true
+            exit 1
+          fi
+
+          mkdir -p /tmp/tarball
+          gh api "repos/${REPO}/actions/artifacts/${artifact_id}/zip" --output /tmp/tarball/artifact.zip
+          unzip -q /tmp/tarball/artifact.zip -d /tmp/tarball
+          ls -la /tmp/tarball
+
+      - name: Extract and install from tarball
+        run: |
+          set -euo pipefail
+          echo "============================================="
+          echo "Installing from sourced tarball artifact"
+          echo "============================================="
+          mapfile -t tarballs < <(find /tmp/tarball -maxdepth 2 -type f -name 'containai-*.tar.gz' | sort)
+          if [[ "${#tarballs[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one containai tarball, found ${#tarballs[@]}"
+            find /tmp/tarball -maxdepth 3 -print || true
+            exit 1
+          fi
+          tar xzf "${tarballs[0]}" -C /tmp/tarball
+          cd /tmp/tarball/containai-*/
+          ./install.sh --local --yes --no-setup
+
+      - name: Run cai setup (Lima + Sysbox)
+        env:
+          CAI_YES: "1"
+        run: |
+          set -euo pipefail
+          echo "============================================="
+          echo "Running cai setup"
+          echo "============================================="
+          export PATH="$HOME/.local/bin:$PATH"
+          setup_timeout_secs=1200
+
+          run_cai_setup_with_timeout() {
+            if command -v gtimeout >/dev/null 2>&1; then
+              gtimeout "$setup_timeout_secs" cai setup --verbose
+            else
+              perl -e 'alarm shift; exec @ARGV or die $!' "$setup_timeout_secs" cai setup --verbose
+            fi
+          }
+
+          for attempt in 1 2; do
+            echo "Attempt $attempt: cai setup --verbose (timeout ${setup_timeout_secs}s)"
+            if run_cai_setup_with_timeout; then
+              echo "cai setup succeeded"
+              break
+            fi
+            setup_rc=$?
+            if [[ $setup_rc -eq 124 || $setup_rc -eq 142 ]]; then
+              echo "::warning::cai setup timed out on attempt $attempt after ${setup_timeout_secs}s"
+            else
+              echo "::warning::cai setup failed on attempt $attempt (rc=$setup_rc)"
+            fi
+            if [[ -d "$HOME/.config/containai/logs" ]]; then
+              echo "Recent ContainAI logs:"
+              while IFS= read -r file; do
+                echo "--- $file (tail) ---"
+                tail -n 20 "$file" || true
+              done < <(find "$HOME/.config/containai/logs" -type f -name '*.log' 2>/dev/null | head -20 || true)
+            fi
+            limactl list || true
+            if [[ "$attempt" -lt 2 ]]; then
+              if command -v limactl >/dev/null 2>&1; then
+                limactl delete -f containai-docker || true
+              fi
+              rm -rf "$HOME/.lima/containai-docker" || true
+              echo "Retrying after Lima cleanup..."
+              continue
+            fi
+            echo "::error::cai setup failed after retries"
+            exit 1
+          done
+
+      - name: Ensure containai-docker context is ready
+        run: |
+          set -euo pipefail
+          CONTEXT_NAME="containai-docker"
+
+          echo "============================================="
+          echo "Context diagnostics + readiness checks"
+          echo "============================================="
+          docker context ls || true
+          if ! docker context inspect "$CONTEXT_NAME" >/dev/null 2>&1; then
+            echo "::error::Docker context '$CONTEXT_NAME' not found after cai setup"
+            docker context ls || true
+            exit 1
+          fi
+
+          context_host="$(docker context inspect "$CONTEXT_NAME" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+          echo "Context '$CONTEXT_NAME' endpoint: ${context_host:-unknown}"
+
+          if [[ "$context_host" == unix://* ]]; then
+            socket_path="${context_host#unix://}"
+            echo "Waiting for context socket: $socket_path"
+            for i in $(seq 1 60); do
+              if [[ -S "$socket_path" ]]; then
+                echo "Socket ready"
+                break
+              fi
+              sleep 2
+            done
+            if [[ ! -S "$socket_path" ]]; then
+              echo "::error::Context socket not available: $socket_path"
+              ls -la "$(dirname "$socket_path")" || true
+              exit 1
+            fi
+          fi
+
+          echo "Waiting for Docker API via context '$CONTEXT_NAME'"
+          for i in $(seq 1 60); do
+            if docker --context "$CONTEXT_NAME" info >/tmp/containai-docker-info.log 2>&1; then
+              echo "Docker context '$CONTEXT_NAME' is ready"
+              break
+            fi
+            echo "Attempt $i/60: context not ready yet"
+            tail -n 5 /tmp/containai-docker-info.log 2>/dev/null || true
+            sleep 2
+          done
+
+          if ! docker --context "$CONTEXT_NAME" info >/dev/null 2>&1; then
+            echo "::error::Docker context '$CONTEXT_NAME' not reachable"
+            cat /tmp/containai-docker-info.log || true
+            docker --context "$CONTEXT_NAME" version || true
+            if command -v limactl >/dev/null 2>&1; then
+              limactl list || true
+            fi
+            exit 1
+          fi
+
+      - name: Log in to Container Registry (containai-docker)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
+      - name: Pull images into Lima
+        run: |
+          docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
+          docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
+
+      - name: Run Secure Engine E2E tests (macOS)
+        run: |
+          BASH_BIN="$(brew --prefix bash)/bin/bash"
+          "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
+          "$BASH_BIN" -lc './tests/integration/test-dind.sh'
+          "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
+          "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+
+      - name: Collect Lima diagnostics
+        if: always()
+        run: |
+          set +e
+          VM_NAME="containai-docker"
+          echo "============================================="
+          echo "Lima diagnostics"
+          echo "============================================="
+          mkdir -p /tmp/lima-logs
+          limactl list > /tmp/lima-logs/limactl-list.log 2>&1 || true
+          limactl info "$VM_NAME" > /tmp/lima-logs/limactl-info.log 2>&1 || true
+          if [[ -d "$HOME/.lima/$VM_NAME" ]]; then
+            cp -a "$HOME/.lima/$VM_NAME"/*.log /tmp/lima-logs/ 2>/dev/null || true
+            cp -a "$HOME/.lima/$VM_NAME"/serial*.log /tmp/lima-logs/ 2>/dev/null || true
+          fi
+          if [[ -d "$HOME/Library/Logs/Lima" ]]; then
+            cp -a "$HOME/Library/Logs/Lima" /tmp/lima-logs/ 2>/dev/null || true
+          fi
+          limactl shell "$VM_NAME" -- systemctl status docker > /tmp/lima-logs/docker-status.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u docker --no-pager > /tmp/lima-logs/docker-journal.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u sysbox-mgr --no-pager > /tmp/lima-logs/sysbox-mgr-journal.log 2>&1 || true
+          limactl shell "$VM_NAME" -- journalctl -u sysbox-fs --no-pager > /tmp/lima-logs/sysbox-fs-journal.log 2>&1 || true
+
+      - name: Upload Lima logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lima-logs-macos-focused-${{ github.run_id }}
+          path: /tmp/lima-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
+          docker --context containai-docker info > /tmp/containai-logs/containai-docker-info.log 2>&1 || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-macos-focused-${{ github.run_id }}
+          path: /tmp/containai-logs/
+          retention-days: 7
+          if-no-files-found: ignore
