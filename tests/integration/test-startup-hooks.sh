@@ -808,17 +808,19 @@ test_ssh_wrapper_behavior() {
     sleep 1
 
     # Test 7a: Real SSH with plain command (tests BASH_ENV path)
-    # This is the CRITICAL test - plain 'ssh container cmd' without bash -c wrapper
+    # Avoid agent-specific binaries; inject a marker into .bash_env and verify it via SSH.
+    docker --context "$CONTEXT_NAME" exec "$container_name" \
+        bash -lc 'echo "export CONTAINAI_BASH_ENV_MARKER=1" >> /home/agent/.bash_env' >/dev/null 2>&1 || true
     local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i $ssh_key_dir/test_key"
     local ssh_output ssh_rc
 
     # shellcheck disable=SC2086
-    ssh_output=$(ssh $ssh_opts agent@"$container_ip" 'type claude' 2>&1) && ssh_rc=0 || ssh_rc=$?
+    ssh_output=$(ssh $ssh_opts agent@"$container_ip" 'echo "$CONTAINAI_BASH_ENV_MARKER"' 2>&1) && ssh_rc=0 || ssh_rc=$?
 
-    if [[ $ssh_rc -eq 0 ]] && [[ "$ssh_output" == *"function"* ]]; then
-        pass "CRITICAL: Plain SSH 'type claude' shows function (BASH_ENV works via real SSH)"
+    if [[ $ssh_rc -eq 0 ]] && [[ "$ssh_output" == *"1"* ]]; then
+        pass "CRITICAL: Plain SSH sees BASH_ENV marker (BASH_ENV works via real SSH)"
     else
-        fail "CRITICAL: Plain SSH 'type claude' failed (rc=$ssh_rc): $ssh_output"
+        fail "CRITICAL: Plain SSH BASH_ENV marker missing (rc=$ssh_rc): $ssh_output"
     fi
 
     # Test 7b: Check BASH_ENV value via real SSH
@@ -832,16 +834,7 @@ test_ssh_wrapper_behavior() {
         fail "BASH_ENV not correctly set via SSH: $bash_env_ssh"
     fi
 
-    # Test 7c: Verify wrapper default args via SSH
-    local declare_ssh
-    # shellcheck disable=SC2086
-    declare_ssh=$(ssh $ssh_opts agent@"$container_ip" 'declare -f claude' 2>&1) || declare_ssh=""
-
-    if [[ "$declare_ssh" == *"--dangerously-skip-permissions"* ]]; then
-        pass "Claude wrapper includes default args via SSH"
-    else
-        fail "Claude wrapper missing default args via SSH: $declare_ssh"
-    fi
+    # Test 7c removed: infrastructure tests must not rely on agent binaries or wrappers.
 
     # Clean up SSH key
     rm -rf "$ssh_key_dir"
