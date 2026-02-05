@@ -793,48 +793,60 @@ test_ssh_wrapper_behavior() {
 
     info "Container IP: $container_ip"
 
-    # Generate temporary SSH key for testing
-    local ssh_key_dir="/tmp/$TEST_RUN_ID/ssh"
-    mkdir -p "$ssh_key_dir"
-    ssh-keygen -t ed25519 -f "$ssh_key_dir/test_key" -N "" -q
+    # Create a dedicated SSH test user to avoid agent-specific assumptions
+    local ssh_user="containai-test"
+    if ! docker --context "$CONTEXT_NAME" exec "$container_name" \
+        bash -lc "id -u \"$ssh_user\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$ssh_user\"" >/dev/null 2>&1; then
+        fail "Failed to create SSH test user: $ssh_user"
+        return
+    fi
 
-    # Copy public key to container's authorized_keys
-    local pubkey
-    pubkey=$(cat "$ssh_key_dir/test_key.pub")
-    docker --context "$CONTEXT_NAME" exec "$container_name" \
-        bash -c "mkdir -p /home/agent/.ssh && echo '$pubkey' >> /home/agent/.ssh/authorized_keys && chmod 600 /home/agent/.ssh/authorized_keys && chown -R agent:agent /home/agent/.ssh" 2>/dev/null
-
-    # Wait a moment for SSH to pick up the new key
-    sleep 1
-
-    local ssh_user="agent"
     local ssh_home
     ssh_home=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
         getent passwd "$ssh_user" 2>/dev/null | cut -d: -f6) || ssh_home=""
-
     if [[ -z "$ssh_home" ]]; then
-        skip "SSH user '$ssh_user' not present in container"
+        ssh_home=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+            bash -lc "awk -F: '\$1==\"$ssh_user\" {print \$6}' /etc/passwd" 2>/dev/null) || ssh_home=""
+    fi
+    if [[ -z "$ssh_home" ]]; then
+        fail "SSH test user home not found for: $ssh_user"
         return
     fi
 
     local bash_env_path
     bash_env_path=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
         bash -lc 'printf "%s" "${BASH_ENV:-}"' 2>/dev/null) || bash_env_path=""
-
     if [[ -z "$bash_env_path" ]]; then
-        skip "BASH_ENV not configured in container"
+        fail "BASH_ENV not configured in container"
+        return
+    fi
+    if [[ "$bash_env_path" != "/etc/containai/bash_env" ]]; then
+        fail "Unexpected BASH_ENV path: $bash_env_path"
         return
     fi
 
-    # Test 7a: Real SSH with plain command (tests BASH_ENV path)
-    # Avoid agent-specific binaries; inject a marker into BASH_ENV and verify it via SSH.
+    # Generate temporary SSH key for testing
+    local ssh_key_dir="/tmp/$TEST_RUN_ID/ssh"
+    mkdir -p "$ssh_key_dir"
+    ssh-keygen -t ed25519 -f "$ssh_key_dir/test_key" -N "" -q
+
+    # Copy public key to container's authorized_keys for the test user
+    local pubkey
+    pubkey=$(cat "$ssh_key_dir/test_key.pub")
     docker --context "$CONTEXT_NAME" exec "$container_name" \
-        bash -lc "echo 'export CONTAINAI_BASH_ENV_MARKER=1' >> \"$bash_env_path\"" >/dev/null 2>&1 || true
+        bash -c "mkdir -p \"$ssh_home/.ssh\" && echo '$pubkey' >> \"$ssh_home/.ssh/authorized_keys\" && chmod 600 \"$ssh_home/.ssh/authorized_keys\" && chown -R $ssh_user:$ssh_user \"$ssh_home/.ssh\"" 2>/dev/null
+
+    # Inject a marker into the user's ~/.bash_env and ensure ownership
+    docker --context "$CONTEXT_NAME" exec "$container_name" \
+        bash -c "echo 'export CONTAINAI_BASH_ENV_MARKER=1' >> \"$ssh_home/.bash_env\" && chown $ssh_user:$ssh_user \"$ssh_home/.bash_env\"" 2>/dev/null
+
+    # Wait a moment for SSH to pick up the new key
+    sleep 1
     local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i $ssh_key_dir/test_key"
     local ssh_output ssh_rc
 
     # shellcheck disable=SC2086
-    ssh_output=$(ssh $ssh_opts agent@"$container_ip" 'echo "$CONTAINAI_BASH_ENV_MARKER"' 2>&1) && ssh_rc=0 || ssh_rc=$?
+    ssh_output=$(ssh $ssh_opts "$ssh_user"@"$container_ip" 'echo "$CONTAINAI_BASH_ENV_MARKER"' 2>&1) && ssh_rc=0 || ssh_rc=$?
 
     if [[ $ssh_rc -eq 0 ]] && [[ "$ssh_output" == *"1"* ]]; then
         pass "CRITICAL: Plain SSH sees BASH_ENV marker (BASH_ENV works via real SSH)"
@@ -845,9 +857,9 @@ test_ssh_wrapper_behavior() {
     # Test 7b: Check BASH_ENV value via real SSH
     local bash_env_ssh
     # shellcheck disable=SC2086
-    bash_env_ssh=$(ssh $ssh_opts agent@"$container_ip" 'echo "BASH_ENV=$BASH_ENV"' 2>&1) || bash_env_ssh=""
+    bash_env_ssh=$(ssh $ssh_opts "$ssh_user"@"$container_ip" 'echo "BASH_ENV=$BASH_ENV"' 2>&1) || bash_env_ssh=""
 
-    if [[ "$bash_env_ssh" == *"BASH_ENV=/home/agent/.bash_env"* ]]; then
+    if [[ "$bash_env_ssh" == *"BASH_ENV=/etc/containai/bash_env"* ]]; then
         pass "BASH_ENV is correctly set via real SSH"
     else
         fail "BASH_ENV not correctly set via SSH: $bash_env_ssh"
