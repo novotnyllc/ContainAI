@@ -834,7 +834,7 @@ test_ssh_wrapper_behavior() {
     local pubkey
     pubkey=$(cat "$ssh_key_dir/test_key.pub")
     docker --context "$CONTEXT_NAME" exec "$container_name" \
-        bash -c "mkdir -p \"$ssh_home/.ssh\" && echo '$pubkey' >> \"$ssh_home/.ssh/authorized_keys\" && chmod 600 \"$ssh_home/.ssh/authorized_keys\" && chown -R $ssh_user:$ssh_user \"$ssh_home/.ssh\"" 2>/dev/null
+        bash -c "mkdir -p \"$ssh_home/.ssh\" && chmod 700 \"$ssh_home/.ssh\" && echo '$pubkey' >> \"$ssh_home/.ssh/authorized_keys\" && chmod 600 \"$ssh_home/.ssh/authorized_keys\" && chown -R $ssh_user:$ssh_user \"$ssh_home/.ssh\"" 2>/dev/null
 
     # Inject a marker into the user's ~/.bash_env and ensure ownership
     docker --context "$CONTEXT_NAME" exec "$container_name" \
