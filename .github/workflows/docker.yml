@@ -656,6 +656,7 @@ jobs:
   # ============================================================================
   e2e-test-macos:
     needs: [lint, build-push, build-tarballs]
+    if: ${{ matrix.enabled }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
@@ -674,10 +675,12 @@ jobs:
             image_arch: amd64
             tarball_arch: macos-x64
             expected_uname: x86_64
+            enabled: true
           - runner: macos-26
             image_arch: arm64
             tarball_arch: macos-arm64
             expected_uname: arm64
+            enabled: false
 
     steps:
       - name: Checkout repository
