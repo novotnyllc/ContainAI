@@ -716,11 +716,29 @@ jobs:
         env:
           CAI_YES: "1"
         run: |
+          set -euo pipefail
           echo "============================================="
           echo "Running cai setup"
           echo "============================================="
           export PATH="$HOME/.local/bin:$PATH"
-          cai setup --verbose
+          for attempt in 1 2; do
+            echo "Attempt $attempt: cai setup --verbose"
+            if cai setup --verbose; then
+              echo "cai setup succeeded"
+              break
+            fi
+            echo "::warning::cai setup failed on attempt $attempt"
+            if [[ "$attempt" -lt 2 ]]; then
+              if command -v limactl >/dev/null 2>&1; then
+                limactl delete -f containai-docker || true
+              fi
+              rm -rf "$HOME/.lima/containai-docker" || true
+              echo "Retrying after Lima cleanup..."
+              continue
+            fi
+            echo "::error::cai setup failed after retries"
+            exit 1
+          done
 
       - name: Ensure Lima VM is ready
         run: |
@@ -734,7 +752,9 @@ jobs:
           echo "Lima diagnostics + readiness checks"
           echo "============================================="
           command -v limactl
+          limactl --version || true
           limactl list || true
+          limactl list --json || true
 
           vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | awk -F'\t' -v name="$VM_NAME" '$1 == name {print $2}')
           if [[ "$vm_status" != "Running" ]]; then
@@ -757,6 +777,7 @@ jobs:
             limactl info "$VM_NAME" || true
             exit 1
           fi
+          ls -la "$HOME/.lima/$VM_NAME/sock/" || true
 
           echo "Checking Docker inside Lima VM"
           limactl shell "$VM_NAME" -- sudo systemctl start docker || true
@@ -793,6 +814,13 @@ jobs:
           mkdir -p /tmp/lima-logs
           limactl list > /tmp/lima-logs/limactl-list.log 2>&1 || true
           limactl info "$VM_NAME" > /tmp/lima-logs/limactl-info.log 2>&1 || true
+          if [[ -d "$HOME/.lima/$VM_NAME" ]]; then
+            cp -a "$HOME/.lima/$VM_NAME"/*.log /tmp/lima-logs/ 2>/dev/null || true
+            cp -a "$HOME/.lima/$VM_NAME"/serial*.log /tmp/lima-logs/ 2>/dev/null || true
+          fi
+          if [[ -d "$HOME/Library/Logs/Lima" ]]; then
+            cp -a "$HOME/Library/Logs/Lima" /tmp/lima-logs/ 2>/dev/null || true
+          fi
           limactl shell "$VM_NAME" -- systemctl status docker > /tmp/lima-logs/docker-status.log 2>&1 || true
           limactl shell "$VM_NAME" -- journalctl -u docker --no-pager > /tmp/lima-logs/docker-journal.log 2>&1 || true
           limactl shell "$VM_NAME" -- journalctl -u sysbox-mgr --no-pager > /tmp/lima-logs/sysbox-mgr-journal.log 2>&1 || true
