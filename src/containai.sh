@@ -6888,6 +6888,9 @@ containai() {
     # This prevents state leaking between commands in sourced/dev mode
     _CAI_VERBOSE=""
     _CAI_QUIET=""
+    if [[ "${CONTAINAI_VERBOSE:-}" == "1" ]] || [[ "${CONTAINAI_VERBOSE:-}" == "true" ]]; then
+        _CAI_VERBOSE=1
+    fi
 
     # Reset channel override to prevent leaking between invocations
     _CAI_CHANNEL_OVERRIDE=""

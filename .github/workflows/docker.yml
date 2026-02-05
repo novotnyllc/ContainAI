@@ -19,6 +19,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
+  CONTAINAI_VERBOSE: "1"
 
 jobs:
   lint:
@@ -37,6 +38,22 @@ jobs:
 
       - name: Check manifest consistency
         run: ./scripts/check-manifest-consistency.sh
+
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-lint-${{ github.run_id }}
+          path: /tmp/containai-logs/
+          retention-days: 7
+          if-no-files-found: ignore
 
   build-push:
     needs: [lint, build-tarballs]
@@ -219,6 +236,24 @@ jobs:
           cache-from: type=gha,scope=main
           cache-to: type=gha,mode=max,scope=main
 
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
+          docker buildx ls > /tmp/containai-logs/buildx-ls.log 2>&1 || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-build-push-${{ github.run_id }}
+          path: /tmp/containai-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
   # ============================================================================
   # Build Test Images (per-arch) - shared across test jobs
   # ============================================================================
@@ -305,6 +340,22 @@ jobs:
           path: ./artifacts/containai-*.tar.gz
           retention-days: 7
           if-no-files-found: error
+
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-build-tarballs-${{ matrix.arch }}-${{ github.run_id }}
+          path: /tmp/containai-logs/
+          retention-days: 7
+          if-no-files-found: ignore
 
   # ============================================================================
   # Import Tests
@@ -427,13 +478,20 @@ jobs:
           chmod +x ./tests/integration/mock-acp-server
           ./tests/integration/test-acp-proxy.sh
 
-      - name: Upload test logs on failure
-        if: failure()
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
+
+      - name: Upload ContainAI logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ matrix.arch }}-${{ github.run_id }}
-          path: |
-            ~/.containai-test-*
+          name: containai-logs-test-${{ matrix.arch }}-${{ github.run_id }}
+          path: /tmp/containai-logs/
           retention-days: 7
           if-no-files-found: ignore
 
@@ -572,6 +630,24 @@ jobs:
           path: |
             ~/.containai-test-*
             /tmp/sysbox-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
+          docker --context containai-docker info > /tmp/containai-logs/containai-docker-info.log 2>&1 || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-e2e-${{ matrix.arch }}-${{ github.run_id }}
+          path: /tmp/containai-logs/
           retention-days: 7
           if-no-files-found: ignore
 
@@ -728,5 +804,23 @@ jobs:
         with:
           name: lima-logs-${{ matrix.runner }}-${{ github.run_id }}
           path: /tmp/lima-logs/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Collect ContainAI logs
+        if: always()
+        run: |
+          mkdir -p /tmp/containai-logs
+          cp -a ~/.config/containai/logs /tmp/containai-logs/ 2>/dev/null || true
+          cp -a ~/.containai-test-* /tmp/containai-logs/ 2>/dev/null || true
+          docker info > /tmp/containai-logs/docker-info.log 2>&1 || true
+          docker --context containai-docker info > /tmp/containai-logs/containai-docker-info.log 2>&1 || true
+
+      - name: Upload ContainAI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-logs-macos-${{ matrix.runner }}-${{ github.run_id }}
+          path: /tmp/containai-logs/
           retention-days: 7
           if-no-files-found: ignore
