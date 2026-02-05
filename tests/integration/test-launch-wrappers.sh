@@ -201,8 +201,8 @@ fi
 printf '\n=== Test: BASH_ENV environment variable ===\n'
 # Run as agent user to ensure we see the agent's environment
 bash_env_var=$("${DOCKER_CMD[@]}" exec -u agent "$WRAPPER_TEST_CONTAINER" printenv BASH_ENV 2>&1 || true)
-if [[ "$bash_env_var" == "/home/agent/.bash_env" ]]; then
-    test_pass "BASH_ENV is set to /home/agent/.bash_env"
+if [[ "$bash_env_var" == "/etc/containai/bash_env" ]]; then
+    test_pass "BASH_ENV is set to /etc/containai/bash_env"
 else
     test_fail "BASH_ENV not correctly set, got: '$bash_env_var'"
 fi
