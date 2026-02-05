@@ -158,9 +158,10 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p artifacts/container-generated
-          ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml artifacts/container-generated/symlinks.sh
-          ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml artifacts/container-generated/init-dirs.sh
-          ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml artifacts/container-generated/link-spec.json
+          ./src/scripts/gen-dockerfile-symlinks.sh src/manifests artifacts/container-generated/symlinks.sh
+          ./src/scripts/gen-init-dirs.sh src/manifests artifacts/container-generated/init-dirs.sh
+          ./src/scripts/gen-container-link-spec.sh src/manifests artifacts/container-generated/link-spec.json
+          ./src/scripts/gen-agent-wrappers.sh src/manifests artifacts/container-generated/agent-wrappers.sh
           cp src/container/link-repair.sh artifacts/container-generated/link-repair.sh
 
       - name: Build and push full image
