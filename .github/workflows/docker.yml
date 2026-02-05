@@ -224,6 +224,7 @@ jobs:
   # ============================================================================
   build-images:
     needs: [lint, build-tarballs]
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -387,6 +388,7 @@ jobs:
   # ============================================================================
   test:
     needs: build-images
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -508,6 +510,7 @@ jobs:
   # ============================================================================
   e2e-test:
     needs: [build-images, build-tarballs]
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 
@@ -632,6 +635,7 @@ jobs:
   # ============================================================================
   e2e-test-macos:
     needs: [lint, build-images, build-tarballs]
+    if: github.event_name == 'pull_request'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
 
@@ -733,9 +737,9 @@ jobs:
   # ============================================================================
   e2e-test-selfhosted:
     needs: [build-tarballs, build-images]
-    # Only run on main repo or when explicitly enabled via repo variable
+    # Only run on PRs and on main repo or when explicitly enabled via repo variable
     # This prevents forks from hanging indefinitely waiting for self-hosted runners
-    if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
+    if: github.event_name == 'pull_request' && (github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true')
     runs-on: [self-hosted, linux, sysbox, '${{ matrix.arch }}']
     timeout-minutes: 30
 
