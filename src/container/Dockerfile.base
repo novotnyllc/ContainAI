@@ -284,12 +284,7 @@ RUN curl -o- "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/insta
 # Source nvm and activate default version silently
 RUN printf '%s\n' \
     '[ -n "${NVM_DIR:-}" ] && [ -s "${NVM_DIR}/nvm.sh" ] && . "${NVM_DIR}/nvm.sh" && nvm use default --silent 2>/dev/null' \
-    > /home/agent/.bash_env && \
-    mkdir -p /etc/containai && \
-    printf '%s\n' \
-    '# Global BASH_ENV entry point for all users' \
-    'if [ -f "$HOME/.bash_env" ]; then . "$HOME/.bash_env"; fi' \
-    > /etc/containai/bash_env
+    > /home/agent/.bash_env
 
 ENV BASH_ENV=/etc/containai/bash_env
 
@@ -309,6 +304,13 @@ ENV PATH="/home/agent/.local/bin:${PATH}"
 
 # Switch back to root for final setup
 USER root
+
+# Create global BASH_ENV entry point (applies to all users)
+RUN mkdir -p /etc/containai && \
+    printf '%s\n' \
+    '# Global BASH_ENV entry point for all users' \
+    'if [ -f "$HOME/.bash_env" ]; then . "$HOME/.bash_env"; fi' \
+    > /etc/containai/bash_env
 
 # =============================================================================
 # FINAL CONFIGURATION
