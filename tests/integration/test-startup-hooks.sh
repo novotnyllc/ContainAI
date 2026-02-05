@@ -807,10 +807,29 @@ test_ssh_wrapper_behavior() {
     # Wait a moment for SSH to pick up the new key
     sleep 1
 
+    local ssh_user="agent"
+    local ssh_home
+    ssh_home=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        getent passwd "$ssh_user" 2>/dev/null | cut -d: -f6) || ssh_home=""
+
+    if [[ -z "$ssh_home" ]]; then
+        skip "SSH user '$ssh_user' not present in container"
+        return
+    fi
+
+    local bash_env_path
+    bash_env_path=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+        bash -lc 'printf "%s" "${BASH_ENV:-}"' 2>/dev/null) || bash_env_path=""
+
+    if [[ -z "$bash_env_path" ]]; then
+        skip "BASH_ENV not configured in container"
+        return
+    fi
+
     # Test 7a: Real SSH with plain command (tests BASH_ENV path)
-    # Avoid agent-specific binaries; inject a marker into .bash_env and verify it via SSH.
+    # Avoid agent-specific binaries; inject a marker into BASH_ENV and verify it via SSH.
     docker --context "$CONTEXT_NAME" exec "$container_name" \
-        bash -lc 'echo "export CONTAINAI_BASH_ENV_MARKER=1" >> /home/agent/.bash_env' >/dev/null 2>&1 || true
+        bash -lc "echo 'export CONTAINAI_BASH_ENV_MARKER=1' >> \"$bash_env_path\"" >/dev/null 2>&1 || true
     local ssh_opts="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -i $ssh_key_dir/test_key"
     local ssh_output ssh_rc
 
