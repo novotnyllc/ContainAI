@@ -12,7 +12,6 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 
 last_run_id=""
-last_state=""
 
 while true; do
     run_id="$(gh run list -L 1 --workflow "$workflow_name" --branch "$branch" --json databaseId --jq '.[0].databaseId')"
@@ -22,33 +21,27 @@ while true; do
         exit 1
     fi
 
-    status="$(gh run view "$run_id" --json status --jq '.status')"
-    conclusion="$(gh run view "$run_id" --json conclusion --jq '.conclusion // empty')"
-    state="${status}:${conclusion}"
-
     if [[ "$run_id" != "$last_run_id" ]]; then
-        printf 'Run %s status: %s
-' "$run_id" "${conclusion:-$status}"
+        printf 'Watching run %s for %s on %s
+' "$run_id" "$workflow_name" "$branch"
         last_run_id="$run_id"
-        last_state="$state"
-    elif [[ "$state" != "$last_state" ]]; then
-        printf 'Run %s status: %s
-' "$run_id" "${conclusion:-$status}"
-        last_state="$state"
+    else
+        sleep "$interval_seconds"
+        continue
     fi
 
-    if [[ "$status" == "completed" ]]; then
-        if [[ "$conclusion" == "success" ]]; then
-            printf 'OK: latest %s run on %s is green (%s)
+    # Stream progress until completion
+    if gh run watch "$run_id" --exit-status --interval "$interval_seconds"; then
+        printf 'OK: latest %s run on %s is green (%s)
 ' "$workflow_name" "$branch" "$run_id"
-            exit 0
-        fi
-
-        gh run view "$run_id" --json jobs --jq '.jobs[] | select(.conclusion=="failure") | "\(.name) \(.url)"'
-        printf 'FAIL: latest %s run on %s finished with %s (%s)
-' "$workflow_name" "$branch" "${conclusion:-unknown}" "$run_id" >&2
-        exit 1
+        exit 0
     fi
+
+    # On failure, dump failing job URLs
+    gh run view "$run_id" --json jobs --jq '.jobs[] | select(.conclusion=="failure") | "\(.name) \(.url)"'
+    printf 'FAIL: latest %s run on %s finished with failure (%s)
+' "$workflow_name" "$branch" "$run_id" >&2
+    exit 1
 
     sleep "$interval_seconds"
 done
