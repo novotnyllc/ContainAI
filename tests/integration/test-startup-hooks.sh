@@ -793,11 +793,16 @@ test_ssh_wrapper_behavior() {
 
     info "Container IP: $container_ip"
 
-    # Create a dedicated SSH test user to avoid agent-specific assumptions
-    local ssh_user="containai-test"
+    # Use an existing SSH-capable user (do not create new users in tests).
+    # Default to agent, fall back to first non-root user with a valid shell.
+    local ssh_user="agent"
     if ! docker --context "$CONTEXT_NAME" exec "$container_name" \
-        bash -lc "id -u \"$ssh_user\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$ssh_user\"" >/dev/null 2>&1; then
-        fail "Failed to create SSH test user: $ssh_user"
+        bash -lc "id -u \"$ssh_user\" >/dev/null 2>&1" >/dev/null 2>&1; then
+        ssh_user=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
+            bash -lc "awk -F: '\$3>=1000 && \$1!=\"nobody\" && \$7!~/(nologin|false)/ {print \$1; exit}' /etc/passwd" 2>/dev/null) || ssh_user=""
+    fi
+    if [[ -z "$ssh_user" ]]; then
+        fail "No suitable SSH test user found (agent missing and no fallback user)"
         return
     fi
 
