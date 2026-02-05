@@ -192,6 +192,11 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
     mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /etc/systemd/system/containai-init.service /etc/systemd/system/multi-user.target.wants/containai-init.service
 
+# User manifest runtime support (symlinks + wrapper generation)
+COPY src/container/lib/gen-user-links.sh /usr/local/lib/containai/
+COPY src/container/lib/gen-user-wrappers.sh /usr/local/lib/containai/
+RUN chmod +x /usr/local/lib/containai/gen-user-links.sh /usr/local/lib/containai/gen-user-wrappers.sh
+
 # =============================================================================
 # ESSENTIAL TOOLS
 # tmux, jq, yq, ripgrep, git, unzip, etc.

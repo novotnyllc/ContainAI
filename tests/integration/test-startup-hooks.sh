@@ -638,7 +638,7 @@ EOF
     # Check if 'echo' binary exists in container (it always should)
     local echo_exists
     echo_exists=$(docker --context "$CONTEXT_NAME" exec "$container_name" \
-        command -v echo 2>/dev/null) || echo_exists=""
+        bash -lc 'command -v echo' 2>/dev/null) || echo_exists=""
 
     if [[ -n "$wrapper_file" ]]; then
         pass "User agent wrapper file exists"
@@ -759,22 +759,28 @@ test_ssh_wrapper_behavior() {
     # Wait for container to initialize and SSH to be ready
     local wait_timeout=45
     local wait_elapsed=0
+    local ssh_service=""
     info "Waiting for container initialization and SSH (timeout: ${wait_timeout}s)..."
     while [[ $wait_elapsed -lt $wait_timeout ]]; do
-        # Check both init and SSH are ready
+        if docker --context "$CONTEXT_NAME" exec "$container_name" \
+            systemctl is-active ssh.service >/dev/null 2>&1; then
+            ssh_service="ssh.service"
+            break
+        fi
         if docker --context "$CONTEXT_NAME" exec "$container_name" \
             systemctl is-active sshd.service >/dev/null 2>&1; then
+            ssh_service="sshd.service"
             break
         fi
         sleep 2
         wait_elapsed=$((wait_elapsed + 2))
     done
 
-    if [[ $wait_elapsed -ge $wait_timeout ]]; then
+    if [[ -z "$ssh_service" ]]; then
         fail "Timeout waiting for SSH service"
         return
     fi
-    pass "SSH service is running"
+    pass "SSH service is running ($ssh_service)"
 
     # Get container IP for SSH connection
     local container_ip

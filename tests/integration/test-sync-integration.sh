@@ -5906,17 +5906,14 @@ test_cai_sync() {
         for path in ~/.cursor ~/.cursor/rules; do
             if [ -L "$path" ]; then
                 resolved=$(readlink -f "$path" 2>/dev/null || echo "")
-                if [ "${resolved#/mnt/agent-data}" != "$resolved" ]; then
-                    echo "ERROR: $path is a symlink pointing to volume ($resolved) - cannot safely prepare test"
-                    exit 1
+                if [ -n "$resolved" ] && [ "${resolved#/mnt/agent-data}" != "$resolved" ]; then
+                    # Safe: remove symlink only (do not touch target)
+                    rm -f "$path"
+                    continue
                 fi
+                rm -f "$path"
             fi
         done
-
-        # Now safe to remove ~/.cursor if it exists as a symlink (not to volume)
-        if [ -L ~/.cursor ]; then
-            rm -f ~/.cursor
-        fi
 
         # Verify ~/.cursor resolves under $HOME, not /mnt/agent-data
         cursor_resolved=$(realpath -m ~/.cursor)
@@ -5926,9 +5923,7 @@ test_cai_sync() {
         fi
 
         # Safe to remove ~/.cursor/rules now (verified not pointing to volume)
-        if [ -L ~/.cursor/rules ]; then
-            rm -f ~/.cursor/rules
-        elif [ -d ~/.cursor/rules ]; then
+        if [ -d ~/.cursor/rules ]; then
             rm -rf ~/.cursor/rules
         fi
 
