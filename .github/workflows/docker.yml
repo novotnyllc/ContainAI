@@ -829,7 +829,11 @@ jobs:
           "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
           "$BASH_BIN" -lc './tests/integration/test-dind.sh'
           "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
-          "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+          if command -v iptables >/dev/null 2>&1; then
+            "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+          else
+            echo "[WARN] Skipping test-network-blocking.sh on macOS host (iptables not available)"
+          fi
 
       - name: Collect Lima diagnostics
         if: always()
