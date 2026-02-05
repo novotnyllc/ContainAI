@@ -508,6 +508,10 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           cai setup --verbose
 
+      - name: Log in to Container Registry (containai-docker)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
       - name: Smoke test acp-proxy binary
         run: |
           ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
@@ -649,6 +653,10 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           cai setup --verbose
 
+      - name: Log in to Container Registry (containai-docker)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
       - name: Pull images into Lima
         run: |
           docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
@@ -742,6 +750,10 @@ jobs:
           echo "============================================="
           export PATH="$HOME/.local/bin:$PATH"
           cai setup --verbose
+
+      - name: Log in to Container Registry (containai-docker)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
 
       - name: Smoke test acp-proxy binary
         run: |
