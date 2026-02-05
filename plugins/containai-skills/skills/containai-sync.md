@@ -64,7 +64,7 @@ cai import --container my-proj   # Sync to specific container
 
 ### What Gets Synced
 
-Default sync items (from sync-manifest.toml):
+Default sync items (from src/manifests/):
 - Git config (user.name, user.email)
 - GitHub CLI config and OAuth tokens
 - Agent configs and secrets (Claude, Gemini, Codex, etc.)
