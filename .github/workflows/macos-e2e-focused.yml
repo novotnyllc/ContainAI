@@ -116,13 +116,14 @@ jobs:
           echo "============================================="
           echo "Installing from sourced tarball artifact"
           echo "============================================="
-          mapfile -t tarballs < <(find /tmp/tarball -maxdepth 2 -type f -name 'containai-*.tar.gz' | sort)
-          if [[ "${#tarballs[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one containai tarball, found ${#tarballs[@]}"
+          tarball_first="$(find /tmp/tarball -maxdepth 2 -type f -name 'containai-*.tar.gz' | sort | sed -n '1p')"
+          tarball_second="$(find /tmp/tarball -maxdepth 2 -type f -name 'containai-*.tar.gz' | sort | sed -n '2p')"
+          if [[ -z "$tarball_first" || -n "$tarball_second" ]]; then
+            echo "::error::Expected exactly one containai tarball; first='${tarball_first:-<none>}' second='${tarball_second:-<none>}'"
             find /tmp/tarball -maxdepth 3 -print || true
             exit 1
           fi
-          tar xzf "${tarballs[0]}" -C /tmp/tarball
+          tar xzf "$tarball_first" -C /tmp/tarball
           cd /tmp/tarball/containai-*/
           ./install.sh --local --yes --no-setup
 
