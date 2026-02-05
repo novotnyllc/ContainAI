@@ -40,11 +40,15 @@ jobs:
 
   build-push:
     needs: [lint, build-tarballs]
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_prefix: ${{ steps.build_strategy.outputs.image_prefix }}
+      tag_suffix: ${{ steps.build_strategy.outputs.tag_suffix }}
+      push: ${{ steps.build_strategy.outputs.push }}
 
     steps:
       - name: Checkout repository
@@ -85,7 +89,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -100,10 +104,10 @@ jobs:
         id: build_strategy
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
-            echo "push=false" >> $GITHUB_OUTPUT
-            echo "load=true" >> $GITHUB_OUTPUT
-            echo "image_prefix=containai" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+            echo "push=true" >> $GITHUB_OUTPUT
+            echo "load=false" >> $GITHUB_OUTPUT
+            echo "image_prefix=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
             echo "tag_suffix=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
           else
             echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
@@ -120,7 +124,6 @@ jobs:
           fi
 
       - name: Build and push base image
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -137,7 +140,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=base
 
       - name: Build and push sdks image
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -155,7 +157,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=sdks
 
       - name: Generate container files
-        if: github.event_name != 'pull_request'
         run: |
           mkdir -p artifacts/container-generated
           ./src/scripts/gen-dockerfile-symlinks.sh src/manifests artifacts/container-generated/symlinks.sh
@@ -165,7 +166,6 @@ jobs:
           cp src/container/link-repair.sh artifacts/container-generated/link-repair.sh
 
       - name: Build and push full image
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -184,7 +184,7 @@ jobs:
 
       - name: Extract metadata (tags, labels)
         id: meta
-        if: github.event_name != 'pull_request'
+        if: steps.build_strategy.outputs.push == 'true'
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -202,7 +202,7 @@ jobs:
             type=sha,prefix=sha-
 
       - name: Build and push Docker image
-        if: github.event_name != 'pull_request'
+        if: steps.build_strategy.outputs.push == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -222,70 +222,6 @@ jobs:
   # ============================================================================
   # Build Test Images (per-arch) - shared across test jobs
   # ============================================================================
-  build-images:
-    needs: [lint, build-tarballs]
-    if: github.event_name == 'pull_request'
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-            platform: linux/amd64
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            platform: linux/arm64
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set version from build-tarballs
-        run: |
-          echo "NBGV_SemVer2=${{ needs.build-tarballs.outputs.version }}" >> "$GITHUB_ENV"
-
-      - name: Download CLI tarball (${{ matrix.arch }})
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-tarball-${{ matrix.arch }}
-          path: /tmp/tarball
-
-      - name: Stage ContainAI CLI tarball
-        run: |
-          mkdir -p artifacts/cai-tarballs
-          cp /tmp/tarball/containai-*.tar.gz artifacts/cai-tarballs/
-
-      - name: Build test images (${{ matrix.arch }})
-        run: |
-          echo "Building containai images for ${{ matrix.arch }}..."
-          ./src/build.sh \
-            --image-prefix containai \
-            --version "$NBGV_SemVer2"
-
-      - name: Save images to artifact
-        run: |
-          mkdir -p artifacts
-          docker save \
-            containai:latest \
-            containai/base:latest \
-            containai/sdks:latest \
-            containai/agents:latest \
-            -o artifacts/containai-images-${{ matrix.arch }}.tar
-          gzip -f artifacts/containai-images-${{ matrix.arch }}.tar
-
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: containai-images-${{ matrix.arch }}
-          path: artifacts/containai-images-${{ matrix.arch }}.tar.gz
-          retention-days: 7
-          if-no-files-found: error
-
   # ============================================================================
   # Build Multi-arch Tarballs
   # ============================================================================
@@ -379,18 +315,21 @@ jobs:
   # - Full E2E tests (sysbox/systemd containers) require self-hosted runners
   #   with sysbox installed - see docs/testing.md for manual E2E testing
   #
-  # Test execution on PRs:
-  # - Depends on build-images job (per-arch)
-  # - Uses image artifacts produced earlier (no local rebuild)
+  # Test execution:
+  # - Depends on build-push job (single build stage)
+  # - Pulls images from registry (no local rebuild)
   # - Runs full test suite (standard Docker runtime, no sysbox required)
   #
-  # Note: Image artifacts are produced in build-images and shared across jobs.
+  # Note: Images are produced in build-push and pulled by test jobs.
   # ============================================================================
   test:
-    needs: build-images
-    if: github.event_name == 'pull_request'
+    needs: build-push
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    env:
+      IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
+      IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
+      IMAGE_NAME: ${{ needs.build-push.outputs.image_prefix }}/agents:${{ needs.build-push.outputs.tag_suffix }}
 
     strategy:
       fail-fast: false
@@ -412,24 +351,16 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Download image artifact (${{ matrix.arch }})
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-images-${{ matrix.arch }}
-          path: /tmp/containai-images
-
-      - name: Load test images
+      - name: Pull test images
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker load
-          echo "Loaded images:"
-          docker images
+          docker pull "${IMAGE_PREFIX}/agents:${IMAGE_TAG}"
+          docker pull "${IMAGE_PREFIX}/base:${IMAGE_TAG}"
 
       - name: Run import integration tests
         run: |
           echo "============================================="
           echo "Running import integration tests (${{ matrix.arch }})"
           echo "============================================="
-          export IMAGE_NAME="containai:latest"
           ./tests/integration/test-sync-integration.sh
 
       - name: Run manifest parsing unit tests
@@ -444,7 +375,6 @@ jobs:
           echo "============================================="
           echo "Running launch wrapper tests (${{ matrix.arch }})"
           echo "============================================="
-          export IMAGE_NAME="containai:latest"
           ./tests/integration/test-launch-wrappers.sh
 
       - name: Run user manifest tests
@@ -452,7 +382,6 @@ jobs:
           echo "============================================="
           echo "Running user manifest tests (${{ matrix.arch }})"
           echo "============================================="
-          export IMAGE_NAME="containai:latest"
           ./tests/integration/test-user-manifests.sh
 
       - name: Run .NET unit tests (if test projects exist)
@@ -509,10 +438,13 @@ jobs:
   # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test:
-    needs: [build-images, build-tarballs]
-    if: github.event_name == 'pull_request'
+    needs: [build-push, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    env:
+      IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
+      IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
+      CONTAINAI_TEST_IMAGE: ${{ needs.build-push.outputs.image_prefix }}/base:${{ needs.build-push.outputs.tag_suffix }}
 
     strategy:
       fail-fast: false
@@ -581,21 +513,12 @@ jobs:
           uname -a
           echo "KERNEL_VERSION=$(uname -r)" >> "$GITHUB_OUTPUT"
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-images-${{ matrix.arch }}
-          path: /tmp/containai-images
-
-      - name: Load test images into containai-docker
+      - name: Pull test images into containai-docker
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker --context containai-docker load
-          echo "Loaded images:"
-          docker --context containai-docker images
+          docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
+          docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
       - name: Run E2E tests (DinD)
-        env:
-          CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           echo "============================================="
           echo "Running Docker-in-Docker E2E tests"
@@ -603,8 +526,6 @@ jobs:
           ./tests/integration/test-dind.sh
 
       - name: Run startup hooks tests (Sysbox)
-        env:
-          CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           echo "============================================="
           echo "Running startup hooks tests (requires Sysbox)"
@@ -634,10 +555,13 @@ jobs:
   # E2E Tests (macOS + Lima)
   # ============================================================================
   e2e-test-macos:
-    needs: [lint, build-images, build-tarballs]
-    if: github.event_name == 'pull_request'
+    needs: [lint, build-push, build-tarballs]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
+      IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
+      CONTAINAI_TEST_IMAGE: ${{ needs.build-push.outputs.image_prefix }}/base:${{ needs.build-push.outputs.tag_suffix }}
 
     strategy:
       fail-fast: false
@@ -695,20 +619,12 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           cai setup --verbose
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-images-${{ env.IMAGE_ARCH }}
-          path: /tmp/containai-images
-
-      - name: Load images into Lima
+      - name: Pull images into Lima
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${IMAGE_ARCH}.tar.gz | docker --context containai-docker load
-          docker --context containai-docker images | grep -E '^(containai|REPOSITORY)' || true
+          docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
+          docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
       - name: Run Secure Engine E2E tests (macOS)
-        env:
-          CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           BASH_BIN="$(brew --prefix bash)/bin/bash"
           "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
@@ -736,12 +652,16 @@ jobs:
   # install.sh --local --yes --no-setup to verify the tarball install path works.
   # ============================================================================
   e2e-test-selfhosted:
-    needs: [build-tarballs, build-images]
-    # Only run on PRs and on main repo or when explicitly enabled via repo variable
+    needs: [build-tarballs, build-push]
+    # Only run on main repo or when explicitly enabled via repo variable
     # This prevents forks from hanging indefinitely waiting for self-hosted runners
-    if: github.event_name == 'pull_request' && (github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true')
+    if: github.repository == 'novotnyllc/containai' || vars.ENABLE_SELF_HOSTED_E2E == 'true'
     runs-on: [self-hosted, linux, sysbox, '${{ matrix.arch }}']
     timeout-minutes: 30
+    env:
+      IMAGE_PREFIX: ${{ needs.build-push.outputs.image_prefix }}
+      IMAGE_TAG: ${{ needs.build-push.outputs.tag_suffix }}
+      CONTAINAI_TEST_IMAGE: ${{ needs.build-push.outputs.image_prefix }}/base:${{ needs.build-push.outputs.tag_suffix }}
 
     strategy:
       fail-fast: false
@@ -799,21 +719,12 @@ jobs:
             exit 1
           fi
 
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: containai-images-${{ matrix.arch }}
-          path: /tmp/containai-images
-
-      - name: Load test images into containai-docker
+      - name: Pull test images into containai-docker
         run: |
-          gunzip -c /tmp/containai-images/containai-images-${{ matrix.arch }}.tar.gz | docker --context containai-docker load
-          echo "Loaded images:"
-          docker --context containai-docker images
+          docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
+          docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
       - name: Run E2E tests (DinD)
-        env:
-          CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           echo "============================================="
           echo "Running Docker-in-Docker E2E tests (${{ matrix.arch }})"
@@ -821,8 +732,6 @@ jobs:
           ./tests/integration/test-dind.sh
 
       - name: Run startup hooks tests (Sysbox)
-        env:
-          CONTAINAI_TEST_IMAGE: containai/base:latest
         run: |
           echo "============================================="
           echo "Running startup hooks tests (${{ matrix.arch }})"
