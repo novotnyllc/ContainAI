@@ -7,17 +7,20 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
     private readonly ILegacyContainAiBridge _legacyBridge;
     private readonly ICommandRuntimeService _runtimeService;
     private readonly AcpProxyRunner _acpProxyRunner;
+    private readonly NativeLifecycleCommandRuntime _nativeLifecycleRuntime;
     private readonly TextWriter _stderr;
 
     public CaiCommandRuntime(
         ILegacyContainAiBridge legacyBridge,
         ICommandRuntimeService runtimeService,
         AcpProxyRunner acpProxyRunner,
+        NativeLifecycleCommandRuntime? nativeLifecycleRuntime = null,
         TextWriter? stderr = null)
     {
         _legacyBridge = legacyBridge;
         _runtimeService = runtimeService;
         _acpProxyRunner = acpProxyRunner;
+        _nativeLifecycleRuntime = nativeLifecycleRuntime ?? new NativeLifecycleCommandRuntime();
         _stderr = stderr ?? Console.Error;
     }
 
@@ -87,6 +90,9 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
 
     public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
         => _acpProxyRunner.RunAsync(agent, cancellationToken);
+
+    public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
 
     private static bool ShouldUseNativeRuntimeCore()
         => string.Equals(Environment.GetEnvironmentVariable("CAI_NATIVE_RUNTIME_CORE"), "1", StringComparison.Ordinal);

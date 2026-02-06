@@ -7,6 +7,16 @@ namespace ContainAI.Cli;
 
 internal sealed class RootCommandBuilder
 {
+    private static readonly IReadOnlySet<string> NativePassThroughCommands = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "completion",
+        "config",
+        "template",
+        "ssh",
+        "stop",
+        "gc",
+    };
+
     private readonly AcpCommandBuilder _acpCommandBuilder;
 
     public RootCommandBuilder(AcpCommandBuilder? acpCommandBuilder = null)
@@ -44,6 +54,7 @@ internal sealed class RootCommandBuilder
                 "docker" => CreateDockerCommand(runtime),
                 "status" => CreateStatusCommand(runtime),
                 "version" => CreateVersionCommand(runtime),
+                _ when NativePassThroughCommands.Contains(name) => CreateNativePassThroughCommand(name, runtime),
                 _ => CreateLegacyPassThroughCommand(name, runtime),
             };
 
@@ -294,6 +305,27 @@ internal sealed class RootCommandBuilder
 
             forwarded.AddRange(parseResult.UnmatchedTokens);
             return runtime.RunLegacyAsync(forwarded, cancellationToken);
+        });
+
+        return command;
+    }
+
+    private static Command CreateNativePassThroughCommand(string commandName, ICaiCommandRuntime runtime)
+    {
+        var command = new Command(commandName)
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var forwarded = new List<string>(capacity: parseResult.UnmatchedTokens.Count + 1)
+            {
+                commandName,
+            };
+
+            forwarded.AddRange(parseResult.UnmatchedTokens);
+            return runtime.RunNativeAsync(forwarded, cancellationToken);
         });
 
         return command;

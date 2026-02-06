@@ -206,6 +206,9 @@ public sealed class CaiCliIntegrationTests
             }
         }
 
+        public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RunLegacyAsync(args, cancellationToken);
+
         public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
         {
             AcpCalls.Add(agent);

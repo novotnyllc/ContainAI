@@ -90,17 +90,45 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task KnownLegacyCommand_UnknownSubcommand_IsForwardedToLegacyRuntime()
+    public async Task NativeLifecycleCommand_UnknownSubcommand_IsForwardedToNativeRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["config", "mystery-subcommand", "--json"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["config", "mystery-subcommand", "--json"], call));
+    }
+
+    [Fact]
+    public async Task ConfigCommand_UsesNativeLifecycleRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["config", "set", "agent.default", "claude"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["config", "set", "agent.default", "claude"], call));
+    }
+
+    [Fact]
+    public async Task CompletionCommand_UsesNativeLifecycleRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["completion", "bash"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["completion", "bash"], call));
     }
 
     [Fact]
@@ -378,6 +406,7 @@ public sealed class CaiCliRoutingTests
         public const int ExecExitCode = 33;
         public const int DockerExitCode = 34;
         public const int StatusExitCode = 35;
+        public const int NativeExitCode = 36;
         public const int LegacyExitCode = 17;
         public const int AcpExitCode = 23;
 
@@ -392,6 +421,8 @@ public sealed class CaiCliRoutingTests
         public List<StatusCommandOptions> StatusCalls { get; } = [];
 
         public List<IReadOnlyList<string>> LegacyCalls { get; } = [];
+
+        public List<IReadOnlyList<string>> NativeCalls { get; } = [];
 
         public List<string> AcpCalls { get; } = [];
 
@@ -429,6 +460,12 @@ public sealed class CaiCliRoutingTests
         {
             LegacyCalls.Add(args.ToArray());
             return Task.FromResult(LegacyExitCode);
+        }
+
+        public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        {
+            NativeCalls.Add(args.ToArray());
+            return Task.FromResult(NativeExitCode);
         }
 
         public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
