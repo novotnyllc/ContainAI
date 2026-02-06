@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>cai</AssemblyName>
+    <RootNamespace>ContainAI.Cli.Host</RootNamespace>
+    <Description>ContainAI native CLI host</Description>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PublishAot>true</PublishAot>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TrimMode>link</TrimMode>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ContainAI.Cli/ContainAI.Cli.csproj" />
+    <ProjectReference Include="../ContainAI.Acp/ContainAI.Acp.csproj" />
+  </ItemGroup>
+
+</Project>

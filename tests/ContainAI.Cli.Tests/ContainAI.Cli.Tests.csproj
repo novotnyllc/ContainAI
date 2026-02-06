@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ContainAI.Cli.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/ContainAI.Cli/ContainAI.Cli.csproj" />
+    <ProjectReference Include="../../src/ContainAI.Cli.Abstractions/ContainAI.Cli.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

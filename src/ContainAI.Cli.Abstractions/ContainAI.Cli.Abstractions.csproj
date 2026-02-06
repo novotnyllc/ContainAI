@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ContainAI.Cli.Abstractions</RootNamespace>
+    <Description>ContainAI CLI contracts and shared abstractions</Description>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+</Project>

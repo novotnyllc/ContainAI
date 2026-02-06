@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ContainAI.Cli</RootNamespace>
+    <Description>ContainAI native CLI core and command routing</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ContainAI.Cli.Abstractions/ContainAI.Cli.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
