@@ -4,16 +4,13 @@ namespace ContainAI.Cli.Host;
 
 internal sealed class CaiCommandRuntime : ICaiCommandRuntime
 {
-    private readonly ICommandRuntimeService _runtimeService;
     private readonly AcpProxyRunner _acpProxyRunner;
     private readonly NativeLifecycleCommandRuntime _nativeLifecycleRuntime;
 
     public CaiCommandRuntime(
-        ICommandRuntimeService runtimeService,
         AcpProxyRunner acpProxyRunner,
         NativeLifecycleCommandRuntime? nativeLifecycleRuntime = null)
     {
-        _runtimeService = runtimeService;
         _acpProxyRunner = acpProxyRunner;
         _nativeLifecycleRuntime = nativeLifecycleRuntime ?? new NativeLifecycleCommandRuntime();
     }
@@ -39,13 +36,47 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
     public Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return _runtimeService.RunDockerAsync(RuntimeCoreCommandSpecFactory.CreateDockerSpec(options), cancellationToken);
+        var args = new List<string>
+        {
+            "docker",
+        };
+
+        AppendTokens(args, options.DockerArgs);
+        return _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
     }
 
     public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return _runtimeService.RunDockerAsync(RuntimeCoreCommandSpecFactory.CreateStatusSpec(options), cancellationToken);
+        var args = new List<string>
+        {
+            "status",
+        };
+
+        if (options.Json)
+        {
+            args.Add("--json");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Workspace))
+        {
+            args.Add("--workspace");
+            args.Add(options.Workspace!);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Container))
+        {
+            args.Add("--container");
+            args.Add(options.Container!);
+        }
+
+        if (options.Verbose)
+        {
+            args.Add("--verbose");
+        }
+
+        AppendTokens(args, options.AdditionalArgs);
+        return _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
     }
 
     public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
