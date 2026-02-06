@@ -370,7 +370,41 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private async Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
+        if (args.Count > 1 && string.Equals(args[1], "fix", StringComparison.Ordinal))
+        {
+            return await RunDoctorFixAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!ValidateOptions(args, 1, "--json", "--build-templates", "--reset-lima", "--help", "-h"))
+        {
+            await _stderr.WriteLineAsync("Unknown doctor option. Use 'cai doctor --help'.").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal))
+        {
+            await _stdout.WriteLineAsync("Usage: cai doctor [--json] [--build-templates] [--reset-lima]").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("       cai doctor fix [--all | container [--all|<name>] | template [--all|<name>] ]").ConfigureAwait(false);
+            return 0;
+        }
+
         var outputJson = args.Contains("--json", StringComparer.Ordinal);
+        var buildTemplates = args.Contains("--build-templates", StringComparer.Ordinal);
+        var resetLima = args.Contains("--reset-lima", StringComparer.Ordinal);
+
+        if (resetLima)
+        {
+            if (!OperatingSystem.IsMacOS())
+            {
+                await _stderr.WriteLineAsync("--reset-lima is only available on macOS").ConfigureAwait(false);
+                return 1;
+            }
+
+            await _stdout.WriteLineAsync("Resetting Lima VM containai...").ConfigureAwait(false);
+            await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
+            await RunProcessCaptureAsync("docker", ["context", "rm", "-f", "containai-docker"], cancellationToken).ConfigureAwait(false);
+        }
+
         var dockerCli = await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
         var contextName = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var contextExists = !string.IsNullOrWhiteSpace(contextName);
@@ -391,10 +425,15 @@ internal sealed class NativeLifecycleCommandRuntime
         };
         var runtimeInfo = await RunProcessCaptureAsync("docker", runtimeArgs, cancellationToken).ConfigureAwait(false);
         var sysboxRuntime = runtimeInfo.ExitCode == 0 && runtimeInfo.StandardOutput.Contains("sysbox-runc", StringComparison.Ordinal);
+        var templateStatus = true;
+        if (buildTemplates)
+        {
+            templateStatus = await ValidateTemplatesAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         if (outputJson)
         {
-            await _stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()},\"templates\":{templateStatus.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
         }
         else
         {
@@ -402,9 +441,13 @@ internal sealed class NativeLifecycleCommandRuntime
             await _stdout.WriteLineAsync($"Context: {(contextExists ? contextName : "missing")}").ConfigureAwait(false);
             await _stdout.WriteLineAsync($"Docker daemon: {(dockerInfo ? "ok" : "unreachable")}").ConfigureAwait(false);
             await _stdout.WriteLineAsync($"sysbox-runc runtime: {(sysboxRuntime ? "ok" : "missing")}").ConfigureAwait(false);
+            if (buildTemplates)
+            {
+                await _stdout.WriteLineAsync($"Templates: {(templateStatus ? "ok" : "failed")}").ConfigureAwait(false);
+            }
         }
 
-        return dockerCli && contextExists && dockerInfo && sysboxRuntime ? 0 : 1;
+        return dockerCli && contextExists && dockerInfo && sysboxRuntime && templateStatus ? 0 : 1;
     }
 
     private async Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -419,6 +462,20 @@ internal sealed class NativeLifecycleCommandRuntime
     {
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
         var verbose = args.Contains("--verbose", StringComparer.Ordinal);
+        var skipTemplates = args.Contains("--skip-templates", StringComparer.Ordinal);
+        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
+        if (showHelp)
+        {
+            await _stdout.WriteLineAsync("Usage: cai setup [--dry-run] [--verbose] [--skip-templates]").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (!ValidateOptions(args, 1, "--dry-run", "--verbose", "--skip-templates", "--help", "-h"))
+        {
+            await _stderr.WriteLineAsync("Unknown setup option. Use 'cai setup --help'.").ConfigureAwait(false);
+            return 1;
+        }
+
         var home = ResolveHomeDirectory();
         var containAiDir = Path.Combine(home, ".config", "containai");
         var sshDir = Path.Combine(home, ".ssh", "containai.d");
@@ -432,6 +489,11 @@ internal sealed class NativeLifecycleCommandRuntime
             await _stdout.WriteLineAsync($"Would generate SSH key {sshKeyPath}").ConfigureAwait(false);
             await _stdout.WriteLineAsync($"Would verify runtime socket {socketPath}").ConfigureAwait(false);
             await _stdout.WriteLineAsync("Would create Docker context containai-docker").ConfigureAwait(false);
+            if (!skipTemplates)
+            {
+                await _stdout.WriteLineAsync($"Would install templates to {ResolveTemplatesDirectory()}").ConfigureAwait(false);
+            }
+
             return 0;
         }
 
@@ -490,6 +552,15 @@ internal sealed class NativeLifecycleCommandRuntime
             await _stderr.WriteLineAsync($"Setup warning: runtime socket not found at {socketPath}.").ConfigureAwait(false);
         }
 
+        if (!skipTemplates)
+        {
+            var templateResult = await RestoreTemplatesAsync(templateName: null, includeAll: true, cancellationToken).ConfigureAwait(false);
+            if (templateResult != 0 && verbose)
+            {
+                await _stderr.WriteLineAsync("Template installation completed with warnings.").ConfigureAwait(false);
+            }
+        }
+
         var doctorExitCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
         if (doctorExitCode != 0)
         {
@@ -499,6 +570,174 @@ internal sealed class NativeLifecycleCommandRuntime
 
         await _stdout.WriteLineAsync("Setup complete.").ConfigureAwait(false);
         return doctorExitCode;
+    }
+
+    private async Task<int> RunDoctorFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var fixAll = args.Contains("--all", StringComparer.Ordinal);
+
+        var target = args.FirstOrDefault(static token => !token.StartsWith("-", StringComparison.Ordinal));
+        var targetArg = args.SkipWhile(static token => token.StartsWith("-", StringComparison.Ordinal))
+            .Skip(1)
+            .FirstOrDefault(static token => !token.StartsWith("-", StringComparison.Ordinal));
+
+        if (target is null && !fixAll)
+        {
+            await _stdout.WriteLineAsync("Available doctor fix targets:").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("  --all").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("  container [--all|<name>]").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("  template [--all|<name>]").ConfigureAwait(false);
+            return 0;
+        }
+
+        var containAiDir = Path.Combine(ResolveHomeDirectory(), ".config", "containai");
+        var sshDir = Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d");
+        if (dryRun)
+        {
+            await _stdout.WriteLineAsync($"Would create {containAiDir} and {sshDir}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("Would ensure SSH include directive and cleanup stale SSH configs").ConfigureAwait(false);
+        }
+        else
+        {
+            Directory.CreateDirectory(containAiDir);
+            Directory.CreateDirectory(sshDir);
+            await EnsureSshIncludeDirectiveAsync(cancellationToken).ConfigureAwait(false);
+            await RunSshAsync(["ssh", "cleanup"], cancellationToken).ConfigureAwait(false);
+        }
+
+        if (fixAll || string.Equals(target, "template", StringComparison.Ordinal))
+        {
+            var templateResult = await RestoreTemplatesAsync(targetArg, includeAll: fixAll || string.Equals(targetArg, "--all", StringComparison.Ordinal), cancellationToken).ConfigureAwait(false);
+            if (templateResult != 0)
+            {
+                return templateResult;
+            }
+        }
+
+        if (fixAll || string.Equals(target, "container", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(targetArg) || string.Equals(targetArg, "--all", StringComparison.Ordinal))
+            {
+                await _stdout.WriteLineAsync("Container fix completed (SSH cleanup applied).").ConfigureAwait(false);
+            }
+            else
+            {
+                var exists = await DockerContainerExistsAsync(targetArg, cancellationToken).ConfigureAwait(false);
+                if (!exists)
+                {
+                    await _stderr.WriteLineAsync($"Container not found: {targetArg}").ConfigureAwait(false);
+                    return 1;
+                }
+
+                await _stdout.WriteLineAsync($"Container fix completed for {targetArg}.").ConfigureAwait(false);
+            }
+        }
+
+        return 0;
+    }
+
+    private async Task EnsureSshIncludeDirectiveAsync(CancellationToken cancellationToken)
+    {
+        var userSshConfig = Path.Combine(ResolveHomeDirectory(), ".ssh", "config");
+        var includeLine = $"Include {Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d")}/*.conf";
+
+        Directory.CreateDirectory(Path.GetDirectoryName(userSshConfig)!);
+        if (!File.Exists(userSshConfig))
+        {
+            await File.WriteAllTextAsync(userSshConfig, includeLine + Environment.NewLine, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var content = await File.ReadAllTextAsync(userSshConfig, cancellationToken).ConfigureAwait(false);
+        if (content.Contains(includeLine, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var normalized = content.TrimEnd();
+        var merged = string.IsNullOrWhiteSpace(normalized)
+            ? includeLine + Environment.NewLine
+            : normalized + Environment.NewLine + includeLine + Environment.NewLine;
+        await File.WriteAllTextAsync(userSshConfig, merged, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> ValidateTemplatesAsync(CancellationToken cancellationToken)
+    {
+        var templatesRoot = ResolveTemplatesDirectory();
+        if (!Directory.Exists(templatesRoot))
+        {
+            return false;
+        }
+
+        foreach (var dockerfile in Directory.EnumerateFiles(templatesRoot, "Dockerfile", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var directory = Path.GetDirectoryName(dockerfile)!;
+            var imageName = $"containai-template-check-{Path.GetFileName(directory)}";
+            var build = await DockerCaptureAsync(["build", "-q", "-f", dockerfile, "-t", imageName, directory], cancellationToken).ConfigureAwait(false);
+            if (build.ExitCode != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private async Task<int> RestoreTemplatesAsync(string? templateName, bool includeAll, CancellationToken cancellationToken)
+    {
+        var sourceRoot = ResolveBundledTemplatesDirectory();
+        if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
+        {
+            await _stderr.WriteLineAsync("Bundled templates not found; skipping template restore.").ConfigureAwait(false);
+            return 0;
+        }
+
+        var destinationRoot = ResolveTemplatesDirectory();
+        Directory.CreateDirectory(destinationRoot);
+
+        var sourceTemplates = Directory.EnumerateDirectories(sourceRoot).ToArray();
+        if (!string.IsNullOrWhiteSpace(templateName) && !includeAll)
+        {
+            sourceTemplates = sourceTemplates
+                .Where(path => string.Equals(Path.GetFileName(path), templateName, StringComparison.Ordinal))
+                .ToArray();
+        }
+
+        foreach (var source in sourceTemplates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var template = Path.GetFileName(source);
+            var destination = Path.Combine(destinationRoot, template);
+            if (Directory.Exists(destination))
+            {
+                Directory.Delete(destination, recursive: true);
+            }
+
+            await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Restored template '{template}'").ConfigureAwait(false);
+        }
+
+        return 0;
+    }
+
+    private static string ResolveBundledTemplatesDirectory()
+    {
+        var installRoot = ResolveInstallDirectory();
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(installRoot, "templates"),
+                     Path.Combine(installRoot, "src", "templates"),
+                 })
+        {
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return string.Empty;
     }
 
     private async Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
