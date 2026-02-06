@@ -4327,6 +4327,26 @@ _containai_shell_cmd() {
         return $?
     fi
 
+    # Existing container + template drift detection:
+    # Prompt to rebuild with updated template (default: No).
+    # If user confirms, flip to fresh flow below so recreate is automatic.
+    if [[ "$fresh_flag" != "true" && "$reset_flag" != "true" ]]; then
+        if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
+            local prompt_template_name template_prompt_rc
+            prompt_template_name="$cli_template"
+            if [[ -z "$prompt_template_name" ]]; then
+                prompt_template_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || prompt_template_name=""
+            fi
+            [[ -z "$prompt_template_name" ]] && prompt_template_name="default"
+
+            template_prompt_rc=0
+            _cai_maybe_prompt_template_rebuild "$selected_context" "$resolved_container_name" "$prompt_template_name" "true" || template_prompt_rc=$?
+            if [[ $template_prompt_rc -eq 10 ]]; then
+                fresh_flag="true"
+            fi
+        fi
+    fi
+
     # Handle --fresh or --reset flag: remove and recreate container
     # Note: --reset has already regenerated workspace state values above
     if [[ "$fresh_flag" == "true" || "$reset_flag" == "true" ]]; then
@@ -4997,6 +5017,26 @@ _containai_exec_cmd() {
 
     # Build docker command prefix
     local -a docker_cmd=(docker --context "$selected_context")
+
+    # Existing container + template drift detection:
+    # Prompt to rebuild with updated template (default: No).
+    # If user confirms, flip to fresh flow below so recreate is automatic.
+    if [[ "$fresh_flag" != "true" ]]; then
+        if DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container -- "$resolved_container_name" >/dev/null 2>&1; then
+            local prompt_template_name template_prompt_rc
+            prompt_template_name="$cli_template"
+            if [[ -z "$prompt_template_name" ]]; then
+                prompt_template_name=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$resolved_container_name" 2>/dev/null) || prompt_template_name=""
+            fi
+            [[ -z "$prompt_template_name" ]] && prompt_template_name="default"
+
+            template_prompt_rc=0
+            _cai_maybe_prompt_template_rebuild "$selected_context" "$resolved_container_name" "$prompt_template_name" "true" || template_prompt_rc=$?
+            if [[ $template_prompt_rc -eq 10 ]]; then
+                fresh_flag="true"
+            fi
+        fi
+    fi
 
     # Handle --fresh flag: remove and recreate container
     if [[ "$fresh_flag" == "true" ]]; then

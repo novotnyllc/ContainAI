@@ -519,6 +519,50 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
+# Test: _cai_template_fingerprint tracks Dockerfile changes
+# ==============================================================================
+
+test_start "_cai_template_fingerprint is stable for unchanged template"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/default"
+cat > "$TEST_TMPDIR/templates/default/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+USER agent
+EOF
+fingerprint_a=$(_cai_template_fingerprint "default" 2>/dev/null || true)
+fingerprint_b=$(_cai_template_fingerprint "default" 2>/dev/null || true)
+if [[ -n "$fingerprint_a" && "$fingerprint_a" == "$fingerprint_b" ]]; then
+    test_pass
+else
+    test_fail "expected stable fingerprint, got '$fingerprint_a' and '$fingerprint_b'"
+fi
+teardown_tmpdir
+
+test_start "_cai_template_fingerprint changes when Dockerfile content changes"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/default"
+cat > "$TEST_TMPDIR/templates/default/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+USER agent
+EOF
+fingerprint_before=$(_cai_template_fingerprint "default" 2>/dev/null || true)
+cat > "$TEST_TMPDIR/templates/default/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+USER root
+RUN apt-get update
+USER agent
+EOF
+fingerprint_after=$(_cai_template_fingerprint "default" 2>/dev/null || true)
+if [[ -n "$fingerprint_before" && -n "$fingerprint_after" && "$fingerprint_before" != "$fingerprint_after" ]]; then
+    test_pass
+else
+    test_fail "expected different fingerprint after content change, got '$fingerprint_before' and '$fingerprint_after'"
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Test: _cai_validate_template_base validates ContainAI base images
 # ==============================================================================
 

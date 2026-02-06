@@ -105,3 +105,7 @@ USER agent
 # =============================================================================
 # YOUR CUSTOMIZATIONS BELOW
 # =============================================================================
+
+# Keep this as the final user. If you add USER root for package installs above,
+# switch back to USER agent before the Dockerfile ends.
+USER agent

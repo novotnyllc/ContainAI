@@ -12,6 +12,7 @@
 #   _cai_find_container_by_name    - Find container by name across multiple contexts
 #   _cai_resolve_container_name    - Resolve container name for creation (duplicate-aware)
 #   _cai_find_container            - Find container by workspace and optional image-tag filter
+#   _cai_maybe_prompt_template_rebuild - Prompt to rebuild when template Dockerfile changed
 #   _containai_check_isolation     - Detect container isolation status
 #   _containai_validate_masked_paths - Validate Docker MaskedPaths are applied (in-container)
 #   _containai_ensure_volumes      - Ensure a volume exists (takes volume name param)
@@ -303,6 +304,70 @@ _cai_hash_path() {
     fi
 
     printf '%s' "$hash"
+}
+
+# Check whether a container should be rebuilt due to template Dockerfile changes.
+# Compares current template fingerprint with the container's template-hash label.
+# Args:
+#   $1 = docker context (optional, empty for default)
+#   $2 = container name
+#   $3 = template name
+#   $4 = prompt_on_change ("true" to prompt user, otherwise no prompt)
+# Returns:
+#   0 = continue (unchanged or user declined rebuild)
+#   2 = template changed (or fingerprint missing) and prompt_on_change != true
+#   10 = user confirmed rebuild
+# Notes:
+#   - If container template label mismatches requested template, returns 0
+#     (caller's template-mismatch logic should handle that case).
+_cai_maybe_prompt_template_rebuild() {
+    local docker_context="${1:-}"
+    local container_name="${2:-}"
+    local template_name="${3:-default}"
+    local prompt_on_change="${4:-true}"
+    local container_template container_hash current_hash
+    local -a docker_cmd=(docker)
+
+    if [[ -z "$container_name" ]]; then
+        return 0
+    fi
+
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # If container has an explicit template label and it doesn't match, this helper
+    # defers to existing mismatch handling in callers.
+    container_template=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || container_template=""
+    if [[ -n "$container_template" && "$container_template" != "$template_name" ]]; then
+        return 0
+    fi
+
+    # No fingerprint support available -> no prompt.
+    if ! current_hash=$(_cai_template_fingerprint "$template_name" 2>/dev/null); then
+        return 0
+    fi
+
+    container_hash=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template-hash"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || container_hash=""
+
+    # Fingerprints match: no rebuild needed.
+    if [[ -n "$container_hash" && "$container_hash" == "$current_hash" ]]; then
+        return 0
+    fi
+
+    if [[ "$prompt_on_change" != "true" ]]; then
+        return 2
+    fi
+
+    _cai_warn "Template '$template_name' changed since this container was created."
+    if [[ -z "$container_hash" ]]; then
+        _cai_warn "Container has no template fingerprint label (older container build)."
+    fi
+    if _cai_prompt_confirm "Rebuild container with the updated template now?" "false"; then
+        return 10
+    fi
+
+    return 0
 }
 
 # Sanitize a value to be a valid RFC 1123 hostname
@@ -1935,11 +2000,31 @@ _containai_start_container() {
             # Template mismatch check for existing containers
             if [[ "$dry_run_state" != "none" ]]; then
                 local dry_run_template
+                local dry_run_template_hash=""
+                local dry_run_current_hash=""
                 dry_run_template=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || dry_run_template=""
                 if [[ -n "$dry_run_template" ]]; then
                     echo "CONTAINER_TEMPLATE=$dry_run_template"
                 else
                     echo "CONTAINER_TEMPLATE=<none - pre-existing container>"
+                fi
+
+                dry_run_template_hash=$("${docker_cmd[@]}" inspect --format '{{with index .Config.Labels "ai.containai.template-hash"}}{{.}}{{end}}' -- "$container_name" 2>/dev/null) || dry_run_template_hash=""
+                if [[ -n "$dry_run_template_hash" ]]; then
+                    echo "CONTAINER_TEMPLATE_HASH=$dry_run_template_hash"
+                else
+                    echo "CONTAINER_TEMPLATE_HASH=<none>"
+                fi
+
+                dry_run_current_hash=$(_cai_template_fingerprint "$template_name" 2>/dev/null) || dry_run_current_hash=""
+                if [[ -n "$dry_run_current_hash" ]]; then
+                    echo "TEMPLATE_HASH=$dry_run_current_hash"
+                    if [[ -z "$dry_run_template_hash" || "$dry_run_template_hash" != "$dry_run_current_hash" ]]; then
+                        echo "TEMPLATE_CHANGED=true"
+                        echo "TEMPLATE_REBUILD_PROMPT_DEFAULT=no"
+                    else
+                        echo "TEMPLATE_CHANGED=false"
+                    fi
                 fi
 
                 if [[ -z "$dry_run_template" && "$template_name" != "default" ]]; then
@@ -2139,6 +2224,15 @@ _containai_start_container() {
             _cai_warn "Requested template: $template_name"
             _cai_warn "Existing template: $container_template"
             return 1
+        fi
+
+        # Prompt to rebuild when template Dockerfile fingerprint changed.
+        # Default is "No" to avoid unexpected rebuilds.
+        local template_rebuild_rc=0
+        _cai_maybe_prompt_template_rebuild "$selected_context" "$container_name" "$template_name" "true" || template_rebuild_rc=$?
+        if [[ $template_rebuild_rc -eq 10 ]]; then
+            fresh_flag=true
+            _cai_info "Rebuilding container with updated template..."
         fi
         # Template matches - continue normally
     fi
@@ -2639,6 +2733,11 @@ _containai_start_container() {
             # Store template name label when using templates (fn-33-lp4.4)
             if [[ "$use_template" == "true" ]]; then
                 args+=(--label "ai.containai.template=$template_name")
+                local template_fingerprint=""
+                template_fingerprint=$(_cai_template_fingerprint "$template_name" 2>/dev/null) || template_fingerprint=""
+                if [[ -n "$template_fingerprint" ]]; then
+                    args+=(--label "ai.containai.template-hash=$template_fingerprint")
+                fi
             fi
             # Store image-tag label when explicitly specified (advanced/debugging feature)
             # Only write when NOT using templates (image-tag is ignored with templates)

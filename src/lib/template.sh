@@ -21,6 +21,7 @@
 #   _cai_install_template()        - Install a single template from repo (if missing)
 #   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
+#   _cai_template_fingerprint()    - Compute SHA-256 fingerprint of template Dockerfile
 #   _cai_ensure_base_image()       - Check/pull base image with user prompt
 #   _cai_build_template()          - Build template Dockerfile using Docker context
 #   _cai_get_template_image_name() - Get image name for a template (no build)
@@ -395,6 +396,51 @@ _cai_ensure_default_templates() {
         return 1
     fi
 
+    return 0
+}
+
+# Compute SHA-256 fingerprint of a template Dockerfile
+# Args: template_name (defaults to "default")
+# Outputs: hex SHA-256 digest via stdout (no newline)
+# Returns: 0 on success, 1 on failure
+# Notes:
+#   - Uses first-use template resolution via _cai_require_template()
+#   - Uses portable SHA-256 tools: sha256sum, shasum, openssl
+_cai_template_fingerprint() {
+    local template_name="${1:-default}"
+    local dockerfile_path hash
+
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    if ! dockerfile_path=$(_cai_require_template "$template_name" "false" 2>/dev/null); then
+        return 1
+    fi
+
+    if [[ ! -f "$dockerfile_path" ]]; then
+        _cai_error "Template Dockerfile not found: $dockerfile_path"
+        return 1
+    fi
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        hash=$(sha256sum "$dockerfile_path" | awk '{print $1}')
+    elif command -v shasum >/dev/null 2>&1; then
+        hash=$(shasum -a 256 "$dockerfile_path" | awk '{print $1}')
+    elif command -v openssl >/dev/null 2>&1; then
+        hash=$(openssl dgst -sha256 "$dockerfile_path" | awk '{print $NF}')
+    else
+        _cai_error "No SHA-256 tool available (sha256sum, shasum, or openssl required)"
+        return 1
+    fi
+
+    if [[ -z "$hash" ]]; then
+        _cai_error "Failed to fingerprint template Dockerfile: $dockerfile_path"
+        return 1
+    fi
+
+    printf '%s' "$hash"
     return 0
 }
 
