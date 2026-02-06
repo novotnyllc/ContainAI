@@ -1,0 +1,15 @@
+# syntax=docker/dockerfile:1
+# ContainAI Template System Wrapper
+#
+# This wrapper enforces runtime invariants for user template images:
+# - systemd init entrypoint
+# - root runtime user (required for PID 1 init startup)
+# - explicit empty CMD
+#
+# TEMPLATE_IMAGE must be a ContainAI-derived image produced by template build.
+ARG TEMPLATE_IMAGE
+FROM ${TEMPLATE_IMAGE}
+
+USER root
+ENTRYPOINT ["/sbin/init", "--log-level=err"]
+CMD []

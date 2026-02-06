@@ -10,9 +10,9 @@
 #
 # IMPORTANT WARNINGS:
 # ------------------
-# 1. DO NOT override ENTRYPOINT - systemd is the init system and must be PID 1
-# 2. DO NOT override CMD - it's set to start systemd properly
-# 3. The FINAL USER must be root so /sbin/init (systemd) can start correctly
+# 1. Keep FROM based on ContainAI images (enforced at build time)
+# 2. Runtime USER/ENTRYPOINT/CMD are enforced by the system wrapper image
+# 3. Use symlink pattern for services; do not run `systemctl enable` in Dockerfile
 #
 FROM ghcr.io/novotnyllc/containai:latest
 
@@ -68,5 +68,4 @@ EOF
 RUN ln -sf /etc/systemd/system/check-gpu.service \
     /etc/systemd/system/multi-user.target.wants/check-gpu.service
 
-# Final USER must be root (see warning at top of file)
-USER root
+# Runtime startup settings are enforced by the wrapper image.

@@ -789,47 +789,59 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
-# Test: _cai_validate_template_runtime_user enforces root final USER
+# Test: Template image naming and system wrapper path
 # ==============================================================================
 
-test_start "_cai_validate_template_runtime_user accepts Dockerfile with no USER directives"
-setup_tmpdir
-cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
-FROM ghcr.io/novotnyllc/containai:latest
-RUN echo "no explicit user"
-EOF
-if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
+test_start "_cai_get_template_build_image_name returns default intermediate image tag"
+result=$(_cai_get_template_build_image_name "default")
+expected="containai-template-build-default:local"
+assert_equal "$expected" "$result" "default build image name"
+
+test_start "_cai_get_template_build_image_name returns custom intermediate image tag"
+result=$(_cai_get_template_build_image_name "foo-bar")
+expected="containai-template-build-foo-bar:local"
+assert_equal "$expected" "$result" "custom build image name"
+
+test_start "_cai_get_template_build_image_name rejects invalid template names"
+if _cai_get_template_build_image_name "../bad" 2>/dev/null; then
+    test_fail "accepted invalid template name"
+else
+    test_pass
+fi
+
+test_start "_cai_get_template_system_wrapper_path returns existing wrapper Dockerfile"
+result=$(_cai_get_template_system_wrapper_path)
+if [[ -f "$result" ]] && [[ "$result" == */container/Dockerfile.template-system ]]; then
     test_pass
 else
-    test_fail "should accept Dockerfile with inherited root user"
+    test_fail "wrapper Dockerfile path invalid: $result"
+fi
+
+test_start "_cai_build_template dry-run rejects non-ContainAI base"
+setup_tmpdir
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/custom"
+cat > "$TEST_TMPDIR/templates/custom/Dockerfile" <<'EOF'
+FROM ubuntu:latest
+EOF
+if _cai_build_template "custom" "" "true" "true" >/dev/null 2>&1; then
+    test_fail "build should fail for non-ContainAI base"
+else
+    test_pass
 fi
 teardown_tmpdir
 
-test_start "_cai_validate_template_runtime_user accepts final USER root"
+test_start "_cai_build_template dry-run succeeds with ContainAI base"
 setup_tmpdir
-cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+_CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
+mkdir -p "$TEST_TMPDIR/templates/custom"
+cat > "$TEST_TMPDIR/templates/custom/Dockerfile" <<'EOF'
 FROM ghcr.io/novotnyllc/containai:latest
-USER agent
-RUN echo "install user tools"
-USER root
 EOF
-if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
+if _cai_build_template "custom" "" "true" "true" >/dev/null 2>&1; then
     test_pass
 else
-    test_fail "should accept final USER root"
-fi
-teardown_tmpdir
-
-test_start "_cai_validate_template_runtime_user rejects final USER agent"
-setup_tmpdir
-cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
-FROM ghcr.io/novotnyllc/containai:latest
-USER agent
-EOF
-if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
-    test_fail "should reject final USER agent"
-else
-    test_pass
+    test_fail "build should succeed for ContainAI base"
 fi
 teardown_tmpdir
 

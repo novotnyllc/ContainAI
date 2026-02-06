@@ -587,11 +587,10 @@ ContainAI containers require specific configuration to function correctly:
 
 | Restriction | Reason |
 |-------------|--------|
-| Do NOT override ENTRYPOINT | systemd must be PID 1 for services and init to work |
-| Do NOT override CMD | Required for proper systemd startup sequence |
-| Do NOT change the final USER away from root | systemd (`/sbin/init`) must start as root (PID 1) |
+| Template `FROM` must resolve to a ContainAI image | Enforced by template build validation before wrapping |
+| Runtime `ENTRYPOINT`/`CMD`/`USER` are wrapper-enforced | Final runtime image always uses system defaults for reliable startup |
 
-**Note:** You can temporarily switch to `USER agent` for unprivileged installs, but the final `USER` directive in your Dockerfile must be `root`.
+**Note:** The template build now uses a system wrapper image, so your template can switch `USER` as needed for build steps. The runtime container still starts with system defaults.
 
 If you override these, ContainAI features (SSH, agent startup, import/export) will not work correctly.
 

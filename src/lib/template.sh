@@ -21,12 +21,13 @@
 #   _cai_install_template()        - Install a single template from repo (if missing)
 #   _cai_install_all_templates()   - Install all repo templates during setup
 #   _cai_ensure_default_templates() - Install all missing default templates
+#   _cai_get_template_system_wrapper_path() - Get system wrapper Dockerfile path
 #   _cai_template_fingerprint()    - Compute SHA-256 fingerprint of template Dockerfile
 #   _cai_ensure_base_image()       - Check/pull base image with user prompt
 #   _cai_build_template()          - Build template Dockerfile using Docker context
 #   _cai_get_template_image_name() - Get image name for a template (no build)
+#   _cai_get_template_build_image_name() - Get intermediate build image name
 #   _cai_validate_template_base()  - Validate Dockerfile FROM uses ContainAI base
-#   _cai_validate_template_runtime_user() - Validate final runtime USER for systemd
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -274,6 +275,29 @@ _cai_get_repo_templates_dir() {
     fi
 
     return 1
+}
+
+# Get path to the system wrapper Dockerfile used to enforce runtime invariants
+# Outputs: path to src/container/Dockerfile.template-system
+# Returns: 0 on success, 1 if not found
+_cai_get_template_system_wrapper_path() {
+    local wrapper_path
+
+    if [[ -n "${_CAI_SCRIPT_DIR:-}" ]]; then
+        wrapper_path="$_CAI_SCRIPT_DIR/container/Dockerfile.template-system"
+    else
+        local script_dir
+        script_dir="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        wrapper_path="$(cd -- "$script_dir/.." && pwd)/container/Dockerfile.template-system"
+    fi
+
+    if [[ ! -f "$wrapper_path" ]]; then
+        _cai_error "Template system wrapper Dockerfile not found: $wrapper_path"
+        return 1
+    fi
+
+    printf '%s' "$wrapper_path"
+    return 0
 }
 
 # Install a single template from repo to user config directory
@@ -567,9 +591,9 @@ _cai_ensure_base_image() {
 #   suppress_base_warning  - If "true", suppress base image validation warnings
 # Returns: 0 on success, 1 on failure
 # Outputs: Image name (stdout) on success: containai-template-{name}:local
-# Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<command> to stdout
-#       The command is shell-escaped and includes env var clearing prefix
-# Note: Validates that Dockerfile uses ContainAI base image; warns if not
+# Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<commands> to stdout
+#       Commands are shell-escaped and include env var clearing prefix
+# Note: Template base must resolve to a ContainAI image family
 # Note: Prompts to pull base image if not present locally
 _cai_build_template() {
     local template_name="${1:-default}"
@@ -589,22 +613,28 @@ _cai_build_template() {
         return 1
     fi
 
-    # Validate layer stack (warn if not based on ContainAI, unless suppressed)
-    # This is a warning only - we proceed with build regardless of result
-    # Return code 2 (parse error) is logged but doesn't block build
-    if [[ "$dry_run" != "true" ]]; then
-        _cai_validate_template_base "$dockerfile_path" "$suppress_base_warning" || true
-        if ! _cai_validate_template_runtime_user "$dockerfile_path"; then
-            return 1
-        fi
+    # Template base must resolve to a ContainAI image before system wrapper build.
+    # We fail fast here to avoid producing images with missing runtime requirements.
+    if ! _cai_validate_template_base "$dockerfile_path" "$suppress_base_warning"; then
+        _cai_error "Template '$template_name' must be based on ContainAI images."
+        _cai_error "Allowed base patterns: containai:*, ghcr.io/novotnyllc/containai*, containai-template-*:local"
+        return 1
     fi
 
     # Template directory is the build context (parent of Dockerfile)
     local template_dir
     template_dir="$(dirname "$dockerfile_path")"
 
-    # Image tag: containai-template-{name}:local
-    local image_tag="containai-template-${template_name}:local"
+    # Build outputs:
+    # 1. Intermediate image from user template Dockerfile
+    # 2. Final runtime image from system wrapper Dockerfile (enforces USER/ENTRYPOINT/CMD)
+    local build_image_tag image_tag
+    if ! build_image_tag=$(_cai_get_template_build_image_name "$template_name"); then
+        return 1
+    fi
+    if ! image_tag=$(_cai_get_template_image_name "$template_name"); then
+        return 1
+    fi
 
     # Build docker command array based on context
     local -a docker_cmd=(docker)
@@ -623,49 +653,80 @@ _cai_build_template() {
     local base_image
     base_image=$(_cai_base_image)
 
-    # Construct the build command with BASE_IMAGE arg for channel support
-    local -a build_args=("${docker_cmd[@]}" build --build-arg "BASE_IMAGE=$base_image" -t "$image_tag" "$template_dir")
+    local wrapper_dockerfile wrapper_context
+    if ! wrapper_dockerfile=$(_cai_get_template_system_wrapper_path); then
+        return 1
+    fi
+    wrapper_context="$(dirname "$wrapper_dockerfile")"
+
+    # Construct build commands:
+    # - user_build_args: user template Dockerfile -> intermediate image
+    # - wrapper_build_args: system wrapper Dockerfile -> final runtime image
+    local -a user_build_args=("${docker_cmd[@]}" build --build-arg "BASE_IMAGE=$base_image" -t "$build_image_tag" "$template_dir")
+    local -a wrapper_build_args=("${docker_cmd[@]}" build --build-arg "TEMPLATE_IMAGE=$build_image_tag" -f "$wrapper_dockerfile" -t "$image_tag" "$wrapper_context")
 
     # Handle dry-run mode
     if [[ "$dry_run" == "true" ]]; then
         # Output machine-parseable format with proper shell escaping
         # Use printf %q to escape each argument, preserving argument boundaries
-        local build_cmd_str=""
+        local user_build_cmd_str=""
+        local wrapper_build_cmd_str=""
         local arg
-        for arg in "${build_args[@]}"; do
-            if [[ -n "$build_cmd_str" ]]; then
-                build_cmd_str+=" "
+        for arg in "${user_build_args[@]}"; do
+            if [[ -n "$user_build_cmd_str" ]]; then
+                user_build_cmd_str+=" "
             fi
-            # Use printf %q to shell-escape each argument
-            build_cmd_str+=$(printf '%q' "$arg")
+            user_build_cmd_str+=$(printf '%q' "$arg")
+        done
+        for arg in "${wrapper_build_args[@]}"; do
+            if [[ -n "$wrapper_build_cmd_str" ]]; then
+                wrapper_build_cmd_str+=" "
+            fi
+            wrapper_build_cmd_str+=$(printf '%q' "$arg")
         done
         # Include env var clearing prefix to match actual execution
-        printf '%s\n' "TEMPLATE_BUILD_CMD=DOCKER_CONTEXT= DOCKER_HOST= $build_cmd_str"
+        printf '%s\n' "TEMPLATE_BUILD_CMD=DOCKER_CONTEXT= DOCKER_HOST= $user_build_cmd_str && DOCKER_CONTEXT= DOCKER_HOST= $wrapper_build_cmd_str"
         printf '%s\n' "TEMPLATE_IMAGE=$image_tag"
+        printf '%s\n' "TEMPLATE_BUILD_IMAGE=$build_image_tag"
         printf '%s\n' "TEMPLATE_NAME=$template_name"
         return 0
     fi
 
-    # Build the template
-    _cai_info "Building template '$template_name'..."
+    # Build user template (intermediate)
+    _cai_info "Building template '$template_name' (stage: user template)..."
     # Clear DOCKER_HOST/DOCKER_CONTEXT to make --context flag authoritative
     # Stream output directly on failure to avoid memory issues with large builds
     local build_rc
-    if DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" >/dev/null 2>&1; then
+    if DOCKER_CONTEXT= DOCKER_HOST= "${user_build_args[@]}" >/dev/null 2>&1; then
         build_rc=0
     else
         build_rc=$?
     fi
 
     if [[ $build_rc -ne 0 ]]; then
-        _cai_error "Failed to build template '$template_name' (exit code: $build_rc)"
+        _cai_error "Failed to build user template '$template_name' (exit code: $build_rc)"
         _cai_error "Re-running build to show output:"
         # Re-run with output visible for debugging (output goes to stderr)
-        DOCKER_CONTEXT= DOCKER_HOST= "${build_args[@]}" >&2 || true
+        DOCKER_CONTEXT= DOCKER_HOST= "${user_build_args[@]}" >&2 || true
         return 1
     fi
 
-    _cai_info "Template '$template_name' built successfully: $image_tag"
+    # Build system wrapper (final runtime image)
+    _cai_info "Building template '$template_name' (stage: system wrapper)..."
+    if DOCKER_CONTEXT= DOCKER_HOST= "${wrapper_build_args[@]}" >/dev/null 2>&1; then
+        build_rc=0
+    else
+        build_rc=$?
+    fi
+
+    if [[ $build_rc -ne 0 ]]; then
+        _cai_error "Failed to build wrapped template '$template_name' (exit code: $build_rc)"
+        _cai_error "Re-running wrapper build to show output:"
+        DOCKER_CONTEXT= DOCKER_HOST= "${wrapper_build_args[@]}" >&2 || true
+        return 1
+    fi
+
+    _cai_info "Template '$template_name' built successfully: $image_tag (from $build_image_tag)"
 
     # Output the image name for use by caller
     printf '%s' "$image_tag"
@@ -686,6 +747,21 @@ _cai_get_template_image_name() {
     fi
 
     printf '%s' "containai-template-${template_name}:local"
+}
+
+# Get the intermediate user-template image name without building
+# Args: template_name
+# Returns: 0 on success, 1 if template name is invalid
+# Outputs: Image name (stdout): containai-template-build-{name}:local
+_cai_get_template_build_image_name() {
+    local template_name="${1:-default}"
+
+    if ! _cai_validate_template_name "$template_name"; then
+        _cai_error "Invalid template name: $template_name"
+        return 1
+    fi
+
+    printf '%s' "containai-template-build-${template_name}:local"
 }
 
 # ==============================================================================
@@ -881,71 +957,6 @@ EOF
        suppress_base_warning = true
 EOF
     fi
-    return 1
-}
-
-# Validate that the final runtime USER for the last stage is root.
-# systemd (/sbin/init) must start as root inside the container.
-# Args: dockerfile_path
-# Returns: 0 if final runtime USER is root/inherited root, 1 if invalid, 2 if parse error
-_cai_validate_template_runtime_user() {
-    local dockerfile_path="${1:-}"
-
-    if [[ -z "$dockerfile_path" ]]; then
-        _cai_error "Dockerfile path required"
-        return 2
-    fi
-
-    if [[ ! -f "$dockerfile_path" ]]; then
-        _cai_error "Dockerfile not found: $dockerfile_path"
-        return 2
-    fi
-
-    # Track only the final stage's USER directives. Each FROM starts a new stage.
-    local saw_from="false"
-    local final_stage_user=""
-    local line user_token effective_user
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # Remove leading/trailing whitespace
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-
-        # Skip empty lines and comments
-        [[ -z "$line" ]] && continue
-        [[ "$line" == \#* ]] && continue
-
-        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
-            saw_from="true"
-            final_stage_user=""
-            continue
-        fi
-
-        if [[ "$saw_from" == "true" ]] && [[ "$line" =~ ^[Uu][Ss][Ee][Rr][[:space:]]+([^[:space:]#]+) ]]; then
-            user_token="${BASH_REMATCH[1]}"
-            final_stage_user="$user_token"
-        fi
-    done < "$dockerfile_path"
-
-    if [[ "$saw_from" != "true" ]]; then
-        _cai_error "No FROM line found in Dockerfile: $dockerfile_path"
-        return 2
-    fi
-
-    # No USER in final stage means inherit base image default user.
-    # ContainAI base images run with root runtime user for systemd startup.
-    if [[ -z "$final_stage_user" ]]; then
-        return 0
-    fi
-
-    effective_user="${final_stage_user%%:*}"
-    effective_user="${effective_user,,}"
-    if [[ "$effective_user" == "root" ]] || [[ "$effective_user" == "0" ]]; then
-        return 0
-    fi
-
-    _cai_error "Final runtime USER must be root for systemd startup: found '$final_stage_user'"
-    _cai_error "Set the final USER to root in $dockerfile_path"
     return 1
 }
 
