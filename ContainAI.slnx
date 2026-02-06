@@ -3,7 +3,6 @@
     <Project Path="src/cai/cai.csproj" />
     <Project Path="src/ContainAI.Cli/ContainAI.Cli.csproj" />
     <Project Path="src/ContainAI.Cli.Abstractions/ContainAI.Cli.Abstractions.csproj" />
-    <Project Path="src/acp-proxy/acp-proxy.csproj" />
     <Project Path="src/ContainAI.Acp/ContainAI.Acp.csproj" />
   </Folder>
   <Folder Name="/tests/">

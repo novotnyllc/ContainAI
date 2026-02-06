@@ -2182,32 +2182,7 @@ _cai_update() {
         fi
     fi
 
-    # Build ACP proxy if dotnet is available and source exists
-    if [[ $overall_status -eq 0 ]] || [[ "$dry_run" == "true" ]]; then
-        local acp_build_script="${_CAI_SCRIPT_DIR}/acp-proxy/build.sh"
-        if [[ -f "$acp_build_script" ]] && [[ -x "$acp_build_script" ]]; then
-            _cai_info ""
-            _cai_step "Building ACP proxy binary"
-
-            if [[ "$dry_run" == "true" ]]; then
-                _cai_dryrun "Would build and install ACP proxy to ${_CAI_SCRIPT_DIR}/bin/acp-proxy"
-            else
-                if command -v dotnet >/dev/null 2>&1; then
-                    local acp_rc=0
-                    "$acp_build_script" --install && acp_rc=0 || acp_rc=$?
-                    if [[ $acp_rc -ne 0 ]]; then
-                        _cai_warn "ACP proxy build failed (exit: $acp_rc)"
-                        # Non-fatal: ACP is optional
-                    else
-                        _cai_ok "ACP proxy installed"
-                    fi
-                else
-                    _cai_info ".NET SDK not found - skipping ACP proxy build"
-                    _cai_info "Install .NET 10+ SDK and run: ${acp_build_script} --install"
-                fi
-            fi
-        fi
-    fi
+    # ACP proxy is integrated in cai (`cai acp proxy`), no standalone binary build step.
 
     # Summary
     _cai_info ""

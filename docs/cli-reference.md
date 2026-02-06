@@ -1088,7 +1088,7 @@ cai acp proxy gemini
 
 **Notes:**
 - Requires the ACP proxy binary to be built and installed
-- Build with: `src/acp-proxy/build.sh --install`
+- Uses the integrated `cai` runtime command (no standalone `acp-proxy` build step)
 
 **Related:** [ACP Documentation](acp.md)
 

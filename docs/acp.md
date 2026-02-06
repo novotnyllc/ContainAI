@@ -4,7 +4,7 @@ ContainAI supports the [Agent Client Protocol](https://agentclientprotocol.com) 
 
 ## Quick Start
 
-Configure your editor to use `cai --acp <agent>`:
+Configure your editor to use `cai acp proxy <agent>`:
 
 **Zed** (`~/.config/zed/settings.json`):
 ```json
@@ -13,7 +13,7 @@ Configure your editor to use `cai --acp <agent>`:
     "claude-sandbox": {
       "type": "custom",
       "command": "cai",
-      "args": ["--acp", "claude"]
+      "args": ["acp", "proxy", "claude"]
     }
   }
 }
@@ -23,7 +23,7 @@ Configure your editor to use `cai --acp <agent>`:
 ```json
 {
   "acp.executable": "cai",
-  "acp.args": ["--acp", "claude"]
+  "acp.args": ["acp", "proxy", "claude"]
 }
 ```
 
@@ -47,7 +47,7 @@ Configure your editor to use `cai --acp <agent>`:
 }}}%%
 sequenceDiagram
     participant Editor
-    participant Proxy as cai --acp (Proxy)
+    participant Proxy as cai acp proxy (Proxy)
     participant Exec as cai exec
     participant Container
     participant Agent as Agent (claude --acp)
@@ -63,7 +63,7 @@ sequenceDiagram
     Proxy-->>Editor: Response via stdio
 ```
 
-1. Editor spawns `cai --acp claude`
+1. Editor spawns `cai acp proxy claude`
 2. Editor sends `initialize`, then `session/new` with workspace and MCP config
 3. Proxy resolves workspace root (git root or `.containai/config.toml` parent)
 4. Proxy spawns `cai exec` which handles container creation/SSH
@@ -163,8 +163,8 @@ ContainAI supports **any agent** that implements the ACP protocol. The agent bin
 
 | Agent | Command | Notes |
 |-------|---------|-------|
-| Claude Code | `cai --acp claude` | Pre-installed in default images |
-| Gemini CLI | `cai --acp gemini` | Pre-installed in default images |
+| Claude Code | `cai acp proxy claude` | Pre-installed in default images |
+| Gemini CLI | `cai acp proxy gemini` | Pre-installed in default images |
 
 ### Custom Agents
 
@@ -172,7 +172,7 @@ Any ACP-compatible agent can be used:
 
 ```bash
 # Use a custom agent
-cai --acp myagent
+cai acp proxy myagent
 
 # The agent must:
 # 1. Be installed in the container (in $PATH)
@@ -206,7 +206,7 @@ Add to `~/.config/zed/settings.json`:
     "claude-sandbox": {
       "type": "custom",
       "command": "cai",
-      "args": ["--acp", "claude"]
+      "args": ["acp", "proxy", "claude"]
     }
   }
 }
@@ -220,12 +220,12 @@ For multiple agents:
     "claude-sandbox": {
       "type": "custom",
       "command": "cai",
-      "args": ["--acp", "claude"]
+      "args": ["acp", "proxy", "claude"]
     },
     "gemini-sandbox": {
       "type": "custom",
       "command": "cai",
-      "args": ["--acp", "gemini"]
+      "args": ["acp", "proxy", "gemini"]
     }
   }
 }
@@ -240,7 +240,7 @@ With an ACP-compatible extension, add to `settings.json`:
 ```json
 {
   "acp.executable": "cai",
-  "acp.args": ["--acp", "claude"]
+  "acp.args": ["acp", "proxy", "claude"]
 }
 ```
 

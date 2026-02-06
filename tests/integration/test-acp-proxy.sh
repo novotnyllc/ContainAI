@@ -41,8 +41,18 @@ export CAI_ACP_DIRECT_SPAWN=1
 # Add mock server to PATH
 export PATH="$SCRIPT_DIR:$PATH"
 
-# Proxy binary location
-PROXY_BIN="$SRC_DIR/bin/acp-proxy"
+# Proxy command resolution
+PROXY_CAI_BIN="$SRC_DIR/bin/cai"
+PROXY_LEGACY_BIN="$SRC_DIR/bin/acp-proxy"
+PROXY_CMD=()
+
+if [[ -x "$PROXY_CAI_BIN" ]]; then
+    PROXY_CMD=("$PROXY_CAI_BIN" "acp" "proxy")
+elif [[ -x "$PROXY_LEGACY_BIN" ]]; then
+    PROXY_CMD=("$PROXY_LEGACY_BIN" "proxy")
+else
+    PROXY_CMD=("dotnet" "run" "--project" "$SRC_DIR/cai" "--" "acp" "proxy")
+fi
 
 # Test timeout (seconds)
 TEST_TIMEOUT=30
@@ -144,7 +154,7 @@ run_proxy() {
     # This gives the proxy time to process and write output
     # The subshell sends input, sleeps briefly, then closes stdin
     PROXY_EXIT_CODE=0
-    (printf '%s\n' "$input"; sleep 0.1) | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy mock-acp-server 2>/dev/null > "$tmpfile" || PROXY_EXIT_CODE=$?
+    (printf '%s\n' "$input"; sleep 0.1) | run_with_timeout "$TEST_TIMEOUT" "${PROXY_CMD[@]}" mock-acp-server 2>/dev/null > "$tmpfile" || PROXY_EXIT_CODE=$?
 
     PROXY_OUTPUT=$(< "$tmpfile")
 
@@ -182,7 +192,7 @@ start_interactive_proxy() {
 
     # Start proxy with FIFOs, capture stderr for mock server logs
     (
-        "$PROXY_BIN" proxy mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>"$PROXY_ERR_FILE"
+        "${PROXY_CMD[@]}" mock-acp-server < "$PROXY_IN_FIFO" > "$PROXY_OUT_FIFO" 2>"$PROXY_ERR_FILE"
     ) &
     PROXY_PID=$!
 
@@ -276,13 +286,13 @@ check_prerequisites() {
     fi
     pass "mock-acp-server is executable"
 
-    # Check proxy binary exists
-    if [[ ! -f "$PROXY_BIN" || ! -x "$PROXY_BIN" ]]; then
-        fail "ACP proxy binary not found at $PROXY_BIN"
-        info "Build with: cd $SRC_DIR/acp-proxy && dotnet publish -r linux-x64 -c Release && cp bin/Release/*/linux-x64/publish/acp-proxy ../bin/"
+    # Check proxy command source is available
+    if [[ ! -x "$PROXY_CAI_BIN" && ! -x "$PROXY_LEGACY_BIN" ]] && ! command -v dotnet >/dev/null 2>&1; then
+        fail "No ACP proxy command source found (missing src/bin/cai, src/bin/acp-proxy, and dotnet)"
+        info "Build with: dotnet publish src/cai -r linux-x64 -c Release --self-contained"
         exit 1
     fi
-    pass "ACP proxy binary found"
+    pass "ACP proxy command source found"
 
     # Verify mock server works
     local mock_output
@@ -352,7 +362,7 @@ test_stdout_purity() {
         export CONTAINAI_VERBOSE=1
         export CAI_NO_UPDATE_CHECK=1
         (printf '%s\n' '{"jsonrpc":"2.0","id":"purity-test","method":"initialize","params":{"protocolVersion":"2025-01-01"}}'; sleep 0.1) \
-            | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy mock-acp-server 2>/dev/null > "$tmpfile"
+            | run_with_timeout "$TEST_TIMEOUT" "${PROXY_CMD[@]}" mock-acp-server 2>/dev/null > "$tmpfile"
     )
 
     # Count total lines in output
@@ -1119,7 +1129,7 @@ test_generic_agent_accepts_any_name() {
     # Note: we're testing that it doesn't reject the name upfront
     local exit_code=0
     (printf '%s\n' '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}'; sleep 0.1) \
-        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "my-custom-agent" 2>"$tmpstderr" > "$tmpfile" || exit_code=$?
+        | run_with_timeout "$TEST_TIMEOUT" "${PROXY_CMD[@]}" "my-custom-agent" 2>"$tmpstderr" > "$tmpfile" || exit_code=$?
 
     local response
     response=$(< "$tmpfile")
@@ -1178,7 +1188,7 @@ test_generic_agent_missing_error() {
 {"jsonrpc":"2.0","id":"2","method":"session/new","params":{"cwd":"'"$ws"'"}}'
 
     (printf '%s\n' "$input"; sleep 0.5) \
-        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "nonexistent-agent-xyz" 2>"$tmpstderr" > "$tmpfile" || true
+        | run_with_timeout "$TEST_TIMEOUT" "${PROXY_CMD[@]}" "nonexistent-agent-xyz" 2>"$tmpstderr" > "$tmpfile" || true
 
     # Check stderr for the error message
     local stderr_output
@@ -1249,7 +1259,7 @@ test_generic_agent_no_injection() {
     rm -f /tmp/test-injection-pwned 2>/dev/null || true
 
     (printf '%s\n' "$input"; sleep 0.5) \
-        | run_with_timeout "$TEST_TIMEOUT" "$PROXY_BIN" proxy "$malicious_agent" 2>"$tmpstderr" > "$tmpfile" || true
+        | run_with_timeout "$TEST_TIMEOUT" "${PROXY_CMD[@]}" "$malicious_agent" 2>"$tmpstderr" > "$tmpfile" || true
 
     # Check that the injection file was NOT created
     if [[ -f /tmp/test-injection-pwned ]]; then

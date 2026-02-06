@@ -213,8 +213,8 @@ for platform in "${platform_list[@]}"; do
     fi
     seen["$local_arch"]=1
 
-    printf '  Building acp-proxy (%s)...\n' "$local_rid"
-    dotnet publish "$REPO_ROOT/src/acp-proxy" \
+    printf '  Building cai (%s)...\n' "$local_rid"
+    dotnet publish "$REPO_ROOT/src/cai" \
         -r "$local_rid" \
         -c Release \
         --self-contained \
