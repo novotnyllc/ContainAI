@@ -348,14 +348,21 @@ _cai_iptables_available() {
         if [[ "$vm_status" != "Running" ]]; then
             return 1
         fi
-        # Check if iptables is available inside the VM.
-        # Use explicit sbin fallbacks because non-interactive PATH in Lima may
-        # omit /usr/sbin and /sbin even when iptables is installed.
+        # Check if any iptables-compatible binary is available inside the VM.
+        # Include nft/legacy and explicit sbin fallbacks for non-interactive PATH.
         limactl shell "$vm_name" -- sh -c '
             command -v iptables >/dev/null 2>&1 ||
+            command -v iptables-nft >/dev/null 2>&1 ||
+            command -v iptables-legacy >/dev/null 2>&1 ||
             [ -x /usr/sbin/iptables ] ||
             [ -x /sbin/iptables ] ||
-            [ -x /usr/bin/iptables ]
+            [ -x /usr/bin/iptables ] ||
+            [ -x /usr/sbin/iptables-nft ] ||
+            [ -x /sbin/iptables-nft ] ||
+            [ -x /usr/bin/iptables-nft ] ||
+            [ -x /usr/sbin/iptables-legacy ] ||
+            [ -x /sbin/iptables-legacy ] ||
+            [ -x /usr/bin/iptables-legacy ]
         ' >/dev/null 2>&1
     else
         command -v iptables >/dev/null 2>&1
@@ -376,11 +383,43 @@ _cai_iptables() {
     # macOS: Execute inside Lima VM
     if _cai_is_macos; then
         local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
-        # Construct iptables command for Lima shell
-        # Use sudo -n (non-interactive) to avoid blocking on password prompt
-        # Lima VMs typically have passwordless sudo for the default user
-        limactl shell "$vm_name" -- sudo -n iptables "$@"
-        return $?
+        local candidate
+        local output rc
+        local -a candidates=(
+            iptables
+            /usr/sbin/iptables
+            /sbin/iptables
+            /usr/bin/iptables
+            iptables-nft
+            /usr/sbin/iptables-nft
+            /sbin/iptables-nft
+            /usr/bin/iptables-nft
+            iptables-legacy
+            /usr/sbin/iptables-legacy
+            /sbin/iptables-legacy
+            /usr/bin/iptables-legacy
+        )
+
+        # Prefer non-interactive sudo for root-required iptables operations.
+        for candidate in "${candidates[@]}"; do
+            output=$(limactl shell "$vm_name" -- sudo -n "$candidate" "$@" 2>&1) && rc=0 || rc=$?
+            if [[ $rc -eq 0 ]]; then
+                [[ -n "$output" ]] && printf '%s\n' "$output"
+                return 0
+            fi
+        done
+
+        # Fallback: direct execution in case shell user already has privileges.
+        for candidate in "${candidates[@]}"; do
+            output=$(limactl shell "$vm_name" -- "$candidate" "$@" 2>&1) && rc=0 || rc=$?
+            if [[ $rc -eq 0 ]]; then
+                [[ -n "$output" ]] && printf '%s\n' "$output"
+                return 0
+            fi
+        done
+
+        [[ -n "${output:-}" ]] && printf '%s\n' "$output" >&2
+        return 1
     fi
 
     # Linux/WSL: Direct execution with privilege handling

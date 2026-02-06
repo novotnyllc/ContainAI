@@ -823,6 +823,22 @@ jobs:
           docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
           docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
+      - name: Diagnose Lima iptables access
+        run: |
+          set +e
+          VM_NAME="containai-docker"
+          echo "============================================="
+          echo "Lima iptables diagnostics"
+          echo "============================================="
+          limactl list || true
+          limactl shell "$VM_NAME" -- sh -c 'id; uname -a' || true
+          limactl shell "$VM_NAME" -- sh -c 'command -v sudo || true; command -v iptables || true; command -v iptables-nft || true' || true
+          limactl shell "$VM_NAME" -- sh -c 'ls -l /usr/sbin/iptables /sbin/iptables /usr/bin/iptables /usr/sbin/iptables-nft /sbin/iptables-nft /usr/bin/iptables-nft 2>/dev/null || true' || true
+          limactl shell "$VM_NAME" -- sh -c 'sudo -n true && echo "sudo-nopasswd=yes" || echo "sudo-nopasswd=no"' || true
+          limactl shell "$VM_NAME" -- sh -c 'sudo -n iptables -S >/tmp/cai-iptables-s.out 2>/tmp/cai-iptables-s.err; echo "sudo iptables -S rc=$?"; cat /tmp/cai-iptables-s.err' || true
+          limactl shell "$VM_NAME" -- sh -c 'sudo -n iptables-nft -S >/tmp/cai-iptables-nft-s.out 2>/tmp/cai-iptables-nft-s.err; echo "sudo iptables-nft -S rc=$?"; cat /tmp/cai-iptables-nft-s.err' || true
+          limactl shell "$VM_NAME" -- sh -c 'sudo -n iptables -S DOCKER-USER >/tmp/cai-iptables-docker-user.out 2>/tmp/cai-iptables-docker-user.err; echo "sudo iptables -S DOCKER-USER rc=$?"; cat /tmp/cai-iptables-docker-user.err' || true
+
       - name: Run Secure Engine E2E tests (macOS)
         run: |
           BASH_BIN="$(brew --prefix bash)/bin/bash"
