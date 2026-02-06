@@ -25,6 +25,7 @@
 - `91cd5f5` expand native `doctor/setup` flows (`doctor fix`, `--build-templates`, `--reset-lima`, setup template handling)
 - `ba862f5` add xUnit v3 parity tests for native lifecycle command behavior
 - `2609690` switch release/update/integration wiring to single-binary ACP flow (`cai acp proxy`)
+- `c3bfc35` update release packaging to include `cai` artifact (remove `acp-proxy` artifact dependency)
 
 ### Review-Agent Passes
 - Correctness/regression review: completed against current no-legacy diff.
@@ -57,6 +58,8 @@
   - `dotnet run --project src/cai -- doctor fix` (pass)
   - `dotnet run --project src/cai -- setup --dry-run --skip-templates` (pass)
   - `dotnet run --project src/cai -- doctor --reset-lima` on non-macOS (expected failure path)
+- Release packaging smoke:
+  - `./src/scripts/build-cai-tarballs.sh --platforms linux/amd64 --output-dir artifacts/cai-tarballs-test` (pass)
 - Slopwatch (dirty-file hook mode):
   - `slopwatch analyze -d . --hook --no-baseline --fail-on warning` (passed)
 - CRAP/coverage hotspot analysis:
