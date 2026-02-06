@@ -3,8 +3,7 @@
   <PropertyGroup>
     <RootNamespace>AgentClientProtocol</RootNamespace>
     <Description>Agent Client Protocol proxy library for .NET</Description>
-    <IsPackable>true</IsPackable>
-    <PackageId>AgentClientProtocol</PackageId>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <PropertyGroup>
