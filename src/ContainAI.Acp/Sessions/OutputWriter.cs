@@ -15,10 +15,7 @@ public sealed class OutputWriter
     private readonly Channel<JsonRpcMessage> _channel = Channel.CreateUnbounded<JsonRpcMessage>();
     private readonly Stream _stdout;
 
-    public OutputWriter(Stream stdout)
-    {
-        _stdout = stdout;
-    }
+    public OutputWriter(Stream stdout) => _stdout = stdout;
 
     /// <summary>
     /// Enqueues a message to be written to stdout.

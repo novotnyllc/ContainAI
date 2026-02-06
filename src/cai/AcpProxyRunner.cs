@@ -1,5 +1,5 @@
-using ContainAI.Acp;
 using System.Runtime.CompilerServices;
+using ContainAI.Acp;
 
 [assembly: InternalsVisibleTo("ContainAI.Acp.Tests")]
 [assembly: InternalsVisibleTo("ContainAI.Cli.Tests")]
@@ -21,10 +21,7 @@ internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
         string agent,
         Stream stdout,
         TextWriter stderr,
-        bool directSpawn)
-    {
-        _proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
-    }
+        bool directSpawn) => _proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
 
     public void Cancel()
     {

@@ -46,10 +46,7 @@ public sealed class AcpSession : IDisposable
     /// </summary>
     public CancellationToken CancellationToken => _cts.Token;
 
-    public AcpSession(string workspace)
-    {
-        Workspace = workspace;
-    }
+    public AcpSession(string workspace) => Workspace = workspace;
 
     /// <summary>
     /// Writes a JSON-RPC message to the agent.

@@ -1,7 +1,7 @@
 using System.CommandLine;
-using System.Reflection;
 using System.Text.Encodings.Web;
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host;
 
 namespace ContainAI.Cli;
 
@@ -9,10 +9,7 @@ internal sealed class RootCommandBuilder
 {
     private readonly AcpCommandBuilder _acpCommandBuilder;
 
-    public RootCommandBuilder(AcpCommandBuilder? acpCommandBuilder = null)
-    {
-        _acpCommandBuilder = acpCommandBuilder ?? new AcpCommandBuilder();
-    }
+    public RootCommandBuilder(AcpCommandBuilder? acpCommandBuilder = null) => _acpCommandBuilder = acpCommandBuilder ?? new AcpCommandBuilder();
 
     public RootCommand Build(ICaiCommandRuntime runtime)
     {
@@ -338,82 +335,8 @@ internal sealed class RootCommandBuilder
 
     internal static string GetVersionJson()
     {
-        var installDir = ResolveInstallDirectory();
-        var version = ResolveVersion(installDir);
-        var installType = ResolveInstallType(installDir);
+        var (version, installType, installDir) = InstallMetadata.ResolveVersionInfo();
 
         return $"{{\"version\":\"{JavaScriptEncoder.Default.Encode(version)}\",\"install_type\":\"{JavaScriptEncoder.Default.Encode(installType)}\",\"install_dir\":\"{JavaScriptEncoder.Default.Encode(installDir)}\"}}";
-    }
-
-    private static string ResolveVersion(string installDir)
-    {
-        var versionFile = Path.Combine(installDir, "VERSION");
-        if (File.Exists(versionFile))
-        {
-            var value = File.ReadAllText(versionFile).Trim();
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        var assemblyVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
-            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
-
-        return string.IsNullOrWhiteSpace(assemblyVersion) ? "0.0.0" : assemblyVersion;
-    }
-
-    private static string ResolveInstallType(string installDir)
-    {
-        if (Directory.Exists(Path.Combine(installDir, ".git")))
-        {
-            return "git";
-        }
-
-        var normalized = installDir.Replace('\\', '/');
-        if (normalized.Contains("/.local/share/containai", StringComparison.Ordinal))
-        {
-            return "local";
-        }
-
-        return "installed";
-    }
-
-    private static string ResolveInstallDirectory()
-    {
-        foreach (var candidate in EnumerateInstallDirectoryCandidates())
-        {
-            if (File.Exists(Path.Combine(candidate, "VERSION")))
-            {
-                return candidate;
-            }
-        }
-
-        return Directory.GetCurrentDirectory();
-    }
-
-    private static IEnumerable<string> EnumerateInstallDirectoryCandidates()
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
-        {
-            var current = Path.GetFullPath(root);
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                if (seen.Add(current))
-                {
-                    yield return current;
-                }
-
-                var parent = Directory.GetParent(current);
-                if (parent is null)
-                {
-                    break;
-                }
-
-                current = parent.FullName;
-            }
-        }
     }
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContainAI.Cli.Host;
 using Xunit;
 
 namespace ContainAI.Cli.Tests;
@@ -6,118 +7,157 @@ namespace ContainAI.Cli.Tests;
 public sealed class WorkspaceStateTests
 {
     [Fact]
-    public async Task UserConfigPath_UsesXdgConfigHome()
+    public void WriteAndReadWorkspaceState_RoundTripsValues()
     {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-ws-xdg");
-        var xdgPath = Path.Combine(temp.Path, "config");
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var corePath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/core.sh");
-        var platformPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/platform.sh");
-        var configPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/config.sh");
+        using var temp = new TemporaryDirectory();
+        var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var result = await ShellTestSupport.RunBashAsync(
-            $"""
-            source {ShellTestSupport.ShellQuote(corePath)}
-            source {ShellTestSupport.ShellQuote(platformPath)}
-            source {ShellTestSupport.ShellQuote(configPath)}
-            _containai_user_config_path
-            """,
-            environment: new Dictionary<string, string?> { ["XDG_CONFIG_HOME"] = xdgPath },
-            cancellationToken: cancellationToken);
+        var setVolume = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-workspace-key", "/tmp/test-workspace", "data_volume", "test-vol",
+        ]);
+        Assert.Equal(0, setVolume.ExitCode);
 
-        Assert.Equal(0, result.ExitCode);
-        Assert.Equal(Path.Combine(xdgPath, "containai/config.toml"), result.StdOut.Trim());
-    }
+        var setContainer = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-workspace-key", "/tmp/test-workspace", "container_name", "my-container",
+        ]);
+        Assert.Equal(0, setContainer.ExitCode);
 
-    [Fact]
-    public async Task WriteWorkspaceState_CreatesExpectedPermissions()
-    {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-ws-perms");
-        var xdgPath = Path.Combine(temp.Path, "config");
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var corePath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/core.sh");
-        var platformPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/platform.sh");
-        var configPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/config.sh");
+        var getWorkspace = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--get-workspace", "/tmp/test-workspace",
+        ]);
 
-        var result = await ShellTestSupport.RunBashAsync(
-            $"""
-            source {ShellTestSupport.ShellQuote(corePath)}
-            source {ShellTestSupport.ShellQuote(platformPath)}
-            source {ShellTestSupport.ShellQuote(configPath)}
-
-            _containai_write_workspace_state "/tmp/test-workspace" "data_volume" "test-vol"
-
-            dir_perms=$(stat -c '%a' "{xdgPath}/containai" 2>/dev/null || stat -f '%Lp' "{xdgPath}/containai")
-            file_perms=$(stat -c '%a' "{xdgPath}/containai/config.toml" 2>/dev/null || stat -f '%Lp' "{xdgPath}/containai/config.toml")
-            printf '%s|%s' "$dir_perms" "$file_perms"
-            """,
-            environment: new Dictionary<string, string?> { ["XDG_CONFIG_HOME"] = xdgPath },
-            cancellationToken: cancellationToken);
-
-        Assert.Equal(0, result.ExitCode);
-        var split = result.StdOut.Trim().Split('|', StringSplitOptions.RemoveEmptyEntries);
-        Assert.Equal("700", split[0]);
-        Assert.Equal("600", split[1]);
-    }
-
-    [Fact]
-    public async Task ReadAndWriteWorkspaceState_RoundTripsValues()
-    {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-ws-roundtrip");
-        var xdgPath = Path.Combine(temp.Path, "config");
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var corePath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/core.sh");
-        var platformPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/platform.sh");
-        var configPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/config.sh");
-
-        var result = await ShellTestSupport.RunBashAsync(
-            $"""
-            source {ShellTestSupport.ShellQuote(corePath)}
-            source {ShellTestSupport.ShellQuote(platformPath)}
-            source {ShellTestSupport.ShellQuote(configPath)}
-
-            _containai_write_workspace_state "/tmp/test-workspace" "data_volume" "test-vol"
-            _containai_write_workspace_state "/tmp/test-workspace" "container_name" "my-container"
-
-            ws_json=$(_containai_read_workspace_state "/tmp/test-workspace")
-            ws_container=$(_containai_read_workspace_key "/tmp/test-workspace" "container_name")
-            printf '%s\n%s' "$ws_json" "$ws_container"
-            """,
-            environment: new Dictionary<string, string?> { ["XDG_CONFIG_HOME"] = xdgPath },
-            cancellationToken: cancellationToken);
-
-        Assert.Equal(0, result.ExitCode);
-        var lines = result.StdOut.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        Assert.True(lines.Length >= 2);
-
-        using var json = JsonDocument.Parse(lines[0]);
+        Assert.Equal(0, getWorkspace.ExitCode);
+        using var json = JsonDocument.Parse(getWorkspace.StandardOutput);
         Assert.Equal("test-vol", json.RootElement.GetProperty("data_volume").GetString());
         Assert.Equal("my-container", json.RootElement.GetProperty("container_name").GetString());
-        Assert.Equal("my-container", lines[1]);
     }
 
     [Fact]
-    public async Task WriteWorkspaceState_AllowsEmptyValue()
+    public void SetWorkspaceKey_RejectsRelativePath()
     {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-ws-empty");
-        var xdgPath = Path.Combine(temp.Path, "config");
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var corePath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/core.sh");
-        var platformPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/platform.sh");
-        var configPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/config.sh");
+        using var temp = new TemporaryDirectory();
+        var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var result = await ShellTestSupport.RunBashAsync(
-            $"""
-            source {ShellTestSupport.ShellQuote(corePath)}
-            source {ShellTestSupport.ShellQuote(platformPath)}
-            source {ShellTestSupport.ShellQuote(configPath)}
+        var result = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-workspace-key", "relative/path", "k", "v",
+        ]);
 
-            _containai_write_workspace_state "/tmp/test-workspace" "agent" ""
-            grep -q 'agent = ""' "{xdgPath}/containai/config.toml"
-            """,
-            environment: new Dictionary<string, string?> { ["XDG_CONFIG_HOME"] = xdgPath },
-            cancellationToken: cancellationToken);
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains("Workspace path must be absolute", result.StandardError, StringComparison.Ordinal);
+    }
 
-        Assert.Equal(0, result.ExitCode);
+    [Fact]
+    public void UnsetWorkspaceKey_RemovesEntry()
+    {
+        using var temp = new TemporaryDirectory();
+        var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
+
+        var set = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-workspace-key", "/tmp/test-workspace", "agent", "codex",
+        ]);
+        Assert.Equal(0, set.ExitCode);
+
+        var unset = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--unset-workspace-key", "/tmp/test-workspace", "agent",
+        ]);
+        Assert.Equal(0, unset.ExitCode);
+
+        var get = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--get-workspace", "/tmp/test-workspace",
+        ]);
+        Assert.Equal(0, get.ExitCode);
+
+        using var json = JsonDocument.Parse(get.StandardOutput);
+        Assert.Equal(JsonValueKind.Object, json.RootElement.ValueKind);
+        Assert.False(json.RootElement.TryGetProperty("agent", out _));
+    }
+
+    [Fact]
+    public void SetAndUnsetGlobalKey_Works()
+    {
+        using var temp = new TemporaryDirectory();
+        var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
+
+        var set = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-key", "agent.data_volume", "containai-data",
+        ]);
+        Assert.Equal(0, set.ExitCode);
+
+        var get = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--key", "agent.data_volume",
+        ]);
+        Assert.Equal(0, get.ExitCode);
+        Assert.Equal("containai-data", get.StandardOutput);
+
+        var unset = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--unset-key", "agent.data_volume",
+        ]);
+        Assert.Equal(0, unset.ExitCode);
+
+        var getAfter = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--key", "agent.data_volume",
+        ]);
+        Assert.Equal(0, getAfter.ExitCode);
+        Assert.Equal(string.Empty, getAfter.StandardOutput);
+    }
+
+    [Fact]
+    public void SetWorkspaceState_CreatesSecurePermissions_OnUnix()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        {
+            return;
+        }
+
+        using var temp = new TemporaryDirectory();
+        var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
+
+        var set = TomlCommandProcessor.Execute([
+            "--file", configPath,
+            "--set-workspace-key", "/tmp/test-workspace", "k", "v",
+        ]);
+
+        Assert.Equal(0, set.ExitCode);
+
+        var configDir = Path.GetDirectoryName(configPath)!;
+        var dirMode = File.GetUnixFileMode(configDir);
+        var fileMode = File.GetUnixFileMode(configPath);
+
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            dirMode);
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite,
+            fileMode);
+    }
+
+    private sealed class TemporaryDirectory : IDisposable
+    {
+        public TemporaryDirectory()
+        {
+            Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"cai-ws-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+            {
+                Directory.Delete(Path, recursive: true);
+            }
+        }
     }
 }

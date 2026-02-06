@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Reflection;
 using System.Text.Json;
 
 namespace ContainAI.Cli.Host;
@@ -53,6 +52,7 @@ internal sealed class NativeLifecycleCommandRuntime
             "uninstall" => RunUninstallAsync(args, cancellationToken),
             "completion" => RunCompletionAsync(args, cancellationToken),
             "config" => RunConfigAsync(args, cancellationToken),
+            "manifest" => RunManifestAsync(args, cancellationToken),
             "template" => RunTemplateAsync(args, cancellationToken),
             "ssh" => RunSshAsync(args, cancellationToken),
             "stop" => RunStopAsync(args, cancellationToken),
@@ -356,7 +356,7 @@ internal sealed class NativeLifecycleCommandRuntime
     {
         cancellationToken.ThrowIfCancellationRequested();
         var json = args.Contains("--json", StringComparer.Ordinal);
-        var (version, installType, installDir) = ResolveVersionInfo();
+        var (version, installType, installDir) = InstallMetadata.ResolveVersionInfo();
 
         if (json)
         {
@@ -724,7 +724,7 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private static string ResolveBundledTemplatesDirectory()
     {
-        var installRoot = ResolveInstallDirectory();
+        var installRoot = InstallMetadata.ResolveInstallDirectory();
         foreach (var candidate in new[]
                  {
                      Path.Combine(installRoot, "templates"),
@@ -1336,6 +1336,372 @@ internal sealed class NativeLifecycleCommandRuntime
         };
     }
 
+    private async Task<int> RunManifestAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        if (args.Count < 2 || args[1] is "-h" or "--help")
+        {
+            await _stdout.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
+            return 0;
+        }
+
+        return args[1] switch
+        {
+            "parse" => await RunManifestParseAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            "generate" => await RunManifestGenerateAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            "apply" => await RunManifestApplyAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            "check" => await RunManifestCheckAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            _ => await WriteManifestSubcommandErrorAsync(args[1]).ConfigureAwait(false),
+        };
+    }
+
+    private async Task<int> WriteManifestSubcommandErrorAsync(string subcommand)
+    {
+        await _stderr.WriteLineAsync($"Unknown manifest subcommand: {subcommand}").ConfigureAwait(false);
+        await _stderr.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
+        return 1;
+    }
+
+    private async Task<int> RunManifestParseAsync(string[] args, CancellationToken cancellationToken)
+    {
+        var includeDisabled = false;
+        var emitSourceFile = false;
+        string? manifestPath = null;
+
+        foreach (var token in args)
+        {
+            switch (token)
+            {
+                case "--include-disabled":
+                    includeDisabled = true;
+                    break;
+                case "--emit-source-file":
+                    emitSourceFile = true;
+                    break;
+                default:
+                    if (token.StartsWith("-", StringComparison.Ordinal))
+                    {
+                        await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    if (manifestPath is not null)
+                    {
+                        await _stderr.WriteLineAsync("ERROR: only one manifest path is supported").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    manifestPath = token;
+                    break;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(manifestPath))
+        {
+            await _stderr.WriteLineAsync("ERROR: manifest file or directory required").ConfigureAwait(false);
+            return 1;
+        }
+
+        try
+        {
+            var parsed = ManifestTomlParser.Parse(manifestPath, includeDisabled, emitSourceFile);
+            foreach (var entry in parsed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await _stdout.WriteLineAsync(entry.ToString()).ConfigureAwait(false);
+            }
+
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+    }
+
+    private async Task<int> RunManifestGenerateAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length < 2)
+        {
+            await _stderr.WriteLineAsync("ERROR: usage: cai manifest generate <kind> <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
+            return 1;
+        }
+
+        var kind = args[0];
+        var manifestPath = args[1];
+        var outputPath = args.Length >= 3 ? args[2] : null;
+
+        try
+        {
+            var generated = kind switch
+            {
+                "import-map" => ManifestGenerators.GenerateImportMap(manifestPath),
+                "dockerfile-symlinks" => ManifestGenerators.GenerateDockerfileSymlinks(manifestPath),
+                "init-dirs" => ManifestGenerators.GenerateInitDirs(manifestPath),
+                "container-link-spec" => ManifestGenerators.GenerateContainerLinkSpec(manifestPath),
+                "agent-wrappers" => ManifestGenerators.GenerateAgentWrappers(manifestPath),
+                _ => throw new InvalidOperationException($"unknown generator kind: {kind}"),
+            };
+
+            if (!string.IsNullOrWhiteSpace(outputPath))
+            {
+                var outputDirectory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
+                if (!string.IsNullOrWhiteSpace(outputDirectory))
+                {
+                    Directory.CreateDirectory(outputDirectory);
+                }
+
+                await File.WriteAllTextAsync(outputPath, generated.Content, cancellationToken).ConfigureAwait(false);
+
+                if (kind is "dockerfile-symlinks" or "init-dirs" or "agent-wrappers")
+                {
+                    await _stderr.WriteLineAsync($"Generated: {outputPath}").ConfigureAwait(false);
+                }
+                else
+                {
+                    var label = kind switch
+                    {
+                        "import-map" => "entries",
+                        "container-link-spec" => "links",
+                        _ => "items",
+                    };
+
+                    await _stderr.WriteLineAsync($"Generated: {outputPath} ({generated.Count} {label})").ConfigureAwait(false);
+                }
+
+                return 0;
+            }
+
+            await _stdout.WriteAsync(generated.Content).ConfigureAwait(false);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+    }
+
+    private async Task<int> RunManifestApplyAsync(string[] args, CancellationToken cancellationToken)
+    {
+        if (args.Length < 2)
+        {
+            await _stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs> <manifest_path_or_dir> [options]").ConfigureAwait(false);
+            return 1;
+        }
+
+        var kind = args[0];
+        var manifestPath = args[1];
+        var dataDir = "/mnt/agent-data";
+        var homeDir = "/home/agent";
+
+        for (var index = 2; index < args.Length; index++)
+        {
+            var token = args[index];
+            if (token is "-h" or "--help")
+            {
+                await _stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>]").ConfigureAwait(false);
+                return 0;
+            }
+
+            if (token == "--data-dir")
+            {
+                if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    await _stderr.WriteLineAsync("ERROR: --data-dir requires a value").ConfigureAwait(false);
+                    return 1;
+                }
+
+                dataDir = args[++index];
+                continue;
+            }
+
+            if (token.StartsWith("--data-dir=", StringComparison.Ordinal))
+            {
+                dataDir = token[11..];
+                continue;
+            }
+
+            if (token == "--home-dir")
+            {
+                if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    await _stderr.WriteLineAsync("ERROR: --home-dir requires a value").ConfigureAwait(false);
+                    return 1;
+                }
+
+                homeDir = args[++index];
+                continue;
+            }
+
+            if (token.StartsWith("--home-dir=", StringComparison.Ordinal))
+            {
+                homeDir = token[11..];
+                continue;
+            }
+
+            await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+            return 1;
+        }
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var applied = kind switch
+            {
+                "container-links" => ManifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir),
+                "init-dirs" => ManifestApplier.ApplyInitDirs(manifestPath, dataDir),
+                _ => throw new InvalidOperationException($"unknown apply kind: {kind}"),
+            };
+
+            await _stderr.WriteLineAsync($"Applied {kind}: {applied}").ConfigureAwait(false);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+    }
+
+    private async Task<int> RunManifestCheckAsync(string[] args, CancellationToken cancellationToken)
+    {
+        string? manifestDirectory = null;
+
+        for (var index = 0; index < args.Length; index++)
+        {
+            var token = args[index];
+            switch (token)
+            {
+                case "-h":
+                case "--help":
+                    await _stdout.WriteLineAsync("Usage: cai manifest check [--manifest-dir <path>]").ConfigureAwait(false);
+                    return 0;
+                case "--manifest-dir":
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    {
+                        await _stderr.WriteLineAsync("ERROR: --manifest-dir requires a value").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    manifestDirectory = args[++index];
+                    break;
+                default:
+                    if (token.StartsWith("--manifest-dir=", StringComparison.Ordinal))
+                    {
+                        manifestDirectory = token[15..];
+                        break;
+                    }
+
+                    if (token.StartsWith("-", StringComparison.Ordinal))
+                    {
+                        await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    if (manifestDirectory is not null)
+                    {
+                        await _stderr.WriteLineAsync("ERROR: only one manifest directory can be specified").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    manifestDirectory = token;
+                    break;
+            }
+        }
+
+        manifestDirectory = ResolveManifestDirectory(manifestDirectory);
+        if (!Directory.Exists(manifestDirectory))
+        {
+            await _stderr.WriteLineAsync($"ERROR: manifest directory not found: {manifestDirectory}").ConfigureAwait(false);
+            return 1;
+        }
+
+        var manifestFiles = Directory
+            .EnumerateFiles(manifestDirectory, "*.toml", SearchOption.TopDirectoryOnly)
+            .OrderBy(static path => path, StringComparer.Ordinal)
+            .ToArray();
+        if (manifestFiles.Length == 0)
+        {
+            await _stderr.WriteLineAsync($"ERROR: no .toml files found in directory: {manifestDirectory}").ConfigureAwait(false);
+            return 1;
+        }
+
+        foreach (var file in manifestFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ManifestTomlParser.Parse(file, includeDisabled: true, includeSourceFile: false);
+        }
+
+        var importMap = ManifestGenerators.GenerateImportMap(manifestDirectory);
+        var linkSpec = ManifestGenerators.GenerateContainerLinkSpec(manifestDirectory);
+        var initProbeDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-check-{Guid.NewGuid():N}");
+        var initApplied = 0;
+        try
+        {
+            initApplied = ManifestApplier.ApplyInitDirs(manifestDirectory, initProbeDir);
+        }
+        finally
+        {
+            if (Directory.Exists(initProbeDir))
+            {
+                Directory.Delete(initProbeDir, recursive: true);
+            }
+        }
+
+        if (!importMap.Content.Contains("_IMPORT_SYNC_MAP=(", StringComparison.Ordinal))
+        {
+            await _stderr.WriteLineAsync("ERROR: generated import map missing _IMPORT_SYNC_MAP header").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (initApplied <= 0)
+        {
+            await _stderr.WriteLineAsync("ERROR: init-dir apply produced no operations").ConfigureAwait(false);
+            return 1;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(linkSpec.Content);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("links", out var links) ||
+                links.ValueKind != JsonValueKind.Array)
+            {
+                await _stderr.WriteLineAsync("ERROR: generated link spec appears invalid").ConfigureAwait(false);
+                return 1;
+            }
+        }
+        catch (JsonException)
+        {
+            await _stderr.WriteLineAsync("ERROR: generated link spec is not valid JSON").ConfigureAwait(false);
+            return 1;
+        }
+
+        await _stdout.WriteLineAsync("Manifest consistency check passed.").ConfigureAwait(false);
+        return 0;
+    }
+
+    private static string ResolveManifestDirectory(string? userProvidedPath)
+    {
+        if (!string.IsNullOrWhiteSpace(userProvidedPath))
+        {
+            return Path.GetFullPath(ExpandHomePath(userProvidedPath));
+        }
+
+        var current = Directory.GetCurrentDirectory();
+        var srcCandidate = Path.Combine(current, "src", "manifests");
+        if (Directory.Exists(srcCandidate))
+        {
+            return srcCandidate;
+        }
+
+        var directCandidate = Path.Combine(current, "manifests");
+        return Directory.Exists(directCandidate)
+            ? directCandidate
+            : srcCandidate;
+    }
+
     private async Task<int> ConfigListAsync(string configPath, CancellationToken cancellationToken)
     {
         var parseResult = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
@@ -1518,7 +1884,7 @@ internal sealed class NativeLifecycleCommandRuntime
             }
 
             var content = await File.ReadAllTextAsync(dockerfile, cancellationToken).ConfigureAwait(false);
-            if (!TryUpgradeDockerfile(content, out var updated))
+            if (!TemplateUtilities.TryUpgradeDockerfile(content, out var updated))
             {
                 continue;
             }
@@ -2086,9 +2452,7 @@ internal sealed class NativeLifecycleCommandRuntime
             return "stable";
         }
 
-        var result = await RunParseTomlAsync(
-            ["--file", configPath, "--key", "image.channel"],
-            cancellationToken).ConfigureAwait(false);
+        var result = await RunParseTomlAsync(["--file", configPath, "--key", "image.channel"], cancellationToken).ConfigureAwait(false);
 
         if (result.ExitCode != 0)
         {
@@ -2176,51 +2540,9 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        var parseTomlPath = ResolveParseTomlPath();
-        if (string.IsNullOrWhiteSpace(parseTomlPath))
-        {
-            return new ProcessResult(1, string.Empty, "parse-toml.py not found");
-        }
-
-        var allArgs = new List<string>(capacity: args.Count + 1)
-        {
-            parseTomlPath,
-        };
-        allArgs.AddRange(args);
-
-        return await RunProcessCaptureAsync("python3", allArgs, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static string? ResolveParseTomlPath()
-    {
-        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
-        {
-            var current = Path.GetFullPath(root);
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                foreach (var candidate in new[]
-                         {
-                             Path.Combine(current, "parse-toml.py"),
-                             Path.Combine(current, "src", "parse-toml.py"),
-                         })
-                {
-                    if (File.Exists(candidate))
-                    {
-                        return candidate;
-                    }
-                }
-
-                var parent = Directory.GetParent(current);
-                if (parent is null)
-                {
-                    break;
-                }
-
-                current = parent.FullName;
-            }
-        }
-
-        return null;
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = TomlCommandProcessor.Execute(args);
+        return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
     }
 
     private static string NormalizeConfigKey(string key)
@@ -2384,67 +2706,6 @@ internal sealed class NativeLifecycleCommandRuntime
         return DateTimeOffset.TryParse(createdRaw, out var created) ? created : null;
     }
 
-    private static bool TryUpgradeDockerfile(string content, out string updated)
-    {
-        updated = content;
-        if (content.Contains("${BASE_IMAGE}", StringComparison.Ordinal) &&
-            content.Contains("ARG BASE_IMAGE", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var lines = content.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        for (var index = 0; index < lines.Length; index++)
-        {
-            var trimmed = lines[index].TrimStart();
-            if (!trimmed.StartsWith("FROM ", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            var fromPayload = trimmed[5..].Trim();
-            if (string.IsNullOrWhiteSpace(fromPayload))
-            {
-                return false;
-            }
-
-            string baseImage;
-            string? stage = null;
-            var asIndex = fromPayload.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
-            if (asIndex > 0)
-            {
-                baseImage = fromPayload[..asIndex].Trim();
-                stage = fromPayload[(asIndex + 4)..].Trim();
-            }
-            else
-            {
-                baseImage = fromPayload;
-            }
-
-            var indent = lines[index][..(lines[index].Length - trimmed.Length)];
-            var fromReplacement = string.IsNullOrWhiteSpace(stage)
-                ? $"{indent}FROM ${{BASE_IMAGE}}"
-                : $"{indent}FROM ${{BASE_IMAGE}} AS {stage}";
-
-            var replacement = new List<string>
-            {
-                $"{indent}ARG BASE_IMAGE={baseImage}",
-                fromReplacement,
-            };
-
-            lines[index] = string.Join("\n", replacement);
-            updated = string.Join("\n", lines);
-            if (content.EndsWith("\n", StringComparison.Ordinal) && !updated.EndsWith("\n", StringComparison.Ordinal))
-            {
-                updated += "\n";
-            }
-
-            return true;
-        }
-
-        return false;
-    }
-
     private static string? GetOptionValue(IReadOnlyList<string> args, string option)
     {
         for (var index = 0; index < args.Count; index++)
@@ -2514,6 +2775,7 @@ Subcommands:
   ssh           Manage SSH configuration
   links         Verify and repair container symlinks
   config        Manage settings
+  manifest      Parse manifests and generate derived artifacts
   template      Manage templates
   update        Update ContainAI installation
   refresh       Pull latest base image and optionally rebuild template
@@ -2530,74 +2792,6 @@ Examples:
   cai stop --all
   cai doctor
 """;
-    }
-
-    private static (string Version, string InstallType, string InstallDir) ResolveVersionInfo()
-    {
-        var installDir = ResolveInstallDirectory();
-        var version = ResolveVersion(installDir);
-        var installType = ResolveInstallType(installDir);
-        return (version, installType, installDir);
-    }
-
-    private static string ResolveInstallDirectory()
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
-        {
-            var current = Path.GetFullPath(root);
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                if (seen.Add(current) && File.Exists(Path.Combine(current, "VERSION")))
-                {
-                    return current;
-                }
-
-                var parent = Directory.GetParent(current);
-                if (parent is null)
-                {
-                    break;
-                }
-
-                current = parent.FullName;
-            }
-        }
-
-        return Directory.GetCurrentDirectory();
-    }
-
-    private static string ResolveVersion(string installDir)
-    {
-        var versionFile = Path.Combine(installDir, "VERSION");
-        if (File.Exists(versionFile))
-        {
-            var value = File.ReadAllText(versionFile).Trim();
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        var assemblyVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
-            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
-
-        return string.IsNullOrWhiteSpace(assemblyVersion) ? "0.0.0" : assemblyVersion;
-    }
-
-    private static string ResolveInstallType(string installDir)
-    {
-        if (Directory.Exists(Path.Combine(installDir, ".git")))
-        {
-            return "git";
-        }
-
-        var normalized = installDir.Replace('\\', '/');
-        if (normalized.Contains("/.local/share/containai", StringComparison.Ordinal))
-        {
-            return "local";
-        }
-
-        return "installed";
     }
 
     private static string EscapeJson(string value)
@@ -2718,7 +2912,7 @@ _cai_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="run shell exec doctor setup validate docker import export sync stop status gc ssh links config template update refresh uninstall completion version help acp"
+  local cmds="run shell exec doctor setup validate docker import export sync stop status gc ssh links config manifest template update refresh uninstall completion version help acp"
   COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
 }
 complete -F _cai_completions cai

@@ -258,10 +258,10 @@ EOF
 #!/usr/bin/env bash
 EOF
 
-    cat >"$source_dir/scripts/parse-manifest.sh" <<'EOF'
+    cat >"$source_dir/scripts/cai-manifest.sh" <<'EOF'
 #!/usr/bin/env bash
 EOF
-    chmod +x "$source_dir/scripts/parse-manifest.sh"
+    chmod +x "$source_dir/scripts/cai-manifest.sh"
 
     cat >"$source_dir/manifests/00-common.toml" <<'EOF'
 [tools]
@@ -319,10 +319,10 @@ EOF
 #!/usr/bin/env bash
 EOF
 
-    cat >"$source_dir/scripts/parse-manifest.sh" <<'EOF'
+    cat >"$source_dir/scripts/cai-manifest.sh" <<'EOF'
 #!/usr/bin/env bash
 EOF
-    chmod +x "$source_dir/scripts/parse-manifest.sh"
+    chmod +x "$source_dir/scripts/cai-manifest.sh"
 
     cat >"$source_dir/manifests/00-common.toml" <<'EOF'
 [tools]
@@ -380,10 +380,10 @@ EOF
 #!/usr/bin/env bash
 EOF
 
-    cat >"$source_dir/scripts/parse-manifest.sh" <<'EOF'
+    cat >"$source_dir/scripts/cai-manifest.sh" <<'EOF'
 #!/usr/bin/env bash
 EOF
-    chmod +x "$source_dir/scripts/parse-manifest.sh"
+    chmod +x "$source_dir/scripts/cai-manifest.sh"
 
     cat >"$source_dir/manifests/00-common.toml" <<'EOF'
 [tools]

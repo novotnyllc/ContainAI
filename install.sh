@@ -94,15 +94,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Mode Detection
 # ==============================================================================
 # Resolve local source directory from either:
-#   1) extracted tarball layout (./containai.sh + ./lib/core.sh)
-#   2) source checkout layout   (./src/containai.sh + ./src/lib/core.sh)
+#   1) extracted tarball layout (./cai)
+#   2) source checkout layout   (./src/cai/cai.csproj)
 resolve_local_source_dir() {
-    if [[ -f "$SCRIPT_DIR/containai.sh" && -f "$SCRIPT_DIR/lib/core.sh" ]]; then
+    if [[ -x "$SCRIPT_DIR/cai" ]]; then
         printf '%s' "$SCRIPT_DIR"
         return 0
     fi
 
-    if [[ -f "$SCRIPT_DIR/src/containai.sh" && -f "$SCRIPT_DIR/src/lib/core.sh" ]]; then
+    if [[ -f "$SCRIPT_DIR/src/cai/cai.csproj" ]]; then
         printf '%s' "$SCRIPT_DIR/src"
         return 0
     fi
@@ -649,25 +649,47 @@ build_local_native_artifacts() {
         return 0
     fi
 
-    local build_script="$source_dir/acp-proxy/build.sh"
-    if [[ ! -x "$build_script" ]]; then
-        warn "Local acp-proxy source found, but build script is missing: $build_script"
-        warn "Continuing without rebuilding native acp-proxy"
-        return 0
-    fi
-
     if ! command -v dotnet >/dev/null 2>&1; then
-        warn "dotnet SDK not found; skipping local acp-proxy debug build"
-        warn "Install .NET SDK and run: $build_script --debug --install"
+        warn "dotnet SDK not found; cannot build cai from source checkout"
         return 0
     fi
 
-    info "Building local acp-proxy (Debug with symbols)..."
-    if ! (cd "$source_dir/acp-proxy" && ./build.sh --debug --install); then
-        error "Failed to build local acp-proxy from source checkout"
+    local rid=""
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64|Linux-amd64) rid="linux-x64" ;;
+        Linux-aarch64|Linux-arm64) rid="linux-arm64" ;;
+        Darwin-x86_64|Darwin-amd64) rid="osx-x64" ;;
+        Darwin-arm64|Darwin-aarch64) rid="osx-arm64" ;;
+        *)
+            error "Unsupported platform for local cai native build: $(uname -s)/$(uname -m)"
+            return 1
+            ;;
+    esac
+
+    local build_version
+    if ! build_version="$(resolve_build_version_from_nbgv "$source_dir")"; then
+        error "Failed to resolve version from NBGV"
         return 1
     fi
-    success "Built local acp-proxy (Debug)"
+
+    info "Building local cai native binary ($rid, version: $build_version)..."
+    if ! (
+        cd "$source_dir" &&
+        dotnet publish ./cai -r "$rid" -c Release --self-contained -p:Version="$build_version"
+    ); then
+        error "Failed to build local cai from source checkout"
+        return 1
+    fi
+
+    local published_binary="$SCRIPT_DIR/artifacts/publish/cai/release_${rid}/cai"
+    if [[ ! -x "$published_binary" ]]; then
+        error "Published cai binary not found at expected path: $published_binary"
+        return 1
+    fi
+
+    cp "$published_binary" "$source_dir/cai"
+    chmod +x "$source_dir/cai"
+    success "Built local cai native binary"
     return 0
 }
 
@@ -677,7 +699,7 @@ install_from_local() {
     if [[ -z "$source_dir" ]]; then
         if ! source_dir="$(resolve_local_source_dir)"; then
             error "Could not locate local install source files."
-            error "Expected either './containai.sh' or './src/containai.sh' next to install.sh."
+            error "Expected either './cai' or './src/cai/cai.csproj' next to install.sh."
             exit 1
         fi
         if [[ "$source_dir" == "$SCRIPT_DIR/src" ]]; then
@@ -690,16 +712,14 @@ install_from_local() {
     info "Installing ContainAI from local files..."
 
     # Determine if this is update or fresh install
-    if [[ -d "$INSTALL_DIR" && -f "$INSTALL_DIR/containai.sh" ]]; then
+    if [[ -d "$INSTALL_DIR" && -x "$INSTALL_DIR/cai" ]]; then
         IS_FRESH_INSTALL="false"
         if [[ -f "$BIN_DIR/cai" ]]; then
             IS_RERUN="true"
         fi
         info "Updating existing installation at $INSTALL_DIR"
 
-        # For updates, wipe the runtime directories to remove stale files
-        # Keep the install dir itself but remove subdirs we manage
-        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" "${INSTALL_DIR:?}/manifests" "${INSTALL_DIR:?}/container" 2>/dev/null || true
+        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" 2>/dev/null || true
 
         # Local installer-managed installs are not git worktrees.
         # Remove stale git metadata from previous install modes so
@@ -712,8 +732,6 @@ install_from_local() {
 
     # Create installation directory structure
     mkdir -p "$INSTALL_DIR"
-    mkdir -p "$INSTALL_DIR/lib"
-    mkdir -p "$INSTALL_DIR/scripts"
     mkdir -p "$INSTALL_DIR/templates"
     mkdir -p "$INSTALL_DIR/manifests"
     mkdir -p "$INSTALL_DIR/container"
@@ -725,24 +743,12 @@ install_from_local() {
         exit 1
     fi
 
-    # Main CLI
-    cp "$source_dir/containai.sh" "$INSTALL_DIR/containai.sh"
-    chmod +x "$INSTALL_DIR/containai.sh"
-
-    # Shell libraries
-    cp "$source_dir/lib/"*.sh "$INSTALL_DIR/lib/"
-
-    # Runtime scripts (parse-manifest.sh + parse-toml.py)
-    cp "$source_dir/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
-    chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
-
-    # TOML parser runtime dependency (used by lib/config.sh workspace/config operations)
-    if [[ ! -f "$source_dir/parse-toml.py" ]]; then
-        error "Required runtime file missing: $source_dir/parse-toml.py"
+    if [[ ! -x "$source_dir/cai" ]]; then
+        error "Required runtime binary missing: $source_dir/cai"
         exit 1
     fi
-    cp "$source_dir/parse-toml.py" "$INSTALL_DIR/parse-toml.py"
-    chmod +x "$INSTALL_DIR/parse-toml.py"
+    cp "$source_dir/cai" "$INSTALL_DIR/cai"
+    chmod +x "$INSTALL_DIR/cai"
 
     # Manifests directory
     if ! compgen -G "$source_dir/manifests/*.toml" >/dev/null; then
@@ -767,25 +773,6 @@ install_from_local() {
         exit 1
     fi
 
-    # ACP proxy binary
-    if [[ -f "$source_dir/acp-proxy" ]]; then
-        cp "$source_dir/acp-proxy" "$INSTALL_DIR/acp-proxy"
-        chmod +x "$INSTALL_DIR/acp-proxy"
-    elif [[ -f "$source_dir/bin/acp-proxy" ]]; then
-        cp "$source_dir/bin/acp-proxy" "$INSTALL_DIR/acp-proxy"
-        chmod +x "$INSTALL_DIR/acp-proxy"
-        if [[ -f "$source_dir/bin/acp-proxy.pdb" ]]; then
-            cp "$source_dir/bin/acp-proxy.pdb" "$INSTALL_DIR/acp-proxy.pdb"
-        fi
-    fi
-
-    # Version file
-    if [[ -f "$source_dir/VERSION" ]]; then
-        cp "$source_dir/VERSION" "$INSTALL_DIR/VERSION"
-    elif [[ -f "$SCRIPT_DIR/VERSION" ]]; then
-        cp "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
-    fi
-
     # LICENSE
     if [[ -f "$source_dir/LICENSE" ]]; then
         cp "$source_dir/LICENSE" "$INSTALL_DIR/LICENSE"
@@ -795,12 +782,33 @@ install_from_local() {
 
     success "Files installed to $INSTALL_DIR"
 
-    # Show version
-    if [[ -f "$INSTALL_DIR/VERSION" ]]; then
-        local version
-        version=$(tr -d '[:space:]' <"$INSTALL_DIR/VERSION")
+    local version
+    version="$("$INSTALL_DIR/cai" version 2>/dev/null | head -n 1 | tr -d '[:space:]' || true)"
+    if [[ -n "$version" ]]; then
         info "Installed version: $version"
     fi
+}
+
+resolve_build_version_from_nbgv() {
+    local source_dir="$1"
+    if ! command -v dotnet >/dev/null 2>&1; then
+        printf 'ERROR: dotnet SDK is required for NBGV version resolution\n' >&2
+        return 1
+    fi
+
+    local version
+    version="$(cd "$source_dir" && dotnet nbgv get-version -v SemVer2 2>/dev/null)" || true
+    if [[ -z "$version" ]]; then
+        dotnet tool restore --verbosity quiet >/dev/null 2>&1 || true
+        version="$(cd "$source_dir" && dotnet nbgv get-version -v SemVer2 2>/dev/null)" || true
+    fi
+
+    if [[ -z "$version" ]]; then
+        printf 'ERROR: Unable to resolve version with dotnet nbgv get-version -v SemVer2\n' >&2
+        return 1
+    fi
+
+    printf '%s' "$version"
 }
 
 # ==============================================================================
@@ -868,14 +876,13 @@ WRAPPER_PART1
     # Part 3: Rest of the script
     cat >>"$wrapper" <<'WRAPPER_PART2'
 
-if [[ ! -f "$CAI_INSTALL_DIR/containai.sh" ]]; then
+if [[ ! -x "$CAI_INSTALL_DIR/cai" ]]; then
     echo "[ERROR] ContainAI not found at $CAI_INSTALL_DIR" >&2
     echo "  Re-run the installer or set CAI_INSTALL_DIR" >&2
     exit 1
 fi
 
-source "$CAI_INSTALL_DIR/containai.sh"
-cai "$@"
+exec "$CAI_INSTALL_DIR/cai" "$@"
 WRAPPER_PART2
 
     chmod +x "$wrapper"
@@ -1158,7 +1165,7 @@ main() {
     if [[ "$LOCAL_MODE" == "true" ]]; then
         if ! local_source_dir="$(resolve_local_source_dir)"; then
             error "--local was specified but no local source files were found."
-            error "Expected either './containai.sh' or './src/containai.sh' next to install.sh."
+            error "Expected either './cai' or './src/cai/cai.csproj' next to install.sh."
             exit 1
         fi
         if [[ "$local_source_dir" == "$SCRIPT_DIR/src" ]]; then

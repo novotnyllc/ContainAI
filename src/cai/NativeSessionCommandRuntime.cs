@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -658,7 +657,7 @@ Host {containerName}
 
         var lines = scan.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(static line => !line.StartsWith('#'))
+            .Where(static line => !line.StartsWith("#", StringComparison.Ordinal))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -927,7 +926,7 @@ Host {containerName}
             return ContainerLookupResult.Success(generated);
         }
 
-        var legacy = GenerateLegacyContainerName(workspace);
+        var legacy = ContainerNameGenerator.GenerateLegacy(workspace);
         var legacyExists = await DockerCaptureAsync(context, ["inspect", "--type", "container", legacy], cancellationToken).ConfigureAwait(false);
         return legacyExists.ExitCode == 0 ? ContainerLookupResult.Success(legacy) : ContainerLookupResult.Empty();
     }
@@ -983,50 +982,7 @@ Host {containerName}
             }
         }
 
-        var branchLeaf = branchName.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? branchName;
-        var repo = SanitizeNameComponent(repoName, "repo");
-        var branchComponent = SanitizeNameComponent(branchLeaf, "branch");
-
-        var repoKeep = repo.Length;
-        var branchKeep = branchComponent.Length;
-        const int maxCombined = 23;
-        while (repoKeep + branchKeep > maxCombined)
-        {
-            if (repoKeep >= branchKeep && repoKeep > 1)
-            {
-                repoKeep--;
-            }
-            else if (branchKeep > 1)
-            {
-                branchKeep--;
-            }
-            else
-            {
-                break;
-            }
-        }
-
-        repo = TrimTrailingDash(repo[..repoKeep]);
-        branchComponent = TrimTrailingDash(branchComponent[..branchKeep]);
-        if (string.IsNullOrWhiteSpace(repo))
-        {
-            repo = "repo";
-        }
-
-        if (string.IsNullOrWhiteSpace(branchComponent))
-        {
-            branchComponent = "branch";
-        }
-
-        return $"{repo}-{branchComponent}";
-    }
-
-    private static string GenerateLegacyContainerName(string workspace)
-    {
-        var normalized = Path.GetFullPath(workspace).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        var hash = Convert.ToHexString(bytes).ToLowerInvariant();
-        return $"containai-{hash[..12]}";
+        return ContainerNameGenerator.Compose(repoName, branchName);
     }
 
     private async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
@@ -1517,16 +1473,7 @@ Host {containerName}
 
     private static string SanitizeNameComponent(string value, string fallback)
     {
-        var normalized = value.ToLowerInvariant().Replace('/', '-');
-        var chars = normalized.Where(static ch => char.IsAsciiLetterOrDigit(ch) || ch == '-').ToArray();
-        var cleaned = new string(chars);
-        while (cleaned.Contains("--", StringComparison.Ordinal))
-        {
-            cleaned = cleaned.Replace("--", "-", StringComparison.Ordinal);
-        }
-
-        cleaned = cleaned.Trim('-');
-        return string.IsNullOrWhiteSpace(cleaned) ? fallback : cleaned;
+        return ContainerNameGenerator.SanitizeNameComponent(value, fallback);
     }
 
     private static string SanitizeHostname(string value)
@@ -1550,7 +1497,7 @@ Host {containerName}
 
     private static string TrimTrailingDash(string value)
     {
-        return value.TrimEnd('-');
+        return ContainerNameGenerator.TrimTrailingDash(value);
     }
 
     private static string GenerateWorkspaceVolumeName(string workspace)
@@ -2180,51 +2127,9 @@ Host {containerName}
 
     private async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        var parseTomlPath = ResolveParseTomlPath();
-        if (string.IsNullOrWhiteSpace(parseTomlPath))
-        {
-            return new ProcessResult(1, string.Empty, "parse-toml.py not found");
-        }
-
-        var allArgs = new List<string>(capacity: args.Count + 1)
-        {
-            parseTomlPath,
-        };
-        allArgs.AddRange(args);
-
-        return await RunProcessCaptureAsync("python3", allArgs, cancellationToken).ConfigureAwait(false);
-    }
-
-    private static string? ResolveParseTomlPath()
-    {
-        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
-        {
-            var current = Path.GetFullPath(root);
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                foreach (var candidate in new[]
-                         {
-                             Path.Combine(current, "parse-toml.py"),
-                             Path.Combine(current, "src", "parse-toml.py"),
-                         })
-                {
-                    if (File.Exists(candidate))
-                    {
-                        return candidate;
-                    }
-                }
-
-                var parent = Directory.GetParent(current);
-                if (parent is null)
-                {
-                    break;
-                }
-
-                current = parent.FullName;
-            }
-        }
-
-        return null;
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = TomlCommandProcessor.Execute(args);
+        return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
     }
 
     private static async Task<int> RunProcessInteractiveAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)

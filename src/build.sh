@@ -423,7 +423,7 @@ if [[ -z "$BUILD_VERSION" ]]; then
     fi
 fi
 
-# Export for child processes (e.g., build-cai-tarballs.sh)
+# Export for child processes (workflow and docker build scripts)
 export NBGV_SemVer2="$BUILD_VERSION"
 
 # Helper to check if a local image exists in current Docker context
@@ -434,92 +434,13 @@ local_image_exists() {
 }
 
 # ==============================================================================
-# Run manifest-driven generators for full/all layer builds
-# ==============================================================================
-generate_container_files() {
-    local manifests_dir="${SCRIPT_DIR}/manifests"
-    local gen_dir="${REPO_ROOT}/artifacts/container-generated"
-    local scripts_dir="${SCRIPT_DIR}/scripts"
-
-    if [[ ! -d "$manifests_dir" ]]; then
-        printf 'ERROR: manifests directory not found: %s\n' "$manifests_dir" >&2
-        return 1
-    fi
-
-    echo ""
-    echo "=== Generating container files from manifests ==="
-    echo ""
-
-    mkdir -p "$gen_dir"
-
-    # Generate symlinks shell script (COPY'd and RUN in Dockerfile)
-    if ! "${scripts_dir}/gen-dockerfile-symlinks.sh" "$manifests_dir" "${gen_dir}/symlinks.sh"; then
-        printf 'ERROR: Failed to generate symlinks.sh\n' >&2
-        return 1
-    fi
-
-    # Generate init-dirs script
-    if ! "${scripts_dir}/gen-init-dirs.sh" "$manifests_dir" "${gen_dir}/init-dirs.sh"; then
-        printf 'ERROR: Failed to generate init-dirs.sh\n' >&2
-        return 1
-    fi
-
-    # Generate link-spec.json
-    if ! "${scripts_dir}/gen-container-link-spec.sh" "$manifests_dir" "${gen_dir}/link-spec.json"; then
-        printf 'ERROR: Failed to generate link-spec.json\n' >&2
-        return 1
-    fi
-
-    # Generate agent wrappers (BASH_ENV sourced functions)
-    if ! "${scripts_dir}/gen-agent-wrappers.sh" "$manifests_dir" "${gen_dir}/agent-wrappers.sh"; then
-        printf 'ERROR: Failed to generate agent-wrappers.sh\n' >&2
-        return 1
-    fi
-
-    # Copy link-repair.sh to generated dir so it gets included in build context
-    cp "${SCRIPT_DIR}/container/link-repair.sh" "${gen_dir}/link-repair.sh"
-
-    # Verify generated files are newer than any manifest (staleness check)
-    # First check that manifests exist
-    if ! compgen -G "${manifests_dir}/*.toml" >/dev/null; then
-        printf 'ERROR: no .toml files found in manifests directory: %s\n' "$manifests_dir" >&2
-        return 1
-    fi
-    local newest_manifest_mtime=0
-    local manifest_mtime gen_file_mtime
-    for manifest in "${manifests_dir}"/*.toml; do
-        manifest_mtime=$(stat -c %Y "$manifest" 2>/dev/null || stat -f %m "$manifest" 2>/dev/null)
-        if [[ "$manifest_mtime" -gt "$newest_manifest_mtime" ]]; then
-            newest_manifest_mtime="$manifest_mtime"
-        fi
-    done
-    for gen_file in "${gen_dir}/symlinks.sh" "${gen_dir}/init-dirs.sh" "${gen_dir}/link-spec.json" "${gen_dir}/agent-wrappers.sh"; do
-        gen_file_mtime=$(stat -c %Y "$gen_file" 2>/dev/null || stat -f %m "$gen_file" 2>/dev/null)
-        if [[ "$gen_file_mtime" -lt "$newest_manifest_mtime" ]]; then
-            printf 'ERROR: Generated file is stale: %s\n' "$gen_file" >&2
-            return 1
-        fi
-    done
-
-    echo "  Generated files:"
-    ls -la "${gen_dir}"
-    echo ""
-}
-
-# ==============================================================================
 # Build ContainAI CLI tarballs for container installation
 # ==============================================================================
 build_cai_tarballs() {
-    local script="${SCRIPT_DIR}/scripts/build-cai-tarballs.sh"
     local platforms=""
     local tarballs_dir="${REPO_ROOT}/artifacts/cai-tarballs"
     local host_arch
     local missing=0
-
-    if [[ ! -x "$script" ]]; then
-        printf 'ERROR: Tarball build script not found or not executable: %s\n' "$script" >&2
-        return 1
-    fi
 
     if [[ "$USE_BUILDX" -eq 1 && -n "$PLATFORMS" ]]; then
         platforms="$PLATFORMS"
@@ -536,11 +457,19 @@ build_cai_tarballs() {
     mkdir -p "$tarballs_dir"
 
     IFS=',' read -ra platform_list <<< "$platforms"
+    local missing_rids=()
     for platform in "${platform_list[@]}"; do
         local_arch=""
+        local_rid=""
         case "$platform" in
-            linux/amd64) local_arch="linux-x64" ;;
-            linux/arm64) local_arch="linux-arm64" ;;
+            linux/amd64)
+                local_arch="linux-x64"
+                local_rid="linux-x64"
+                ;;
+            linux/arm64)
+                local_arch="linux-arm64"
+                local_rid="linux-arm64"
+                ;;
             *)
                 printf 'ERROR: Unsupported platform for cai tarball: %s\n' "$platform" >&2
                 return 1
@@ -559,6 +488,7 @@ build_cai_tarballs() {
         fi
 
         missing=1
+        missing_rids+=("$local_rid")
     done
 
     if [[ "$missing" -eq 0 ]]; then
@@ -566,10 +496,19 @@ build_cai_tarballs() {
         return 0
     fi
 
-    "$script" \
-        --platforms "linux/${host_arch}" \
-        --version "$BUILD_VERSION" \
-        --output-dir "$tarballs_dir"
+    if ! command -v dotnet >/dev/null 2>&1; then
+        printf 'ERROR: dotnet SDK is required to build cai tarballs\n' >&2
+        return 1
+    fi
+
+    local runtime_ids
+    runtime_ids="$(IFS=';'; printf '%s' "${missing_rids[*]}")"
+    dotnet msbuild "${SCRIPT_DIR}/cai/cai.csproj" \
+        -t:BuildContainAITarballs \
+        -p:Configuration=Release \
+        -p:ContainAIRuntimeIdentifiers="$runtime_ids" \
+        -p:ContainAIVersion="$BUILD_VERSION" \
+        -p:ContainAIOutputDir="$tarballs_dir"
 }
 
 # Build function for a single layer
@@ -629,7 +568,6 @@ case "$BUILD_LAYER" in
         build_layer "sdks" "Dockerfile.sdks" "${sdks_args[@]}"
         ;;
     agents)
-        generate_container_files || exit 1
         build_cai_tarballs || exit 1
         agents_args=()
         if local_image_exists "${IMAGE_SDKS}:latest"; then
@@ -648,8 +586,7 @@ case "$BUILD_LAYER" in
         echo "Building all ContainAI layers..."
         echo "  .NET channel: $DOTNET_CHANNEL"
 
-        # Generate container files and tarballs before building images
-        generate_container_files || exit 1
+        # Generate CLI tarballs before building images
         build_cai_tarballs || exit 1
 
         # Build in dependency order

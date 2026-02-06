@@ -3,8 +3,8 @@
 # Unit tests for per-agent manifest parsing
 # ==============================================================================
 # Verifies:
-# 1. parse-manifest.sh correctly parses entries from per-agent manifest files
-# 2. parse-manifest.sh handles directory input (iterates *.toml in sorted order)
+# 1. cai-manifest.sh/manifest parse correctly parses entries from per-agent manifest files
+# 2. cai-manifest.sh/manifest parse handles directory input (iterates *.toml in sorted order)
 # 3. [agent] section parsing extracts name, binary, default_args, aliases, optional
 # 4. parse-toml.py rejects invalid TOML syntax (validation layer)
 # 5. gen-agent-wrappers.sh produces expected output for agents with default_args
@@ -12,8 +12,8 @@
 # 7. gen-import-map.sh produces expected _IMPORT_SYNC_MAP format
 # 8. check-manifest-consistency.sh validates manifests
 #
-# Note: parse-manifest.sh is a regex-based parser for speed; TOML validation
-# is handled by parse-toml.py which check-manifest-consistency.sh invokes.
+# Note: cai-manifest.sh delegates to native `cai manifest parse` TOML parsing.
+# parse-toml.py is still used by this script for direct TOML validation checks.
 # ==============================================================================
 set -euo pipefail
 
@@ -86,9 +86,9 @@ assert_not_contains() {
 }
 
 # ==============================================================================
-# Test: parse-manifest.sh parses single manifest file
+# Test: cai-manifest.sh/manifest parse parses single manifest file
 # ==============================================================================
-test_start "parse-manifest.sh parses single manifest file"
+test_start "cai-manifest.sh/manifest parse parses single manifest file"
 setup_tmpdir
 cat > "$TEST_TMPDIR/test.toml" << 'EOF'
 [agent]
@@ -111,7 +111,7 @@ container_link = ".test/secret.json"
 flags = "fso"
 EOF
 
-output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/test.toml")
+output=$("$REPO_ROOT/src/scripts/cai-manifest.sh" parse "$TEST_TMPDIR/test.toml")
 # Count non-empty lines to avoid miscounting empty output
 entry_count=$(printf '%s\n' "$output" | sed '/^$/d' | wc -l | tr -d ' ')
 if [[ "$entry_count" == "2" ]]; then
@@ -122,9 +122,9 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
-# Test: parse-manifest.sh handles directory input
+# Test: cai-manifest.sh/manifest parse handles directory input
 # ==============================================================================
-test_start "parse-manifest.sh handles directory input (sorted order)"
+test_start "cai-manifest.sh/manifest parse handles directory input (sorted order)"
 setup_tmpdir
 mkdir -p "$TEST_TMPDIR/manifests"
 cat > "$TEST_TMPDIR/manifests/01-first.toml" << 'EOF'
@@ -142,7 +142,7 @@ container_link = ".second/config"
 flags = "f"
 EOF
 
-output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/manifests")
+output=$("$REPO_ROOT/src/scripts/cai-manifest.sh" parse "$TEST_TMPDIR/manifests")
 # First entry should be from 01-first.toml
 first_line=$(printf '%s\n' "$output" | head -1)
 if [[ "$first_line" == *".first/config"* ]]; then
@@ -153,9 +153,9 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
-# Test: parse-manifest.sh extracts optional flag
+# Test: cai-manifest.sh/manifest parse extracts optional flag
 # ==============================================================================
-test_start "parse-manifest.sh extracts optional flag from 'o' in flags"
+test_start "cai-manifest.sh/manifest parse extracts optional flag from 'o' in flags"
 setup_tmpdir
 cat > "$TEST_TMPDIR/test.toml" << 'EOF'
 [[entries]]
@@ -165,7 +165,7 @@ container_link = ".optional/config"
 flags = "fso"
 EOF
 
-output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/test.toml")
+output=$("$REPO_ROOT/src/scripts/cai-manifest.sh" parse "$TEST_TMPDIR/test.toml")
 # Output format: source|target|container_link|flags|disabled|type|optional
 optional_field=$(printf '%s' "$output" | cut -d'|' -f7)
 if [[ "$optional_field" == "true" ]]; then
@@ -176,9 +176,9 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
-# Test: parse-manifest.sh skips [agent] section (doesn't emit it as entry)
+# Test: cai-manifest.sh/manifest parse skips [agent] section (doesn't emit it as entry)
 # ==============================================================================
-test_start "parse-manifest.sh skips [agent] section content"
+test_start "cai-manifest.sh/manifest parse skips [agent] section content"
 setup_tmpdir
 cat > "$TEST_TMPDIR/test.toml" << 'EOF'
 [agent]
@@ -193,7 +193,7 @@ container_link = ".test/file"
 flags = "f"
 EOF
 
-output=$("$REPO_ROOT/src/scripts/parse-manifest.sh" "$TEST_TMPDIR/test.toml")
+output=$("$REPO_ROOT/src/scripts/cai-manifest.sh" parse "$TEST_TMPDIR/test.toml")
 # Count non-empty lines to avoid miscounting empty output
 entry_count=$(printf '%s\n' "$output" | sed '/^$/d' | wc -l | tr -d ' ')
 # Should only have 1 entry (the [[entries]] section, not [agent])

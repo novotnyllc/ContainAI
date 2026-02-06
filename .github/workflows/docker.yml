@@ -34,10 +34,10 @@ jobs:
       - name: Lint shell scripts with shellcheck
         run: |
           echo "Running shellcheck on shell scripts..."
-          shellcheck -x src/*.sh src/lib/*.sh
+          shellcheck -x install.sh src/build.sh scripts/*.sh scripts/ralph/*.sh src/container/*.sh src/container/lib/*.sh
 
       - name: Check manifest consistency
-        run: ./scripts/check-manifest-consistency.sh
+        run: dotnet run --project src/cai -- manifest check src/manifests
 
       - name: Collect ContainAI logs
         if: always()
@@ -173,15 +173,6 @@ jobs:
           cache-from: type=gha,scope=sdks
           cache-to: type=gha,mode=max,scope=sdks
 
-      - name: Generate container files
-        run: |
-          mkdir -p artifacts/container-generated
-          ./src/scripts/gen-dockerfile-symlinks.sh src/manifests artifacts/container-generated/symlinks.sh
-          ./src/scripts/gen-init-dirs.sh src/manifests artifacts/container-generated/init-dirs.sh
-          ./src/scripts/gen-container-link-spec.sh src/manifests artifacts/container-generated/link-spec.json
-          ./src/scripts/gen-agent-wrappers.sh src/manifests artifacts/container-generated/agent-wrappers.sh
-          cp src/container/link-repair.sh artifacts/container-generated/link-repair.sh
-
       - name: Build and push full image
         uses: docker/build-push-action@v6
         with:
@@ -315,21 +306,18 @@ jobs:
           echo "Creating tarball for ${{ matrix.tarball_target }}"
           echo "============================================="
           case "${{ matrix.tarball_target }}" in
-            linux-x64) platform="linux/amd64" ;;
-            linux-arm64) platform="linux/arm64" ;;
-            macos-x64) platform="macos/amd64" ;;
-            macos-arm64) platform="macos/arm64" ;;
+            linux-x64) rid="linux-x64" ;;
+            linux-arm64) rid="linux-arm64" ;;
+            macos-x64) rid="osx-x64" ;;
+            macos-arm64) rid="osx-arm64" ;;
             *) echo "ERROR: Unknown tarball target: ${{ matrix.tarball_target }}" >&2; exit 1 ;;
           esac
-          if [[ "$(uname -s)" == "Darwin" ]]; then
-            bash_cmd="$(brew --prefix)/bin/bash"
-          else
-            bash_cmd="bash"
-          fi
-          "$bash_cmd" ./src/scripts/build-cai-tarballs.sh \
-            --platforms "$platform" \
-            --version "$NBGV_SemVer2" \
-            --output-dir ./artifacts
+          dotnet msbuild ./src/cai/cai.csproj \
+            -t:BuildContainAITarballs \
+            -p:Configuration=Release \
+            -p:ContainAIRuntimeIdentifiers="$rid" \
+            -p:ContainAIVersion="$NBGV_SemVer2" \
+            -p:ContainAIOutputDir=./artifacts
 
           ls -la ./artifacts/
 
@@ -426,13 +414,6 @@ jobs:
           echo "============================================="
           ./tests/integration/test-sync-integration.sh
 
-      - name: Run manifest parsing unit tests
-        run: |
-          echo "============================================="
-          echo "Running manifest parsing unit tests"
-          echo "============================================="
-          ./tests/unit/test-manifest-parsing.sh
-
       - name: Run launch wrapper tests
         run: |
           echo "============================================="
@@ -447,27 +428,45 @@ jobs:
           echo "============================================="
           ./tests/integration/test-user-manifests.sh
 
-      - name: Run .NET unit tests (if test projects exist)
+      - name: Run .NET unit tests with coverage
         run: |
           echo "============================================="
-          echo "Running .NET unit tests (${{ matrix.arch }})"
+          echo "Running .NET unit tests with coverage (${{ matrix.arch }})"
           echo "============================================="
           if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
-            dotnet test --configuration Release
+            dotnet test --solution ContainAI.slnx --configuration Release --coverage --xunit-info
           else
             echo "No test projects found, skipping dotnet test"
           fi
 
-      - name: Build ACP Proxy (${{ matrix.arch }})
+      - name: Install coverage report tools
         run: |
-          echo "============================================="
-          echo "Building ACP proxy binary (${{ matrix.arch }})"
-          echo "============================================="
-          cd src/acp-proxy
-          dotnet publish -r ${{ matrix.dotnet_rid }} -c Release --self-contained -o publish
-          mkdir -p ../bin
-          cp publish/acp-proxy ../bin/acp-proxy
-          chmod +x ../bin/acp-proxy
+          dotnet tool install --global dotnet-coverage --version 18.4.1
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.1
+
+      - name: Generate coverage reports
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          mkdir -p artifacts/coverage
+          coverage_files="$(find artifacts/bin -type f -path '*/TestResults/*.coverage' | tr '\n' ';')"
+          if [[ -z "$coverage_files" ]]; then
+            echo "ERROR: No .coverage files produced by test run"
+            exit 1
+          fi
+          dotnet-coverage merge $coverage_files -f cobertura -o artifacts/coverage/coverage.cobertura.xml
+          reportgenerator \
+            -reports:artifacts/coverage/coverage.cobertura.xml \
+            -targetdir:artifacts/coverage/report \
+            "-reporttypes:HtmlInline;Cobertura;Badges"
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: containai-coverage-${{ matrix.arch }}-${{ github.run_id }}
+          path: artifacts/coverage/
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Run ACP integration tests
         env:

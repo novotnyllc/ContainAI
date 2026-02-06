@@ -105,23 +105,29 @@ safe_chmod() {
     chmod "$mode" "$path"
 }
 
-# Generated init-dirs script location
-readonly INIT_DIRS_SCRIPT="/usr/local/lib/containai/init-dirs.sh"
+readonly BUILTIN_MANIFESTS_DIR="/opt/containai/manifests"
 
 # Ensure all volume structure exists for symlinks to work
-# Sources the generated init-dirs.sh script from sync-manifest.toml
+# Uses native cai manifest apply logic from built-in manifests
 ensure_volume_structure() {
     run_as_root mkdir -p "${DATA_DIR}"
     run_as_root chown -R --no-dereference 1000:1000 "${DATA_DIR}"
 
-    # Source generated init script if available
-    # The script uses ensure_dir, ensure_file, and safe_chmod helpers defined above
-    if [[ -f "$INIT_DIRS_SCRIPT" ]]; then
-        log "[INFO] Sourcing generated init-dirs.sh"
-        # shellcheck source=/dev/null
-        source "$INIT_DIRS_SCRIPT"
+    if command -v cai >/dev/null 2>&1 && [[ -d "$BUILTIN_MANIFESTS_DIR" ]]; then
+        log "[INFO] Applying init directory policy from manifests"
+        if ! cai manifest apply init-dirs "$BUILTIN_MANIFESTS_DIR" --data-dir "$DATA_DIR"; then
+            log "[WARN] Native init-dir apply failed, using fallback"
+            ensure_dir "${DATA_DIR}/claude"
+            ensure_dir "${DATA_DIR}/config/gh"
+            ensure_dir "${DATA_DIR}/git"
+            ensure_file "${DATA_DIR}/git/gitconfig"
+            ensure_file "${DATA_DIR}/git/gitignore_global"
+            ensure_dir "${DATA_DIR}/shell"
+            ensure_dir "${DATA_DIR}/editors"
+            ensure_dir "${DATA_DIR}/config"
+        fi
     else
-        log "[WARN] Generated init-dirs.sh not found, using fallback"
+        log "[WARN] Built-in manifests or cai binary not found, using fallback"
         # Minimal fallback for essential directories
         ensure_dir "${DATA_DIR}/claude"
         ensure_dir "${DATA_DIR}/config/gh"

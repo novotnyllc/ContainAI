@@ -63,21 +63,18 @@ jobs:
           echo "Creating tarball for ${{ matrix.tarball_target }}"
           echo "============================================="
           case "${{ matrix.tarball_target }}" in
-            linux-x64) platform="linux/amd64" ;;
-            linux-arm64) platform="linux/arm64" ;;
-            macos-x64) platform="macos/amd64" ;;
-            macos-arm64) platform="macos/arm64" ;;
+            linux-x64) rid="linux-x64" ;;
+            linux-arm64) rid="linux-arm64" ;;
+            macos-x64) rid="osx-x64" ;;
+            macos-arm64) rid="osx-arm64" ;;
             *) echo "ERROR: Unknown tarball target: ${{ matrix.tarball_target }}" >&2; exit 1 ;;
           esac
-          if [[ "$(uname -s)" == "Darwin" ]]; then
-            bash_cmd="$(brew --prefix)/bin/bash"
-          else
-            bash_cmd="bash"
-          fi
-          "$bash_cmd" ./src/scripts/build-cai-tarballs.sh \
-            --platforms "$platform" \
-            --version "$NBGV_SemVer2" \
-            --output-dir ./artifacts
+          dotnet msbuild ./src/cai/cai.csproj \
+            -t:BuildContainAITarballs \
+            -p:Configuration=Release \
+            -p:ContainAIRuntimeIdentifiers="$rid" \
+            -p:ContainAIVersion="$NBGV_SemVer2" \
+            -p:ContainAIOutputDir=./artifacts
 
           ls -la ./artifacts/
 

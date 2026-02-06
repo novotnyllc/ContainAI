@@ -1,5 +1,6 @@
 // Main ACP Proxy implementation
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -13,6 +14,7 @@ namespace ContainAI.Acp;
 /// ACP terminating proxy that handles ACP protocol from editors,
 /// routes to containerized agents via cai exec.
 /// </summary>
+[SuppressMessage("Reliability", "CA2213:Disposable fields should be disposed", Justification = "stderr is owned by the host process and must not be disposed by AcpProxy.")]
 public sealed class AcpProxy : IDisposable
 {
     private readonly ConcurrentDictionary<string, AcpSession> _sessions = new();

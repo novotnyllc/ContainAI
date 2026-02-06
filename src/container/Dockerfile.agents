@@ -6,13 +6,13 @@
 # Usage (from repo root, requires BuildKit):
 #   ./src/build.sh --layer full
 #
-# The build script runs generators first to create artifacts/container-generated/ files.
-# Manual docker build requires running generators first:
-#   ./src/scripts/gen-dockerfile-symlinks.sh src/sync-manifest.toml artifacts/container-generated/symlinks.sh
-#   ./src/scripts/gen-init-dirs.sh src/sync-manifest.toml artifacts/container-generated/init-dirs.sh
-#   ./src/scripts/gen-container-link-spec.sh src/sync-manifest.toml artifacts/container-generated/link-spec.json
-#   cp src/container/link-repair.sh artifacts/container-generated/link-repair.sh
-#   ./src/scripts/build-cai-tarballs.sh --platforms linux/amd64 --version <version>
+# Manual docker build requires a prebuilt cai tarball:
+#   dotnet msbuild ./src/cai/cai.csproj \
+#     -t:BuildContainAITarballs \
+#     -p:Configuration=Release \
+#     -p:ContainAIRuntimeIdentifiers=linux-x64 \
+#     -p:ContainAIVersion=<version> \
+#     -p:ContainAIOutputDir=./artifacts/cai-tarballs
 #   docker build -t containai/full -f src/container/Dockerfile.agents .
 #
 # Requires containai/sdks:latest to be built first (or use ./src/build.sh for all layers)
@@ -109,9 +109,33 @@ RUN uv tool install --python 3.13 kimi-cli && \
     kimi --version
 
 # =============================================================================
+# CONTAINAI CLI
+# In-container cai command for sync and other operations
+# =============================================================================
+USER root
+ARG TARGETARCH
+RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
+    set -euo pipefail; \
+    tarball=""; \
+    case "${TARGETARCH:-}" in \
+        amd64) tarball="$(ls -1 /tmp/cai/containai-*-linux-x64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        arm64) tarball="$(ls -1 /tmp/cai/containai-*-linux-arm64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        *) echo "ERROR: Unsupported TARGETARCH: ${TARGETARCH:-unset}" >&2; exit 1 ;; \
+    esac; \
+    if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
+        echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
+        echo "Run dotnet msbuild src/cai/cai.csproj -t:BuildContainAITarballs before building this image." >&2; \
+        exit 1; \
+    fi; \
+    rm -rf /opt/containai; \
+    mkdir -p /opt/containai; \
+    tar -xzf "$tarball" -C /opt/containai --strip-components 1
+RUN ln -sf /opt/containai/cai /usr/local/bin/cai
+
+# =============================================================================
 # AGENT CONFIGURATION SYMLINKS
 # Symlink config files to /mnt/agent-data for persistence across container restarts
-# Generated from sync-manifest.toml via src/scripts/gen-dockerfile-symlinks.sh
+# Uses native cai manifest apply logic from built-in manifests
 # =============================================================================
 
 # Pre-symlink setup: move installer-created files to data volume location
@@ -125,16 +149,12 @@ RUN if [ -f /home/agent/.claude.json ]; then \
 
 # Ensure /mnt/agent-data exists and is owned by agent user
 # The base image creates this, but we verify here as a safeguard since
-# symlinks.sh runs as USER agent and needs to create subdirectories
+# manifest apply runs as USER agent and needs to create subdirectories
 USER root
 RUN mkdir -p /mnt/agent-data && chown agent:agent /mnt/agent-data
 
-# Run generated symlink script (created from sync-manifest.toml)
-# Uses bash explicitly since symlinks.sh uses bash features for error logging
-# Note: /tmp cleanup happens later as root (RUN rm -rf /tmp/*)
 USER agent
-COPY --chown=agent:agent artifacts/container-generated/symlinks.sh /tmp/symlinks.sh
-RUN bash /tmp/symlinks.sh
+RUN cai manifest apply container-links /opt/containai/manifests --home-dir /home/agent --data-dir /mnt/agent-data
 
 # =============================================================================
 # POST-SYMLINK SETUP
@@ -163,8 +183,8 @@ RUN { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' 
 # Create .bash_env.d directory for modular BASH_ENV sourcing
 RUN mkdir -p /home/agent/.bash_env.d
 
-# Copy generated agent wrappers to .bash_env.d (for BASH_ENV non-interactive sourcing)
-COPY --chown=agent:agent artifacts/container-generated/agent-wrappers.sh /home/agent/.bash_env.d/containai-agents.sh
+# Generate agent wrappers from manifests to .bash_env.d (for BASH_ENV non-interactive sourcing)
+RUN cai manifest generate agent-wrappers /opt/containai/manifests /home/agent/.bash_env.d/containai-agents.sh
 
 # Update .bash_env to source all .bash_env.d/*.sh files and set guard variable
 # The base image creates .bash_env with just nvm setup; we extend it
@@ -204,12 +224,11 @@ RUN chmod +x /usr/local/lib/containai/init.sh && \
 
 # =============================================================================
 # LINK SPEC AND REPAIR TOOLS
-# Generated from sync-manifest.toml for runtime link verification/repair
+# Runtime link verification/repair + generated JSON link spec
 # =============================================================================
-COPY artifacts/container-generated/link-spec.json /usr/local/lib/containai/link-spec.json
-COPY artifacts/container-generated/link-repair.sh /usr/local/lib/containai/link-repair.sh
-COPY artifacts/container-generated/init-dirs.sh /usr/local/lib/containai/init-dirs.sh
-RUN chmod +x /usr/local/lib/containai/link-repair.sh /usr/local/lib/containai/init-dirs.sh
+COPY src/container/link-repair.sh /usr/local/lib/containai/link-repair.sh
+RUN chmod +x /usr/local/lib/containai/link-repair.sh && \
+    cai manifest generate container-link-spec /opt/containai/manifests /usr/local/lib/containai/link-spec.json
 
 # =============================================================================
 # USER MANIFEST RUNTIME SUPPORT
@@ -228,43 +247,7 @@ COPY src/services/containai-link-watcher.service /etc/systemd/system/containai-l
 RUN chmod +x /usr/local/lib/containai/link-watcher.sh && \
     ln -sf /etc/systemd/system/containai-link-watcher.service /etc/systemd/system/multi-user.target.wants/containai-link-watcher.service
 
-# =============================================================================
-# CONTAINAI CLI
-# In-container cai command for sync and other operations
-# =============================================================================
-
-# Install containai CLI from prebuilt tarball (generated before build)
-ARG TARGETARCH
-RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
-    set -euo pipefail; \
-    tarball=""; \
-    case "${TARGETARCH:-}" in \
-        amd64) tarball="$(ls -1 /tmp/cai/containai-*-linux-x64.tar.gz 2>/dev/null | head -n 1)" ;; \
-        arm64) tarball="$(ls -1 /tmp/cai/containai-*-linux-arm64.tar.gz 2>/dev/null | head -n 1)" ;; \
-        *) echo "ERROR: Unsupported TARGETARCH: ${TARGETARCH:-unset}" >&2; exit 1 ;; \
-    esac; \
-    if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
-        echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
-        echo "Run ./src/scripts/build-cai-tarballs.sh before building this image." >&2; \
-        exit 1; \
-    fi; \
-    rm -rf /opt/containai; \
-    mkdir -p /opt/containai; \
-    tar -xzf "$tarball" -C /opt/containai --strip-components 1; \
-    if [[ -f /opt/containai/acp-proxy ]]; then \
-        mkdir -p /opt/containai/bin; \
-        mv /opt/containai/acp-proxy /opt/containai/bin/acp-proxy; \
-        chmod +x /opt/containai/bin/acp-proxy; \
-    fi
-
-# Executable wrapper for non-interactive use (docker exec <container> cai --help)
-RUN printf '#!/bin/bash\nsource /opt/containai/containai.sh\ncai "$@"\n' > /usr/local/bin/cai && \
-    chmod +x /usr/local/bin/cai
-
-# Source containai.sh in .bashrc for interactive shells
 USER agent
-RUN echo '# Source ContainAI CLI' >> /home/agent/.bashrc && \
-    echo 'source /opt/containai/containai.sh' >> /home/agent/.bashrc
 
 # =============================================================================
 # FINAL CONFIGURATION

@@ -20,6 +20,7 @@ internal static class CommandCatalog
         "ssh",
         "links",
         "config",
+        "manifest",
         "template",
         "update",
         "refresh",

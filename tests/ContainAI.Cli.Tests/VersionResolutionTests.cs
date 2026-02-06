@@ -1,3 +1,5 @@
+using System.Reflection;
+using ContainAI.Cli.Host;
 using Xunit;
 
 namespace ContainAI.Cli.Tests;
@@ -5,47 +7,30 @@ namespace ContainAI.Cli.Tests;
 public sealed class VersionResolutionTests
 {
     [Fact]
-    public async Task ReadsVersionFromScriptDirectory()
+    public void ResolvesVersionFromAssemblyMetadata()
     {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-version-same-dir");
-        await File.WriteAllTextAsync(
-            Path.Combine(temp.Path, "VERSION"),
-            "1.2.3-test\n",
-            TestContext.Current.CancellationToken);
+        var expected = Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
+            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+            ?? "0.0.0";
 
-        var version = await ResolveVersionAsync(temp.Path);
-        Assert.Equal("1.2.3-test", version);
+        var version = InstallMetadata.ResolveVersion();
+        Assert.Equal(expected, version);
     }
 
     [Fact]
-    public async Task ReadsVersionFromParentDirectory()
+    public void ResolveInstallType_LocalPath_IsLocal()
     {
-        using var temp = ShellTestSupport.CreateTemporaryDirectory("cai-version-parent");
-        var scriptDir = Path.Combine(temp.Path, "src");
-        Directory.CreateDirectory(scriptDir);
-        await File.WriteAllTextAsync(
-            Path.Combine(temp.Path, "VERSION"),
-            "9.9.9-test\n",
-            TestContext.Current.CancellationToken);
-
-        var version = await ResolveVersionAsync(scriptDir);
-        Assert.Equal("9.9.9-test", version);
+        var installDir = Path.Combine("/tmp", ".local", "share", "containai");
+        var installType = InstallMetadata.ResolveInstallType(installDir);
+        Assert.Equal("local", installType);
     }
 
-    private static async Task<string> ResolveVersionAsync(string scriptDirectory)
+    private static string CreateTemporaryDirectory()
     {
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var versionLibraryPath = Path.Combine(ShellTestSupport.RepositoryRoot, "src/lib/version.sh");
-
-        var result = await ShellTestSupport.RunBashAsync(
-            $"""
-            source {ShellTestSupport.ShellQuote(versionLibraryPath)}
-            _CAI_SCRIPT_DIR={ShellTestSupport.ShellQuote(scriptDirectory)}
-            _cai_get_version
-            """,
-            cancellationToken: cancellationToken);
-
-        Assert.Equal(0, result.ExitCode);
-        return result.StdOut.Trim();
+        var path = Path.Combine(Path.GetTempPath(), $"cai-version-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(path);
+        return path;
     }
 }
