@@ -42,21 +42,27 @@ _CAI_VERSION_LOADED=1
 # Outputs: Version string (e.g., "0.1.0")
 # Returns: 0=success, 1=VERSION file not found
 _cai_get_version() {
-    local version_file="$_CAI_SCRIPT_DIR/../VERSION"
+    local -a candidates=()
+    local candidate
 
-    # Try relative path from lib directory first
-    if [[ ! -f "$version_file" ]]; then
-        # Try parent of script directory (for when sourced from containai.sh)
-        version_file="$(cd -- "$_CAI_SCRIPT_DIR/.." 2>/dev/null && pwd)/VERSION"
-    fi
+    # Installed layout: containai.sh and VERSION are siblings
+    candidates+=("$_CAI_SCRIPT_DIR/VERSION")
 
-    if [[ ! -f "$version_file" ]]; then
-        return 1
-    fi
+    # Source layout: containai.sh in src/, VERSION at repo root
+    candidates+=("$_CAI_SCRIPT_DIR/../VERSION")
 
-    # Read and trim whitespace
-    tr -d '[:space:]' <"$version_file"
-    return 0
+    # Canonicalized parent fallback (handles relative path edge cases)
+    candidate="$(cd -- "$_CAI_SCRIPT_DIR/.." 2>/dev/null && pwd)/VERSION"
+    candidates+=("$candidate")
+
+    for candidate in "${candidates[@]}"; do
+        if [[ -f "$candidate" ]]; then
+            tr -d '[:space:]' <"$candidate"
+            return 0
+        fi
+    done
+
+    return 1
 }
 
 # Escape a string for JSON output
