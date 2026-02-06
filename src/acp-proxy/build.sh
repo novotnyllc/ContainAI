@@ -149,6 +149,12 @@ if [[ "$INSTALL" -eq 1 ]]; then
     printf '[INFO] Installing to %s/acp-proxy\n' "$local_bin"
     cp "$src_binary" "$local_bin/acp-proxy"
     chmod +x "$local_bin/acp-proxy"
+
+    # Preserve symbols for local debugging when available.
+    if [[ -f "${src_binary}.pdb" ]]; then
+        cp "${src_binary}.pdb" "$local_bin/acp-proxy.pdb"
+    fi
+
     printf '[OK] Installed acp-proxy\n'
 fi
 

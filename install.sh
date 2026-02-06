@@ -93,12 +93,28 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ==============================================================================
 # Mode Detection
 # ==============================================================================
-# Check if we're running from an extracted tarball (has containai.sh in same dir)
-detect_local_mode() {
+# Resolve local source directory from either:
+#   1) extracted tarball layout (./containai.sh + ./lib/core.sh)
+#   2) source checkout layout   (./src/containai.sh + ./src/lib/core.sh)
+resolve_local_source_dir() {
     if [[ -f "$SCRIPT_DIR/containai.sh" && -f "$SCRIPT_DIR/lib/core.sh" ]]; then
-        return 0  # Local mode
+        printf '%s' "$SCRIPT_DIR"
+        return 0
     fi
-    return 1  # Standalone mode
+
+    if [[ -f "$SCRIPT_DIR/src/containai.sh" && -f "$SCRIPT_DIR/src/lib/core.sh" ]]; then
+        printf '%s' "$SCRIPT_DIR/src"
+        return 0
+    fi
+
+    return 1
+}
+
+detect_local_mode() {
+    if resolve_local_source_dir >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
 }
 
 # ==============================================================================
@@ -112,11 +128,16 @@ detect_os() {
             echo "macos"
             ;;
         Linux)
-            if [[ -f /etc/os-release ]]; then
-                # shellcheck disable=SC1091
-                . /etc/os-release
+            local os_release_file
+            os_release_file="${CAI_OS_RELEASE_FILE:-/etc/os-release}"
+            if [[ -f "$os_release_file" ]]; then
+                # shellcheck disable=SC1090,SC1091
+                . "$os_release_file"
                 case "${ID:-}" in
-                    ubuntu | debian)
+                    ubuntu)
+                        echo "ubuntu"
+                        ;;
+                    debian)
                         echo "debian"
                         ;;
                     fedora | rhel | centos | rocky | almalinux)
@@ -403,10 +424,19 @@ check_docker() {
         return 0
     fi
 
-    if ! docker info >/dev/null 2>&1; then
-        warn "Docker CLI is installed but the daemon is not running"
-        warn "ContainAI will use its own isolated Docker during 'cai setup'"
+    # Installer health-checks should target ContainAI's own context only.
+    # Avoid probing default/current context, which may be intentionally unavailable.
+    if docker context inspect containai-docker >/dev/null 2>&1; then
+        if docker --context containai-docker info >/dev/null 2>&1; then
+            info "ContainAI Docker context is reachable: containai-docker"
+            return 0
+        fi
+        warn "ContainAI Docker context exists but daemon is not reachable: containai-docker"
+        warn "ContainAI will configure/start its isolated Docker during 'cai setup'"
+        return 0
     fi
+
+    info "ContainAI Docker context not found yet (expected before first 'cai setup')"
 
     return 0
 }
@@ -605,7 +635,58 @@ download_and_extract() {
 # ==============================================================================
 # Local Installation (from tarball)
 # ==============================================================================
+build_local_native_artifacts() {
+    local source_dir="$1"
+    local source_kind="${2:-}"
+
+    # Only source checkouts have buildable native sources.
+    if [[ "$source_kind" != "source_checkout" ]]; then
+        return 0
+    fi
+
+    if [[ "${CAI_SKIP_NATIVE_BUILD:-}" == "1" ]]; then
+        info "Skipping local native build (CAI_SKIP_NATIVE_BUILD=1)"
+        return 0
+    fi
+
+    local build_script="$source_dir/acp-proxy/build.sh"
+    if [[ ! -x "$build_script" ]]; then
+        warn "Local acp-proxy source found, but build script is missing: $build_script"
+        warn "Continuing without rebuilding native acp-proxy"
+        return 0
+    fi
+
+    if ! command -v dotnet >/dev/null 2>&1; then
+        warn "dotnet SDK not found; skipping local acp-proxy debug build"
+        warn "Install .NET SDK and run: $build_script --debug --install"
+        return 0
+    fi
+
+    info "Building local acp-proxy (Debug with symbols)..."
+    if ! (cd "$source_dir/acp-proxy" && ./build.sh --debug --install); then
+        error "Failed to build local acp-proxy from source checkout"
+        return 1
+    fi
+    success "Built local acp-proxy (Debug)"
+    return 0
+}
+
 install_from_local() {
+    local source_dir="${1:-}"
+    local source_kind="${2:-}"
+    if [[ -z "$source_dir" ]]; then
+        if ! source_dir="$(resolve_local_source_dir)"; then
+            error "Could not locate local install source files."
+            error "Expected either './containai.sh' or './src/containai.sh' next to install.sh."
+            exit 1
+        fi
+        if [[ "$source_dir" == "$SCRIPT_DIR/src" ]]; then
+            source_kind="source_checkout"
+        else
+            source_kind="tarball"
+        fi
+    fi
+
     info "Installing ContainAI from local files..."
 
     # Determine if this is update or fresh install
@@ -634,42 +715,56 @@ install_from_local() {
     # Copy files from tarball to install directory
     info "Copying files..."
 
+    if ! build_local_native_artifacts "$source_dir" "$source_kind"; then
+        exit 1
+    fi
+
     # Main CLI
-    cp "$SCRIPT_DIR/containai.sh" "$INSTALL_DIR/containai.sh"
+    cp "$source_dir/containai.sh" "$INSTALL_DIR/containai.sh"
     chmod +x "$INSTALL_DIR/containai.sh"
 
     # Shell libraries
-    cp "$SCRIPT_DIR/lib/"*.sh "$INSTALL_DIR/lib/"
+    cp "$source_dir/lib/"*.sh "$INSTALL_DIR/lib/"
 
     # Runtime scripts (only parse-manifest.sh)
-    cp "$SCRIPT_DIR/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
+    cp "$source_dir/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
     chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
 
     # Manifests directory
-    if ! compgen -G "$SCRIPT_DIR/manifests/*.toml" >/dev/null; then
-        error "No manifest files found in $SCRIPT_DIR/manifests/"
+    if ! compgen -G "$source_dir/manifests/*.toml" >/dev/null; then
+        error "No manifest files found in $source_dir/manifests/"
         exit 1
     fi
-    cp "$SCRIPT_DIR/manifests/"*.toml "$INSTALL_DIR/manifests/"
+    cp "$source_dir/manifests/"*.toml "$INSTALL_DIR/manifests/"
 
     # Templates
-    if [[ -d "$SCRIPT_DIR/templates" ]]; then
-        cp -r "$SCRIPT_DIR/templates/"* "$INSTALL_DIR/templates/" 2>/dev/null || true
+    if [[ -d "$source_dir/templates" ]]; then
+        cp -r "$source_dir/templates/"* "$INSTALL_DIR/templates/" 2>/dev/null || true
     fi
 
     # ACP proxy binary
-    if [[ -f "$SCRIPT_DIR/acp-proxy" ]]; then
-        cp "$SCRIPT_DIR/acp-proxy" "$INSTALL_DIR/acp-proxy"
+    if [[ -f "$source_dir/acp-proxy" ]]; then
+        cp "$source_dir/acp-proxy" "$INSTALL_DIR/acp-proxy"
         chmod +x "$INSTALL_DIR/acp-proxy"
+    elif [[ -f "$source_dir/bin/acp-proxy" ]]; then
+        cp "$source_dir/bin/acp-proxy" "$INSTALL_DIR/acp-proxy"
+        chmod +x "$INSTALL_DIR/acp-proxy"
+        if [[ -f "$source_dir/bin/acp-proxy.pdb" ]]; then
+            cp "$source_dir/bin/acp-proxy.pdb" "$INSTALL_DIR/acp-proxy.pdb"
+        fi
     fi
 
     # Version file
-    if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
+    if [[ -f "$source_dir/VERSION" ]]; then
+        cp "$source_dir/VERSION" "$INSTALL_DIR/VERSION"
+    elif [[ -f "$SCRIPT_DIR/VERSION" ]]; then
         cp "$SCRIPT_DIR/VERSION" "$INSTALL_DIR/VERSION"
     fi
 
     # LICENSE
-    if [[ -f "$SCRIPT_DIR/LICENSE" ]]; then
+    if [[ -f "$source_dir/LICENSE" ]]; then
+        cp "$source_dir/LICENSE" "$INSTALL_DIR/LICENSE"
+    elif [[ -f "$SCRIPT_DIR/LICENSE" ]]; then
         cp "$SCRIPT_DIR/LICENSE" "$INSTALL_DIR/LICENSE"
     fi
 
@@ -857,7 +952,7 @@ show_setup_instructions() {
                 echo "  - Installs Docker Engine and Sysbox inside the VM"
                 echo "  - Configures secure container isolation"
                 ;;
-            debian)
+            ubuntu | debian)
                 echo "  - Installs Sysbox for secure container isolation"
                 echo "  - Creates an isolated Docker daemon (containai-docker)"
                 echo "  - Does NOT modify your system Docker"
@@ -1050,15 +1145,32 @@ main() {
 
     # Determine mode: local (from tarball) or standalone (download)
     local use_local_mode="false"
+    local local_source_dir=""
+    local local_source_kind=""
 
     if [[ "$LOCAL_MODE" == "true" ]]; then
-        # Explicit --local flag
+        if ! local_source_dir="$(resolve_local_source_dir)"; then
+            error "--local was specified but no local source files were found."
+            error "Expected either './containai.sh' or './src/containai.sh' next to install.sh."
+            exit 1
+        fi
+        if [[ "$local_source_dir" == "$SCRIPT_DIR/src" ]]; then
+            local_source_kind="source_checkout"
+        else
+            local_source_kind="tarball"
+        fi
+
         use_local_mode="true"
         info "Mode: Local install (--local flag)"
-    elif detect_local_mode; then
-        # Auto-detected local files
+    elif local_source_dir="$(resolve_local_source_dir)"; then
         use_local_mode="true"
-        info "Mode: Local install (tarball detected)"
+        if [[ "$local_source_dir" == "$SCRIPT_DIR/src" ]]; then
+            local_source_kind="source_checkout"
+            info "Mode: Local install (source checkout detected)"
+        else
+            local_source_kind="tarball"
+            info "Mode: Local install (tarball detected)"
+        fi
     else
         info "Mode: Standalone install (will download)"
     fi
@@ -1074,7 +1186,7 @@ main() {
 
     if [[ "$use_local_mode" == "true" ]]; then
         # Local mode: install from tarball files
-        install_from_local
+        install_from_local "$local_source_dir" "$local_source_kind"
         echo ""
         setup_path
         echo ""
