@@ -1,7 +1,7 @@
 // Helper methods for JSON-RPC message handling
 using System.Text.Json.Nodes;
 
-namespace ContainAI.Acp.Protocol;
+namespace AgentClientProtocol.Proxy.Protocol;
 
 /// <summary>
 /// Helper methods for JSON-RPC protocol handling.

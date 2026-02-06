@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
-using ContainAI.Acp;
+using AgentClientProtocol.Proxy;
 
-[assembly: InternalsVisibleTo("ContainAI.Acp.Tests")]
+[assembly: InternalsVisibleTo("AgentClientProtocol.Proxy.Tests")]
 [assembly: InternalsVisibleTo("ContainAI.Cli.Tests")]
 
 namespace ContainAI.Cli.Host;

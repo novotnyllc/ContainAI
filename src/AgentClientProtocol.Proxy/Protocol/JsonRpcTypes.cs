@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
-namespace ContainAI.Acp.Protocol;
+namespace AgentClientProtocol.Proxy.Protocol;
 
 /// <summary>
 /// JSON-RPC 2.0 message (request, response, or notification).

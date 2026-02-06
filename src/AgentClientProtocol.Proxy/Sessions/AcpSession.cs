@@ -2,9 +2,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
-using ContainAI.Acp.Protocol;
+using AgentClientProtocol.Proxy.Protocol;
 
-namespace ContainAI.Acp.Sessions;
+namespace AgentClientProtocol.Proxy.Sessions;
 
 /// <summary>
 /// Represents an ACP session with an agent process.

@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <RootNamespace>ContainAI.Acp</RootNamespace>
-    <Description>ACP protocol library for ContainAI</Description>
+    <RootNamespace>AgentClientProtocol</RootNamespace>
+    <Description>Agent Client Protocol proxy library for .NET</Description>
     <IsPackable>true</IsPackable>
-    <PackageId>ContainAI.Acp</PackageId>
+    <PackageId>AgentClientProtocol</PackageId>
   </PropertyGroup>
 
   <PropertyGroup>

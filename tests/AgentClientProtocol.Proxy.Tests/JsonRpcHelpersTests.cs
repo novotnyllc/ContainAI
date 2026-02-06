@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
-using ContainAI.Acp.Protocol;
+using AgentClientProtocol.Proxy.Protocol;
 using Xunit;
 
-namespace ContainAI.Acp.Tests;
+namespace AgentClientProtocol.Proxy.Tests;
 
 public class JsonRpcHelpersTests
 {

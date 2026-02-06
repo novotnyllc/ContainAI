@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace ContainAI.Acp.Sessions;
+namespace AgentClientProtocol.Proxy.Sessions;
 
 /// <summary>
 /// Creates and starts ACP agent processes for sessions.

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>acp-proxy</AssemblyName>
-    <RootNamespace>ContainAI.AcpProxy</RootNamespace>
+    <RootNamespace>AgentClientProtocol.ProxyProxy</RootNamespace>
     <Description>ACP terminating proxy CLI for ContainAI</Description>
   </PropertyGroup>
 
@@ -28,7 +28,7 @@
 
   <ItemGroup>
     <!-- Reference the ACP library -->
-    <ProjectReference Include="../ContainAI.Acp/ContainAI.Acp.csproj" />
+    <ProjectReference Include="../AgentClientProtocol.Proxy/AgentClientProtocol.Proxy.csproj" />
   </ItemGroup>
 
 </Project>

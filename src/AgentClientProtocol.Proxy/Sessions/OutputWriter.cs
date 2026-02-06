@@ -2,9 +2,9 @@
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
-using ContainAI.Acp.Protocol;
+using AgentClientProtocol.Proxy.Protocol;
 
-namespace ContainAI.Acp.Sessions;
+namespace AgentClientProtocol.Proxy.Sessions;
 
 /// <summary>
 /// Thread-safe writer for NDJSON output to stdout.

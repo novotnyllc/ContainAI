@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>ContainAI.Acp.Tests</RootNamespace>
+    <RootNamespace>AgentClientProtocol.Proxy.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
@@ -17,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/ContainAI.Acp/ContainAI.Acp.csproj" />
+    <ProjectReference Include="../../src/AgentClientProtocol.Proxy/AgentClientProtocol.Proxy.csproj" />
     <ProjectReference Include="../../src/cai/cai.csproj" />
   </ItemGroup>
 

@@ -1,8 +1,8 @@
 using System.Text.Json.Nodes;
-using ContainAI.Acp.PathTranslation;
+using AgentClientProtocol.Proxy.PathTranslation;
 using Xunit;
 
-namespace ContainAI.Acp.Tests;
+namespace AgentClientProtocol.Proxy.Tests;
 
 public class PathTranslatorTests
 {

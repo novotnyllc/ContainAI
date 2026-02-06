@@ -2,7 +2,7 @@
 using CliWrap;
 using CliWrap.Buffered;
 
-namespace ContainAI.Acp.PathTranslation;
+namespace AgentClientProtocol.Proxy.PathTranslation;
 
 /// <summary>
 /// Resolves the workspace root from a given directory.

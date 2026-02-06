@@ -1,7 +1,7 @@
-using ContainAI.Acp.Sessions;
+using AgentClientProtocol.Proxy.Sessions;
 using Xunit;
 
-namespace ContainAI.Acp.Tests;
+namespace AgentClientProtocol.Proxy.Tests;
 
 public class AcpSessionTests
 {

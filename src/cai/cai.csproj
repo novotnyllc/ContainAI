@@ -21,7 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../ContainAI.Cli/ContainAI.Cli.csproj" />
-    <ProjectReference Include="../ContainAI.Acp/ContainAI.Acp.csproj" />
+    <ProjectReference Include="../AgentClientProtocol.Proxy/AgentClientProtocol.Proxy.csproj" />
   </ItemGroup>
 
   <ItemGroup>

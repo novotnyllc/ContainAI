@@ -2,7 +2,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 
-namespace ContainAI.Acp.Sessions;
+namespace AgentClientProtocol.Proxy.Sessions;
 
 /// <summary>
 /// Spawns agent processes for ACP sessions.

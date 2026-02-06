@@ -2,7 +2,7 @@ using System.Reflection;
 using ContainAI.Cli.Host;
 using Xunit;
 
-namespace ContainAI.Acp.Tests;
+namespace AgentClientProtocol.Proxy.Tests;
 
 public sealed class AcpProxyRunnerTests
 {

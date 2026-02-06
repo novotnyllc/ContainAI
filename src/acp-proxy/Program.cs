@@ -3,9 +3,9 @@
 
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using ContainAI.Acp;
+using AgentClientProtocol.Proxy;
 
-namespace ContainAI.AcpProxy;
+namespace AgentClientProtocol.ProxyProxy;
 
 public static class Program
 {

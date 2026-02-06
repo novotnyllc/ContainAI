@@ -3,10 +3,10 @@
     <Project Path="src/cai/cai.csproj" />
     <Project Path="src/ContainAI.Cli/ContainAI.Cli.csproj" />
     <Project Path="src/ContainAI.Cli.Abstractions/ContainAI.Cli.Abstractions.csproj" />
-    <Project Path="src/ContainAI.Acp/ContainAI.Acp.csproj" />
+    <Project Path="src/AgentClientProtocol.Proxy/AgentClientProtocol.Proxy.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj" />
-    <Project Path="tests/ContainAI.Acp.Tests/ContainAI.Acp.Tests.csproj" />
+    <Project Path="tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj" />
   </Folder>
 </Solution>

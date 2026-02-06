@@ -1,7 +1,7 @@
 // Path translation between host and container paths
 using System.Text.Json.Nodes;
 
-namespace ContainAI.Acp.PathTranslation;
+namespace AgentClientProtocol.Proxy.PathTranslation;
 
 /// <summary>
 /// Translates paths between host workspace and container workspace.

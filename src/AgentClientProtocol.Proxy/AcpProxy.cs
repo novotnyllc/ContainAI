@@ -4,11 +4,11 @@ using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using ContainAI.Acp.PathTranslation;
-using ContainAI.Acp.Protocol;
-using ContainAI.Acp.Sessions;
+using AgentClientProtocol.Proxy.PathTranslation;
+using AgentClientProtocol.Proxy.Protocol;
+using AgentClientProtocol.Proxy.Sessions;
 
-namespace ContainAI.Acp;
+namespace AgentClientProtocol.Proxy;
 
 /// <summary>
 /// ACP terminating proxy that handles ACP protocol from editors,
