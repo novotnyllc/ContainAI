@@ -589,9 +589,9 @@ ContainAI containers require specific configuration to function correctly:
 |-------------|--------|
 | Do NOT override ENTRYPOINT | systemd must be PID 1 for services and init to work |
 | Do NOT override CMD | Required for proper systemd startup sequence |
-| Do NOT change the final USER away from agent | agent user (UID 1000) is required for volume permissions |
+| Do NOT change the final USER away from root | systemd (`/sbin/init`) must start as root (PID 1) |
 
-**Note:** You can temporarily switch to `USER root` for privileged operations (like `apt-get install`), but the final `USER` directive in your Dockerfile must be `agent`.
+**Note:** You can temporarily switch to `USER agent` for unprivileged installs, but the final `USER` directive in your Dockerfile must be `root`.
 
 If you override these, ContainAI features (SSH, agent startup, import/export) will not work correctly.
 

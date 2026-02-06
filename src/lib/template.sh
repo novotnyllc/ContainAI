@@ -26,6 +26,7 @@
 #   _cai_build_template()          - Build template Dockerfile using Docker context
 #   _cai_get_template_image_name() - Get image name for a template (no build)
 #   _cai_validate_template_base()  - Validate Dockerfile FROM uses ContainAI base
+#   _cai_validate_template_runtime_user() - Validate final runtime USER for systemd
 #
 # Template directory structure:
 #   ~/.config/containai/templates/
@@ -593,6 +594,9 @@ _cai_build_template() {
     # Return code 2 (parse error) is logged but doesn't block build
     if [[ "$dry_run" != "true" ]]; then
         _cai_validate_template_base "$dockerfile_path" "$suppress_base_warning" || true
+        if ! _cai_validate_template_runtime_user "$dockerfile_path"; then
+            return 1
+        fi
     fi
 
     # Template directory is the build context (parent of Dockerfile)
@@ -877,6 +881,71 @@ EOF
        suppress_base_warning = true
 EOF
     fi
+    return 1
+}
+
+# Validate that the final runtime USER for the last stage is root.
+# systemd (/sbin/init) must start as root inside the container.
+# Args: dockerfile_path
+# Returns: 0 if final runtime USER is root/inherited root, 1 if invalid, 2 if parse error
+_cai_validate_template_runtime_user() {
+    local dockerfile_path="${1:-}"
+
+    if [[ -z "$dockerfile_path" ]]; then
+        _cai_error "Dockerfile path required"
+        return 2
+    fi
+
+    if [[ ! -f "$dockerfile_path" ]]; then
+        _cai_error "Dockerfile not found: $dockerfile_path"
+        return 2
+    fi
+
+    # Track only the final stage's USER directives. Each FROM starts a new stage.
+    local saw_from="false"
+    local final_stage_user=""
+    local line user_token effective_user
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        # Remove leading/trailing whitespace
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        if [[ "$line" =~ ^[Ff][Rr][Oo][Mm][[:space:]]+ ]]; then
+            saw_from="true"
+            final_stage_user=""
+            continue
+        fi
+
+        if [[ "$saw_from" == "true" ]] && [[ "$line" =~ ^[Uu][Ss][Ee][Rr][[:space:]]+([^[:space:]#]+) ]]; then
+            user_token="${BASH_REMATCH[1]}"
+            final_stage_user="$user_token"
+        fi
+    done < "$dockerfile_path"
+
+    if [[ "$saw_from" != "true" ]]; then
+        _cai_error "No FROM line found in Dockerfile: $dockerfile_path"
+        return 2
+    fi
+
+    # No USER in final stage means inherit base image default user.
+    # ContainAI base images run with root runtime user for systemd startup.
+    if [[ -z "$final_stage_user" ]]; then
+        return 0
+    fi
+
+    effective_user="${final_stage_user%%:*}"
+    effective_user="${effective_user,,}"
+    if [[ "$effective_user" == "root" ]] || [[ "$effective_user" == "0" ]]; then
+        return 0
+    fi
+
+    _cai_error "Final runtime USER must be root for systemd startup: found '$final_stage_user'"
+    _cai_error "Set the final USER to root in $dockerfile_path"
     return 1
 }
 

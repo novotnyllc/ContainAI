@@ -12,7 +12,7 @@
 # ------------------
 # 1. DO NOT override ENTRYPOINT - systemd is the init system and must be PID 1
 # 2. DO NOT override CMD - it's set to start systemd properly
-# 3. The FINAL USER must be agent - you may use USER root temporarily for installs
+# 3. The FINAL USER must be root so /sbin/init (systemd) can start correctly
 #
 FROM ghcr.io/novotnyllc/containai:latest
 
@@ -68,5 +68,5 @@ EOF
 RUN ln -sf /etc/systemd/system/check-gpu.service \
     /etc/systemd/system/multi-user.target.wants/check-gpu.service
 
-# Final USER must be agent (see warning at top of file)
-USER agent
+# Final USER must be root (see warning at top of file)
+USER root

@@ -789,6 +789,51 @@ fi
 teardown_tmpdir
 
 # ==============================================================================
+# Test: _cai_validate_template_runtime_user enforces root final USER
+# ==============================================================================
+
+test_start "_cai_validate_template_runtime_user accepts Dockerfile with no USER directives"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+RUN echo "no explicit user"
+EOF
+if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
+    test_pass
+else
+    test_fail "should accept Dockerfile with inherited root user"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_runtime_user accepts final USER root"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+USER agent
+RUN echo "install user tools"
+USER root
+EOF
+if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
+    test_pass
+else
+    test_fail "should accept final USER root"
+fi
+teardown_tmpdir
+
+test_start "_cai_validate_template_runtime_user rejects final USER agent"
+setup_tmpdir
+cat > "$TEST_TMPDIR/Dockerfile" <<'EOF'
+FROM ghcr.io/novotnyllc/containai:latest
+USER agent
+EOF
+if _cai_validate_template_runtime_user "$TEST_TMPDIR/Dockerfile" 2>/dev/null; then
+    test_fail "should reject final USER agent"
+else
+    test_pass
+fi
+teardown_tmpdir
+
+# ==============================================================================
 # Test: _containai_parse_config extracts [template].suppress_base_warning
 # ==============================================================================
 

@@ -8,7 +8,7 @@
 # ------------------
 # 1. DO NOT override ENTRYPOINT - systemd is the init system and must be PID 1
 # 2. DO NOT override CMD - it's set to start systemd properly
-# 3. The FINAL USER must be agent - you may use USER root temporarily for installs
+# 3. The FINAL USER must be root so /sbin/init (systemd) can start correctly
 #
 # To reset to default, reinstall the template from the repo:
 #   cp /path/to/containai/src/templates/default.Dockerfile \
@@ -100,12 +100,11 @@ FROM ${BASE_IMAGE}
 # See docs/configuration.md for details on hook naming and ordering.
 USER root
 RUN mkdir -p /etc/containai/template-hooks/startup.d
-USER agent
 
 # =============================================================================
 # YOUR CUSTOMIZATIONS BELOW
 # =============================================================================
 
-# Keep this as the final user. If you add USER root for package installs above,
-# switch back to USER agent before the Dockerfile ends.
-USER agent
+# Keep this as the final user. If you switch to USER agent above for unprivileged
+# installs, switch back to USER root before the Dockerfile ends.
+USER root
