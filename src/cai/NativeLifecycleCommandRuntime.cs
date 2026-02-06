@@ -120,10 +120,18 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        if (!parsed.Global && !string.IsNullOrWhiteSpace(parsed.Workspace))
+        var normalizedKey = NormalizeConfigKey(parsed.Key);
+        var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
+        if (workspaceScope.Error is not null)
+        {
+            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            return 1;
+        }
+
+        if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
             var wsResult = await RunParseTomlAsync(
-                ["--file", configPath, "--get-workspace", parsed.Workspace],
+                ["--file", configPath, "--get-workspace", workspaceScope.Workspace],
                 cancellationToken).ConfigureAwait(false);
             if (wsResult.ExitCode != 0)
             {
@@ -141,7 +149,6 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        var normalizedKey = NormalizeConfigKey(parsed.Key);
         var getResult = await RunParseTomlAsync(
             ["--file", configPath, "--key", normalizedKey],
             cancellationToken).ConfigureAwait(false);
@@ -163,16 +170,23 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        var normalizedKey = NormalizeConfigKey(parsed.Key);
+        var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
+        if (workspaceScope.Error is not null)
+        {
+            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            return 1;
+        }
+
         ProcessResult setResult;
-        if (!parsed.Global && !string.IsNullOrWhiteSpace(parsed.Workspace))
+        if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
             setResult = await RunParseTomlAsync(
-                ["--file", configPath, "--set-workspace-key", parsed.Workspace, parsed.Key, parsed.Value],
+                ["--file", configPath, "--set-workspace-key", workspaceScope.Workspace, parsed.Key, parsed.Value],
                 cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            var normalizedKey = NormalizeConfigKey(parsed.Key);
             setResult = await RunParseTomlAsync(
                 ["--file", configPath, "--set-key", normalizedKey, parsed.Value],
                 cancellationToken).ConfigureAwait(false);
@@ -195,16 +209,23 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        var normalizedKey = NormalizeConfigKey(parsed.Key);
+        var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
+        if (workspaceScope.Error is not null)
+        {
+            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            return 1;
+        }
+
         ProcessResult unsetResult;
-        if (!parsed.Global && !string.IsNullOrWhiteSpace(parsed.Workspace))
+        if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
             unsetResult = await RunParseTomlAsync(
-                ["--file", configPath, "--unset-workspace-key", parsed.Workspace, parsed.Key],
+                ["--file", configPath, "--unset-workspace-key", workspaceScope.Workspace, parsed.Key],
                 cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            var normalizedKey = NormalizeConfigKey(parsed.Key);
             unsetResult = await RunParseTomlAsync(
                 ["--file", configPath, "--unset-key", normalizedKey],
                 cancellationToken).ConfigureAwait(false);
@@ -340,6 +361,19 @@ internal sealed class NativeLifecycleCommandRuntime
         var containerName = GetOptionValue(args, "--container");
         var stopAll = args.Contains("--all", StringComparer.Ordinal);
         var remove = args.Contains("--remove", StringComparer.Ordinal);
+        var force = args.Contains("--force", StringComparer.Ordinal);
+
+        if (!ValidateStopArgs(args, out var stopValidationError))
+        {
+            await _stderr.WriteLineAsync(stopValidationError).ConfigureAwait(false);
+            return 1;
+        }
+
+        if (stopAll && !string.IsNullOrWhiteSpace(containerName))
+        {
+            await _stderr.WriteLineAsync("--all and --container are mutually exclusive").ConfigureAwait(false);
+            return 1;
+        }
 
         var targets = new List<string>();
         if (!string.IsNullOrWhiteSpace(containerName))
@@ -364,23 +398,46 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        var failures = 0;
         foreach (var target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await DockerRunAsync(["stop", target], cancellationToken).ConfigureAwait(false);
+            var stopExitCode = await DockerRunAsync(["stop", target], cancellationToken).ConfigureAwait(false);
+            if (stopExitCode != 0)
+            {
+                failures++;
+                await _stderr.WriteLineAsync($"Failed to stop container: {target}").ConfigureAwait(false);
+                if (!force)
+                {
+                    continue;
+                }
+            }
+
             if (remove)
             {
-                await DockerRunAsync(["rm", "-f", target], cancellationToken).ConfigureAwait(false);
+                var removeExitCode = await DockerRunAsync(["rm", "-f", target], cancellationToken).ConfigureAwait(false);
+                if (removeExitCode != 0)
+                {
+                    failures++;
+                    await _stderr.WriteLineAsync($"Failed to remove container: {target}").ConfigureAwait(false);
+                }
             }
         }
 
-        return 0;
+        return failures == 0 ? 0 : 1;
     }
 
     private async Task<int> RunGcAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var force = args.Contains("--force", StringComparer.Ordinal);
         var includeImages = args.Contains("--images", StringComparer.Ordinal);
+        var ageValue = GetOptionValue(args, "--age") ?? "30d";
+        if (!TryParseAgeDuration(ageValue, out var minimumAge))
+        {
+            await _stderr.WriteLineAsync($"Invalid --age value: {ageValue}").ConfigureAwait(false);
+            return 1;
+        }
 
         var candidates = await DockerCaptureAsync(
             ["ps", "-aq", "--filter", "label=containai.managed=true", "--filter", "status=exited", "--filter", "status=created"],
@@ -395,21 +452,69 @@ internal sealed class NativeLifecycleCommandRuntime
         var containerIds = candidates.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var failures = 0;
         foreach (var containerId in containerIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var inspect = await DockerCaptureAsync(
+                ["inspect", "--format", "{{.State.Status}}|{{.State.FinishedAt}}|{{.Created}}|{{with index .Config.Labels \"containai.keep\"}}{{.}}{{end}}", containerId],
+                cancellationToken).ConfigureAwait(false);
+            if (inspect.ExitCode != 0)
+            {
+                failures++;
+                continue;
+            }
+
+            var inspectFields = inspect.StandardOutput.Trim().Split('|');
+            if (inspectFields.Length < 4)
+            {
+                continue;
+            }
+
+            var state = inspectFields[0];
+            if (string.Equals(state, "running", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (string.Equals(inspectFields[3], "true", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var referenceTime = ParseGcReferenceTime(inspectFields[1], inspectFields[2]);
+            if (referenceTime is null)
+            {
+                continue;
+            }
+
+            if (DateTimeOffset.UtcNow - referenceTime.Value < minimumAge)
+            {
+                continue;
+            }
+
             if (dryRun)
             {
                 await _stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
             }
             else
             {
-                await DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+                var removeResult = await DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+                if (removeResult != 0)
+                {
+                    failures++;
+                }
             }
         }
 
         if (includeImages)
         {
+            if (!dryRun && !force)
+            {
+                await _stderr.WriteLineAsync("Use --force with --images to remove images.").ConfigureAwait(false);
+                return 1;
+            }
+
             var images = await DockerCaptureAsync(["images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"], cancellationToken).ConfigureAwait(false);
             if (images.ExitCode == 0)
             {
@@ -434,13 +539,17 @@ internal sealed class NativeLifecycleCommandRuntime
                     }
                     else
                     {
-                        await DockerRunAsync(["rmi", imageId], cancellationToken).ConfigureAwait(false);
+                        var removeImageResult = await DockerRunAsync(["rmi", imageId], cancellationToken).ConfigureAwait(false);
+                        if (removeImageResult != 0)
+                        {
+                            failures++;
+                        }
                     }
                 }
             }
         }
 
-        return 0;
+        return failures == 0 ? 0 : 1;
     }
 
     private async Task<bool> DockerContainerExistsAsync(string containerName, CancellationToken cancellationToken)
@@ -568,6 +677,27 @@ internal sealed class NativeLifecycleCommandRuntime
             : key;
     }
 
+    private static (string? Workspace, string? Error) ResolveWorkspaceScope(ParsedConfigCommand parsed, string normalizedKey)
+    {
+        if (!string.Equals(normalizedKey, "data_volume", StringComparison.Ordinal))
+        {
+            return (parsed.Workspace, null);
+        }
+
+        if (parsed.Global)
+        {
+            return (null, "data_volume is workspace-scoped and cannot be set globally");
+        }
+
+        var workspace = parsed.Workspace;
+        if (string.IsNullOrWhiteSpace(workspace))
+        {
+            workspace = Directory.GetCurrentDirectory();
+        }
+
+        return (Path.GetFullPath(workspace), null);
+    }
+
     private static ParsedConfigCommand ParseConfigOptions(string[] args)
     {
         var global = false;
@@ -622,6 +752,83 @@ internal sealed class NativeLifecycleCommandRuntime
             "unset" when tail.Count >= 2 => new ParsedConfigCommand(action, tail[1], null, global, workspace, null),
             _ => ParsedConfigCommand.WithError("invalid config command usage"),
         };
+    }
+
+    private static bool ValidateStopArgs(IReadOnlyList<string> args, out string error)
+    {
+        for (var index = 1; index < args.Count; index++)
+        {
+            var token = args[index];
+            if (token is "--all" or "--remove" or "--force" or "--export" or "--verbose")
+            {
+                continue;
+            }
+
+            if (token == "--container")
+            {
+                if (index + 1 >= args.Count || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                {
+                    error = "--container requires a value";
+                    return false;
+                }
+
+                index++;
+                continue;
+            }
+
+            if (token.StartsWith("--container=", StringComparison.Ordinal))
+            {
+                if (token.Length <= "--container=".Length)
+                {
+                    error = "--container requires a value";
+                    return false;
+                }
+
+                continue;
+            }
+
+            error = $"Unknown stop option: {token}";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static bool TryParseAgeDuration(string value, out TimeSpan duration)
+    {
+        duration = default;
+        if (string.IsNullOrWhiteSpace(value) || value.Length < 2)
+        {
+            return false;
+        }
+
+        var suffix = value[^1];
+        if (!int.TryParse(value[..^1], out var amount) || amount < 0)
+        {
+            return false;
+        }
+
+        duration = suffix switch
+        {
+            'd' or 'D' => TimeSpan.FromDays(amount),
+            'h' or 'H' => TimeSpan.FromHours(amount),
+            _ => default,
+        };
+
+        return duration != default || amount == 0;
+    }
+
+    private static DateTimeOffset? ParseGcReferenceTime(string finishedAtRaw, string createdRaw)
+    {
+        if (!string.IsNullOrWhiteSpace(finishedAtRaw) &&
+            !string.Equals(finishedAtRaw, "0001-01-01T00:00:00Z", StringComparison.Ordinal) &&
+            DateTimeOffset.TryParse(finishedAtRaw, out var finishedAt))
+        {
+            return finishedAt;
+        }
+
+        return DateTimeOffset.TryParse(createdRaw, out var created) ? created : null;
     }
 
     private static bool TryUpgradeDockerfile(string content, out string updated)
