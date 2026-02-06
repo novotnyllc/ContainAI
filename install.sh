@@ -700,6 +700,11 @@ install_from_local() {
         # For updates, wipe the runtime directories to remove stale files
         # Keep the install dir itself but remove subdirs we manage
         rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" "${INSTALL_DIR:?}/manifests" 2>/dev/null || true
+
+        # Local installer-managed installs are not git worktrees.
+        # Remove stale git metadata from previous install modes so
+        # post-install `cai update` does not attempt CLI git updates.
+        rm -rf "${INSTALL_DIR:?}/.git" 2>/dev/null || true
     else
         IS_FRESH_INSTALL="true"
         info "Installing to $INSTALL_DIR"
