@@ -2054,7 +2054,7 @@ _containai_start_container() {
             local port_check_failed=false
             if [[ "$dry_run_state" == "exited" || "$dry_run_state" == "created" ]]; then
                 local port_avail_rc
-                if _cai_is_port_available "$dry_run_ssh_port" 2>/dev/null; then
+                if _cai_is_port_available "$dry_run_ssh_port" "$selected_context" 2>/dev/null; then
                     port_avail_rc=0
                 else
                     port_avail_rc=$?
@@ -2243,7 +2243,7 @@ _containai_start_container() {
         local existing_ssh_port port_check_rc
         if existing_ssh_port=$(_cai_get_container_ssh_port "$container_name" "$selected_context"); then
             # Capture return code safely (set -e safe)
-            if _cai_is_port_available "$existing_ssh_port"; then
+            if _cai_is_port_available "$existing_ssh_port" "$selected_context"; then
                 port_check_rc=0
             else
                 port_check_rc=$?

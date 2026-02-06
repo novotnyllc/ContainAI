@@ -4347,6 +4347,33 @@ _containai_shell_cmd() {
         fi
     fi
 
+    # Auto-recover stopped containers whose SSH port is already taken.
+    # This mirrors _containai_start_container behavior for the shell code path.
+    if [[ "$fresh_flag" != "true" && "$reset_flag" != "true" ]]; then
+        local existing_state
+        if existing_state=$(DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" inspect --type container --format '{{.State.Status}}' -- "$resolved_container_name" 2>/dev/null); then
+            if [[ "$existing_state" == "exited" || "$existing_state" == "created" ]]; then
+                local existing_ssh_port port_check_rc
+                if existing_ssh_port=$(_cai_get_container_ssh_port "$resolved_container_name" "$selected_context"); then
+                    if _cai_is_port_available "$existing_ssh_port" "$selected_context"; then
+                        port_check_rc=0
+                    else
+                        port_check_rc=$?
+                    fi
+
+                    if [[ $port_check_rc -eq 1 ]]; then
+                        _cai_warn "SSH port $existing_ssh_port is in use by another container"
+                        _cai_info "Recreating container with a new SSH port allocation..."
+                        fresh_flag="true"
+                    elif [[ $port_check_rc -eq 2 ]]; then
+                        _cai_error "Cannot verify SSH port availability for container '$resolved_container_name'"
+                        return 1
+                    fi
+                fi
+            fi
+        fi
+    fi
+
     # Handle --fresh or --reset flag: remove and recreate container
     # Note: --reset has already regenerated workspace state values above
     if [[ "$fresh_flag" == "true" || "$reset_flag" == "true" ]]; then

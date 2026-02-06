@@ -962,14 +962,33 @@ _cai_allocate_ssh_port() {
 }
 
 # Check if a specific port is available (not in use)
-# Arguments: $1 = port number
+# Arguments: $1 = port number, $2 = docker context (optional)
 # Returns: 0=available, 1=in use, 2=cannot check
 _cai_is_port_available() {
     local port="$1"
+    local context="${2:-}"
     local used_ports line
 
     if [[ ! "$port" =~ ^[0-9]+$ ]]; then
         return 2
+    fi
+
+    # For explicit Docker contexts, check published ports in that daemon.
+    # This avoids relying on host-local ss output when Docker runs elsewhere.
+    if [[ -n "$context" ]]; then
+        local -a docker_cmd=()
+        docker_cmd=(env DOCKER_CONTEXT= DOCKER_HOST= docker --context "$context")
+
+        local published_ids
+        if ! published_ids=$("${docker_cmd[@]}" ps -q --filter "publish=${port}" 2>/dev/null); then
+            return 2
+        fi
+
+        if [[ -n "$published_ids" ]]; then
+            return 1
+        fi
+
+        return 0
     fi
 
     if ! used_ports=$(_cai_get_used_ports); then
