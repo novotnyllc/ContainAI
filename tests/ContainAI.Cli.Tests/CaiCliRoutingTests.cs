@@ -22,44 +22,48 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task RunCommand_UsesNativeRunRuntime()
+    public async Task RunCommand_UsesNativeLifecycleRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["run", "--fresh", "--detached", "echo", "ok"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
-        Assert.Single(runtime.RunCalls);
-        Assert.True(runtime.RunCalls[0].Fresh);
-        Assert.True(runtime.RunCalls[0].Detached);
-        Assert.Equal(["echo", "ok"], runtime.RunCalls[0].CommandArgs);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Empty(runtime.RunCalls);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["run", "--fresh", "--detached", "echo", "ok"], call));
     }
 
     [Fact]
-    public async Task ShellCommand_UsesNativeShellRuntime()
+    public async Task ShellCommand_UsesNativeLifecycleRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["shell", "--workspace", "/tmp/workspace"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.ShellExitCode, exitCode);
-        Assert.Single(runtime.ShellCalls);
-        Assert.Equal("/tmp/workspace", runtime.ShellCalls[0].Workspace);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Empty(runtime.ShellCalls);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["shell", "--workspace", "/tmp/workspace"], call));
     }
 
     [Fact]
-    public async Task ExecCommand_UsesNativeExecRuntime()
+    public async Task ExecCommand_UsesNativeLifecycleRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["exec", "ssh-target", "echo", "hi"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.ExecExitCode, exitCode);
-        Assert.Single(runtime.ExecCalls);
-        Assert.Equal(["ssh-target", "echo", "hi"], runtime.ExecCalls[0].CommandArgs);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Empty(runtime.ExecCalls);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["exec", "ssh-target", "echo", "hi"], call));
     }
 
     [Fact]
@@ -139,12 +143,11 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["mystery", "token"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
-        Assert.Collection(runtime.RunCalls, call =>
-        {
-            Assert.Empty(call.AdditionalArgs);
-            Assert.Equal(["mystery", "token"], call.CommandArgs);
-        });
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Empty(runtime.RunCalls);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["run", "mystery", "token"], call));
     }
 
     [Fact]
@@ -155,13 +158,11 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["--fresh", "/tmp/workspace"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
-        Assert.Collection(runtime.RunCalls, call =>
-        {
-            Assert.True(call.Fresh);
-            Assert.Empty(call.AdditionalArgs);
-            Assert.Equal(["/tmp/workspace"], call.CommandArgs);
-        });
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Empty(runtime.RunCalls);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["run", "--fresh", "/tmp/workspace"], call));
     }
 
     [Fact]
