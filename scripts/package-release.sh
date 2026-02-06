@@ -24,7 +24,7 @@
 #   ├── manifests/              # Per-agent manifest files (required by sync.sh)
 #   ├── templates/              # User templates
 #   ├── container/              # Container runtime assets (template wrapper Dockerfile)
-#   ├── acp-proxy               # AOT binary
+#   ├── cai                     # AOT binary
 #   ├── install.sh              # Installer (works locally)
 #   ├── VERSION                 # Version file
 #   └── LICENSE
@@ -174,15 +174,15 @@ if [[ ! -f "$PACKAGE_DIR/container/Dockerfile.template-system" ]]; then
     exit 1
 fi
 
-# Copy acp-proxy binary (must be pre-built)
-ACP_BINARY="$REPO_ROOT/artifacts/publish/acp-proxy/release_${DOTNET_RID}/acp-proxy"
-if [[ -f "$ACP_BINARY" ]]; then
-    printf '  Copying acp-proxy binary...\n'
-    cp "$ACP_BINARY" "$PACKAGE_DIR/acp-proxy"
-    chmod +x "$PACKAGE_DIR/acp-proxy"
+# Copy cai binary (must be pre-built)
+CAI_BINARY="$REPO_ROOT/artifacts/publish/cai/release_${DOTNET_RID}/cai"
+if [[ -f "$CAI_BINARY" ]]; then
+    printf '  Copying cai binary...\n'
+    cp "$CAI_BINARY" "$PACKAGE_DIR/cai"
+    chmod +x "$PACKAGE_DIR/cai"
 else
-    printf 'ERROR: acp-proxy binary not found at: %s\n' "$ACP_BINARY" >&2
-    printf '  Build it first: dotnet publish src/acp-proxy -r %s -c Release --self-contained\n' "$DOTNET_RID" >&2
+    printf 'ERROR: cai binary not found at: %s\n' "$CAI_BINARY" >&2
+    printf '  Build it first: dotnet publish src/cai -r %s -c Release --self-contained\n' "$DOTNET_RID" >&2
     exit 1
 fi
 
