@@ -587,10 +587,10 @@ ContainAI containers require specific configuration to function correctly:
 
 | Restriction | Reason |
 |-------------|--------|
-| Template `FROM` must resolve to a ContainAI image | Enforced by template build validation before wrapping |
+| Non-ContainAI `FROM` images must pass runtime invariant probes | Ensures required systemd/SSH/ContainAI runtime components exist |
 | Runtime `ENTRYPOINT`/`CMD`/`USER` are wrapper-enforced | Final runtime image always uses system defaults for reliable startup |
 
-**Note:** The template build now uses a system wrapper image, so your template can switch `USER` as needed for build steps. The runtime container still starts with system defaults.
+**Note:** ContainAI base images are still recommended. If you use another base image, template build probes required runtime invariants before wrapping.
 
 If you override these, ContainAI features (SSH, agent startup, import/export) will not work correctly.
 

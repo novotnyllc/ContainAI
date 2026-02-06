@@ -593,7 +593,7 @@ _cai_ensure_base_image() {
 # Outputs: Image name (stdout) on success: containai-template-{name}:local
 # Note: For dry-run mode, outputs TEMPLATE_BUILD_CMD=<commands> to stdout
 #       Commands are shell-escaped and include env var clearing prefix
-# Note: Template base must resolve to a ContainAI image family
+# Note: Non-ContainAI bases are allowed if invariant checks pass
 # Note: Prompts to pull base image if not present locally
 _cai_build_template() {
     local template_name="${1:-default}"
@@ -613,12 +613,24 @@ _cai_build_template() {
         return 1
     fi
 
-    # Template base must resolve to a ContainAI image before system wrapper build.
-    # We fail fast here to avoid producing images with missing runtime requirements.
+    # Classify template base.
+    # - ContainAI base patterns: trusted, skip extra probes.
+    # - Non-ContainAI/unresolved base: allowed, but requires runtime invariant probe.
+    # - Parse error (e.g., missing FROM): hard failure.
+    local base_validation_rc=0
+    local require_invariant_probe="false"
     if ! _cai_validate_template_base "$dockerfile_path" "$suppress_base_warning"; then
-        _cai_error "Template '$template_name' must be based on ContainAI images."
-        _cai_error "Allowed base patterns: containai:*, ghcr.io/novotnyllc/containai*, containai-template-*:local"
-        return 1
+        base_validation_rc=$?
+        if [[ $base_validation_rc -eq 2 ]]; then
+            _cai_error "Template '$template_name' has an invalid Dockerfile (failed to parse base image)"
+            return 1
+        fi
+        require_invariant_probe="true"
+    fi
+
+    if [[ "$require_invariant_probe" == "true" ]]; then
+        _cai_warn "Template '$template_name' is not using a recognized ContainAI base."
+        _cai_warn "Will validate runtime invariants after building the template stage."
     fi
 
     # Template directory is the build context (parent of Dockerfile)
@@ -632,6 +644,7 @@ _cai_build_template() {
     if ! build_image_tag=$(_cai_get_template_build_image_name "$template_name"); then
         return 1
     fi
+
     if ! image_tag=$(_cai_get_template_image_name "$template_name"); then
         return 1
     fi
@@ -711,6 +724,14 @@ _cai_build_template() {
         return 1
     fi
 
+    # For non-ContainAI bases, ensure the built image still meets required runtime invariants.
+    if [[ "$require_invariant_probe" == "true" ]]; then
+        if ! _cai_validate_template_image_invariants "$build_image_tag" "$docker_context"; then
+            _cai_error "Template '$template_name' does not satisfy required runtime invariants."
+            return 1
+        fi
+    fi
+
     # Build system wrapper (final runtime image)
     _cai_info "Building template '$template_name' (stage: system wrapper)..."
     if DOCKER_CONTEXT= DOCKER_HOST= "${wrapper_build_args[@]}" >/dev/null 2>&1; then
@@ -762,6 +783,55 @@ _cai_get_template_build_image_name() {
     fi
 
     printf '%s' "containai-template-build-${template_name}:local"
+}
+
+# Validate runtime invariants on a built template image.
+# This is used when template FROM is not a recognized ContainAI image pattern.
+# Args: image_tag [docker_context]
+# Returns: 0 if invariants pass, 1 if missing invariant, 2 for usage errors
+_cai_validate_template_image_invariants() {
+    local image_tag="${1:-}"
+    local docker_context="${2:-}"
+    local -a docker_cmd=(docker)
+    local -a failures=()
+
+    if [[ -z "$image_tag" ]]; then
+        _cai_error "Image tag required for invariant validation"
+        return 2
+    fi
+
+    if [[ -n "$docker_context" ]]; then
+        docker_cmd=(docker --context "$docker_context")
+    fi
+
+    # Ensure shell is available for probing.
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --entrypoint /bin/sh "$image_tag" -c 'exit 0' >/dev/null 2>&1; then
+        failures+=("missing usable /bin/sh for invariant probing")
+    fi
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --entrypoint /bin/sh "$image_tag" -c 'test -x /sbin/init' >/dev/null 2>&1; then
+        failures+=("missing executable /sbin/init")
+    fi
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --entrypoint /bin/sh "$image_tag" -c 'id -u agent >/dev/null 2>&1' >/dev/null 2>&1; then
+        failures+=("missing user 'agent'")
+    fi
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --entrypoint /bin/sh "$image_tag" -c 'command -v sshd >/dev/null 2>&1' >/dev/null 2>&1; then
+        failures+=("missing sshd binary")
+    fi
+    if ! DOCKER_CONTEXT= DOCKER_HOST= "${docker_cmd[@]}" run --rm --entrypoint /bin/sh "$image_tag" -c 'test -x /usr/local/lib/containai/init.sh' >/dev/null 2>&1; then
+        failures+=("missing /usr/local/lib/containai/init.sh")
+    fi
+
+    if [[ ${#failures[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    _cai_error "Runtime invariants failed for image '$image_tag':"
+    local failure
+    for failure in "${failures[@]}"; do
+        _cai_error "  - $failure"
+    done
+    _cai_error "Use a ContainAI base image, or install the missing components in your template."
+    return 1
 }
 
 # ==============================================================================

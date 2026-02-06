@@ -10,7 +10,7 @@
 #
 # IMPORTANT WARNINGS:
 # ------------------
-# 1. Keep FROM based on ContainAI images (enforced at build time)
+# 1. ContainAI bases are recommended; non-ContainAI bases must pass runtime invariants
 # 2. Runtime USER/ENTRYPOINT/CMD are enforced by the system wrapper image
 # 3. Use symlink pattern for services; do not run `systemctl enable` in Dockerfile
 #

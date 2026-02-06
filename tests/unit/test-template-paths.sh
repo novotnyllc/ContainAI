@@ -817,7 +817,7 @@ else
     test_fail "wrapper Dockerfile path invalid: $result"
 fi
 
-test_start "_cai_build_template dry-run rejects non-ContainAI base"
+test_start "_cai_build_template dry-run allows non-ContainAI base (invariants checked at build time)"
 setup_tmpdir
 _CAI_TEMPLATE_DIR="$TEST_TMPDIR/templates"
 mkdir -p "$TEST_TMPDIR/templates/custom"
@@ -825,9 +825,9 @@ cat > "$TEST_TMPDIR/templates/custom/Dockerfile" <<'EOF'
 FROM ubuntu:latest
 EOF
 if _cai_build_template "custom" "" "true" "true" >/dev/null 2>&1; then
-    test_fail "build should fail for non-ContainAI base"
-else
     test_pass
+else
+    test_fail "build dry-run should succeed for non-ContainAI base"
 fi
 teardown_tmpdir
 
@@ -844,6 +844,56 @@ else
     test_fail "build should succeed for ContainAI base"
 fi
 teardown_tmpdir
+
+test_start "_cai_validate_template_image_invariants passes when all probes succeed"
+MOCK_INVARIANTS_FAIL_MATCH=""
+docker() {
+    local -a args=("$@")
+    if [[ "${args[0]:-}" == "--context" ]]; then
+        args=("${args[@]:2}")
+    fi
+    if [[ "${args[0]:-}" != "run" ]]; then
+        return 1
+    fi
+    if [[ -n "$MOCK_INVARIANTS_FAIL_MATCH" ]]; then
+        local cmd="${args[*]}"
+        if [[ "$cmd" == *"$MOCK_INVARIANTS_FAIL_MATCH"* ]]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+if _cai_validate_template_image_invariants "containai-template-build-custom:local" "" >/dev/null 2>&1; then
+    test_pass
+else
+    test_fail "invariants should pass when probes succeed"
+fi
+unset -f docker
+
+test_start "_cai_validate_template_image_invariants fails when a required probe fails"
+MOCK_INVARIANTS_FAIL_MATCH="/sbin/init"
+docker() {
+    local -a args=("$@")
+    if [[ "${args[0]:-}" == "--context" ]]; then
+        args=("${args[@]:2}")
+    fi
+    if [[ "${args[0]:-}" != "run" ]]; then
+        return 1
+    fi
+    if [[ -n "$MOCK_INVARIANTS_FAIL_MATCH" ]]; then
+        local cmd="${args[*]}"
+        if [[ "$cmd" == *"$MOCK_INVARIANTS_FAIL_MATCH"* ]]; then
+            return 1
+        fi
+    fi
+    return 0
+}
+if _cai_validate_template_image_invariants "containai-template-build-custom:local" "" >/dev/null 2>&1; then
+    test_fail "invariants should fail when /sbin/init probe fails"
+else
+    test_pass
+fi
+unset -f docker
 
 # ==============================================================================
 # Test: _containai_parse_config extracts [template].suppress_base_warning
