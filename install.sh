@@ -982,8 +982,6 @@ show_setup_instructions() {
 }
 
 run_auto_setup() {
-    local cai_yes_value="$1"
-
     echo ""
     info "Running initial setup..."
     echo ""
@@ -1025,23 +1023,6 @@ run_auto_setup() {
             warn "Preflight dry-run reported issues; setup may still continue"
         fi
 
-        local proceed_setup="true"
-        if [[ "$cai_yes_value" != "1" ]]; then
-            if can_prompt; then
-                if ! prompt_confirm "Proceed with automatic 'cai setup' now? (may prompt for sudo password)" "true"; then
-                    proceed_setup="false"
-                fi
-            else
-                info "Non-interactive install: proceeding with automatic setup"
-            fi
-        fi
-
-        if [[ "$proceed_setup" != "true" ]]; then
-            info "Skipping setup."
-            show_setup_instructions
-            return
-        fi
-
         local rc=0
         CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup || rc=$?
         if [[ $rc -eq 0 ]]; then
@@ -1059,8 +1040,6 @@ run_auto_setup() {
 }
 
 run_auto_update() {
-    local cai_yes_value="$1"
-
     echo ""
     info "Updating existing installation..."
     echo ""
@@ -1075,11 +1054,7 @@ run_auto_update() {
     local cai_wrapper="$BIN_DIR/cai"
     if [[ -f "$cai_wrapper" ]]; then
         local rc=0
-        if [[ "$cai_yes_value" == "1" ]]; then
-            CAI_YES=1 "$bash_cmd" "$cai_wrapper" update || rc=$?
-        else
-            "$bash_cmd" "$cai_wrapper" update || rc=$?
-        fi
+        CAI_YES=1 "$bash_cmd" "$cai_wrapper" update || rc=$?
         if [[ $rc -eq 0 ]]; then
             success "Update completed successfully!"
         elif [[ $rc -eq 75 ]]; then
@@ -1138,31 +1113,10 @@ post_install() {
         return
     fi
 
-    local cai_yes_value=""
-
     if [[ "$IS_RERUN" == "true" ]]; then
-        if [[ -n "$YES_FLAG" ]]; then
-            cai_yes_value="1"
-            run_auto_update "$cai_yes_value"
-        elif can_prompt; then
-            echo ""
-            if prompt_confirm "Would you like to run 'cai update' now to update your environment?" "true"; then
-                cai_yes_value="1"
-                run_auto_update "$cai_yes_value"
-            else
-                info "Skipping update."
-                show_setup_instructions "update"
-            fi
-        else
-            info "Non-interactive install detected. Skipping automatic update."
-            info "To auto-run update, use: curl ... | bash -s -- --yes"
-            show_setup_instructions "update"
-        fi
+        run_auto_update
     else
-        if [[ -n "$YES_FLAG" ]]; then
-            cai_yes_value="1"
-        fi
-        run_auto_setup "$cai_yes_value"
+        run_auto_setup
     fi
 }
 

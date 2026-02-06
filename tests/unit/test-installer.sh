@@ -379,6 +379,37 @@ test_post_install_fresh_install_auto_runs_setup_noninteractive() {
     fi
 }
 
+test_post_install_rerun_auto_runs_update_without_prompt() {
+    test_start "post_install auto-runs update on rerun without prompting"
+
+    local run_auto_update_calls=0
+    local prompt_confirm_calls=0
+
+    run_auto_update() {
+        run_auto_update_calls=$((run_auto_update_calls + 1))
+    }
+    can_prompt() { return 0; }
+    prompt_confirm() {
+        prompt_confirm_calls=$((prompt_confirm_calls + 1))
+        return 1
+    }
+    show_setup_instructions() { :; }
+
+    IS_FRESH_INSTALL="false"
+    IS_RERUN="true"
+    NO_SETUP=""
+    YES_FLAG=""
+    BASH4_PATH=""
+
+    post_install >/dev/null 2>&1 || true
+
+    if [[ "$run_auto_update_calls" -eq 1 ]] && [[ "$prompt_confirm_calls" -eq 0 ]]; then
+        test_pass
+    else
+        test_fail "expected update auto-run once with no prompt, got update_calls=$run_auto_update_calls prompt_calls=$prompt_confirm_calls"
+    fi
+}
+
 source_installer
 test_detect_local_mode_source_checkout
 test_detect_os_ubuntu_mapping
@@ -389,6 +420,7 @@ test_install_from_local_copies_parse_toml
 test_package_release_script_copies_parse_toml
 test_run_auto_setup_invokes_dry_run_before_setup
 test_post_install_fresh_install_auto_runs_setup_noninteractive
+test_post_install_rerun_auto_runs_update_without_prompt
 
 printf '\nSummary: %s run, %s passed, %s failed\n' "$TESTS_RUN" "$TESTS_PASSED" "$TESTS_FAILED"
 if [[ "$TESTS_FAILED" -ne 0 ]]; then
