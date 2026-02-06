@@ -989,12 +989,53 @@ run_auto_setup() {
 
     local cai_wrapper="$BIN_DIR/cai"
     if [[ -x "$cai_wrapper" ]]; then
-        local rc=0
-        if [[ "$cai_yes_value" == "1" ]]; then
-            CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup || rc=$?
-        else
-            "$bash_cmd" "$cai_wrapper" setup || rc=$?
+        local os
+        os="$(detect_os)"
+
+        info "Setup preflight (no privileged changes yet):"
+        case "$os" in
+            ubuntu | debian)
+                echo "  - Install required dependencies (apt packages)"
+                echo "  - Install/verify Sysbox runtime"
+                echo "  - Create/update isolated Docker daemon and 'containai-docker' context"
+                ;;
+            macos)
+                echo "  - Install/verify Lima and VM dependencies"
+                echo "  - Configure isolated Docker/Sysbox environment in Lima VM"
+                echo "  - Create/update 'containai-docker' context"
+                ;;
+            *)
+                echo "  - Install required dependencies"
+                echo "  - Configure secure container isolation"
+                echo "  - Create/update isolated Docker context"
+                ;;
+        esac
+        echo "  - Configure ContainAI SSH/completions as needed"
+        echo ""
+        info "Detailed setup dry-run:"
+        if ! "$bash_cmd" "$cai_wrapper" setup --dry-run --verbose; then
+            warn "Preflight dry-run reported issues; setup may still continue"
         fi
+
+        local proceed_setup="true"
+        if [[ "$cai_yes_value" != "1" ]]; then
+            if can_prompt; then
+                if ! prompt_confirm "Proceed with automatic 'cai setup' now? (may prompt for sudo password)" "true"; then
+                    proceed_setup="false"
+                fi
+            else
+                info "Non-interactive install: proceeding with automatic setup"
+            fi
+        fi
+
+        if [[ "$proceed_setup" != "true" ]]; then
+            info "Skipping setup."
+            show_setup_instructions
+            return
+        fi
+
+        local rc=0
+        CAI_YES=1 "$bash_cmd" "$cai_wrapper" setup || rc=$?
         if [[ $rc -eq 0 ]]; then
             success "Setup completed successfully!"
         elif [[ $rc -eq 75 ]]; then
@@ -1112,21 +1153,8 @@ post_install() {
     else
         if [[ -n "$YES_FLAG" ]]; then
             cai_yes_value="1"
-            run_auto_setup "$cai_yes_value"
-        elif can_prompt; then
-            echo ""
-            if prompt_confirm "Would you like to run 'cai setup' now to configure your environment?" "true"; then
-                cai_yes_value="1"
-                run_auto_setup "$cai_yes_value"
-            else
-                info "Skipping setup."
-                show_setup_instructions
-            fi
-        else
-            info "Non-interactive install detected. Skipping automatic setup."
-            info "To auto-run setup, use: curl ... | bash -s -- --yes"
-            show_setup_instructions
         fi
+        run_auto_setup "$cai_yes_value"
     fi
 }
 

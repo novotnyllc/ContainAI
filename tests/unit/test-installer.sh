@@ -237,12 +237,90 @@ EOF
     rm -rf "$tmpdir"
 }
 
+test_run_auto_setup_invokes_dry_run_before_setup() {
+    test_start "run_auto_setup runs setup dry-run preflight before setup"
+    local tmpdir orig_path log_file
+    tmpdir="$(mktemp -d)"
+    orig_path="$PATH"
+    log_file="$tmpdir/cai-calls.log"
+    mkdir -p "$tmpdir/bin"
+
+    cat >"$tmpdir/bin/cai" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "__LOG_FILE__"
+if [[ "${1:-}" == "setup" && "${2:-}" == "--dry-run" ]]; then
+    exit 0
+fi
+if [[ "${1:-}" == "setup" ]]; then
+    exit 0
+fi
+exit 1
+EOF
+    chmod +x "$tmpdir/bin/cai"
+    sed -i "s|__LOG_FILE__|$log_file|g" "$tmpdir/bin/cai"
+
+    BIN_DIR="$tmpdir/bin"
+    BASH4_PATH=""
+    YES_FLAG="1"
+
+    PATH="$tmpdir/bin:$orig_path"
+    if run_auto_setup "1" >/dev/null 2>&1; then
+        :
+    else
+        PATH="$orig_path"
+        rm -rf "$tmpdir"
+        test_fail "run_auto_setup returned non-zero"
+        return
+    fi
+    PATH="$orig_path"
+
+    local first_call second_call
+    first_call="$(sed -n '1p' "$log_file" 2>/dev/null || true)"
+    second_call="$(sed -n '2p' "$log_file" 2>/dev/null || true)"
+
+    if [[ "$first_call" == "setup --dry-run --verbose" ]] && [[ "$second_call" == "setup" ]]; then
+        test_pass
+    else
+        test_fail "expected calls ['setup --dry-run --verbose','setup'], got ['$first_call','$second_call']"
+    fi
+
+    rm -rf "$tmpdir"
+}
+
+test_post_install_fresh_install_auto_runs_setup_noninteractive() {
+    test_start "post_install auto-runs setup for fresh install in non-interactive mode"
+
+    local run_auto_setup_calls=0
+    run_auto_setup() {
+        run_auto_setup_calls=$((run_auto_setup_calls + 1))
+    }
+    can_prompt() { return 1; }
+    show_setup_instructions() { :; }
+
+    IS_FRESH_INSTALL="true"
+    IS_RERUN=""
+    NO_SETUP=""
+    YES_FLAG=""
+    BASH4_PATH=""
+
+    post_install >/dev/null 2>&1 || true
+
+    if [[ "$run_auto_setup_calls" -eq 1 ]]; then
+        test_pass
+    else
+        test_fail "expected post_install to call run_auto_setup once, got $run_auto_setup_calls"
+    fi
+}
+
 source_installer
 test_detect_local_mode_source_checkout
 test_detect_os_ubuntu_mapping
 test_check_docker_context_fallback
 test_check_docker_no_containai_context_no_warning
 test_build_local_native_artifacts_source_checkout_uses_debug
+test_run_auto_setup_invokes_dry_run_before_setup
+test_post_install_fresh_install_auto_runs_setup_noninteractive
 
 printf '\nSummary: %s run, %s passed, %s failed\n' "$TESTS_RUN" "$TESTS_PASSED" "$TESTS_FAILED"
 if [[ "$TESTS_FAILED" -ne 0 ]]; then
