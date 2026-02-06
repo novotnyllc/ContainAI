@@ -23,6 +23,7 @@
 #   ├── parse-toml.py           # TOML parser runtime dependency
 #   ├── manifests/              # Per-agent manifest files (required by sync.sh)
 #   ├── templates/              # User templates
+#   ├── container/              # Container runtime assets (template wrapper Dockerfile)
 #   ├── acp-proxy               # AOT binary
 #   ├── install.sh              # Installer (works locally)
 #   ├── VERSION                 # Version file
@@ -128,6 +129,7 @@ mkdir -p "$PACKAGE_DIR/lib"
 mkdir -p "$PACKAGE_DIR/scripts"
 mkdir -p "$PACKAGE_DIR/templates"
 mkdir -p "$PACKAGE_DIR/manifests"
+mkdir -p "$PACKAGE_DIR/container"
 
 # Copy main CLI entry point
 printf '  Copying containai.sh...\n'
@@ -159,6 +161,17 @@ cp "$SRC_DIR/manifests/"*.toml "$PACKAGE_DIR/manifests/"
 printf '  Copying templates/...\n'
 if [[ -d "$SRC_DIR/templates" ]]; then
     cp -r "$SRC_DIR/templates/"* "$PACKAGE_DIR/templates/" 2>/dev/null || true
+fi
+
+# Copy container runtime assets
+printf '  Copying container/...\n'
+if [[ -d "$SRC_DIR/container" ]]; then
+    cp -r "$SRC_DIR/container/"* "$PACKAGE_DIR/container/" 2>/dev/null || true
+fi
+
+if [[ ! -f "$PACKAGE_DIR/container/Dockerfile.template-system" ]]; then
+    printf 'ERROR: required container runtime file missing: %s/container/Dockerfile.template-system\n' "$SRC_DIR" >&2
+    exit 1
 fi
 
 # Copy acp-proxy binary (must be pre-built)

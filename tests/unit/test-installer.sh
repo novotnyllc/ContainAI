@@ -246,7 +246,7 @@ test_install_from_local_copies_parse_toml() {
     install_dir="$tmpdir/install"
     bin_dir="$tmpdir/bin"
 
-    mkdir -p "$source_dir/lib" "$source_dir/scripts" "$source_dir/manifests" "$source_dir/templates"
+    mkdir -p "$source_dir/lib" "$source_dir/scripts" "$source_dir/manifests" "$source_dir/templates" "$source_dir/container"
     mkdir -p "$bin_dir"
 
     cat >"$source_dir/containai.sh" <<'EOF'
@@ -272,6 +272,10 @@ EOF
 print("{}")
 EOF
 
+    cat >"$source_dir/container/Dockerfile.template-system" <<'EOF'
+FROM scratch
+EOF
+
     INSTALL_DIR="$install_dir"
     BIN_DIR="$bin_dir"
     IS_FRESH_INSTALL=""
@@ -294,6 +298,67 @@ EOF
     rm -rf "$tmpdir"
 }
 
+test_install_from_local_copies_template_system_wrapper() {
+    test_start "install_from_local copies template system wrapper Dockerfile"
+
+    local tmpdir source_dir install_dir bin_dir
+    tmpdir="$(mktemp -d)"
+    source_dir="$tmpdir/source"
+    install_dir="$tmpdir/install"
+    bin_dir="$tmpdir/bin"
+
+    mkdir -p "$source_dir/lib" "$source_dir/scripts" "$source_dir/manifests" "$source_dir/templates" "$source_dir/container"
+    mkdir -p "$bin_dir"
+
+    cat >"$source_dir/containai.sh" <<'EOF'
+#!/usr/bin/env bash
+EOF
+    chmod +x "$source_dir/containai.sh"
+
+    cat >"$source_dir/lib/core.sh" <<'EOF'
+#!/usr/bin/env bash
+EOF
+
+    cat >"$source_dir/scripts/parse-manifest.sh" <<'EOF'
+#!/usr/bin/env bash
+EOF
+    chmod +x "$source_dir/scripts/parse-manifest.sh"
+
+    cat >"$source_dir/manifests/00-common.toml" <<'EOF'
+[tools]
+EOF
+
+    cat >"$source_dir/parse-toml.py" <<'EOF'
+#!/usr/bin/env python3
+print("{}")
+EOF
+
+    cat >"$source_dir/container/Dockerfile.template-system" <<'EOF'
+FROM scratch
+EOF
+
+    INSTALL_DIR="$install_dir"
+    BIN_DIR="$bin_dir"
+    IS_FRESH_INSTALL=""
+    IS_RERUN=""
+
+    if install_from_local "$source_dir" "tarball" >/dev/null 2>&1; then
+        :
+    else
+        rm -rf "$tmpdir"
+        test_fail "install_from_local returned non-zero"
+        return
+    fi
+
+    if [[ -f "$install_dir/container/Dockerfile.template-system" ]]; then
+        test_pass
+    else
+        test_fail "expected container/Dockerfile.template-system in install dir"
+    fi
+
+    rm -rf "$tmpdir"
+}
+
 test_install_from_local_removes_stale_git_metadata() {
     test_start "install_from_local removes stale .git metadata from install dir"
 
@@ -303,7 +368,7 @@ test_install_from_local_removes_stale_git_metadata() {
     install_dir="$tmpdir/install"
     bin_dir="$tmpdir/bin"
 
-    mkdir -p "$source_dir/lib" "$source_dir/scripts" "$source_dir/manifests" "$source_dir/templates"
+    mkdir -p "$source_dir/lib" "$source_dir/scripts" "$source_dir/manifests" "$source_dir/templates" "$source_dir/container"
     mkdir -p "$install_dir/.git" "$bin_dir"
 
     cat >"$source_dir/containai.sh" <<'EOF'
@@ -327,6 +392,10 @@ EOF
     cat >"$source_dir/parse-toml.py" <<'EOF'
 #!/usr/bin/env python3
 print("{}")
+EOF
+
+    cat >"$source_dir/container/Dockerfile.template-system" <<'EOF'
+FROM scratch
 EOF
 
     # Mark target as update path and include stale metadata.
@@ -363,6 +432,15 @@ test_package_release_script_copies_parse_toml() {
         test_pass
     else
         test_fail "scripts/package-release.sh does not copy parse-toml.py"
+    fi
+}
+
+test_package_release_script_copies_template_system_wrapper() {
+    test_start "package-release script includes template system wrapper in tarball payload"
+    if grep -q 'cp -r "\$SRC_DIR/container/"\* "\$PACKAGE_DIR/container/"' "$REPO_ROOT/scripts/package-release.sh"; then
+        test_pass
+    else
+        test_fail "scripts/package-release.sh does not copy container runtime assets"
     fi
 }
 
@@ -480,8 +558,10 @@ test_check_docker_context_fallback
 test_check_docker_no_containai_context_no_warning
 test_build_local_native_artifacts_source_checkout_uses_debug
 test_install_from_local_copies_parse_toml
+test_install_from_local_copies_template_system_wrapper
 test_install_from_local_removes_stale_git_metadata
 test_package_release_script_copies_parse_toml
+test_package_release_script_copies_template_system_wrapper
 test_run_auto_setup_invokes_dry_run_before_setup
 test_post_install_fresh_install_auto_runs_setup_noninteractive
 test_post_install_rerun_auto_runs_update_without_prompt

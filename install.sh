@@ -699,7 +699,7 @@ install_from_local() {
 
         # For updates, wipe the runtime directories to remove stale files
         # Keep the install dir itself but remove subdirs we manage
-        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" "${INSTALL_DIR:?}/manifests" 2>/dev/null || true
+        rm -rf "${INSTALL_DIR:?}/lib" "${INSTALL_DIR:?}/scripts" "${INSTALL_DIR:?}/templates" "${INSTALL_DIR:?}/manifests" "${INSTALL_DIR:?}/container" 2>/dev/null || true
 
         # Local installer-managed installs are not git worktrees.
         # Remove stale git metadata from previous install modes so
@@ -716,6 +716,7 @@ install_from_local() {
     mkdir -p "$INSTALL_DIR/scripts"
     mkdir -p "$INSTALL_DIR/templates"
     mkdir -p "$INSTALL_DIR/manifests"
+    mkdir -p "$INSTALL_DIR/container"
 
     # Copy files from tarball to install directory
     info "Copying files..."
@@ -753,6 +754,17 @@ install_from_local() {
     # Templates
     if [[ -d "$source_dir/templates" ]]; then
         cp -r "$source_dir/templates/"* "$INSTALL_DIR/templates/" 2>/dev/null || true
+    fi
+
+    # Container runtime assets (template wrapper Dockerfile and related files)
+    if [[ -d "$source_dir/container" ]]; then
+        cp -r "$source_dir/container/"* "$INSTALL_DIR/container/" 2>/dev/null || true
+    fi
+
+    if [[ ! -f "$INSTALL_DIR/container/Dockerfile.template-system" ]]; then
+        error "Required runtime file missing: $source_dir/container/Dockerfile.template-system"
+        error "This file is required for template builds. Reinstall from a complete package."
+        exit 1
     fi
 
     # ACP proxy binary
