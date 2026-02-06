@@ -103,6 +103,18 @@ _cai_is_nested_container() {
     _cai_is_container
 }
 
+# Determine the environment where network rules should be managed.
+# Returns: "nested", "lima", or "host" via stdout.
+_cai_detect_network_config_env() {
+    if _cai_is_nested_container; then
+        printf '%s' "nested"
+    elif _cai_is_macos; then
+        printf '%s' "lima"
+    else
+        printf '%s' "host"
+    fi
+}
+
 # Check if iptables is functional in a nested container environment
 # Sysbox containers virtualize the kernel and may not support full iptables
 # runc containers with NET_ADMIN capability have full iptables support
@@ -341,11 +353,15 @@ _cai_iptables_available() {
             return 1
         fi
         local vm_name="${_CAI_LIMA_VM_NAME:-containai-docker}"
-        # Use machine-parseable format to check VM status
-        # Match specific VM name and Running status to avoid false positives
+        # Check VM status. Prefer --format and fall back to --json for Lima
+        # versions that do not support the format flag consistently.
         local vm_status
-        vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | awk -F'\t' -v name="$vm_name" '$1 == name {print $2}') || vm_status=""
-        if [[ "$vm_status" != "Running" ]]; then
+        vm_status=$(limactl list --format '{{.Name}}\t{{.Status}}' 2>/dev/null | grep "^${vm_name}[[:space:]]" | cut -f2 | head -1) || vm_status=""
+        if [[ -z "$vm_status" ]]; then
+            vm_status=$(limactl list --json 2>/dev/null | grep -o "\"name\":[ ]*\"$vm_name\"[^}]*\"status\":[ ]*\"[^\"]*\"" | sed 's/.*"status":[ ]*"\([^"]*\)".*/\1/' | head -1) || vm_status=""
+        fi
+        vm_status=$(printf '%s' "$vm_status" | tr -d '\r' | awk '{print $1}')
+        if [[ "${vm_status,,}" != "running" ]]; then
             return 1
         fi
         # Check if any iptables-compatible binary is available inside the VM.
@@ -635,7 +651,10 @@ _cai_apply_network_rules() {
         fi
     fi
 
-    # Get network configuration
+    # Get network configuration.
+    # Set environment marker before command substitution, otherwise globals from
+    # _cai_get_network_config are lost in the subshell.
+    _CAI_NETWORK_CONFIG_ENV="$(_cai_detect_network_config_env)"
     if ! config=$(_cai_get_network_config); then
         return 1
     fi
@@ -800,7 +819,10 @@ _cai_remove_network_rules() {
         fi
     fi
 
-    # Get network configuration
+    # Get network configuration.
+    # Set environment marker before command substitution, otherwise globals from
+    # _cai_get_network_config are lost in the subshell.
+    _CAI_NETWORK_CONFIG_ENV="$(_cai_detect_network_config_env)"
     if ! config=$(_cai_get_network_config); then
         return 1
     fi
@@ -905,7 +927,10 @@ _cai_check_network_rules() {
 
     _CAI_NETWORK_RULES_STATUS=""
 
-    # Get network configuration
+    # Get network configuration.
+    # Set environment marker before command substitution, otherwise globals from
+    # _cai_get_network_config are lost in the subshell.
+    _CAI_NETWORK_CONFIG_ENV="$(_cai_detect_network_config_env)"
     if ! config=$(_cai_get_network_config); then
         _CAI_NETWORK_RULES_STATUS="config_failed"
         return 1
@@ -1056,7 +1081,10 @@ _cai_network_doctor_status() {
         fi
     fi
 
-    # Get network configuration
+    # Get network configuration.
+    # Set environment marker before command substitution, otherwise globals from
+    # _cai_get_network_config are lost in the subshell.
+    _CAI_NETWORK_CONFIG_ENV="$(_cai_detect_network_config_env)"
     if ! config=$(_cai_get_network_config 2>/dev/null); then
         _CAI_NETWORK_DOCTOR_DETAIL="Failed to detect network configuration"
         _CAI_NETWORK_DOCTOR_STATUS="error"
