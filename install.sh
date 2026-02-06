@@ -726,9 +726,17 @@ install_from_local() {
     # Shell libraries
     cp "$source_dir/lib/"*.sh "$INSTALL_DIR/lib/"
 
-    # Runtime scripts (only parse-manifest.sh)
+    # Runtime scripts (parse-manifest.sh + parse-toml.py)
     cp "$source_dir/scripts/parse-manifest.sh" "$INSTALL_DIR/scripts/"
     chmod +x "$INSTALL_DIR/scripts/parse-manifest.sh"
+
+    # TOML parser runtime dependency (used by lib/config.sh workspace/config operations)
+    if [[ ! -f "$source_dir/parse-toml.py" ]]; then
+        error "Required runtime file missing: $source_dir/parse-toml.py"
+        exit 1
+    fi
+    cp "$source_dir/parse-toml.py" "$INSTALL_DIR/parse-toml.py"
+    chmod +x "$INSTALL_DIR/parse-toml.py"
 
     # Manifests directory
     if ! compgen -G "$source_dir/manifests/*.toml" >/dev/null; then

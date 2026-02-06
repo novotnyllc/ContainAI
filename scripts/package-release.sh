@@ -20,6 +20,7 @@
 #   ├── lib/                    # Shell libraries
 #   ├── scripts/
 #   │   └── parse-manifest.sh   # ONLY this runtime script
+#   ├── parse-toml.py           # TOML parser runtime dependency
 #   ├── manifests/              # Per-agent manifest files (required by sync.sh)
 #   ├── templates/              # User templates
 #   ├── acp-proxy               # AOT binary
@@ -137,10 +138,14 @@ chmod +x "$PACKAGE_DIR/containai.sh"
 printf '  Copying lib/...\n'
 cp "$SRC_DIR/lib/"*.sh "$PACKAGE_DIR/lib/"
 
-# Copy ONLY parse-manifest.sh (runtime dependency of sync.sh)
+# Copy parse-manifest.sh and parse-toml.py runtime dependencies
 printf '  Copying scripts/parse-manifest.sh...\n'
 cp "$SRC_DIR/scripts/parse-manifest.sh" "$PACKAGE_DIR/scripts/"
 chmod +x "$PACKAGE_DIR/scripts/parse-manifest.sh"
+
+printf '  Copying parse-toml.py...\n'
+cp "$SRC_DIR/parse-toml.py" "$PACKAGE_DIR/parse-toml.py"
+chmod +x "$PACKAGE_DIR/parse-toml.py"
 
 # Copy manifests directory (runtime dependency of sync.sh)
 printf '  Copying manifests/...\n'
