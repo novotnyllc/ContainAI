@@ -43,13 +43,10 @@ export PATH="$SCRIPT_DIR:$PATH"
 
 # Proxy command resolution
 PROXY_CAI_BIN="$SRC_DIR/bin/cai"
-PROXY_LEGACY_BIN="$SRC_DIR/bin/acp-proxy"
 PROXY_CMD=()
 
 if [[ -x "$PROXY_CAI_BIN" ]]; then
     PROXY_CMD=("$PROXY_CAI_BIN" "acp" "proxy")
-elif [[ -x "$PROXY_LEGACY_BIN" ]]; then
-    PROXY_CMD=("$PROXY_LEGACY_BIN" "proxy")
 else
     PROXY_CMD=("dotnet" "run" "--project" "$SRC_DIR/cai" "--" "acp" "proxy")
 fi
@@ -287,8 +284,8 @@ check_prerequisites() {
     pass "mock-acp-server is executable"
 
     # Check proxy command source is available
-    if [[ ! -x "$PROXY_CAI_BIN" && ! -x "$PROXY_LEGACY_BIN" ]] && ! command -v dotnet >/dev/null 2>&1; then
-        fail "No ACP proxy command source found (missing src/bin/cai, src/bin/acp-proxy, and dotnet)"
+    if [[ ! -x "$PROXY_CAI_BIN" ]] && ! command -v dotnet >/dev/null 2>&1; then
+        fail "No ACP proxy command source found (missing src/bin/cai and dotnet)"
         info "Build with: dotnet publish src/cai -r linux-x64 -c Release --self-contained"
         exit 1
     fi

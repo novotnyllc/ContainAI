@@ -571,19 +571,18 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | docker --context containai-docker login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
 
-      - name: Smoke test acp-proxy binary
+      - name: Smoke test ACP proxy command
         run: |
-          ACP_PROXY="$HOME/.local/share/containai/acp-proxy"
-          if [[ -f "$ACP_PROXY" ]]; then
-            echo "Testing acp-proxy binary..."
-            if "$ACP_PROXY" --help >/dev/null 2>&1; then
-              echo "acp-proxy binary works"
+          if command -v cai >/dev/null 2>&1; then
+            echo "Testing cai acp proxy command..."
+            if cai acp proxy --help >/dev/null 2>&1; then
+              echo "cai acp proxy works"
             else
-              echo "::error::acp-proxy binary failed to run (may be glibc incompatibility)"
+              echo "::error::cai acp proxy command failed"
               exit 1
             fi
           else
-            echo "::error::acp-proxy binary not found at $ACP_PROXY"
+            echo "::error::cai binary not found on PATH"
             exit 1
           fi
 
