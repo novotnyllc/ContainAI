@@ -35,8 +35,5 @@ internal static class CommandCatalog
         "help",
         "--help",
         "-h",
-        "version",
-        "--version",
-        "-v",
     };
 }

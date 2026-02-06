@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/ContainAI.Acp/ContainAI.Acp.csproj" />
+    <ProjectReference Include="../../src/cai/cai.csproj" />
   </ItemGroup>
 
 </Project>

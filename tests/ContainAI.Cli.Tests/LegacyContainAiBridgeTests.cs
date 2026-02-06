@@ -48,6 +48,34 @@ containai() {
         }
     }
 
+    [Fact]
+    public async Task InvokeAsync_WhenResolverThrows_PropagatesFailure()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var expected = new FileNotFoundException("missing containai.sh");
+        var resolver = new ThrowingScriptResolver(expected);
+        var bridge = new LegacyContainAiBridge(resolver);
+
+        var exception = await Assert.ThrowsAsync<FileNotFoundException>(
+            () => bridge.InvokeAsync(["run"], cancellationToken));
+
+        Assert.Same(expected, exception);
+        Assert.Equal(1, resolver.CallCount);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WhenResolverReturnsMissingScript_ReturnsNonZeroExitCode()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var missingScriptPath = Path.Combine(Path.GetTempPath(), $"missing-containai-{Guid.NewGuid():N}.sh");
+        var resolver = new StaticScriptResolver(missingScriptPath);
+        var bridge = new LegacyContainAiBridge(resolver);
+
+        var exitCode = await bridge.InvokeAsync(["run"], cancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+    }
+
     private sealed class StaticScriptResolver : IContainAiScriptResolver
     {
         private readonly string _scriptPath;
@@ -58,5 +86,23 @@ containai() {
         }
 
         public string ResolveScriptPath() => _scriptPath;
+    }
+
+    private sealed class ThrowingScriptResolver : IContainAiScriptResolver
+    {
+        private readonly Exception _exception;
+
+        public ThrowingScriptResolver(Exception exception)
+        {
+            _exception = exception;
+        }
+
+        public int CallCount { get; private set; }
+
+        public string ResolveScriptPath()
+        {
+            CallCount++;
+            throw _exception;
+        }
     }
 }

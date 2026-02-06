@@ -129,6 +129,79 @@ Root commands and subcommands:
 5. Merge target:
    All stream PRs merge into orchestrator integration branch first; only orchestrator merges to `main`.
 
+### Orchestrator Runbook (Concrete Commands)
+1. Branch/worktree naming convention:
+   - Orchestrator branch: `orchestrator/cai-nativeaot-phase1`
+   - Stream branches: `stream/a-cli-kernel`, `stream/b-runtime-core`, `stream/c-lifecycle-data`, `stream/d-acp`, `stream/e-tests`, `stream/f-docs-ci`
+   - Worktree roots: `/home/agent/worktrees/containai-native/a-cli-kernel` through `/home/agent/worktrees/containai-native/f-docs-ci`
+2. Create orchestrator branch and stream worktrees:
+   ```bash
+   git fetch origin
+   git switch main
+   git pull --ff-only origin main
+   git switch -c orchestrator/cai-nativeaot-phase1
+
+   git worktree add /home/agent/worktrees/containai-native/a-cli-kernel -b stream/a-cli-kernel origin/main
+   git worktree add /home/agent/worktrees/containai-native/b-runtime-core -b stream/b-runtime-core origin/main
+   git worktree add /home/agent/worktrees/containai-native/c-lifecycle-data -b stream/c-lifecycle-data origin/main
+   git worktree add /home/agent/worktrees/containai-native/d-acp -b stream/d-acp origin/main
+   git worktree add /home/agent/worktrees/containai-native/e-tests -b stream/e-tests origin/main
+   git worktree add /home/agent/worktrees/containai-native/f-docs-ci -b stream/f-docs-ci origin/main
+   ```
+3. Ownership boundaries (hard guardrails):
+   | Stream | Owned Paths |
+   | --- | --- |
+   | A | `src/cai/**`, `src/ContainAI.Cli/**`, `src/ContainAI.Cli.Abstractions/**`, shared command composition seams |
+   | B | runtime/docker command handlers and adapters touched by `run/shell/exec/docker/setup/validate` |
+   | C | lifecycle/config/data command handlers touched by `import/export/sync/stop/status/gc/ssh/links/config/template/update/refresh/uninstall` |
+   | D | `src/ContainAI.Acp/**`, ACP wiring in `src/cai/**` |
+   | E | `tests/**`, test fixtures/infrastructure used by migrated test suites |
+   | F | `docs/**` and `.github/workflows/**` only when needed for CI/release wiring |
+4. Ownership boundary check command (run in each stream worktree before opening/updating PR):
+   ```bash
+   git diff --name-only origin/main...HEAD
+   ```
+   Every listed file must match that stream's owned paths.
+5. Subagent execution pattern (one implementation pass, then two review passes):
+   ```bash
+   codex exec --cwd /home/agent/worktrees/containai-native/b-runtime-core "Implement Stream B scope from docs/cai-dotnet10-nativeaot-migration-plan.md, stay within ownership boundaries, run relevant tests, and commit."
+   codex exec --cwd /home/agent/worktrees/containai-native/b-runtime-core "Review Stream B for correctness/regression risks only; report blocking findings first."
+   codex exec --cwd /home/agent/worktrees/containai-native/b-runtime-core "Review Stream B for architecture/factoring quality only; report blocking findings first."
+   ```
+6. PR creation and mandatory review gates (per stream branch):
+   ```bash
+   gh pr create --base orchestrator/cai-nativeaot-phase1 --head stream/b-runtime-core --title "Stream B: runtime + docker core" --body "Implements Stream B scope from the migration plan."
+   gh pr edit <pr-number> --add-reviewer <correctness-reviewer> --add-reviewer <architecture-reviewer>
+   gh pr checks <pr-number> --watch
+   gh pr view <pr-number> --comments
+   ```
+   Required gate to merge a stream PR:
+   - CI checks required by branch protection are green.
+   - Correctness/regression reviewer approves.
+   - Architecture/factoring reviewer approves.
+   - No unresolved blocking review findings.
+   - Parity checklist entries for the stream are updated.
+7. Merge order and rebase choreography:
+   ```bash
+   # 1) Merge A into orchestrator first.
+   gh pr merge <pr-A> --squash --delete-branch
+
+   # 2) Rebase B/C/D stream branches onto orchestrator after A lands.
+   git -C /home/agent/worktrees/containai-native/b-runtime-core fetch origin
+   git -C /home/agent/worktrees/containai-native/b-runtime-core rebase origin/orchestrator/cai-nativeaot-phase1
+   git -C /home/agent/worktrees/containai-native/c-lifecycle-data fetch origin
+   git -C /home/agent/worktrees/containai-native/c-lifecycle-data rebase origin/orchestrator/cai-nativeaot-phase1
+   git -C /home/agent/worktrees/containai-native/d-acp fetch origin
+   git -C /home/agent/worktrees/containai-native/d-acp rebase origin/orchestrator/cai-nativeaot-phase1
+
+   # 3) Merge B/C/D (order can vary once rebased and green), then E, then F.
+   gh pr merge <pr-B> --squash --delete-branch
+   gh pr merge <pr-C> --squash --delete-branch
+   gh pr merge <pr-D> --squash --delete-branch
+   gh pr merge <pr-E> --squash --delete-branch
+   gh pr merge <pr-F> --squash --delete-branch
+   ```
+
 ### Behavior-Parity and Undocumented Feature Capture
 1. Build a parity inventory from:
    `src/containai.sh`, all `src/lib/*.sh`, current help text, completion behavior, integration/unit tests, and CLI docs.
@@ -181,3 +254,28 @@ Work continues until all are true:
 6. Required review-agent findings are resolved.
 7. slopwatch and CRAP/coverage gates pass.
 8. Orchestrator branch passes full validation and is merged to `main`.
+
+### Completion Loop (Operational Definition of "Keep Going Until Done")
+1. Treat this as a blocking checklist, not a status summary.
+2. Re-run the same loop until every completion criterion is true:
+   ```bash
+   # In orchestrator worktree
+   git fetch origin
+   git switch orchestrator/cai-nativeaot-phase1
+   git pull --ff-only origin orchestrator/cai-nativeaot-phase1
+
+   # Full validation gates
+   dotnet build
+   dotnet test
+   ./tests/integration/test-secure-engine.sh
+   ./tests/integration/test-sync-integration.sh
+   ./tests/integration/test-dind.sh
+
+   # PR/review/CI state inspection
+   gh pr list --base orchestrator/cai-nativeaot-phase1 --state open
+   ```
+3. If any criterion fails, create follow-up stream work, re-run review gates, and repeat the loop.
+4. Stop only when:
+   - Criteria 1-8 above are all satisfied.
+   - No open blocking PRs remain against `orchestrator/cai-nativeaot-phase1`.
+   - The orchestrator PR to `main` is merged.

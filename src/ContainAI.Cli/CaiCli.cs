@@ -5,6 +5,8 @@ namespace ContainAI.Cli;
 
 public static class CaiCli
 {
+    private static readonly RootCommandBuilder RootCommandBuilder = new();
+
     public static async Task<int> RunAsync(
         string[] args,
         ICaiCommandRuntime runtime,
@@ -20,8 +22,13 @@ public static class CaiCli
 
         if (args[0] == "--acp")
         {
-            var agent = args.Length > 1 ? args[1] : "claude";
-            return await runtime.RunAcpProxyAsync(agent, cancellationToken);
+            var translated = new List<string>(capacity: args.Length + 1)
+            {
+                "acp",
+                "proxy",
+            };
+            translated.AddRange(args.Skip(1));
+            args = translated.ToArray();
         }
 
         var normalizedArgs = NormalizeRootAliases(args);
@@ -31,80 +38,14 @@ public static class CaiCli
         }
 
         var root = CreateRootCommand(runtime);
-        return await root.Parse(normalizedArgs).InvokeAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        return await root.Parse(normalizedArgs).InvokeAsync(new InvocationConfiguration(), cancellationToken);
     }
 
     public static RootCommand CreateRootCommand(ICaiCommandRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
-
-        var root = new RootCommand("ContainAI native CLI")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
-
-        root.SetAction((_, cancellationToken) => runtime.RunLegacyAsync(Array.Empty<string>(), cancellationToken));
-
-        foreach (var name in CommandCatalog.RoutedCommands.Where(static command => command != "acp"))
-        {
-            root.Subcommands.Add(CreateLegacyPassThroughCommand(name, runtime));
-        }
-
-        root.Subcommands.Add(CreateAcpCommand(runtime));
-
-        return root;
-    }
-
-    private static Command CreateLegacyPassThroughCommand(string commandName, ICaiCommandRuntime runtime)
-    {
-        var command = new Command(commandName)
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
-
-        command.SetAction((parseResult, cancellationToken) =>
-        {
-            var forwarded = new List<string>(capacity: parseResult.UnmatchedTokens.Count + 1)
-            {
-                commandName,
-            };
-
-            forwarded.AddRange(parseResult.UnmatchedTokens);
-            return runtime.RunLegacyAsync(forwarded, cancellationToken);
-        });
-
-        return command;
-    }
-
-    private static Command CreateAcpCommand(ICaiCommandRuntime runtime)
-    {
-        var acpCommand = new Command("acp", "ACP tooling")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
-
-        var proxyCommand = new Command("proxy", "Start ACP proxy for an agent")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
-
-        var agentArgument = new Argument<string>("agent")
-        {
-            Arity = ArgumentArity.ZeroOrOne,
-            Description = "Agent binary name (defaults to claude)",
-            DefaultValueFactory = _ => "claude",
-        };
-
-        proxyCommand.Arguments.Add(agentArgument);
-        proxyCommand.SetAction((parseResult, cancellationToken) =>
-        {
-            var agent = parseResult.GetValue(agentArgument) ?? "claude";
-            return runtime.RunAcpProxyAsync(agent, cancellationToken);
-        });
-
-        acpCommand.Subcommands.Add(proxyCommand);
-
-        return acpCommand;
+        return RootCommandBuilder.Build(runtime);
     }
 
     private static string[] NormalizeRootAliases(string[] args)
@@ -113,6 +54,14 @@ public static class CaiCli
         {
             var normalized = new string[args.Length];
             normalized[0] = "refresh";
+            Array.Copy(args, 1, normalized, 1, args.Length - 1);
+            return normalized;
+        }
+
+        if (args.Length > 0 && (args[0] == "-v" || args[0] == "--version"))
+        {
+            var normalized = new string[args.Length];
+            normalized[0] = "version";
             Array.Copy(args, 1, normalized, 1, args.Length - 1);
             return normalized;
         }
