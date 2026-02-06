@@ -24,6 +24,7 @@
 - `fd48a8e` route `docker/status` through native lifecycle runtime
 - `91cd5f5` expand native `doctor/setup` flows (`doctor fix`, `--build-templates`, `--reset-lima`, setup template handling)
 - `ba862f5` add xUnit v3 parity tests for native lifecycle command behavior
+- `2609690` switch release/update/integration wiring to single-binary ACP flow (`cai acp proxy`)
 
 ### Review-Agent Passes
 - Correctness/regression review: completed against current no-legacy diff.
@@ -49,6 +50,7 @@
   - `./tests/integration/test-secure-engine.sh` (skipped in container)
   - `./tests/integration/test-sync-integration.sh` (passed)
   - `./tests/integration/test-dind.sh` (skipped in container)
+  - `./tests/integration/test-acp-proxy.sh` (passed, now executed through `cai acp proxy`)
 - Native CLI smoke checks for changed command paths:
   - `dotnet run --project src/cai -- docker --help` (pass)
   - `dotnet run --project src/cai -- status --definitely-unknown` (pass/error-path)
