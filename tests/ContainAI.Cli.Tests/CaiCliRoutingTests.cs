@@ -132,31 +132,36 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task UnknownFirstToken_FallsBackToLegacyRuntime()
+    public async Task UnknownFirstToken_UsesImplicitRunRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["mystery", "token"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
-        Assert.Collection(
-            runtime.LegacyCalls,
-            call => Assert.Equal(["mystery", "token"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Collection(runtime.RunCalls, call =>
+        {
+            Assert.Empty(call.AdditionalArgs);
+            Assert.Equal(["mystery", "token"], call.CommandArgs);
+        });
     }
 
     [Fact]
-    public async Task FlagFirstToken_FallsBackToLegacyRuntime()
+    public async Task FlagFirstToken_UsesImplicitRunRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["--fresh", "/tmp/workspace"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
-        Assert.Collection(
-            runtime.LegacyCalls,
-            call => Assert.Equal(["--fresh", "/tmp/workspace"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Collection(runtime.RunCalls, call =>
+        {
+            Assert.True(call.Fresh);
+            Assert.Empty(call.AdditionalArgs);
+            Assert.Equal(["/tmp/workspace"], call.CommandArgs);
+        });
     }
 
     [Fact]
@@ -169,7 +174,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["gemini"], runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -182,7 +187,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["claude"], runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -195,7 +200,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["claude"], runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -208,7 +213,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["claude"], runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -221,7 +226,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(0, exitCode);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -234,7 +239,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -247,7 +252,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["claude"], runtime.AcpCalls);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -258,9 +263,9 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["--refresh", "--rebuild"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["refresh", "--rebuild"], call));
     }
 
@@ -272,38 +277,38 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["--refresh"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["refresh"], call));
     }
 
     [Fact]
-    public async Task HelpSubcommand_UsesLegacyRuntime()
+    public async Task HelpSubcommand_UsesNativeRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["help"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["help"], call));
         Assert.Empty(runtime.AcpCalls);
     }
 
     [Fact]
-    public async Task VersionSubcommand_UsesLegacyRuntime_WhenJsonNotRequested()
+    public async Task VersionSubcommand_UsesNativeRuntime_WhenJsonNotRequested()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["version"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["version"], call));
         Assert.Empty(runtime.AcpCalls);
     }
@@ -322,7 +327,7 @@ public sealed class CaiCliRoutingTests
             var exitCode = await CaiCli.RunAsync(["version", "--json"], runtime, cancellationToken);
 
             Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.LegacyCalls);
+            Assert.Empty(runtime.NativeCalls);
             Assert.Empty(runtime.AcpCalls);
 
             using var payload = JsonDocument.Parse(writer.ToString());
@@ -348,7 +353,7 @@ public sealed class CaiCliRoutingTests
         var exitCode = await CaiCli.RunAsync([token], runtime, cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.LegacyCalls);
+        Assert.Empty(runtime.NativeCalls);
         Assert.Empty(runtime.AcpCalls);
     }
 
@@ -362,9 +367,9 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync([token], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
         Assert.Collection(
-            runtime.LegacyCalls,
+            runtime.NativeCalls,
             call => Assert.Equal(["version"], call));
         Assert.Empty(runtime.AcpCalls);
     }
@@ -385,7 +390,7 @@ public sealed class CaiCliRoutingTests
             var exitCode = await CaiCli.RunAsync([token, "--json"], runtime, cancellationToken);
 
             Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.LegacyCalls);
+            Assert.Empty(runtime.NativeCalls);
             Assert.Empty(runtime.AcpCalls);
 
             using var payload = JsonDocument.Parse(writer.ToString());
@@ -407,7 +412,6 @@ public sealed class CaiCliRoutingTests
         public const int DockerExitCode = 34;
         public const int StatusExitCode = 35;
         public const int NativeExitCode = 36;
-        public const int LegacyExitCode = 17;
         public const int AcpExitCode = 23;
 
         public List<RunCommandOptions> RunCalls { get; } = [];
@@ -419,8 +423,6 @@ public sealed class CaiCliRoutingTests
         public List<DockerCommandOptions> DockerCalls { get; } = [];
 
         public List<StatusCommandOptions> StatusCalls { get; } = [];
-
-        public List<IReadOnlyList<string>> LegacyCalls { get; } = [];
 
         public List<IReadOnlyList<string>> NativeCalls { get; } = [];
 
@@ -454,12 +456,6 @@ public sealed class CaiCliRoutingTests
         {
             StatusCalls.Add(options);
             return Task.FromResult(StatusExitCode);
-        }
-
-        public Task<int> RunLegacyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        {
-            LegacyCalls.Add(args.ToArray());
-            return Task.FromResult(LegacyExitCode);
         }
 
         public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)

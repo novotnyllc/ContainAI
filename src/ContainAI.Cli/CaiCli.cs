@@ -27,12 +27,17 @@ public static class CaiCli
         }
 
         var normalizedArgs = NormalizeRootAliases(args);
-        if (normalizedArgs.Length > 0 && ShouldFallbackToLegacyRun(normalizedArgs))
+        var root = CreateRootCommand(runtime);
+        if (normalizedArgs.Length > 0 && ShouldImplicitRun(normalizedArgs))
         {
-            return await runtime.RunLegacyAsync(normalizedArgs, cancellationToken);
+            var redirected = new string[normalizedArgs.Length + 1];
+            redirected[0] = "run";
+            Array.Copy(normalizedArgs, 0, redirected, 1, normalizedArgs.Length);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return await root.Parse(redirected).InvokeAsync(new InvocationConfiguration(), cancellationToken);
         }
 
-        var root = CreateRootCommand(runtime);
         cancellationToken.ThrowIfCancellationRequested();
         return await root.Parse(normalizedArgs).InvokeAsync(new InvocationConfiguration(), cancellationToken);
     }
@@ -64,7 +69,7 @@ public static class CaiCli
         return args;
     }
 
-    private static bool ShouldFallbackToLegacyRun(string[] args)
+    private static bool ShouldImplicitRun(string[] args)
     {
         var firstToken = args[0];
 

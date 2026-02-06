@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 
 namespace ContainAI.Cli.Host;
@@ -30,6 +31,18 @@ internal sealed class NativeLifecycleCommandRuntime
 
         return args[0] switch
         {
+            "help" => RunHelpAsync(args, cancellationToken),
+            "version" => RunVersionAsync(args, cancellationToken),
+            "doctor" => RunDoctorAsync(args, cancellationToken),
+            "validate" => RunValidateAsync(args, cancellationToken),
+            "setup" => RunSetupAsync(args, cancellationToken),
+            "import" => RunImportAsync(args, cancellationToken),
+            "export" => RunExportAsync(args, cancellationToken),
+            "sync" => RunSyncAsync(args, cancellationToken),
+            "links" => RunLinksAsync(args, cancellationToken),
+            "update" => RunUpdateAsync(args, cancellationToken),
+            "refresh" => RunRefreshAsync(args, cancellationToken),
+            "uninstall" => RunUninstallAsync(args, cancellationToken),
             "completion" => RunCompletionAsync(args, cancellationToken),
             "config" => RunConfigAsync(args, cancellationToken),
             "template" => RunTemplateAsync(args, cancellationToken),
@@ -38,6 +51,720 @@ internal sealed class NativeLifecycleCommandRuntime
             "gc" => RunGcAsync(args, cancellationToken),
             _ => Task.FromResult(1),
         };
+    }
+
+    private async Task<int> RunHelpAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (args.Count <= 1)
+        {
+            await _stdout.WriteLineAsync(GetRootHelpText()).ConfigureAwait(false);
+            return 0;
+        }
+
+        var topic = args[1];
+        return topic switch
+        {
+            "config" => await WriteUsageAsync("Usage: cai config <list|get|set|unset> [options]").ConfigureAwait(false),
+            "template" => await WriteUsageAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false),
+            "ssh" => await WriteUsageAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false),
+            "completion" => await WriteUsageAsync("Usage: cai completion <bash|zsh>").ConfigureAwait(false),
+            "links" => await WriteUsageAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run]").ConfigureAwait(false),
+            _ => await WriteUsageAsync(GetRootHelpText()).ConfigureAwait(false),
+        };
+    }
+
+    private Task<int> WriteUsageAsync(string usage)
+    {
+        _stdout.WriteLine(usage);
+        return Task.FromResult(0);
+    }
+
+    private async Task<int> RunVersionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var json = args.Contains("--json", StringComparer.Ordinal);
+        var (version, installType, installDir) = ResolveVersionInfo();
+
+        if (json)
+        {
+            await _stdout.WriteLineAsync($"{{\"version\":\"{version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(installDir)}\"}}").ConfigureAwait(false);
+            return 0;
+        }
+
+        await _stdout.WriteLineAsync(version).ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var outputJson = args.Contains("--json", StringComparer.Ordinal);
+        var dockerCli = await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
+        var contextName = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
+        var contextExists = !string.IsNullOrWhiteSpace(contextName);
+        var dockerInfoArgs = new List<string>();
+        if (contextExists)
+        {
+            dockerInfoArgs.Add("--context");
+            dockerInfoArgs.Add(contextName!);
+        }
+
+        dockerInfoArgs.Add("info");
+        var dockerInfo = await CommandSucceedsAsync("docker", dockerInfoArgs, cancellationToken).ConfigureAwait(false);
+
+        var runtimeArgs = new List<string>(dockerInfoArgs)
+        {
+            "--format",
+            "{{json .Runtimes}}",
+        };
+        var runtimeInfo = await RunProcessCaptureAsync("docker", runtimeArgs, cancellationToken).ConfigureAwait(false);
+        var sysboxRuntime = runtimeInfo.ExitCode == 0 && runtimeInfo.StandardOutput.Contains("sysbox-runc", StringComparison.Ordinal);
+
+        if (outputJson)
+        {
+            await _stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
+        }
+        else
+        {
+            await _stdout.WriteLineAsync($"Docker CLI: {(dockerCli ? "ok" : "missing")}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Context: {(contextExists ? contextName : "missing")}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Docker daemon: {(dockerInfo ? "ok" : "unreachable")}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"sysbox-runc runtime: {(sysboxRuntime ? "ok" : "missing")}").ConfigureAwait(false);
+        }
+
+        return dockerCli && contextExists && dockerInfo && sysboxRuntime ? 0 : 1;
+    }
+
+    private async Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var doctorArgs = args.Contains("--json", StringComparer.Ordinal)
+            ? new[] { "doctor", "--json" }
+            : new[] { "doctor" };
+        return await RunDoctorAsync(doctorArgs, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunSetupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var verbose = args.Contains("--verbose", StringComparer.Ordinal);
+        var home = ResolveHomeDirectory();
+        var containAiDir = Path.Combine(home, ".config", "containai");
+        var sshDir = Path.Combine(home, ".ssh", "containai.d");
+        var sshKeyPath = Path.Combine(containAiDir, "id_containai");
+        var socketPath = "/var/run/containai-docker.sock";
+
+        if (dryRun)
+        {
+            await _stdout.WriteLineAsync($"Would create {containAiDir}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Would create {sshDir}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Would generate SSH key {sshKeyPath}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"Would verify runtime socket {socketPath}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync("Would create Docker context containai-docker").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (!await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false))
+        {
+            await _stderr.WriteLineAsync("Docker CLI is required for setup.").ConfigureAwait(false);
+            return 1;
+        }
+
+        Directory.CreateDirectory(containAiDir);
+        Directory.CreateDirectory(sshDir);
+
+        if (!File.Exists(sshKeyPath))
+        {
+            var keygen = await RunProcessCaptureAsync(
+                "ssh-keygen",
+                ["-t", "ed25519", "-N", string.Empty, "-f", sshKeyPath, "-C", "containai"],
+                cancellationToken).ConfigureAwait(false);
+            if (keygen.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(keygen.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        if (!File.Exists(socketPath))
+        {
+            if (await CommandSucceedsAsync("systemctl", ["cat", "containai-docker.service"], cancellationToken).ConfigureAwait(false))
+            {
+                await RunProcessCaptureAsync("systemctl", ["start", "containai-docker.service"], cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (!File.Exists(socketPath) && OperatingSystem.IsMacOS())
+        {
+            await RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
+        }
+
+        if (File.Exists(socketPath))
+        {
+            var createContext = await RunProcessCaptureAsync(
+                "docker",
+                ["context", "create", "containai-docker", "--docker", $"host=unix://{socketPath}"],
+                cancellationToken).ConfigureAwait(false);
+            if (createContext.ExitCode != 0 && verbose)
+            {
+                var error = createContext.StandardError.Trim();
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    await _stderr.WriteLineAsync(error).ConfigureAwait(false);
+                }
+            }
+        }
+        else
+        {
+            await _stderr.WriteLineAsync($"Setup warning: runtime socket not found at {socketPath}.").ConfigureAwait(false);
+        }
+
+        var doctorExitCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
+        if (doctorExitCode != 0)
+        {
+            await _stderr.WriteLineAsync("Setup completed with warnings. Run `cai doctor` for details.").ConfigureAwait(false);
+            return 1;
+        }
+
+        await _stdout.WriteLineAsync("Setup complete.").ConfigureAwait(false);
+        return doctorExitCode;
+    }
+
+    private async Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var source = GetOptionValue(args, "--from");
+        var explicitVolume = GetOptionValue(args, "--data-volume");
+        var workspace = GetOptionValue(args, "--workspace") ?? Directory.GetCurrentDirectory();
+        var volume = await ResolveDataVolumeAsync(workspace, explicitVolume, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(volume))
+        {
+            await _stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
+            return 1;
+        }
+
+        var sourcePath = string.IsNullOrWhiteSpace(source) ? ResolveHomeDirectory() : ExpandHomePath(source);
+        if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
+        {
+            await _stderr.WriteLineAsync($"Import source not found: {sourcePath}").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (sourcePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+        {
+            var archiveDir = Path.GetDirectoryName(Path.GetFullPath(sourcePath))!;
+            var archiveName = Path.GetFileName(sourcePath);
+            var restore = await DockerCaptureAsync(
+                ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{archiveDir}:/backup:ro", "alpine:3.20", "sh", "-lc", $"tar -xzf /backup/{archiveName} -C /mnt/agent-data"],
+                cancellationToken).ConfigureAwait(false);
+            if (restore.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(restore.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+        else
+        {
+            var sourceFull = Path.GetFullPath(sourcePath);
+            var import = await DockerCaptureAsync(
+                ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{sourceFull}:/src:ro", "alpine:3.20", "sh", "-lc", "cp -a /src/. /mnt/agent-data/"],
+                cancellationToken).ConfigureAwait(false);
+            if (import.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(import.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        await _stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> RunExportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var output = GetOptionValue(args, "--output") ?? GetOptionValue(args, "-o");
+        var explicitVolume = GetOptionValue(args, "--data-volume");
+        var container = GetOptionValue(args, "--container");
+        var workspace = GetOptionValue(args, "--workspace") ?? Directory.GetCurrentDirectory();
+        var volume = string.IsNullOrWhiteSpace(container)
+            ? await ResolveDataVolumeAsync(workspace, explicitVolume, cancellationToken).ConfigureAwait(false)
+            : await ResolveDataVolumeFromContainerAsync(container, explicitVolume, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(volume))
+        {
+            await _stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
+            return 1;
+        }
+
+        var outputPath = string.IsNullOrWhiteSpace(output)
+            ? Path.Combine(Directory.GetCurrentDirectory(), $"containai-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.tgz")
+            : Path.GetFullPath(ExpandHomePath(output));
+
+        if (Directory.Exists(outputPath))
+        {
+            outputPath = Path.Combine(outputPath, $"containai-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.tgz");
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+        var outputDir = Path.GetDirectoryName(outputPath)!;
+        var outputFile = Path.GetFileName(outputPath);
+
+        var exportResult = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{outputDir}:/out", "alpine:3.20", "sh", "-lc", $"tar -C /mnt/agent-data -czf /out/{outputFile} ."],
+            cancellationToken).ConfigureAwait(false);
+        if (exportResult.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(exportResult.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        await _stdout.WriteLineAsync(outputPath).ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> RunSyncAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var sourceRoot = ResolveHomeDirectory();
+        var destinationRoot = "/mnt/agent-data";
+        if (!Directory.Exists(destinationRoot))
+        {
+            await _stderr.WriteLineAsync("sync must run inside a container with /mnt/agent-data").ConfigureAwait(false);
+            return 1;
+        }
+
+        foreach (var directory in new[] { ".config", ".ssh", ".claude", ".codex" })
+        {
+            var source = Path.Combine(sourceRoot, directory);
+            var destination = Path.Combine(destinationRoot, directory);
+            if (!Directory.Exists(source))
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(destination);
+            await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
+        }
+
+        await _stdout.WriteLineAsync("Sync complete.").ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> RunLinksAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        if (args.Count < 2 || args[1] is "-h" or "--help")
+        {
+            await _stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
+            return 0;
+        }
+
+        var subcommand = args[1];
+        if (!string.Equals(subcommand, "check", StringComparison.Ordinal) &&
+            !string.Equals(subcommand, "fix", StringComparison.Ordinal))
+        {
+            await _stderr.WriteLineAsync($"Unknown links subcommand: {subcommand}").ConfigureAwait(false);
+            return 1;
+        }
+
+        string? containerName = null;
+        string? workspace = null;
+        var dryRun = false;
+        var quiet = false;
+
+        for (var index = 2; index < args.Count; index++)
+        {
+            var token = args[index];
+            switch (token)
+            {
+                case "--name":
+                case "--container":
+                    if (index + 1 >= args.Count)
+                    {
+                        await _stderr.WriteLineAsync($"{token} requires a value").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    containerName = args[++index];
+                    break;
+                case "--workspace":
+                    if (index + 1 >= args.Count)
+                    {
+                        await _stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    workspace = args[++index];
+                    break;
+                case "--dry-run":
+                    dryRun = true;
+                    break;
+                case "--quiet":
+                case "-q":
+                    quiet = true;
+                    break;
+                case "--verbose":
+                case "--config":
+                    if (token == "--config" && index + 1 < args.Count)
+                    {
+                        index++;
+                    }
+                    break;
+                case "-h":
+                case "--help":
+                    await _stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
+                    return 0;
+                default:
+                    if (!token.StartsWith("-", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(workspace))
+                    {
+                        workspace = token;
+                    }
+                    else if (!string.Equals(token, "--", StringComparison.Ordinal))
+                    {
+                        await _stderr.WriteLineAsync($"Unknown links option: {token}").ConfigureAwait(false);
+                        return 1;
+                    }
+
+                    break;
+            }
+        }
+
+        var resolvedWorkspace = string.IsNullOrWhiteSpace(workspace)
+            ? Directory.GetCurrentDirectory()
+            : Path.GetFullPath(ExpandHomePath(workspace));
+
+        if (string.IsNullOrWhiteSpace(containerName))
+        {
+            containerName = await ResolveWorkspaceContainerNameAsync(resolvedWorkspace, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.IsNullOrWhiteSpace(containerName))
+        {
+            await _stderr.WriteLineAsync($"Unable to resolve container for workspace: {resolvedWorkspace}").ConfigureAwait(false);
+            return 1;
+        }
+
+        var stateResult = await DockerCaptureAsync(
+            ["inspect", "--format", "{{.State.Status}}", containerName],
+            cancellationToken).ConfigureAwait(false);
+
+        if (stateResult.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync($"Container not found: {containerName}").ConfigureAwait(false);
+            return 1;
+        }
+
+        var state = stateResult.StandardOutput.Trim();
+        if (string.Equals(subcommand, "check", StringComparison.Ordinal))
+        {
+            if (!string.Equals(state, "running", StringComparison.Ordinal))
+            {
+                await _stderr.WriteLineAsync($"Container '{containerName}' is not running (state: {state}).").ConfigureAwait(false);
+                return 1;
+            }
+        }
+        else if (!string.Equals(state, "running", StringComparison.Ordinal))
+        {
+            var startResult = await DockerCaptureAsync(["start", containerName], cancellationToken).ConfigureAwait(false);
+            if (startResult.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync($"Failed to start container '{containerName}': {startResult.StandardError.Trim()}").ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        var command = new List<string>
+        {
+            "exec",
+            containerName,
+            "/usr/local/lib/containai/link-repair.sh",
+        };
+
+        if (string.Equals(subcommand, "check", StringComparison.Ordinal))
+        {
+            command.Add("--check");
+        }
+        else if (dryRun)
+        {
+            command.Add("--dry-run");
+        }
+        else
+        {
+            command.Add("--fix");
+        }
+
+        if (quiet)
+        {
+            command.Add("--quiet");
+        }
+
+        var runResult = await DockerCaptureAsync(command, cancellationToken).ConfigureAwait(false);
+        if (!quiet)
+        {
+            var output = runResult.StandardOutput.Trim();
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                await _stdout.WriteLineAsync(output).ConfigureAwait(false);
+            }
+        }
+
+        if (runResult.ExitCode != 0)
+        {
+            var error = runResult.StandardError.Trim();
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                await _stderr.WriteLineAsync(error).ConfigureAwait(false);
+            }
+        }
+
+        return runResult.ExitCode;
+    }
+
+    private async Task<int> RunUpdateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var stopContainers = args.Contains("--stop-containers", StringComparer.Ordinal) || args.Contains("--force", StringComparer.Ordinal);
+        var limaRecreate = args.Contains("--lima-recreate", StringComparer.Ordinal);
+        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
+        if (showHelp)
+        {
+            await _stdout.WriteLineAsync("Usage: cai update [--dry-run] [--stop-containers] [--force] [--lima-recreate]").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (!ValidateOptions(args, 1, "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose", "--help", "-h"))
+        {
+            await _stderr.WriteLineAsync("Unknown update option. Use 'cai update --help'.").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (dryRun)
+        {
+            await _stdout.WriteLineAsync("Would pull latest base image for configured channel.").ConfigureAwait(false);
+            if (stopContainers)
+            {
+                await _stdout.WriteLineAsync("Would stop running ContainAI containers before update.").ConfigureAwait(false);
+            }
+            if (limaRecreate)
+            {
+                await _stdout.WriteLineAsync("Would recreate Lima VM 'containai'.").ConfigureAwait(false);
+            }
+
+            await _stdout.WriteLineAsync("Would refresh templates and verify installation.").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (limaRecreate && !OperatingSystem.IsMacOS())
+        {
+            await _stderr.WriteLineAsync("--lima-recreate is only supported on macOS.").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (limaRecreate)
+        {
+            await _stdout.WriteLineAsync("Recreating Lima VM 'containai'...").ConfigureAwait(false);
+            await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
+            var start = await RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
+            if (start.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(start.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        if (stopContainers)
+        {
+            var stopResult = await DockerCaptureAsync(
+                ["ps", "-q", "--filter", "label=containai.managed=true"],
+                cancellationToken).ConfigureAwait(false);
+
+            if (stopResult.ExitCode == 0)
+            {
+                foreach (var containerId in stopResult.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    await DockerCaptureAsync(["stop", containerId], cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+
+        var refreshCode = await RunRefreshAsync(["refresh", "--rebuild"], cancellationToken).ConfigureAwait(false);
+        if (refreshCode != 0)
+        {
+            return refreshCode;
+        }
+
+        var doctorCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
+        if (doctorCode != 0)
+        {
+            await _stderr.WriteLineAsync("Update completed with validation warnings. Run `cai doctor` for details.").ConfigureAwait(false);
+            return 1;
+        }
+
+        await _stdout.WriteLineAsync("Update complete.").ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
+        if (showHelp)
+        {
+            await _stdout.WriteLineAsync("Usage: cai refresh [--rebuild] [--verbose]").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (!ValidateOptions(args, 1, "--rebuild", "--verbose", "--help", "-h"))
+        {
+            await _stderr.WriteLineAsync("Unknown refresh option. Use 'cai refresh --help'.").ConfigureAwait(false);
+            return 1;
+        }
+
+        var channel = await ResolveChannelAsync(cancellationToken).ConfigureAwait(false);
+        var baseImage = string.Equals(channel, "nightly", StringComparison.Ordinal)
+            ? "ghcr.io/novotnyllc/containai:nightly"
+            : "ghcr.io/novotnyllc/containai:latest";
+
+        await _stdout.WriteLineAsync($"Pulling {baseImage}...").ConfigureAwait(false);
+        var pull = await DockerCaptureAsync(["pull", baseImage], cancellationToken).ConfigureAwait(false);
+        if (pull.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(pull.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        if (!args.Contains("--rebuild", StringComparer.Ordinal))
+        {
+            await _stdout.WriteLineAsync("Refresh complete.").ConfigureAwait(false);
+            return 0;
+        }
+
+        var templatesRoot = ResolveTemplatesDirectory();
+        if (!Directory.Exists(templatesRoot))
+        {
+            await _stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
+            return 1;
+        }
+
+        var failures = 0;
+        foreach (var templateDir in Directory.EnumerateDirectories(templatesRoot))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var templateName = Path.GetFileName(templateDir);
+            var dockerfile = Path.Combine(templateDir, "Dockerfile");
+            if (!File.Exists(dockerfile))
+            {
+                continue;
+            }
+
+            var imageName = $"containai-template-{templateName}:local";
+            var build = await DockerCaptureAsync(
+                [
+                    "build",
+                    "--build-arg", $"BASE_IMAGE={baseImage}",
+                    "-t", imageName,
+                    "-f", dockerfile,
+                    templateDir,
+                ],
+                cancellationToken).ConfigureAwait(false);
+
+            if (build.ExitCode != 0)
+            {
+                failures++;
+                await _stderr.WriteLineAsync($"Template rebuild failed for '{templateName}': {build.StandardError.Trim()}").ConfigureAwait(false);
+                continue;
+            }
+
+            await _stdout.WriteLineAsync($"Rebuilt template '{templateName}' as {imageName}").ConfigureAwait(false);
+        }
+
+        return failures == 0 ? 0 : 1;
+    }
+
+    private async Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
+        if (showHelp)
+        {
+            await _stdout.WriteLineAsync("Usage: cai uninstall [--dry-run] [--containers] [--volumes] [--force]").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (!ValidateOptions(args, 1, "--dry-run", "--containers", "--volumes", "--force", "--verbose", "--help", "-h"))
+        {
+            await _stderr.WriteLineAsync("Unknown uninstall option. Use 'cai uninstall --help'.").ConfigureAwait(false);
+            return 1;
+        }
+
+        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+        var removeContainers = args.Contains("--containers", StringComparer.Ordinal);
+        var removeVolumes = args.Contains("--volumes", StringComparer.Ordinal);
+
+        var contextsToRemove = new[] { "containai-docker", "containai-secure", "docker-containai" };
+        foreach (var context in contextsToRemove)
+        {
+            if (dryRun)
+            {
+                await _stdout.WriteLineAsync($"Would remove Docker context: {context}").ConfigureAwait(false);
+                continue;
+            }
+
+            await DockerCaptureAsync(["context", "rm", "-f", context], cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!removeContainers)
+        {
+            await _stdout.WriteLineAsync("Uninstall complete (contexts cleaned). Use --containers/--volumes for full cleanup.").ConfigureAwait(false);
+            return 0;
+        }
+
+        var list = await DockerCaptureAsync(["ps", "-aq", "--filter", "label=containai.managed=true"], cancellationToken).ConfigureAwait(false);
+        if (list.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(list.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        var containerIds = list.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var volumeNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var containerId in containerIds)
+        {
+            if (dryRun)
+            {
+                await _stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
+            }
+            else
+            {
+                await DockerCaptureAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!removeVolumes)
+            {
+                continue;
+            }
+
+            var inspect = await DockerCaptureAsync(
+                ["inspect", "--format", "{{range .Mounts}}{{if and (eq .Type \"volume\") (eq .Destination \"/mnt/agent-data\")}}{{.Name}}{{end}}{{end}}", containerId],
+                cancellationToken).ConfigureAwait(false);
+            if (inspect.ExitCode == 0)
+            {
+                var volumeName = inspect.StandardOutput.Trim();
+                if (!string.IsNullOrWhiteSpace(volumeName))
+                {
+                    volumeNames.Add(volumeName);
+                }
+            }
+        }
+
+        foreach (var volume in volumeNames)
+        {
+            if (dryRun)
+            {
+                await _stdout.WriteLineAsync($"Would remove volume {volume}").ConfigureAwait(false);
+                continue;
+            }
+
+            await DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
+        }
+
+        await _stdout.WriteLineAsync("Uninstall complete.").ConfigureAwait(false);
+        return 0;
     }
 
     private Task<int> RunCompletionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -362,6 +1089,7 @@ internal sealed class NativeLifecycleCommandRuntime
         var stopAll = args.Contains("--all", StringComparer.Ordinal);
         var remove = args.Contains("--remove", StringComparer.Ordinal);
         var force = args.Contains("--force", StringComparer.Ordinal);
+        var exportFirst = args.Contains("--export", StringComparer.Ordinal);
 
         if (!ValidateStopArgs(args, out var stopValidationError))
         {
@@ -372,6 +1100,12 @@ internal sealed class NativeLifecycleCommandRuntime
         if (stopAll && !string.IsNullOrWhiteSpace(containerName))
         {
             await _stderr.WriteLineAsync("--all and --container are mutually exclusive").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (stopAll && exportFirst)
+        {
+            await _stderr.WriteLineAsync("--export and --all are mutually exclusive").ConfigureAwait(false);
             return 1;
         }
 
@@ -402,6 +1136,20 @@ internal sealed class NativeLifecycleCommandRuntime
         foreach (var target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (exportFirst)
+            {
+                var exportExitCode = await RunExportAsync(["export", "--container", target], cancellationToken).ConfigureAwait(false);
+                if (exportExitCode != 0)
+                {
+                    failures++;
+                    await _stderr.WriteLineAsync($"Failed to export data volume for container: {target}").ConfigureAwait(false);
+                    if (!force)
+                    {
+                        continue;
+                    }
+                }
+            }
+
             var stopExitCode = await DockerRunAsync(["stop", target], cancellationToken).ConfigureAwait(false);
             if (stopExitCode != 0)
             {
@@ -452,6 +1200,7 @@ internal sealed class NativeLifecycleCommandRuntime
         var containerIds = candidates.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        var pruneCandidates = new List<string>();
         var failures = 0;
         foreach (var containerId in containerIds)
         {
@@ -493,17 +1242,40 @@ internal sealed class NativeLifecycleCommandRuntime
                 continue;
             }
 
+            pruneCandidates.Add(containerId);
+        }
+
+        if (!dryRun && !force && pruneCandidates.Count > 0)
+        {
+            if (Console.IsInputRedirected)
+            {
+                await _stderr.WriteLineAsync("gc requires --force in non-interactive mode.").ConfigureAwait(false);
+                return 1;
+            }
+
+            await _stdout.WriteLineAsync($"About to remove {pruneCandidates.Count} containers. Continue? [y/N]").ConfigureAwait(false);
+            var response = (Console.ReadLine() ?? string.Empty).Trim();
+            if (!response.Equals("y", StringComparison.OrdinalIgnoreCase) &&
+                !response.Equals("yes", StringComparison.OrdinalIgnoreCase))
+            {
+                await _stdout.WriteLineAsync("Aborted.").ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        foreach (var containerId in pruneCandidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             if (dryRun)
             {
                 await _stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
+                continue;
             }
-            else
+
+            var removeResult = await DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+            if (removeResult != 0)
             {
-                var removeResult = await DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
-                if (removeResult != 0)
-                {
-                    failures++;
-                }
+                failures++;
             }
         }
 
@@ -580,12 +1352,19 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
-        var containAiContextProbe = await RunProcessCaptureAsync(
-            "docker",
-            ["context", "inspect", "containai-docker"],
-            cancellationToken).ConfigureAwait(false);
+        foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
+        {
+            var probe = await RunProcessCaptureAsync(
+                "docker",
+                ["context", "inspect", contextName],
+                cancellationToken).ConfigureAwait(false);
+            if (probe.ExitCode == 0)
+            {
+                return contextName;
+            }
+        }
 
-        return containAiContextProbe.ExitCode == 0 ? "containai-docker" : null;
+        return null;
     }
 
     private static string ResolveHomeDirectory()
@@ -597,6 +1376,31 @@ internal sealed class NativeLifecycleCommandRuntime
         }
 
         return string.IsNullOrWhiteSpace(home) ? Directory.GetCurrentDirectory() : home;
+    }
+
+    private static string ExpandHomePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return path;
+        }
+
+        if (!path.StartsWith("~", StringComparison.Ordinal))
+        {
+            return path;
+        }
+
+        var home = ResolveHomeDirectory();
+        if (path.Length == 1)
+        {
+            return home;
+        }
+
+        return path[1] switch
+        {
+            '/' or '\\' => Path.Combine(home, path[2..]),
+            _ => path,
+        };
     }
 
     private static string ResolveUserConfigPath()
@@ -619,6 +1423,114 @@ internal sealed class NativeLifecycleCommandRuntime
             : xdgConfigHome;
 
         return Path.Combine(configRoot, "containai", "templates");
+    }
+
+    private async Task<string> ResolveChannelAsync(CancellationToken cancellationToken)
+    {
+        var envChannel = Environment.GetEnvironmentVariable("CAI_CHANNEL")
+                         ?? Environment.GetEnvironmentVariable("CONTAINAI_CHANNEL");
+        if (string.Equals(envChannel, "nightly", StringComparison.OrdinalIgnoreCase))
+        {
+            return "nightly";
+        }
+
+        if (string.Equals(envChannel, "stable", StringComparison.OrdinalIgnoreCase))
+        {
+            return "stable";
+        }
+
+        var configPath = ResolveUserConfigPath();
+        if (!File.Exists(configPath))
+        {
+            return "stable";
+        }
+
+        var result = await RunParseTomlAsync(
+            ["--file", configPath, "--key", "image.channel"],
+            cancellationToken).ConfigureAwait(false);
+
+        if (result.ExitCode != 0)
+        {
+            return "stable";
+        }
+
+        return string.Equals(result.StandardOutput.Trim(), "nightly", StringComparison.OrdinalIgnoreCase)
+            ? "nightly"
+            : "stable";
+    }
+
+    private async Task<string?> ResolveDataVolumeAsync(string workspace, string? explicitVolume, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitVolume))
+        {
+            return explicitVolume;
+        }
+
+        var envVolume = Environment.GetEnvironmentVariable("CONTAINAI_DATA_VOLUME");
+        if (!string.IsNullOrWhiteSpace(envVolume))
+        {
+            return envVolume;
+        }
+
+        var configPath = ResolveUserConfigPath();
+        if (!File.Exists(configPath))
+        {
+            return "containai-data";
+        }
+
+        var normalizedWorkspace = Path.GetFullPath(ExpandHomePath(workspace));
+        var workspaceState = await RunParseTomlAsync(
+            ["--file", configPath, "--get-workspace", normalizedWorkspace],
+            cancellationToken).ConfigureAwait(false);
+
+        if (workspaceState.ExitCode == 0 && !string.IsNullOrWhiteSpace(workspaceState.StandardOutput))
+        {
+            using var json = JsonDocument.Parse(workspaceState.StandardOutput);
+            if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("data_volume", out var workspaceVolume))
+            {
+                var volume = workspaceVolume.GetString();
+                if (!string.IsNullOrWhiteSpace(volume))
+                {
+                    return volume;
+                }
+            }
+        }
+
+        var globalResult = await RunParseTomlAsync(
+            ["--file", configPath, "--key", "agent.data_volume"],
+            cancellationToken).ConfigureAwait(false);
+
+        if (globalResult.ExitCode == 0)
+        {
+            var volume = globalResult.StandardOutput.Trim();
+            if (!string.IsNullOrWhiteSpace(volume))
+            {
+                return volume;
+            }
+        }
+
+        return "containai-data";
+    }
+
+    private async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitVolume))
+        {
+            return explicitVolume;
+        }
+
+        var inspect = await DockerCaptureAsync(
+            ["inspect", "--format", "{{range .Mounts}}{{if and (eq .Type \"volume\") (eq .Destination \"/mnt/agent-data\")}}{{.Name}}{{end}}{{end}}", containerName],
+            cancellationToken).ConfigureAwait(false);
+
+        if (inspect.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var volumeName = inspect.StandardOutput.Trim();
+        return string.IsNullOrWhiteSpace(volumeName) ? null : volumeName;
     }
 
     private async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -915,6 +1827,246 @@ internal sealed class NativeLifecycleCommandRuntime
         return null;
     }
 
+    private static bool ValidateOptions(IReadOnlyList<string> args, int startIndex, params string[] allowed)
+    {
+        var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
+        for (var index = startIndex; index < args.Count; index++)
+        {
+            var token = args[index];
+            if (!token.StartsWith("-", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (allowedSet.Contains(token))
+            {
+                continue;
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static string GetRootHelpText()
+    {
+        return """
+ContainAI - Run AI coding agents in a secure Docker sandbox
+
+Usage: cai [subcommand] [options]
+
+Subcommands:
+  run           Start/attach to sandbox container (default if omitted)
+  shell         Open interactive shell in running container
+  exec          Run a command in container via SSH
+  doctor        Check system capabilities and show diagnostics
+  setup         Configure secure container isolation
+  validate      Validate Secure Engine configuration
+  docker        Run docker with ContainAI context
+  import        Sync host configs to data volume
+  export        Export data volume to .tgz archive
+  sync          In-container config sync
+  stop          Stop ContainAI containers
+  status        Show container status and resource usage
+  gc            Garbage collect stale containers/images
+  ssh           Manage SSH configuration
+  links         Verify and repair container symlinks
+  config        Manage settings
+  template      Manage templates
+  update        Update ContainAI installation
+  refresh       Pull latest base image and optionally rebuild template
+  uninstall     Remove ContainAI system components
+  completion    Generate shell completion scripts
+  version       Show version
+  help          Show this help message
+  acp           ACP proxy tooling
+
+Examples:
+  cai
+  cai shell
+  cai exec ls -la
+  cai stop --all
+  cai doctor
+""";
+    }
+
+    private static (string Version, string InstallType, string InstallDir) ResolveVersionInfo()
+    {
+        var installDir = ResolveInstallDirectory();
+        var version = ResolveVersion(installDir);
+        var installType = ResolveInstallType(installDir);
+        return (version, installType, installDir);
+    }
+
+    private static string ResolveInstallDirectory()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var current = Path.GetFullPath(root);
+            while (!string.IsNullOrWhiteSpace(current))
+            {
+                if (seen.Add(current) && File.Exists(Path.Combine(current, "VERSION")))
+                {
+                    return current;
+                }
+
+                var parent = Directory.GetParent(current);
+                if (parent is null)
+                {
+                    break;
+                }
+
+                current = parent.FullName;
+            }
+        }
+
+        return Directory.GetCurrentDirectory();
+    }
+
+    private static string ResolveVersion(string installDir)
+    {
+        var versionFile = Path.Combine(installDir, "VERSION");
+        if (File.Exists(versionFile))
+        {
+            var value = File.ReadAllText(versionFile).Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        var assemblyVersion = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
+            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString();
+
+        return string.IsNullOrWhiteSpace(assemblyVersion) ? "0.0.0" : assemblyVersion;
+    }
+
+    private static string ResolveInstallType(string installDir)
+    {
+        if (Directory.Exists(Path.Combine(installDir, ".git")))
+        {
+            return "git";
+        }
+
+        var normalized = installDir.Replace('\\', '/');
+        if (normalized.Contains("/.local/share/containai", StringComparison.Ordinal))
+        {
+            return "local";
+        }
+
+        return "installed";
+    }
+
+    private static string EscapeJson(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal)
+            .Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal)
+            .Replace("\t", "\\t", StringComparison.Ordinal);
+    }
+
+    private async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    {
+        var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
+        return result.ExitCode == 0;
+    }
+
+    private async Task<string?> ResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken)
+    {
+        var configPath = ResolveUserConfigPath();
+        if (File.Exists(configPath))
+        {
+            var workspaceResult = await RunParseTomlAsync(
+                ["--file", configPath, "--get-workspace", workspace],
+                cancellationToken).ConfigureAwait(false);
+
+            if (workspaceResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(workspaceResult.StandardOutput))
+            {
+                using var json = JsonDocument.Parse(workspaceResult.StandardOutput);
+                if (json.RootElement.ValueKind == JsonValueKind.Object &&
+                    json.RootElement.TryGetProperty("container_name", out var containerNameElement))
+                {
+                    var configuredName = containerNameElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(configuredName))
+                    {
+                        var inspect = await DockerCaptureAsync(
+                            ["inspect", "--type", "container", configuredName],
+                            cancellationToken).ConfigureAwait(false);
+                        if (inspect.ExitCode == 0)
+                        {
+                            return configuredName;
+                        }
+                    }
+                }
+            }
+        }
+
+        var byLabel = await DockerCaptureAsync(
+            ["ps", "-aq", "--filter", $"label=containai.workspace={workspace}"],
+            cancellationToken).ConfigureAwait(false);
+
+        if (byLabel.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var ids = byLabel.StandardOutput
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        if (ids.Length == 0)
+        {
+            return null;
+        }
+
+        if (ids.Length > 1)
+        {
+            await _stderr.WriteLineAsync($"Multiple containers found for workspace: {workspace}").ConfigureAwait(false);
+            return null;
+        }
+
+        var nameResult = await DockerCaptureAsync(
+            ["inspect", "--format", "{{.Name}}", ids[0]],
+            cancellationToken).ConfigureAwait(false);
+
+        if (nameResult.ExitCode != 0)
+        {
+            return null;
+        }
+
+        return nameResult.StandardOutput.Trim().TrimStart('/');
+    }
+
+    private async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(destinationDirectory);
+
+        foreach (var sourceFile in Directory.EnumerateFiles(sourceDirectory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var destinationFile = Path.Combine(destinationDirectory, Path.GetFileName(sourceFile));
+            await using var sourceStream = File.OpenRead(sourceFile);
+            await using var destinationStream = File.Create(destinationFile);
+            await sourceStream.CopyToAsync(destinationStream, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var sourceSubdirectory in Directory.EnumerateDirectories(sourceDirectory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var destinationSubdirectory = Path.Combine(destinationDirectory, Path.GetFileName(sourceSubdirectory));
+            await CopyDirectoryAsync(sourceSubdirectory, destinationSubdirectory, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private static string BuildBashCompletionScript()
     {
         return """
@@ -1003,9 +2155,9 @@ _cai "$@"
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch
+            catch (Exception killEx)
             {
-                // Ignore cancellation cleanup failures.
+                Console.Error.WriteLine($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
             }
         });
 

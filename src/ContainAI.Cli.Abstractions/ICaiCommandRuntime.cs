@@ -14,7 +14,5 @@ public interface ICaiCommandRuntime
 
     Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken);
 
-    Task<int> RunLegacyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken);
-
     Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken);
 }
