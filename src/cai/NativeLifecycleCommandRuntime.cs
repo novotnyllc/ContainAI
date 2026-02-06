@@ -15,11 +15,13 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private readonly TextWriter _stdout;
     private readonly TextWriter _stderr;
+    private readonly NativeSessionCommandRuntime _sessionRuntime;
 
     public NativeLifecycleCommandRuntime(TextWriter? stdout = null, TextWriter? stderr = null)
     {
         _stdout = stdout ?? Console.Out;
         _stderr = stderr ?? Console.Error;
+        _sessionRuntime = new NativeSessionCommandRuntime(_stdout, _stderr);
     }
 
     public Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -31,6 +33,9 @@ internal sealed class NativeLifecycleCommandRuntime
 
         return args[0] switch
         {
+            "run" => _sessionRuntime.RunRunAsync(args, cancellationToken),
+            "shell" => _sessionRuntime.RunShellAsync(args, cancellationToken),
+            "exec" => _sessionRuntime.RunExecAsync(args, cancellationToken),
             "help" => RunHelpAsync(args, cancellationToken),
             "version" => RunVersionAsync(args, cancellationToken),
             "doctor" => RunDoctorAsync(args, cancellationToken),
