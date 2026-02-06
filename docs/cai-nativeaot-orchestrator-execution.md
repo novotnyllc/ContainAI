@@ -59,6 +59,9 @@
   - `dotnet run --project src/cai -- doctor --reset-lima` on non-macOS (expected failure path)
 - Slopwatch (dirty-file hook mode):
   - `slopwatch analyze -d . --hook --no-baseline --fail-on warning` (passed)
+- CRAP/coverage hotspot analysis:
+  - `dotnet-coverage collect "dotnet test --solution ContainAI.slnx -c Debug" -f cobertura -o artifacts/coverage/coverage.cobertura.xml`
+  - `reportgenerator -reports:artifacts/coverage/coverage.cobertura.xml -targetdir:artifacts/coverage/report -reporttypes:HtmlSummary -riskhotspotassemblyfilters:+* -riskhotspotclassfilters:+*`
 
 ### Notable Migration Decisions
 - Removed legacy shell bridge interfaces and implementations from runtime CLI path.
