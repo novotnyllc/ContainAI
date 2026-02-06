@@ -38,9 +38,6 @@ internal sealed class RootCommandBuilder
         {
             var command = name switch
             {
-                "run" => CreateRunCommand(runtime),
-                "shell" => CreateShellCommand(runtime),
-                "exec" => CreateExecCommand(runtime),
                 "docker" => CreateDockerCommand(runtime),
                 "status" => CreateStatusCommand(runtime),
                 "version" => CreateVersionCommand(runtime),
