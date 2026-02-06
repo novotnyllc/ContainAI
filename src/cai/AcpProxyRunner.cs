@@ -2,6 +2,7 @@ using ContainAI.Acp;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("ContainAI.Acp.Tests")]
+[assembly: InternalsVisibleTo("ContainAI.Cli.Tests")]
 
 namespace ContainAI.Cli.Host;
 
