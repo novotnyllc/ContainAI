@@ -3,6 +3,9 @@
   <PropertyGroup>
     <RootNamespace>ContainAI.Cli</RootNamespace>
     <Description>ContainAI native CLI core and command routing</Description>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <TrimmerDefaultAction>link</TrimmerDefaultAction>
   </PropertyGroup>
 
   <ItemGroup>

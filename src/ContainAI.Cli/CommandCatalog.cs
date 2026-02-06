@@ -2,8 +2,8 @@ namespace ContainAI.Cli;
 
 internal static class CommandCatalog
 {
-    public static readonly IReadOnlySet<string> RoutedCommands = new HashSet<string>(StringComparer.Ordinal)
-    {
+    public static readonly IReadOnlyList<string> RoutedCommandOrder =
+    [
         "run",
         "shell",
         "exec",
@@ -28,7 +28,9 @@ internal static class CommandCatalog
         "version",
         "help",
         "acp",
-    };
+    ];
+
+    public static readonly IReadOnlySet<string> RoutedCommands = new HashSet<string>(RoutedCommandOrder, StringComparer.Ordinal);
 
     public static readonly IReadOnlySet<string> RootParserTokens = new HashSet<string>(StringComparer.Ordinal)
     {

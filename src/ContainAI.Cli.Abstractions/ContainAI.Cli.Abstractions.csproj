@@ -4,6 +4,9 @@
     <RootNamespace>ContainAI.Cli.Abstractions</RootNamespace>
     <Description>ContainAI CLI contracts and shared abstractions</Description>
     <IsPackable>true</IsPackable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <TrimmerDefaultAction>link</TrimmerDefaultAction>
   </PropertyGroup>
 
 </Project>

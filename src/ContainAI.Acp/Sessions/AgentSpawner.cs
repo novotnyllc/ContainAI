@@ -7,7 +7,7 @@ namespace ContainAI.Acp.Sessions;
 /// <summary>
 /// Spawns agent processes for ACP sessions.
 /// </summary>
-public sealed class AgentSpawner
+public sealed class AgentSpawner : IAgentSpawner
 {
     private readonly bool _directSpawn;
     private readonly TextWriter _stderr;

@@ -25,7 +25,7 @@ internal sealed class RootCommandBuilder
 
         root.SetAction((_, cancellationToken) => runtime.RunLegacyAsync(Array.Empty<string>(), cancellationToken));
 
-        foreach (var name in CommandCatalog.RoutedCommands.Where(static command => command != "acp"))
+        foreach (var name in CommandCatalog.RoutedCommandOrder.Where(static command => command != "acp"))
         {
             var command = name == "version"
                 ? CreateVersionCommand(runtime)

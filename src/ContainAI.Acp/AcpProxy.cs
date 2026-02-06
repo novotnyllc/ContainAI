@@ -19,7 +19,7 @@ public sealed class AcpProxy : IDisposable
     private readonly OutputWriter _output;
     private readonly CancellationTokenSource _cts = new();
     private readonly string _agent;
-    private readonly bool _directSpawn;
+    private readonly IAgentSpawner _agentSpawner;
     private readonly TextWriter _stderr;
 
     // Cached initialize params from editor (for forwarding to agents)
@@ -32,16 +32,18 @@ public sealed class AcpProxy : IDisposable
     /// <param name="stdout">Stream for JSON-RPC output.</param>
     /// <param name="stderr">Stream for diagnostic output.</param>
     /// <param name="directSpawn">If true, spawns agent directly without cai exec.</param>
+    /// <param name="agentSpawner">Optional custom agent spawner. If null, default spawner is used.</param>
     public AcpProxy(
         string agent,
         Stream stdout,
         TextWriter stderr,
-        bool directSpawn = false)
+        bool directSpawn = false,
+        IAgentSpawner? agentSpawner = null)
     {
         _agent = agent;
         _output = new OutputWriter(stdout);
         _stderr = stderr;
-        _directSpawn = directSpawn;
+        _agentSpawner = agentSpawner ?? new AgentSpawner(directSpawn, stderr);
 
         // No validation - any agent name is accepted.
         // Validation happens at runtime when the agent binary is executed.
@@ -224,8 +226,7 @@ public sealed class AcpProxy : IDisposable
             var pathTranslator = new PathTranslator(workspace);
 
             // Spawn agent process
-            var spawner = new AgentSpawner(_directSpawn, _stderr);
-            var process = spawner.SpawnAgent(session, _agent);
+            var process = _agentSpawner.SpawnAgent(session, _agent);
             session.AgentProcess = process;
 
             // Start reader task to handle out-of-order responses and notifications
