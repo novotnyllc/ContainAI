@@ -8,34 +8,89 @@ namespace ContainAI.Cli.Tests;
 public sealed class CaiCliRoutingTests
 {
     [Fact]
-    public async Task NoArgs_UsesLegacyRuntime_DefaultRun()
+    public async Task NoArgs_UsesNativeRunRuntime_DefaultRun()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync([], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
-        Assert.Single(runtime.LegacyCalls);
-        Assert.Empty(runtime.LegacyCalls[0]);
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.Empty(runtime.RunCalls[0].AdditionalArgs);
+        Assert.Empty(runtime.RunCalls[0].CommandArgs);
     }
 
     [Fact]
-    public async Task KnownCommand_UsesLegacyRuntime_WithForwardedTokens()
+    public async Task RunCommand_UsesNativeRunRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
-        var exitCode = await CaiCli.RunAsync(["run", "--fresh", "/tmp/workspace"], runtime, cancellationToken);
+        var exitCode = await CaiCli.RunAsync(["run", "--fresh", "--detached", "echo", "ok"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.LegacyExitCode, exitCode);
-        Assert.Collection(
-            runtime.LegacyCalls,
-            call => Assert.Equal(["run", "--fresh", "/tmp/workspace"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.True(runtime.RunCalls[0].Fresh);
+        Assert.True(runtime.RunCalls[0].Detached);
+        Assert.Equal(["echo", "ok"], runtime.RunCalls[0].CommandArgs);
     }
 
     [Fact]
-    public async Task KnownCommand_UnknownSubcommand_IsForwardedToLegacyRuntime()
+    public async Task ShellCommand_UsesNativeShellRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["shell", "--workspace", "/tmp/workspace"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.ShellExitCode, exitCode);
+        Assert.Single(runtime.ShellCalls);
+        Assert.Equal("/tmp/workspace", runtime.ShellCalls[0].Workspace);
+    }
+
+    [Fact]
+    public async Task ExecCommand_UsesNativeExecRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["exec", "ssh-target", "echo", "hi"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.ExecExitCode, exitCode);
+        Assert.Single(runtime.ExecCalls);
+        Assert.Equal(["ssh-target", "echo", "hi"], runtime.ExecCalls[0].CommandArgs);
+    }
+
+    [Fact]
+    public async Task DockerCommand_UsesNativeDockerRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["docker", "ps", "-a"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.DockerExitCode, exitCode);
+        Assert.Single(runtime.DockerCalls);
+        Assert.Equal(["ps", "-a"], runtime.DockerCalls[0].DockerArgs);
+    }
+
+    [Fact]
+    public async Task StatusCommand_UsesNativeStatusRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["status", "--json", "--container", "demo"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.StatusExitCode, exitCode);
+        Assert.Single(runtime.StatusCalls);
+        Assert.True(runtime.StatusCalls[0].Json);
+        Assert.Equal("demo", runtime.StatusCalls[0].Container);
+    }
+
+    [Fact]
+    public async Task KnownLegacyCommand_UnknownSubcommand_IsForwardedToLegacyRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -318,12 +373,57 @@ public sealed class CaiCliRoutingTests
 
     private sealed class FakeRuntime : ICaiCommandRuntime
     {
+        public const int RunExitCode = 31;
+        public const int ShellExitCode = 32;
+        public const int ExecExitCode = 33;
+        public const int DockerExitCode = 34;
+        public const int StatusExitCode = 35;
         public const int LegacyExitCode = 17;
         public const int AcpExitCode = 23;
+
+        public List<RunCommandOptions> RunCalls { get; } = [];
+
+        public List<ShellCommandOptions> ShellCalls { get; } = [];
+
+        public List<ExecCommandOptions> ExecCalls { get; } = [];
+
+        public List<DockerCommandOptions> DockerCalls { get; } = [];
+
+        public List<StatusCommandOptions> StatusCalls { get; } = [];
 
         public List<IReadOnlyList<string>> LegacyCalls { get; } = [];
 
         public List<string> AcpCalls { get; } = [];
+
+        public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
+        {
+            RunCalls.Add(options);
+            return Task.FromResult(RunExitCode);
+        }
+
+        public Task<int> RunShellAsync(ShellCommandOptions options, CancellationToken cancellationToken)
+        {
+            ShellCalls.Add(options);
+            return Task.FromResult(ShellExitCode);
+        }
+
+        public Task<int> RunExecAsync(ExecCommandOptions options, CancellationToken cancellationToken)
+        {
+            ExecCalls.Add(options);
+            return Task.FromResult(ExecExitCode);
+        }
+
+        public Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
+        {
+            DockerCalls.Add(options);
+            return Task.FromResult(DockerExitCode);
+        }
+
+        public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
+        {
+            StatusCalls.Add(options);
+            return Task.FromResult(StatusExitCode);
+        }
 
         public Task<int> RunLegacyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         {

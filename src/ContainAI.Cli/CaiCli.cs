@@ -15,12 +15,7 @@ public static class CaiCli
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        if (args.Length == 0)
-        {
-            return await runtime.RunLegacyAsync(Array.Empty<string>(), cancellationToken);
-        }
-
-        if (args[0] == "--acp")
+        if (args.Length > 0 && args[0] == "--acp")
         {
             var translated = new List<string>(capacity: args.Length + 1)
             {
@@ -32,7 +27,7 @@ public static class CaiCli
         }
 
         var normalizedArgs = NormalizeRootAliases(args);
-        if (ShouldFallbackToLegacyRun(normalizedArgs))
+        if (normalizedArgs.Length > 0 && ShouldFallbackToLegacyRun(normalizedArgs))
         {
             return await runtime.RunLegacyAsync(normalizedArgs, cancellationToken);
         }

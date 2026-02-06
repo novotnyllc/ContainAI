@@ -1,6 +1,6 @@
 using System.CommandLine;
-using System.Text.Encodings.Web;
 using System.Reflection;
+using System.Text.Encodings.Web;
 using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli;
@@ -23,13 +23,29 @@ internal sealed class RootCommandBuilder
             TreatUnmatchedTokensAsErrors = false,
         };
 
-        root.SetAction((_, cancellationToken) => runtime.RunLegacyAsync(Array.Empty<string>(), cancellationToken));
+        root.SetAction((_, cancellationToken) => runtime.RunRunAsync(
+            new RunCommandOptions(
+                Workspace: null,
+                Fresh: false,
+                Detached: false,
+                Quiet: false,
+                Verbose: false,
+                AdditionalArgs: Array.Empty<string>(),
+                CommandArgs: Array.Empty<string>()),
+            cancellationToken));
 
         foreach (var name in CommandCatalog.RoutedCommandOrder.Where(static command => command != "acp"))
         {
-            var command = name == "version"
-                ? CreateVersionCommand(runtime)
-                : CreateLegacyPassThroughCommand(name, runtime);
+            var command = name switch
+            {
+                "run" => CreateRunCommand(runtime),
+                "shell" => CreateShellCommand(runtime),
+                "exec" => CreateExecCommand(runtime),
+                "docker" => CreateDockerCommand(runtime),
+                "status" => CreateStatusCommand(runtime),
+                "version" => CreateVersionCommand(runtime),
+                _ => CreateLegacyPassThroughCommand(name, runtime),
+            };
 
             root.Subcommands.Add(command);
         }
@@ -37,6 +53,229 @@ internal sealed class RootCommandBuilder
         root.Subcommands.Add(_acpCommandBuilder.Build(runtime));
 
         return root;
+    }
+
+    private static Command CreateRunCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("run", "Start or attach to a runtime shell.")
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        var workspaceOption = new Option<string?>("--workspace", "-w")
+        {
+            Description = "Workspace path for command execution.",
+        };
+        var freshOption = new Option<bool>("--fresh")
+        {
+            Description = "Request a fresh runtime environment.",
+        };
+        var detachedOption = new Option<bool>("--detached", "-d")
+        {
+            Description = "Run in detached mode.",
+        };
+        var quietOption = new Option<bool>("--quiet", "-q")
+        {
+            Description = "Suppress non-essential output.",
+        };
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Enable verbose output.",
+        };
+        var commandArgs = new Argument<string[]>("command")
+        {
+            Arity = ArgumentArity.ZeroOrMore,
+            Description = "Optional command to execute in the login shell.",
+        };
+
+        command.Options.Add(workspaceOption);
+        command.Options.Add(freshOption);
+        command.Options.Add(detachedOption);
+        command.Options.Add(quietOption);
+        command.Options.Add(verboseOption);
+        command.Arguments.Add(commandArgs);
+
+        command.SetAction((parseResult, cancellationToken) => runtime.RunRunAsync(
+            new RunCommandOptions(
+                Workspace: parseResult.GetValue(workspaceOption),
+                Fresh: parseResult.GetValue(freshOption),
+                Detached: parseResult.GetValue(detachedOption),
+                Quiet: parseResult.GetValue(quietOption),
+                Verbose: parseResult.GetValue(verboseOption),
+                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
+                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
+            cancellationToken));
+
+        return command;
+    }
+
+    private static Command CreateShellCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("shell", "Open an interactive login shell.")
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        var workspaceOption = new Option<string?>("--workspace", "-w")
+        {
+            Description = "Workspace path for shell execution.",
+        };
+        var quietOption = new Option<bool>("--quiet", "-q")
+        {
+            Description = "Suppress non-essential output.",
+        };
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Enable verbose output.",
+        };
+        var commandArgs = new Argument<string[]>("command")
+        {
+            Arity = ArgumentArity.ZeroOrMore,
+            Description = "Optional command to execute in the login shell.",
+        };
+
+        command.Options.Add(workspaceOption);
+        command.Options.Add(quietOption);
+        command.Options.Add(verboseOption);
+        command.Arguments.Add(commandArgs);
+
+        command.SetAction((parseResult, cancellationToken) => runtime.RunShellAsync(
+            new ShellCommandOptions(
+                Workspace: parseResult.GetValue(workspaceOption),
+                Quiet: parseResult.GetValue(quietOption),
+                Verbose: parseResult.GetValue(verboseOption),
+                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
+                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
+            cancellationToken));
+
+        return command;
+    }
+
+    private static Command CreateExecCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("exec", "Execute a command through SSH.")
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        var workspaceOption = new Option<string?>("--workspace", "-w")
+        {
+            Description = "Workspace path for command execution.",
+        };
+        var quietOption = new Option<bool>("--quiet", "-q")
+        {
+            Description = "Suppress non-essential output.",
+        };
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Enable verbose output.",
+        };
+        var commandArgs = new Argument<string[]>("command")
+        {
+            Arity = ArgumentArity.ZeroOrMore,
+            Description = "Command and arguments passed to ssh.",
+        };
+
+        command.Options.Add(workspaceOption);
+        command.Options.Add(quietOption);
+        command.Options.Add(verboseOption);
+        command.Arguments.Add(commandArgs);
+
+        command.SetAction((parseResult, cancellationToken) => runtime.RunExecAsync(
+            new ExecCommandOptions(
+                Workspace: parseResult.GetValue(workspaceOption),
+                Quiet: parseResult.GetValue(quietOption),
+                Verbose: parseResult.GetValue(verboseOption),
+                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
+                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
+            cancellationToken));
+
+        return command;
+    }
+
+    private static Command CreateDockerCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("docker", "Run Docker in the ContainAI runtime context.")
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        var dockerArgs = new Argument<string[]>("docker-args")
+        {
+            Arity = ArgumentArity.ZeroOrMore,
+            Description = "Arguments forwarded to docker.",
+        };
+
+        command.Arguments.Add(dockerArgs);
+        command.SetAction((parseResult, cancellationToken) => runtime.RunDockerAsync(
+            new DockerCommandOptions(BuildArgumentList(parseResult.GetValue(dockerArgs), parseResult.UnmatchedTokens)),
+            cancellationToken));
+
+        return command;
+    }
+
+    private static Command CreateStatusCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("status", "Show runtime container status.")
+        {
+            TreatUnmatchedTokensAsErrors = false,
+        };
+
+        var jsonOption = new Option<bool>("--json")
+        {
+            Description = "Emit status as JSON lines.",
+        };
+        var workspaceOption = new Option<string?>("--workspace", "-w")
+        {
+            Description = "Workspace path used for status resolution.",
+        };
+        var containerOption = new Option<string?>("--container")
+        {
+            Description = "Filter status output by container name.",
+        };
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Enable verbose output.",
+        };
+
+        command.Options.Add(jsonOption);
+        command.Options.Add(workspaceOption);
+        command.Options.Add(containerOption);
+        command.Options.Add(verboseOption);
+
+        command.SetAction((parseResult, cancellationToken) => runtime.RunStatusAsync(
+            new StatusCommandOptions(
+                Json: parseResult.GetValue(jsonOption),
+                Workspace: parseResult.GetValue(workspaceOption),
+                Container: parseResult.GetValue(containerOption),
+                Verbose: parseResult.GetValue(verboseOption),
+                AdditionalArgs: parseResult.UnmatchedTokens.ToArray()),
+            cancellationToken));
+
+        return command;
+    }
+
+    private static IReadOnlyList<string> BuildArgumentList(string[]? parsedArgs, IReadOnlyList<string> unmatchedTokens)
+    {
+        if ((parsedArgs is null || parsedArgs.Length == 0) && unmatchedTokens.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var all = new List<string>(
+            capacity: (parsedArgs?.Length ?? 0) + unmatchedTokens.Count);
+
+        if (parsedArgs is not null && parsedArgs.Length > 0)
+        {
+            all.AddRange(parsedArgs);
+        }
+
+        if (unmatchedTokens.Count > 0)
+        {
+            all.AddRange(unmatchedTokens);
+        }
+
+        return all;
     }
 
     private static Command CreateLegacyPassThroughCommand(string commandName, ICaiCommandRuntime runtime)
