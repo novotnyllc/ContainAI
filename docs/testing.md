@@ -29,14 +29,13 @@ flowchart TB
     end
 
     subgraph T3["Tier 3: E2E (Manual)"]
-        DinD["test-dind.sh"]
-        Secure["test-secure-engine.sh"]
-        Full["test-containai.sh"]
+        Smoke["docker run ... cai version"]
+        System["docker run ... cai system init --help"]
         Sysbox["Requires Sysbox"]
     end
 
     Manifest -->|"Pass"| Sync
-    Docker -->|"Pass"| DinD
+    Docker -->|"Pass"| Smoke
 
     style T1 fill:#0f3460,stroke:#16213e,color:#fff
     style T2 fill:#1a1a2e,stroke:#16213e,color:#fff
@@ -76,7 +75,7 @@ These tests cover:
 - Environment variable import
 - Hot-reload and data migration scenarios
 
-### Tier 3: E2E Tests (Manual - requires sysbox)
+### Tier 3: E2E Smoke Tests (Manual - requires sysbox)
 
 Full system container tests require sysbox runtime for systemd support. These are not run automatically in CI due to infrastructure requirements.
 
@@ -84,16 +83,16 @@ Full system container tests require sysbox runtime for systemd support. These ar
 - Linux host with sysbox installed
 - Docker configured with sysbox-runc runtime
 
-**Running E2E tests:**
+**Running E2E smoke checks:**
 
 ```bash
 # Verify sysbox is available
 docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc
 
-# Run E2E tests (requires sysbox)
-./tests/integration/test-dind.sh
-./tests/integration/test-secure-engine.sh
-./tests/integration/test-containai.sh
+# Run smoke checks against the base image (requires sysbox)
+docker --context containai-docker pull ghcr.io/novotnyllc/containai/base:latest
+docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai version
+docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai system init --help
 ```
 
 **Why sysbox is required:**
@@ -111,7 +110,7 @@ The GitHub Actions workflow (`docker.yml`) runs:
 
 1. **lint job**: shellcheck + manifest consistency (always)
 2. **build job**: Build Docker images (after lint)
-3. **test job**: Integration tests against built image (PRs only)
+3. **test job**: Integration tests, ACP .NET tests, and runtime smoke checks against built images
 
 E2E tests are documented for manual execution on self-hosted infrastructure.
 

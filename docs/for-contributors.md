@@ -10,9 +10,9 @@
    cd containai
    ```
 
-2. **Source the CLI** to load all functions:
+2. **Build the native CLI**:
    ```bash
-   source src/containai.sh
+   dotnet build ContainAI.slnx -c Release
    ```
 
 3. **Verify your environment**:
@@ -72,39 +72,32 @@ flowchart TD
 
 ```
 containai/
-├── src/                     # Main CLI and container runtime
-│   ├── containai.sh         # Entry point (sources lib/*.sh)
-│   ├── lib/                 # Modular shell libraries
-│   │   ├── core.sh          # Logging utilities
-│   │   ├── platform.sh      # OS detection
-│   │   ├── docker.sh        # Docker helpers
-│   │   ├── doctor.sh        # Health checks
-│   │   ├── config.sh        # TOML parsing
-│   │   ├── container.sh     # Container lifecycle
-│   │   ├── import.sh        # Dotfile sync
-│   │   └── ...              # Other modules
+├── src/                     # Main CLI and runtime libraries
+│   ├── cai/                 # NativeAOT host executable
+│   ├── ContainAI.Cli/       # System.CommandLine surface
+│   ├── ContainAI.Cli.Abstractions/
+│   ├── AgentClientProtocol.Proxy/
 │   ├── container/           # Container-specific content
 │   │   └── Dockerfile*      # Image layers
-│   └── build.sh             # Build script
+│   └── manifests/           # Authoritative sync manifests
 ├── tests/
-│   ├── unit/                # Unit tests (portable)
-│   └── integration/         # Integration tests (require Docker)
+│   ├── ContainAI.Cli.Tests/
+│   └── AgentClientProtocol.Proxy.Tests/
 └── docs/                    # Documentation
 ```
 
 ## Key Patterns
 
-### Shell Scripting Conventions
+### Native CLI Conventions
 
-ContainAI uses strict shell conventions for portability:
+ContainAI uses a .NET 10 native CLI with strong typing and deterministic behavior:
 
 | Pattern | Why |
 |---------|-----|
-| `command -v` not `which` | Portable across shells |
-| `printf '%s\n'` not `echo` | Handles `-n`/`-e` safely |
-| `[[:space:]]` not `\s` | POSIX character classes |
-| `local` for loop variables | Prevents shell pollution |
-| `set -euo pipefail` | Strict error handling |
+| `System.CommandLine` entrypoint | Structured command/subcommand parsing |
+| `System.Text.Json` + `Tomlyn` | Native JSON/TOML parsing without external parsers |
+| `xunit.v3` + MTP | Consistent local/CI test execution and coverage |
+| NBGV (`dotnet nbgv`) | Versioning from Git metadata |
 
 See [.flow/memory/conventions.md](../.flow/memory/conventions.md) for the full list.
 
@@ -134,7 +127,8 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 | Tier | Location | Requirements |
 |------|----------|--------------|
 | Linting | CI | None (shellcheck on installer script) |
-| Integration | `tests/integration/` | Docker |
+| Integration | `tests/ContainAI.Cli.Tests/` | Docker |
+| ACP | `tests/AgentClientProtocol.Proxy.Tests/` | None |
 | E2E | Manual | Sysbox runtime |
 
 ### Running Tests
@@ -146,8 +140,11 @@ shellcheck -x install.sh
 # Integration tests
 dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
-# E2E tests (requires sysbox)
-./tests/integration/test-secure-engine.sh
+# ACP proxy tests
+dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj --configuration Release -- --xunit-info
+
+# E2E smoke checks (requires sysbox)
+docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai version
 ```
 
 ## Common Pitfalls

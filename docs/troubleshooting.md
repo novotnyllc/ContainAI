@@ -984,7 +984,7 @@ Claude Code uses OAuth tokens stored in `~/.claude/.credentials.json`. These tok
 **Diagnosis:**
 ```bash
 # Check token expiration time (expiresAt is in milliseconds)
-jq '.claudeAiOauth.expiresAt' ~/.claude/.credentials.json
+grep -o '"expiresAt":[0-9]*' ~/.claude/.credentials.json
 # Compare to current time in milliseconds
 echo $(($(date +%s) * 1000))
 

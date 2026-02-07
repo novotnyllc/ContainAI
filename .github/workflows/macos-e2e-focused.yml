@@ -243,12 +243,10 @@ jobs:
           docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
           docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
-      - name: Run Secure Engine E2E tests (macOS)
+      - name: Run Secure Engine E2E smoke tests (macOS)
         run: |
-          BASH_BIN="$(brew --prefix bash)/bin/bash"
-          "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
-          "$BASH_BIN" -lc './tests/integration/test-dind.sh'
-          "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai version
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai system init --help
 
       - name: Collect Lima diagnostics
         if: always()

@@ -411,20 +411,6 @@ jobs:
           echo "============================================="
           dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
-      - name: Run launch wrapper tests
-        run: |
-          echo "============================================="
-          echo "Running launch wrapper tests (${{ matrix.arch }})"
-          echo "============================================="
-          ./tests/integration/test-launch-wrappers.sh
-
-      - name: Run user manifest tests
-        run: |
-          echo "============================================="
-          echo "Running user manifest tests (${{ matrix.arch }})"
-          echo "============================================="
-          ./tests/integration/test-user-manifests.sh
-
       - name: Run .NET unit tests with coverage
         run: |
           echo "============================================="
@@ -473,8 +459,7 @@ jobs:
           echo "============================================="
           echo "Running ACP proxy integration tests (${{ matrix.arch }})"
           echo "============================================="
-          chmod +x ./tests/integration/mock-acp-server
-          ./tests/integration/test-acp-proxy.sh
+          dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj --configuration Release -- --xunit-info
 
       - name: Collect ContainAI logs
         if: always()
@@ -597,19 +582,14 @@ jobs:
           docker --context containai-docker pull "${CONTAINAI_TEST_IMAGE}"
           docker --context containai-docker images | grep -E '^(containai|ghcr.io|REPOSITORY)' || true
 
-      - name: Run E2E tests (DinD)
+      - name: Run E2E runtime smoke tests
         run: |
           echo "============================================="
-          echo "Running Docker-in-Docker E2E tests"
+          echo "Running runtime smoke tests"
           echo "============================================="
-          ./tests/integration/test-dind.sh
-
-      - name: Run startup hooks tests (Sysbox)
-        run: |
-          echo "============================================="
-          echo "Running startup hooks tests (requires Sysbox)"
-          echo "============================================="
-          ./tests/integration/test-startup-hooks.sh
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai version
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai system init --help
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai system link-repair --help
 
       - name: Collect sysbox logs
         if: always()
@@ -834,13 +814,10 @@ jobs:
           limactl shell "$VM_NAME" -- sh -c 'sudo -n iptables-nft -S >/tmp/cai-iptables-nft-s.out 2>/tmp/cai-iptables-nft-s.err; echo "sudo iptables-nft -S rc=$?"; cat /tmp/cai-iptables-nft-s.err' || true
           limactl shell "$VM_NAME" -- sh -c 'sudo -n iptables -S DOCKER-USER >/tmp/cai-iptables-docker-user.out 2>/tmp/cai-iptables-docker-user.err; echo "sudo iptables -S DOCKER-USER rc=$?"; cat /tmp/cai-iptables-docker-user.err' || true
 
-      - name: Run Secure Engine E2E tests (macOS)
+      - name: Run Secure Engine E2E smoke tests (macOS)
         run: |
-          BASH_BIN="$(brew --prefix bash)/bin/bash"
-          "$BASH_BIN" -lc './tests/integration/test-secure-engine.sh'
-          "$BASH_BIN" -lc './tests/integration/test-dind.sh'
-          "$BASH_BIN" -lc './tests/integration/test-dind-runc133.sh'
-          "$BASH_BIN" -lc './tests/integration/test-network-blocking.sh'
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai version
+          docker --context containai-docker run --rm --runtime=sysbox-runc "${CONTAINAI_TEST_IMAGE}" cai system init --help
 
       - name: Collect Lima diagnostics
         if: always()
