@@ -416,15 +416,15 @@ jobs:
           echo "============================================="
           echo "Running .NET unit tests with coverage (${{ matrix.arch }})"
           echo "============================================="
+          find artifacts/bin -type d -name TestResults -prune -exec rm -rf {} +
           if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
-            dotnet test --solution ContainAI.slnx --configuration Release -- --filter-not-trait "Category=SyncIntegration" --coverage --xunit-info
+            dotnet test --solution ContainAI.slnx --configuration Release -- --filter-not-trait "Category=SyncIntegration" --coverage --coverage-output-format cobertura --xunit-info
           else
             echo "No test projects found, skipping dotnet test"
           fi
 
       - name: Install coverage report tools
         run: |
-          dotnet tool install --global dotnet-coverage --version 18.4.1
           dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.1
 
       - name: Generate coverage reports
@@ -432,16 +432,49 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.dotnet/tools:$PATH"
           mkdir -p artifacts/coverage
-          coverage_files="$(find artifacts/bin -type f -path '*/TestResults/*.coverage' | tr '\n' ';')"
+          coverage_files="$(find artifacts/bin -type f -path '*/TestResults/*.cobertura.xml' | tr '\n' ';')"
           if [[ -z "$coverage_files" ]]; then
-            echo "ERROR: No .coverage files produced by test run"
+            echo "ERROR: No .cobertura.xml coverage files produced by test run"
             exit 1
           fi
-          dotnet-coverage merge $coverage_files -f cobertura -o artifacts/coverage/coverage.cobertura.xml
           reportgenerator \
-            -reports:artifacts/coverage/coverage.cobertura.xml \
+            -reports:"artifacts/bin/**/TestResults/*.cobertura.xml" \
             -targetdir:artifacts/coverage/report \
-            "-reporttypes:HtmlInline;Cobertura;Badges"
+            "-reporttypes:HtmlInline;Cobertura;Badges;TextSummary"
+
+      - name: Enforce .NET coverage threshold (>= 90%)
+        run: |
+          set -euo pipefail
+          summary_file="artifacts/coverage/report/Summary.txt"
+          if [[ ! -f "$summary_file" ]]; then
+            echo "ERROR: Coverage summary file not found: $summary_file"
+            exit 1
+          fi
+
+          containai_cli_pct="$(awk '/^ContainAI\.Cli[[:space:]]+[0-9.]+%$/ {gsub("%","",$NF); print $NF; exit}' "$summary_file")"
+          abstractions_pct="$(awk '/^ContainAI\.Cli\.Abstractions[[:space:]]+[0-9.]+%$/ {gsub("%","",$NF); print $NF; exit}' "$summary_file")"
+
+          if [[ -z "$containai_cli_pct" ]]; then
+            echo "ERROR: Could not determine coverage for ContainAI.Cli from $summary_file"
+            exit 1
+          fi
+
+          if [[ -z "$abstractions_pct" ]]; then
+            echo "ERROR: Could not determine coverage for ContainAI.Cli.Abstractions from $summary_file"
+            exit 1
+          fi
+
+          awk -v v="$containai_cli_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
+            echo "ERROR: ContainAI.Cli coverage is ${containai_cli_pct}% (< 90%)"
+            exit 1
+          }
+
+          awk -v v="$abstractions_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
+            echo "ERROR: ContainAI.Cli.Abstractions coverage is ${abstractions_pct}% (< 90%)"
+            exit 1
+          }
+
+          echo "Coverage gate passed: ContainAI.Cli=${containai_cli_pct}%, ContainAI.Cli.Abstractions=${abstractions_pct}%"
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
