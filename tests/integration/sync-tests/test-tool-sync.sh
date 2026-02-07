@@ -10,7 +10,7 @@
 #
 # Prerequisites:
 #   - Docker daemon running
-#   - Test image built: ./src/build.sh
+#   - Test image built: dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 # ==============================================================================
 
 set -euo pipefail

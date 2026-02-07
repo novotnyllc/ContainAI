@@ -34,7 +34,7 @@ jobs:
       - name: Lint shell scripts with shellcheck
         run: |
           echo "Running shellcheck on shell scripts..."
-          shellcheck -x install.sh src/build.sh scripts/*.sh scripts/ralph/*.sh
+          shellcheck -x install.sh scripts/*.sh scripts/ralph/*.sh
 
       - name: Check manifest consistency
         run: dotnet run --project src/cai -- manifest check src/manifests
@@ -152,7 +152,7 @@ jobs:
           build-args: |
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ env.NBGV_SemVer2 }}
+            CONTAINAI_VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=base
           cache-to: type=gha,mode=max,scope=base
 
@@ -169,7 +169,7 @@ jobs:
             BASE_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/base:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ env.NBGV_SemVer2 }}
+            CONTAINAI_VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=sdks
           cache-to: type=gha,mode=max,scope=sdks
 
@@ -186,7 +186,7 @@ jobs:
             SDKS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/sdks:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ env.NBGV_SemVer2 }}
+            CONTAINAI_VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=full-v2
           cache-to: type=gha,mode=max,scope=full-v2
 
@@ -223,7 +223,7 @@ jobs:
             AGENTS_IMAGE=${{ steps.build_strategy.outputs.image_prefix }}/agents:${{ steps.build_strategy.outputs.tag_suffix }}
             BUILD_DATE=${{ github.run_started_at }}
             VCS_REF=${{ github.sha }}
-            VERSION=${{ env.NBGV_SemVer2 }}
+            CONTAINAI_VERSION=${{ env.NBGV_SemVer2 }}
           cache-from: type=gha,scope=main
           cache-to: type=gha,mode=max,scope=main
 
@@ -528,7 +528,7 @@ jobs:
             runner: ubuntu-24.04-arm
 
     steps:
-      # Always checkout repository - needed for build.sh and test scripts
+      # Always checkout repository - needed for test scripts and build metadata
       - name: Checkout repository
         uses: actions/checkout@v4
         with:

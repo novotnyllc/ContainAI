@@ -32,8 +32,8 @@ This directory contains the ContainAI sandbox implementation:
 - VS Code Server support
 
 **Key Files:**
-- `containai.sh` - CLI entry point (sources `lib/*.sh` modules)
-- `lib/` - Modular shell libraries
+- `cai/Program.cs` - Native `.NET 10` CLI entry point
+- `ContainAI.Cli/` - `System.CommandLine` routing and command surface
 - `container/Dockerfile*` - Container image definitions
 - `cai` native runtime commands (`cai system ...`) - Container init/link orchestration
 
@@ -71,7 +71,7 @@ Numeric prefixes ensure deterministic processing order. See [docs/adding-agents.
 
 - Docker Desktop 4.50+ with sandbox feature, **OR** Docker Engine with Sysbox runtime
 - macOS, Linux, or Windows (WSL2)
-- Bash 4.0+ (macOS default is 3.2; use `brew install bash`)
+- .NET SDK 10.0+
 
 ### Enable Docker Sandbox (Docker Desktop)
 
@@ -83,18 +83,12 @@ Numeric prefixes ensure deterministic processing order. See [docs/adding-agents.
 
 ```bash
 # Build the image (first time only)
-./build.sh
-
-# Source ContainAI CLI (adds cai/containai commands)
-# Note: requires bash (not zsh or other shells)
-source ./containai.sh
+dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Start sandbox in your project directory
 cd /path/to/your/project
 cai
 ```
-
-> **Note:** `containai.sh` sources the modular libraries (`lib/*.sh`) to provide all ContainAI functionality.
 
 The data volume (`containai-data` by default) is created automatically on first run.
 
@@ -106,7 +100,6 @@ cai
 
 **Existing users** (sync settings from host):
 ```bash
-source ./containai.sh
 cai import
 ```
 
@@ -332,13 +325,12 @@ docker --context containai-docker run --rm -u agent containai:latest bash -lc "n
 ## Build Options
 
 ```bash
-./build.sh                    # Standard build
-./build.sh --no-cache         # Force rebuild all layers
-./build.sh --platforms linux/amd64,linux/arm64 --push  # Multi-arch publish (uses buildx)
+dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
 ```
 
-The build script tags the image as both `containai:latest` and `containai:<YYYY-MM-DD>` for reproducibility.
-By default, `./build.sh` uses plain `docker build` for local, single-arch builds. Buildx is used only when buildx options (like `--platforms`, `--push`, or `--load`) are supplied.
+The MSBuild image target supports layer-specific builds (`ContainAILayer`), multi-arch (`ContainAIPlatforms`), and optional buildx setup (`ContainAIBuildSetup=true`).
 
 ## Testing with Dockerfile.test
 
@@ -445,7 +437,7 @@ Ensure you have:
 
 Build the image first:
 ```bash
-./build.sh
+dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 ```
 
 ### Node.js commands not found

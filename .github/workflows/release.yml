@@ -111,10 +111,10 @@ jobs:
         id: version
         run: |
           dotnet tool restore
-          VERSION=$(dotnet nbgv get-version -v SemVer2)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Release version: $VERSION (tag: v$VERSION)"
+          release_semver=$(dotnet nbgv get-version -v SemVer2)
+          echo "version=$release_semver" >> "$GITHUB_OUTPUT"
+          echo "tag=v$release_semver" >> "$GITHUB_OUTPUT"
+          echo "Release version: $release_semver (tag: v$release_semver)"
 
       - name: Wait for Docker image
         id: wait_image
@@ -207,7 +207,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          VERSION="${{ steps.version.outputs.version }}"
 
           gh release create "$TAG" \
             --title "ContainAI $TAG" \

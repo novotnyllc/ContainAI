@@ -29,28 +29,17 @@ Thank you for your interest in contributing to ContainAI! This guide covers deve
 
 ### Requirements
 
-- **Bash 4.0+** - The CLI requires bash (not zsh or fish)
+- **.NET SDK 10.0+** - Required for native CLI build and test
 - **Docker Desktop 4.50+** with sandbox feature enabled, OR
 - **Sysbox runtime** installed (for Linux/WSL2/macOS via Lima)
 - **Git** for version control
 
-### Shell Requirement
-
-ContainAI scripts require **bash**. If your default shell is zsh or fish:
-
-```bash
-# Switch to bash before developing
-bash
-
-# Or run bash explicitly
-bash ./tests/integration/test-secure-engine.sh
-```
-
 ### Setup
 
 ```bash
-# Source the CLI to load all functions
-source src/containai.sh
+# Restore local tools and build
+dotnet tool restore
+dotnet build ContainAI.slnx -c Release
 
 # Verify your environment
 cai doctor
@@ -58,45 +47,34 @@ cai doctor
 
 ### Building Images (Buildx Preferred)
 
-ContainAI builds use Docker buildx by default to match CI behavior. The default platform is `linux/<host-arch>` even on macOS (builds run inside Lima). Use `--build-setup` to configure a buildx builder and binfmt if required.
+ContainAI image builds are driven by MSBuild targets in `src/cai/cai.csproj`.
+Use `ContainAIBuildSetup=true` to configure buildx builder/binfmt when needed.
 
 ```bash
-# Build all layers for the current host arch (buildx + --load)
-./src/build.sh
+# Build all layers for host architecture
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
-# Configure buildx builder/binfmt (first-time setup)
-./src/build.sh --build-setup
+# Build single layer
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build and tag for a registry (all layers)
-./src/build.sh --image-prefix ghcr.io/ORG/containai --platforms linux/amd64,linux/arm64 --push --build-setup
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
 
-# Multi-arch build (CI style) - requires --push or --output
-./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
+# Multi-arch release tarballs
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAITarballs -p:Configuration=Release -p:ContainAIRuntimeIdentifiers=linux-x64;linux-arm64
 ```
 
 ### Project Structure
 
 ```
 containai/
-├── src/                     # Main CLI and container runtime
-│   ├── containai.sh         # Entry point (sources lib/*.sh)
-│   ├── lib/                 # Modular shell libraries
-│   │   ├── core.sh          # Logging utilities
-│   │   ├── platform.sh      # OS detection
-│   │   ├── docker.sh        # Docker helpers
-│   │   ├── eci.sh           # ECI detection
-│   │   ├── doctor.sh        # Health checks
-│   │   ├── config.sh        # TOML parsing
-│   │   ├── container.sh     # Container lifecycle
-│   │   ├── import.sh        # Dotfile sync
-│   │   ├── export.sh        # Volume backup
-│   │   ├── setup.sh         # Sysbox installation
-│   │   └── env.sh           # Environment handling
-│   └── container/           # Container-specific content
-│       └── Dockerfile*      # Container image definitions
-├── tests/                   # Test suites
-│   ├── unit/                # Unit tests (portable)
-│   └── integration/         # Integration tests (require Docker)
+├── src/
+│   ├── cai/                 # Native CLI host runtime
+│   ├── ContainAI.Cli/       # System.CommandLine parser and routing
+│   ├── AgentClientProtocol.Proxy/ # ACP proxy library
+│   ├── container/           # Container image definitions
+│   └── manifests/           # Authoritative sync manifests
+├── tests/                   # xUnit v3 test suites
 ├── docs/                    # Documentation
 ├── SECURITY.md              # Security model
 └── README.md                # Project overview
@@ -203,14 +181,12 @@ Common pitfalls to avoid are documented in [.flow/memory/pitfalls.md](.flow/memo
 
 ## Testing
 
-### Test Scripts
+### Test Commands
 
-Integration tests are located in `tests/integration/`:
-
-| Script | Purpose |
+| Command | Purpose |
 |--------|---------|
-| `test-secure-engine.sh` | Verifies Sysbox runtime and Docker context setup |
-| `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -- --filter-trait "Category=SyncIntegration"` | Tests dotfile sync, config parsing, container lifecycle |
+| `dotnet test --solution ContainAI.slnx -c Release --xunit-info` | Full unit/integration test suite |
+| `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=SyncIntegration" --xunit-info` | Docker-backed sync integration tests |
 
 ### Documentation Validation
 
@@ -228,8 +204,8 @@ This script validates all internal markdown links (relative paths and anchors) i
 # Run from the repo root
 cd containai
 
-# Run secure engine tests
-./tests/integration/test-secure-engine.sh
+# Run full suite
+dotnet test --solution ContainAI.slnx -c Release --xunit-info
 
 # Run sync integration tests (requires Docker)
 dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
@@ -251,40 +227,10 @@ Tests use consistent markers for results:
 
 When adding new tests:
 
-1. **Use the standard markers**: `[PASS]`, `[FAIL]`, `[WARN]`, `[INFO]`
-2. **Test actual behavior**: Verify sentinel values or specific outputs, not just that operations succeed
-3. **Provide remediation hints**: On failure, tell the user how to fix it
-4. **Be hermetic**: Clear external env vars with `env -u` to avoid test pollution
-
-Example test structure:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/containai.sh"
-
-# Test helpers
-pass() { printf '%s\n' "[PASS] $*"; }
-fail() { printf '%s\n' "[FAIL] $*" >&2; FAILED=1; }
-warn() { printf '%s\n' "[WARN] $*"; }
-info() { printf '%s\n' "[INFO] $*"; }
-section() { printf '\n%s\n' "=== $* ==="; }
-
-FAILED=0
-
-# Tests
-section "Feature X"
-if some_condition; then
-    pass "Feature X works as expected"
-else
-    fail "Feature X failed"
-    info "  Remediation: Check Y and Z"
-fi
-
-exit $FAILED
-```
+1. **Use xUnit v3** and deterministic assertions.
+2. **Test behavior, not implementation details**.
+3. **Use trait filters** for environment-specific tests (for example, `Category=SyncIntegration`).
+4. **Keep tests hermetic** and avoid dependency on user-local state.
 
 ## Pull Request Process
 
@@ -292,7 +238,7 @@ exit $FAILED
 
 1. **Run tests** to ensure nothing is broken:
    ```bash
-   ./tests/integration/test-secure-engine.sh
+   dotnet test --solution ContainAI.slnx -c Release --xunit-info
    dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
    ```
 
@@ -374,7 +320,7 @@ For a comprehensive understanding of the codebase:
 
 Key concepts:
 - **Dual isolation paths**: Docker Desktop sandbox (ECI) or Sysbox runtime
-- **Modular libraries**: `src/lib/*.sh` modules with explicit dependencies
+- **Native command runtime**: `.NET 10` CLI with `System.CommandLine` entrypoint
 - **Safe defaults**: Dangerous operations require explicit CLI flags
 - **Workspace-scoped config**: Per-project settings via TOML config files
 

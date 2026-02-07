@@ -23,7 +23,7 @@ FROM ${AGENTS_IMAGE}
 # Dynamic build args at end to avoid cache invalidation
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
-ARG VERSION=unknown
+ARG CONTAINAI_VERSION=unknown
 
 LABEL org.opencontainers.image.title="ContainAI" \
       org.opencontainers.image.description="Secure AI agent sandbox with systemd, SSH, Docker-in-Docker, and AI coding agents" \
@@ -32,7 +32,7 @@ LABEL org.opencontainers.image.title="ContainAI" \
       org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
       org.opencontainers.image.vendor="Claire Novotny LLC" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.version="${CONTAINAI_VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}"
 

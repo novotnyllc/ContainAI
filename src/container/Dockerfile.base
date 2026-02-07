@@ -366,7 +366,7 @@ STOPSIGNAL SIGRTMIN+3
 # Dynamic build args at end to avoid cache invalidation
 ARG BUILD_DATE=unknown
 ARG VCS_REF=unknown
-ARG VERSION=unknown
+ARG CONTAINAI_VERSION=unknown
 
 LABEL org.opencontainers.image.title="ContainAI Base" \
       org.opencontainers.image.description="System container with systemd, sshd, and Docker-in-Docker support" \
@@ -375,7 +375,7 @@ LABEL org.opencontainers.image.title="ContainAI Base" \
       org.opencontainers.image.documentation="https://github.com/novotnyllc/containai#readme" \
       org.opencontainers.image.vendor="Claire Novotny LLC" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.version="${CONTAINAI_VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}"
 

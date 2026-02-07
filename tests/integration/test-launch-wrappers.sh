@@ -21,7 +21,7 @@
 #
 # Prerequisites:
 #   - Docker daemon running
-#   - Test image built: ./src/build.sh
+#   - Test image built: dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 # ==============================================================================
 set -euo pipefail
 
@@ -73,7 +73,7 @@ fi
 
 if ! check_test_image; then
     test_info "Test image not available - skipping launch wrapper tests"
-    test_info "Run './src/build.sh' first to build the test image"
+    test_info "Run 'dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest' first to build the test image"
     exit 0
 fi
 

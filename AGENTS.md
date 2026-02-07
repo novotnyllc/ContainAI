@@ -1,66 +1,61 @@
 # ContainAI
 
-Sandboxed container environment for AI coding agents. Bash shell libraries with strict POSIX conventions.
+Sandboxed container environment for AI coding agents. Native .NET 10 CLI with container/runtime artifacts.
 
 ## Quick Commands
 
 ```bash
-# Development - source the CLI
-source src/containai.sh
-
 # Verify environment
 cai doctor
 
 # Build Docker images (all layers)
-./src/build.sh
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build single layer (faster iteration)
-./src/build.sh --layer base
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build with buildx setup (installs binfmt + builder if needed)
-./src/build.sh --build-setup
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
 
 # Build and tag for a registry (prefix applies to all layers)
-./src/build.sh --image-prefix ghcr.io/ORG/containai --push --platforms linux/amd64,linux/arm64 --build-setup
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
 
 # CI-style multi-arch build (amd64 + arm64)
-./src/build.sh --platforms linux/amd64,linux/arm64 --push --build-setup
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
 
-# Run integration tests (requires Docker)
-./tests/integration/test-secure-engine.sh
-dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
-./tests/integration/test-dind.sh
+# Run tests
+dotnet test --solution ContainAI.slnx -c Release --xunit-info
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
 # Lint shell scripts
-shellcheck -x src/*.sh src/lib/*.sh
+shellcheck -x install.sh scripts/*.sh scripts/ralph/*.sh
 ```
 
 ## Project Structure
 
 ```
 src/
-├── containai.sh        # Main CLI entry point (source this)
+├── cai/                # Native CLI host entrypoint and runtime
+│   ├── Program.cs
+│   ├── NativeLifecycleCommandRuntime.cs
+│   └── ContainerRuntimeCommandService.cs
+├── ContainAI.Cli/      # System.CommandLine command surface and routing
 ├── manifests/          # Per-agent manifest files (sync config source)
 │   ├── 00-common.toml  # Shared entries (fonts, agents dir)
 │   ├── 10-claude.toml  # Claude Code agent
 │   ├── 11-codex.toml   # Codex agent
 │   └── ...             # Other agents/tools
-├── lib/                # Modular shell libraries
-│   ├── core.sh         # Logging utilities
-│   ├── config.sh       # TOML config parsing
-│   ├── container.sh    # Container lifecycle
-│   ├── ssh.sh          # SSH configuration
-│   └── ...             # Other modules
+├── AgentClientProtocol.Proxy/ # ACP proxy library integrated into cai
 ├── container/          # Container-specific content
 │   ├── Dockerfile.template-system # Template wrapper
 │   ├── Dockerfile.base    # Base image
 │   ├── Dockerfile.sdks    # SDK layer
 │   ├── Dockerfile.agents  # Agent layer
 │   └── Dockerfile         # Final image
-├── scripts/            # Operational scripts (install/docs/sysbox tooling)
-└── build.sh            # Build script
+├── services/           # systemd units using native cai system commands
+└── templates/          # Template Dockerfiles
 
-tests/integration/      # Integration tests (require Docker)
+tests/                  # xUnit v3 test suites
 docs/                   # Architecture, config, quickstart
 .flow/                  # Flow-Next task tracking
 ```
@@ -69,7 +64,7 @@ docs/                   # Architecture, config, quickstart
 
 - **`src/manifests/*.toml` are the authoritative source** for what gets synced between host and container
 - Per-agent files with numeric prefixes ensure deterministic processing order
-- `src/lib/import-sync-map.sh` is generated from manifests (contains `_IMPORT_SYNC_MAP`)
+- `cai manifest generate import-map` generates the import mapping from manifests
 - Run `dotnet run --project src/cai -- manifest check src/manifests` to verify alignment (CI enforces this)
 - `cai manifest generate ...` reads manifests to produce derived artifacts
 - User manifests go in `~/.config/containai/manifests/` (processed at runtime)

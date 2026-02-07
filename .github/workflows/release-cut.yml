@@ -33,6 +33,14 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore .NET tools
+        run: dotnet tool restore
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
@@ -41,13 +49,35 @@ jobs:
       - name: Bump version
         id: bump
         run: |
-          ./scripts/bump-version.sh ${{ inputs.bump_type }}
-          new_version=$(cat VERSION | tr -d '[:space:]')
+          set -euo pipefail
+          current_version="$(dotnet nbgv get-version -v Version)"
+          IFS='.' read -r major minor patch <<< "$current_version"
+          case "${{ inputs.bump_type }}" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+            *)
+              echo "Unknown bump type: ${{ inputs.bump_type }}" >&2
+              exit 1
+              ;;
+          esac
+
+          new_version="${major}.${minor}.${patch}"
+          dotnet nbgv set-version "$new_version"
           echo "version=$new_version" >> $GITHUB_OUTPUT
 
       - name: Commit version change
         run: |
-          git add VERSION
+          git add version.json
           git commit -m "chore(release): bump version to ${{ steps.bump.outputs.version }}"
 
       - name: Create annotated tag

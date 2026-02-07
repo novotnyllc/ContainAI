@@ -713,7 +713,7 @@ SYNC_TEST_IMAGE_NAME="${IMAGE_NAME:-containai-test:latest}"
 check_test_image() {
     if ! "${DOCKER_CMD[@]}" image inspect "$SYNC_TEST_IMAGE_NAME" &>/dev/null; then
         printf '%s\n' "[ERROR] Image $SYNC_TEST_IMAGE_NAME not found" >&2
-        printf '%s\n' "[INFO] Run './src/build.sh' first to build the test image" >&2
+        printf '%s\n' "[INFO] Run 'dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest' first to build the test image" >&2
         return 1
     fi
     return 0
