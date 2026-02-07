@@ -71,7 +71,7 @@
     <ContainAIPush Condition="'$(ContainAIPush)'==''">false</ContainAIPush>
     <ContainAILoad Condition="'$(ContainAILoad)'==''">false</ContainAILoad>
     <ContainAIBuildSetup Condition="'$(ContainAIBuildSetup)'==''">false</ContainAIBuildSetup>
-    <ContainAIBuildxBuilder Condition="'$(ContainAIBuildxBuilder)'==''">containai-builder</ContainAIBuildxBuilder>
+    <ContainAIBuildxBuilder Condition="'$(ContainAIBuildxBuilder)'==''"></ContainAIBuildxBuilder>
     <ContainAISkipDockerBuild Condition="'$(ContainAISkipDockerBuild)'==''">false</ContainAISkipDockerBuild>
   </PropertyGroup>
 
@@ -115,6 +115,8 @@
     <PropertyGroup>
       <_ContainAIUseBuildx>false</_ContainAIUseBuildx>
       <_ContainAIUseBuildx Condition="'$(ContainAIPlatforms)'!='' or '$(ContainAIPush)'=='true' or '$(ContainAILoad)'=='true'">true</_ContainAIUseBuildx>
+      <_ContainAIEffectiveBuildxBuilder>$(ContainAIBuildxBuilder)</_ContainAIEffectiveBuildxBuilder>
+      <_ContainAIEffectiveBuildxBuilder Condition="'$(_ContainAIEffectiveBuildxBuilder)'==''">containai-builder</_ContainAIEffectiveBuildxBuilder>
       <_ContainAIPlatformsArg Condition="'$(ContainAIPlatforms)'!=''"> --platform $(ContainAIPlatforms)</_ContainAIPlatformsArg>
       <_ContainAIPushArg Condition="'$(ContainAIPush)'=='true'"> --push</_ContainAIPushArg>
       <_ContainAILoadArg Condition="'$(ContainAILoad)'=='true'"> --load</_ContainAILoadArg>
@@ -129,18 +131,18 @@
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
-      Command="docker buildx inspect $(ContainAIBuildxBuilder)"
+      Command="docker buildx inspect $(_ContainAIEffectiveBuildxBuilder)"
       IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_ContainAIBuildxInspectExitCode" />
     </Exec>
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'!='0'"
-      Command="docker buildx create --name $(ContainAIBuildxBuilder) --use" />
+      Command="docker buildx create --name $(_ContainAIEffectiveBuildxBuilder) --use" />
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'=='0'"
-      Command="docker buildx use $(ContainAIBuildxBuilder)" />
+      Command="docker buildx use $(_ContainAIEffectiveBuildxBuilder)" />
   </Target>
 
   <Target Name="_ResolvePackageArch">
