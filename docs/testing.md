@@ -42,7 +42,7 @@ flowchart TB
     style T3 fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
-### Tier 1: Linting (CI - ubuntu-latest)
+### Tier 1: Linting (CI - ubuntu-24.04)
 
 Host-side checks that don't require Docker:
 
@@ -54,7 +54,7 @@ shellcheck -x install.sh
 dotnet run --project src/cai -- manifest check src/manifests
 ```
 
-### Tier 2: Integration Tests (CI - ubuntu-latest)
+### Tier 2: Integration Tests (CI - ubuntu-24.04 / ubuntu-24.04-arm)
 
 Tests that run against standard Docker runtime:
 
@@ -113,6 +113,16 @@ The GitHub Actions workflow (`docker.yml`) runs:
 3. **test job**: Integration tests, ACP .NET tests, and runtime smoke checks against built images
 
 E2E tests are documented for manual execution on self-hosted infrastructure.
+
+## Coverage Gate Policy
+
+`docker.yml` test jobs run .NET unit tests with coverage in Cobertura format and generate merged reports. The build fails when coverage artifacts are missing.
+
+A hard threshold gate is enforced in CI:
+- `ContainAI.Cli` line coverage must be **>= 90%**
+- `ContainAI.Cli.Abstractions` line coverage must be **>= 90%**
+
+These thresholds are validated from the generated `Summary.txt` coverage report in CI.
 
 ## Test Resource Cleanup
 

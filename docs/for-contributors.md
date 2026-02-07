@@ -101,6 +101,8 @@ ContainAI uses a .NET 10 native CLI with strong typing and deterministic behavio
 
 See [.flow/memory/conventions.md](../.flow/memory/conventions.md) for the full list.
 
+**Command surface**: Commands/options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. Shell completion uses the built-in `cai completion suggest` path; `dotnet-suggest` is not required.
+
 ### Verbose Pattern
 
 Commands are silent by default (Unix Rule of Silence):
@@ -146,6 +148,14 @@ dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.
 # E2E smoke checks (requires sysbox)
 docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai version
 ```
+
+### Coverage Gate Policy
+
+CI requires Cobertura coverage artifacts and merged reports. If no coverage artifacts are generated, the workflow fails.
+
+CI also enforces minimum line coverage thresholds:
+- `ContainAI.Cli` >= 90%
+- `ContainAI.Cli.Abstractions` >= 90%
 
 ## Common Pitfalls
 

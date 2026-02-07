@@ -502,6 +502,12 @@ flowchart LR
     style Runtime fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
+### CLI Command Surface
+
+ContainAI's CLI command surface is **statically declared** in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. There is no runtime discovery or plugin-based command loading; the compiled command model is the source of truth for parsing and completion.
+
+Shell completion uses the built-in `cai completion suggest` path implemented by the CLI itself. This removes any dependency on external completion helpers such as `dotnet-suggest`.
+
 ## Modular Library Structure
 
 The CLI is split into native C# runtime components:
@@ -513,13 +519,12 @@ The CLI is split into native C# runtime components:
 | `src/cai/NativeLifecycleCommandRuntime.cs` | Host command orchestration | `NativeLifecycleCommandRuntime` |
 | `src/cai/NativeSessionCommandRuntime.cs` | Session lifecycle and SSH flow | `NativeSessionCommandRuntime` |
 | `src/cai/ContainerRuntimeCommandService.cs` | Container-side init/link/runtime commands | `ContainerRuntimeCommandService` |
-| `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all` |
-| `import.sh` | Dotfile sync | `_containai_import` |
-| `export.sh` | Volume backup | `_containai_export` |
-| `setup.sh` | Sysbox installation | `_cai_setup` |
-| `ssh.sh` | SSH infrastructure | `_cai_setup_ssh_key`, `_cai_allocate_ssh_port`, `_cai_ssh_run` |
-| `env.sh` | Environment handling | `_containai_import_env` |
-| `version.sh` | Version management | `_cai_version`, `_cai_check_update` |
+| `src/cai/ManifestTomlParser.cs` | TOML manifest parsing | `ManifestTomlParser` |
+| `src/cai/ManifestGenerators.cs` | Derived artifact generation | `ManifestGenerators` |
+| `src/cai/DevcontainerFeatureRuntime.cs` | Devcontainer feature/system integration | `DevcontainerFeatureRuntime` |
+| `src/cai/ContainAiDockerProxy.cs` | Docker context mediation and setup helpers | `ContainAiDockerProxy` |
+| `src/cai/AcpProxyRunner.cs` | ACP proxy process lifecycle | `AcpProxyRunner` |
+| `src/AgentClientProtocol.Proxy/` | ACP transport/proxy library | `AcpProxy`, `AcpSession`, `PathTranslator` |
 
 ### Module Dependencies
 
@@ -535,22 +540,18 @@ The CLI is split into native C# runtime components:
   'background': '#0d1117'
 }}}%%
 flowchart TD
-    Main["containai.sh"] --> Core["core.sh"]
-    Core --> Platform["platform.sh"]
-    Platform --> Docker["docker.sh"]
-    Docker --> Doctor["doctor.sh"]
-    Doctor --> Config["config.sh"]
-    Config --> Container["container.sh"]
-    Container --> Import["import.sh"]
-    Import --> Export["export.sh"]
-    Export --> Setup["setup.sh"]
-    Setup --> SSH["ssh.sh"]
-    SSH --> Env["env.sh"]
-    Env --> Version["version.sh"]
+    Main["Program.cs"] --> Cli["ContainAI.Cli (System.CommandLine)"]
+    Cli --> Runtime["NativeLifecycleCommandRuntime.cs"]
+    Runtime --> Session["NativeSessionCommandRuntime.cs"]
+    Runtime --> Container["ContainerRuntimeCommandService.cs"]
+    Runtime --> Manifest["ManifestTomlParser.cs / ManifestGenerators.cs"]
+    Runtime --> DockerProxy["ContainAiDockerProxy.cs"]
+    Cli --> AcpRunner["AcpProxyRunner.cs"]
+    AcpRunner --> AcpLib["AgentClientProtocol.Proxy"]
 
     style Main fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Core fill:#e94560,stroke:#16213e,color:#fff
-    style SSH fill:#0f3460,stroke:#16213e,color:#fff
+    style Runtime fill:#e94560,stroke:#16213e,color:#fff
+    style AcpLib fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ## Data Flow
@@ -579,26 +580,21 @@ flowchart TD
 }}}%%
 sequenceDiagram
     participant User
-    participant CLI as containai.sh
-    participant Config as config.sh
-    participant Doctor as doctor.sh
-    participant SSH as ssh.sh
-    participant Container as container.sh
+    participant CLI as cai (Program.cs)
+    participant Runtime as NativeLifecycleCommandRuntime
+    participant Session as NativeSessionCommandRuntime
     participant Docker as ContainAI Docker
     participant SSHD as Container sshd
 
     User->>CLI: cai run [options]
-    CLI->>Config: Parse config.toml
-    Config-->>CLI: Volume, agent, resources
-    CLI->>Doctor: Select context
-    Doctor->>Docker: docker info (verify sysbox)
-    Docker-->>Doctor: Sysbox available
-    CLI->>Container: Start/find container
-    Container->>Docker: docker run --runtime=sysbox-runc
-    Docker-->>Container: Container ID
-    Container->>SSH: Setup SSH (port, key, known_hosts)
-    SSH->>SSHD: Wait for ready
-    SSH->>SSHD: ssh agent@localhost -p PORT
+    CLI->>Runtime: Parse config + route typed command
+    Runtime->>Docker: docker info (verify context/runtime)
+    Docker-->>Runtime: Context/runtime availability
+    Runtime->>Session: Resolve/start container + SSH metadata
+    Session->>Docker: docker run --runtime=sysbox-runc
+    Docker-->>Session: Container ID
+    Session->>SSHD: Wait for ready and connect via ssh
+    Session->>SSHD: ssh agent@localhost -p PORT
     SSHD-->>User: Agent session
 ```
 

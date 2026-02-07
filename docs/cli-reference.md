@@ -6,6 +6,8 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 **Source of truth**: The native CLI implementation (`src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/`) is authoritative. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output.
 
+**Command surface**: Commands and options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. There is no runtime discovery or plugin-based command loading.
+
 **Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell completion scripts also support these advanced flags.
 
 **When to update this document:**
@@ -14,7 +16,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/RootCommandBuilder.cs` for canonical command/flag routing.
+**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs`, `src/ContainAI.Cli/RootCommandBuilder.cs`, and `src/ContainAI.Cli/CommandCatalog.cs` for canonical command/flag routing.
 
 ## Quick Reference
 
@@ -35,8 +37,10 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 | [`cai gc`](#cai-gc) | Garbage collection | - |
 | [`cai ssh`](#cai-ssh) | Manage SSH configuration | `cleanup` |
 | [`cai links`](#cai-links) | Verify/repair symlinks | `check`, `fix` |
-| [`cai config`](#cai-config) | Manage settings | `list`, `get`, `set`, `unset` |
+| [`cai config`](#cai-config) | Manage settings | `list`, `get`, `set`, `unset`, `resolve-volume` |
+| [`cai manifest`](#cai-manifest) | Parse manifests/generate artifacts | `parse`, `generate`, `apply`, `check` |
 | [`cai template`](#cai-template) | Manage templates | `upgrade` |
+| [`cai system`](#cai-system) | Container-internal runtime commands | `init`, `link-repair`, `watch-links`, `devcontainer` |
 | [`cai acp`](#cai-acp) | ACP proxy for editors | `proxy` |
 | [`cai completion`](#cai-completion) | Generate completions | - |
 | [`cai version`](#cai-version) | Show version | - |
@@ -44,7 +48,6 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 | [`cai refresh`](#cai-refresh) | Pull latest base image | - |
 | [`cai uninstall`](#cai-uninstall) | Remove system components | - |
 | [`cai help`](#cai-help) | Show help message | - |
-| [`cai sandbox`](#cai-sandbox) | **DEPRECATED** | - |
 
 ## Command Hierarchy
 
@@ -84,6 +87,12 @@ flowchart TB
         config_get[get]
         config_set[set]
         config_unset[unset]
+        config_resolve_volume[resolve-volume]
+        manifest[manifest]
+        manifest_parse[parse]
+        manifest_generate[generate]
+        manifest_apply[apply]
+        manifest_check[check]
         template[template]
         template_upgrade[upgrade]
         ssh_cmd[ssh]
@@ -99,12 +108,16 @@ flowchart TB
 
     subgraph Other["Other"]
         docker_cmd[docker]
+        system_cmd[system]
+        system_init[init]
+        system_link_repair[link-repair]
+        system_watch_links[watch-links]
+        system_devcontainer[devcontainer]
         acp[acp]
         acp_proxy[proxy]
         completion[completion]
         version[version]
         help_cmd[help]
-        sandbox[sandbox]
     end
 
     cai --> Lifecycle
@@ -121,8 +134,17 @@ flowchart TB
     config --> config_get
     config --> config_set
     config --> config_unset
+    config --> config_resolve_volume
+    manifest --> manifest_parse
+    manifest --> manifest_generate
+    manifest --> manifest_apply
+    manifest --> manifest_check
     template --> template_upgrade
     ssh_cmd --> ssh_cleanup
+    system_cmd --> system_init
+    system_cmd --> system_link_repair
+    system_cmd --> system_watch_links
+    system_cmd --> system_devcontainer
     acp --> acp_proxy
 ```
 
@@ -149,6 +171,10 @@ containai [subcommand] [options]
 - **Installed usage:** The `install.sh` script installs `cai` to `~/.local/bin/cai`
 - **Development usage:** Run directly with `dotnet run --project src/cai -- <command>`
 - Requires Bash 4.0+
+
+**Root aliases:**
+- `cai --acp [agent]` is translated to `cai acp proxy [agent]`
+- `cai -v` and `cai --version` are translated to `cai version`
 
 ---
 
@@ -178,7 +204,6 @@ cai [path] [options] [-- <agent-args>]
 | `--cpus <count>` | CPU limit (e.g., 2, 4) |
 | `--fresh` | Remove and recreate container (preserves volume) |
 | `--restart` | Alias for `--fresh` |
-| `--reset` | Reset workspace state (new unique volume name) |
 | `--force` | Skip isolation checks (testing only) |
 | `-d`, `--detached` | Run in background |
 | `-q`, `--quiet` | Suppress verbose output |
@@ -187,6 +212,7 @@ cai [path] [options] [-- <agent-args>]
 | `--dry-run` | Show what would happen without executing |
 | `-e`, `--env <VAR=val>` | Set environment variable (repeatable) |
 | `--credentials <mode>` | Credential mode (only `none` supported with Sysbox isolation) |
+| `--acknowledge-credential-risk` | Required acknowledgment when using risk-bearing credential modes |
 | `-- <args>` | Pass arguments to agent |
 
 **Deprecated/Unsupported flags:**
@@ -196,10 +222,9 @@ cai [path] [options] [-- <agent-args>]
 | `--allow-host-credentials` | Errors at runtime (unsupported with Sysbox) |
 | `--allow-host-docker-socket` | Errors at runtime (unsupported with Sysbox) |
 | `--mount-docker-socket` | Errors at runtime (unsupported with Sysbox) |
-| `--i-understand-this-exposes-host-credentials` | Parsed but ignored (acknowledgment for `--allow-host-credentials`) |
-| `--i-understand-this-grants-root-access` | Parsed but ignored (acknowledgment for `--allow-host-docker-socket`) |
-| `--please-root-my-host` | Parsed but ignored (legacy flag) |
-| `--acknowledge-credential-risk` | Parsed but ignored (legacy flag) |
+| `--i-understand-this-exposes-host-credentials` | Rejected by parser (legacy unsafe flag removed) |
+| `--i-understand-this-grants-root-access` | Rejected by parser (legacy unsafe flag removed) |
+| `--please-root-my-host` | Rejected by parser (legacy unsafe flag removed) |
 
 **Note:** Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
 
@@ -870,7 +895,6 @@ cai ssh cleanup [options]
 | Option | Description |
 |--------|-------------|
 | `--dry-run` | Show what would be cleaned |
-| `--verbose` | Enable verbose output |
 
 **What Gets Cleaned:**
 - SSH host config files in `~/.ssh/containai.d/*.conf`
@@ -911,10 +935,11 @@ Repair broken or missing symlinks.
 | `<path>` | Workspace path |
 | `--workspace <path>` | Alternative to positional path |
 | `--name <name>` | Container name |
+| `--container <name>` | Target container name |
 | `--config <path>` | Config file path |
 | `-q`, `--quiet` | Suppress output |
 | `--verbose` | Enable verbose output |
-| `--dry-run` | Show what would be fixed (fix only) |
+| `--dry-run` | Show planned actions without mutating state |
 
 **Exit Codes:**
 
@@ -964,6 +989,10 @@ Set value (workspace if in one, else global).
 #### cai config unset <key>
 
 Remove setting.
+
+#### cai config resolve-volume [explicit-volume]
+
+Resolve the effective data volume name for the current configuration/workspace context.
 
 **Scoping Options:**
 
@@ -1017,6 +1046,41 @@ cai config unset -g ssh.forward_agent
 ```
 
 **Related:** [Configuration Reference](configuration.md)
+
+---
+
+### cai manifest
+
+Parse manifests and generate/apply derived artifacts.
+
+**Synopsis:**
+```bash
+cai manifest parse [options] <manifest-path>
+cai manifest generate <import-map|dockerfile-symlinks|init-dirs|container-link-spec|agent-wrappers> <manifest-path> [output-path]
+cai manifest apply <container-links|init-dirs> <manifest-path> [--data-dir <path>] [--home-dir <path>]
+cai manifest check [--manifest-dir <path> | <manifest-dir>]
+```
+
+**Subcommands and options:**
+
+| Subcommand | Options/Arguments | Purpose |
+|------------|-------------------|---------|
+| `parse` | `--include-disabled`, `--emit-source-file`, `<manifest-path>` | Parse manifests and emit normalized JSON |
+| `generate` | `<kind>`, `<manifest-path>`, `[output-path]` | Generate derived artifacts from manifests |
+| `apply` | `<kind>`, `<manifest-path>`, `--data-dir`, `--home-dir` | Apply generated artifacts to runtime paths |
+| `check` | `--manifest-dir` or positional `<manifest-dir>` | Validate manifest consistency |
+
+**Examples:**
+```bash
+# Parse manifests
+cai manifest parse --include-disabled src/manifests
+
+# Generate import map
+cai manifest generate import-map src/manifests artifacts/import-map.sh
+
+# Check consistency
+cai manifest check src/manifests
+```
 
 ---
 
@@ -1096,11 +1160,12 @@ cai acp proxy gemini
 
 ### cai completion
 
-Generate shell completion scripts.
+Generate shell completion scripts and completion suggestions.
 
 **Synopsis:**
 ```bash
-cai completion <shell>
+cai completion <bash|zsh>
+cai completion suggest --line "<command line>" [--position <cursor>]
 ```
 
 **Shells:**
@@ -1124,9 +1189,10 @@ cai completion zsh > ~/.zfunc/_cai
 ```
 
 **Notes:**
-- Completion scripts are static and can be saved for faster loading
-- Dynamic completion uses cached Docker lookups (500ms timeout)
-- Results cached for 5 seconds
+- Completion scripts call the built-in `cai completion suggest` path for suggestions.
+- `cai completion suggest` is provided by the CLI itself; `dotnet-suggest` is not required.
+- `suggest` expects the full command line via `--line` and an optional cursor position via `--position` (defaults to the end of the line).
+- The script layout follows the .NET tab-completion guidance: <https://learn.microsoft.com/en-us/dotnet/standard/commandline/how-to-enable-tab-completion>.
 
 ---
 
@@ -1299,6 +1365,44 @@ cai uninstall --containers --volumes --force
 
 ---
 
+### cai system
+
+Container-internal runtime commands used by systemd services and devcontainer feature setup.
+
+**Synopsis:**
+```bash
+cai system init [options]
+cai system link-repair [options]
+cai system watch-links [options]
+cai system devcontainer <install|init|start|verify-sysbox> [options]
+```
+
+**Subcommands and options:**
+
+| Subcommand | Options/Arguments | Purpose |
+|------------|-------------------|---------|
+| `init` | `--data-dir`, `--home-dir`, `--manifests-dir`, `--template-hooks`, `--workspace-hooks`, `--workspace-dir`, `--quiet` | Initialize runtime directories and generated assets |
+| `link-repair` | `--check`, `--fix`, `--dry-run`, `--quiet`, `--builtin-spec`, `--user-spec`, `--checked-at-file` | Validate/repair link-spec state |
+| `watch-links` | `--poll-interval`, `--imported-at-file`, `--checked-at-file`, `--quiet` | Background link drift watcher |
+| `devcontainer install` | `--feature-dir` | Install devcontainer feature files |
+| `devcontainer init` | - | Initialize devcontainer runtime |
+| `devcontainer start` | - | Start devcontainer runtime services |
+| `devcontainer verify-sysbox` | - | Verify sysbox availability and configuration |
+
+**Examples:**
+```bash
+# Initialize runtime internals
+cai system init --quiet
+
+# Check link state without mutating
+cai system link-repair --check --dry-run
+
+# Install devcontainer feature payload
+cai system devcontainer install --feature-dir /tmp/feature
+```
+
+---
+
 ### cai help
 
 Show help message.
@@ -1309,22 +1413,6 @@ cai help
 cai -h
 cai --help
 ```
-
----
-
-### cai sandbox
-
-**DEPRECATED** - Use `cai stop && cai --restart` instead.
-
-**Migration:**
-
-| Old Command | New Command |
-|-------------|-------------|
-| `cai sandbox reset` | `cai stop && cai --restart` |
-| `cai sandbox clear-credentials` | `docker volume rm <volume-name>` |
-
-**Why Deprecated:**
-ContainAI now uses Sysbox for container isolation instead of Docker Desktop sandboxes.
 
 ---
 
@@ -1408,16 +1496,6 @@ Common exit codes across commands.
 | 15 | Container exists but not owned by ContainAI |
 
 **Note:** Commands that run remote operations may return the exit code from the remote command.
-
----
-
-## Deprecated Commands
-
-The following commands have been deprecated and will be removed in future versions.
-
-| Command | Status | Migration |
-|---------|--------|-----------|
-| `cai sandbox` | DEPRECATED | See [`cai sandbox`](#cai-sandbox) section above |
 
 ---
 
