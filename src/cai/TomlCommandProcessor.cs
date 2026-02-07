@@ -581,7 +581,7 @@ internal static partial class TomlCommandProcessor
                 inTargetSection = false;
             }
 
-            if (inTargetSection && Regex.IsMatch(trimmed, $"^{Regex.Escape(key)}\\s*=", RegexOptions.CultureInvariant))
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, key))
             {
                 newLines.Add(keyLine);
                 lastContentIndex = newLines.Count - 1;
@@ -644,7 +644,7 @@ internal static partial class TomlCommandProcessor
                 inTargetSection = false;
             }
 
-            if (inTargetSection && Regex.IsMatch(trimmed, $"^{Regex.Escape(key)}\\s*=", RegexOptions.CultureInvariant))
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, key))
             {
                 continue;
             }
@@ -696,7 +696,7 @@ internal static partial class TomlCommandProcessor
                     continue;
                 }
 
-                if (!inTable && Regex.IsMatch(trimmed, $"^{Regex.Escape(keyParts[0])}\\s*=", RegexOptions.CultureInvariant))
+                if (!inTable && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
                 {
                     newLines.Add(keyLine);
                     keyUpdated = true;
@@ -757,7 +757,7 @@ internal static partial class TomlCommandProcessor
                 inTargetSection = false;
             }
 
-            if (inTargetSection && Regex.IsMatch(trimmed, $"^{Regex.Escape(keyParts[^1])}\\s*=", RegexOptions.CultureInvariant))
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
             {
                 newLines.Add(keyLine);
                 keyUpdatedNested = true;
@@ -797,7 +797,7 @@ internal static partial class TomlCommandProcessor
             foreach (var line in lines)
             {
                 var trimmed = line.Trim();
-                if (!IsAnyTableHeader(trimmed) && Regex.IsMatch(trimmed, $"^{Regex.Escape(keyParts[0])}\\s*=", RegexOptions.CultureInvariant))
+                if (!IsAnyTableHeader(trimmed) && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
                 {
                     continue;
                 }
@@ -829,7 +829,7 @@ internal static partial class TomlCommandProcessor
                 inTargetSection = false;
             }
 
-            if (inTargetSection && Regex.IsMatch(trimmed, $"^{Regex.Escape(keyParts[^1])}\\s*=", RegexOptions.CultureInvariant))
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
             {
                 continue;
             }
@@ -952,6 +952,29 @@ internal static partial class TomlCommandProcessor
         }
 
         return false;
+    }
+
+    private static bool IsTomlKeyAssignmentLine(string trimmedLine, string key)
+    {
+        if (string.IsNullOrWhiteSpace(trimmedLine) || string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        var line = trimmedLine.AsSpan();
+        var keySpan = key.AsSpan();
+        if (!line.StartsWith(keySpan, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var position = keySpan.Length;
+        while (position < line.Length && char.IsWhiteSpace(line[position]))
+        {
+            position++;
+        }
+
+        return position < line.Length && line[position] == '=';
     }
 
     private static bool SectionHasContent(IReadOnlyList<string> lines, int start, int end)

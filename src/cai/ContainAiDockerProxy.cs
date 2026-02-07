@@ -14,8 +14,6 @@ internal static partial class ContainAiDockerProxy
     private const int SshPortRangeStart = 2400;
     private const int SshPortRangeEnd = 2499;
 
-    private static readonly Regex VolumeNamePattern = new("^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex UnixUsernamePattern = new("^[a-z_][a-z0-9_-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     public static async Task<int> RunAsync(IReadOnlyList<string> args, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
     {
@@ -532,7 +530,7 @@ internal static partial class ContainAiDockerProxy
                 if (featureElement.ValueKind == JsonValueKind.Object && featureElement.TryGetProperty("remoteUser", out var remoteUserElement) && remoteUserElement.ValueKind == JsonValueKind.String)
                 {
                     var candidate = remoteUserElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "auto", StringComparison.Ordinal) && UnixUsernamePattern.IsMatch(candidate!))
+                    if (!string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "auto", StringComparison.Ordinal) && UnixUsernameRegex().IsMatch(candidate!))
                     {
                         remoteUser = candidate!;
                     }
@@ -542,7 +540,7 @@ internal static partial class ContainAiDockerProxy
                     topLevelRemoteUserElement.ValueKind == JsonValueKind.String)
                 {
                     var candidate = topLevelRemoteUserElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "auto", StringComparison.Ordinal) && UnixUsernamePattern.IsMatch(candidate!))
+                    if (!string.IsNullOrWhiteSpace(candidate) && !string.Equals(candidate, "auto", StringComparison.Ordinal) && UnixUsernameRegex().IsMatch(candidate!))
                     {
                         remoteUser = candidate!;
                     }
@@ -563,7 +561,7 @@ internal static partial class ContainAiDockerProxy
 
     internal static bool IsValidVolumeName(string volume)
     {
-        if (!VolumeNamePattern.IsMatch(volume))
+        if (!VolumeNameRegex().IsMatch(volume))
         {
             return false;
         }
@@ -792,6 +790,12 @@ internal static partial class ContainAiDockerProxy
 
     [GeneratedRegex("^[\\s]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][\\s]+[^#]*containai\\.d/", RegexOptions.Compiled)]
     private static partial Regex ContainAiIncludeRegex();
+
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex VolumeNameRegex();
+
+    [GeneratedRegex("^[a-z_][a-z0-9_-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex UnixUsernameRegex();
 
     private static readonly HashSet<string> ContainerTargetingSubcommands =
     [

@@ -16,8 +16,6 @@ internal sealed partial class DevcontainerFeatureRuntime
     private const string DefaultDockerPidFile = "/var/run/docker.pid";
     private const string DefaultDockerLogFile = "/var/log/containai-dockerd.log";
 
-    private static readonly Regex VolumeNamePattern = new("^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
-    private static readonly Regex UnixUsernamePattern = new("^[a-z_][a-z0-9_-]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly HashSet<string> CredentialTargets = new(StringComparer.Ordinal)
     {
@@ -494,13 +492,13 @@ internal sealed partial class DevcontainerFeatureRuntime
 
     private static bool ValidateFeatureConfig(FeatureConfig config, out string error)
     {
-        if (!VolumeNamePattern.IsMatch(config.DataVolume))
+        if (!VolumeNameRegex().IsMatch(config.DataVolume))
         {
             error = $"ERROR: Invalid dataVolume \"{config.DataVolume}\". Must be alphanumeric with ._- allowed.";
             return false;
         }
 
-        if (!string.Equals(config.RemoteUser, "auto", StringComparison.Ordinal) && !UnixUsernamePattern.IsMatch(config.RemoteUser))
+        if (!string.Equals(config.RemoteUser, "auto", StringComparison.Ordinal) && !UnixUsernameRegex().IsMatch(config.RemoteUser))
         {
             error = $"ERROR: Invalid remoteUser \"{config.RemoteUser}\". Must be \"auto\" or a valid Unix username.";
             return false;
@@ -816,6 +814,12 @@ internal sealed partial class DevcontainerFeatureRuntime
 
     private readonly record struct ProcessResult(int ExitCode, string StandardOutput, string StandardError);
 
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex VolumeNameRegex();
+
+    [GeneratedRegex("^[a-z_][a-z0-9_-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex UnixUsernameRegex();
+
     [JsonSerializable(typeof(FeatureConfig))]
     [JsonSerializable(typeof(LinkSpecDocument))]
     private partial class JsonContext : JsonSerializerContext;
@@ -829,7 +833,7 @@ internal sealed partial class DevcontainerFeatureRuntime
 
     public sealed record LinkSpecDocument(
         [property: JsonPropertyName("home_dir")] string? HomeDirectory,
-        [property: JsonPropertyName("links")] List<LinkEntry>? Links);
+        [property: JsonPropertyName("links")] IReadOnlyList<LinkEntry>? Links);
 
     public sealed record LinkEntry(
         [property: JsonPropertyName("link")] string Link,
