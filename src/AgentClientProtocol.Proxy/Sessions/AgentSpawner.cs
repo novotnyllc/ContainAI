@@ -1,6 +1,7 @@
 // Agent process spawning using System.Diagnostics.Process
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 
 namespace AgentClientProtocol.Proxy.Sessions;
 
@@ -9,6 +10,7 @@ namespace AgentClientProtocol.Proxy.Sessions;
 /// </summary>
 public sealed class AgentSpawner : IAgentSpawner
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private readonly bool _directSpawn;
     private readonly TextWriter _stderr;
     private readonly string _caiExecutable;
@@ -49,6 +51,9 @@ public sealed class AgentSpawner : IAgentSpawner
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                StandardInputEncoding = Utf8NoBom,
+                StandardOutputEncoding = Utf8NoBom,
+                StandardErrorEncoding = Utf8NoBom,
             };
             psi.ArgumentList.Add("--acp");
 
@@ -82,6 +87,9 @@ public sealed class AgentSpawner : IAgentSpawner
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
+                StandardInputEncoding = Utf8NoBom,
+                StandardOutputEncoding = Utf8NoBom,
+                StandardErrorEncoding = Utf8NoBom,
             };
             // Use ArgumentList to safely pass arguments without quoting issues
             psi.ArgumentList.Add("exec");

@@ -35,9 +35,15 @@ public static class WorkspaceResolver
                 return result.StandardOutput.Trim();
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Git not available or failed
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            // Git not available or failed; fall back to workspace marker walk.
+            _ = ex;
         }
 
         // Walk up looking for .containai/config.toml

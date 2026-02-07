@@ -22,12 +22,12 @@ public sealed class OutputWriterTests
         {
             Id = JsonValue.Create("1"),
             Method = "initialize",
-        });
+        }, TestContext.Current.CancellationToken);
         await writer.EnqueueAsync(new JsonRpcMessage
         {
             Id = JsonValue.Create("2"),
             Result = new JsonObject { ["ok"] = true },
-        });
+        }, TestContext.Current.CancellationToken);
 
         writer.Complete();
         await runTask.WaitAsync(TestContext.Current.CancellationToken);

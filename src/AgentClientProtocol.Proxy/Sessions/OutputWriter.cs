@@ -1,5 +1,4 @@
 // Thread-safe output writer for JSON-RPC messages
-using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using AgentClientProtocol.Proxy.Protocol;
@@ -12,7 +11,13 @@ namespace AgentClientProtocol.Proxy.Sessions;
 /// </summary>
 public sealed class OutputWriter
 {
-    private readonly Channel<JsonRpcMessage> _channel = Channel.CreateUnbounded<JsonRpcMessage>();
+    private static readonly byte[] NewLine = [(byte)'\n'];
+    private readonly Channel<JsonRpcMessage> _channel = Channel.CreateBounded<JsonRpcMessage>(new BoundedChannelOptions(capacity: 1024)
+    {
+        SingleReader = true,
+        SingleWriter = false,
+        FullMode = BoundedChannelFullMode.Wait,
+    });
     private readonly Stream _stdout;
 
     public OutputWriter(Stream stdout) => _stdout = stdout;
@@ -20,9 +25,9 @@ public sealed class OutputWriter
     /// <summary>
     /// Enqueues a message to be written to stdout.
     /// </summary>
-    public async Task EnqueueAsync(JsonRpcMessage message)
+    public async Task EnqueueAsync(JsonRpcMessage message, CancellationToken cancellationToken = default)
     {
-        await _channel.Writer.WriteAsync(message);
+        await _channel.Writer.WriteAsync(message, cancellationToken);
     }
 
     /// <summary>
@@ -42,15 +47,15 @@ public sealed class OutputWriter
         {
             await foreach (var message in _channel.Reader.ReadAllAsync(ct))
             {
-                var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
-                var bytes = Encoding.UTF8.GetBytes(json + "\n");
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(message, AcpJsonContext.Default.JsonRpcMessage);
                 await _stdout.WriteAsync(bytes, ct);
+                await _stdout.WriteAsync(NewLine, ct);
                 await _stdout.FlushAsync(ct);
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Expected during shutdown
+            return;
         }
     }
 }

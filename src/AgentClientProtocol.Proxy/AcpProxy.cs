@@ -290,14 +290,14 @@ public sealed class AcpProxy : IDisposable
             var initResponse = await session.SendAndWaitForResponseAsync(initRequest, initRequestId, TimeSpan.FromSeconds(30));
             if (initResponse == null)
             {
-                throw new Exception("Agent did not respond to initialize");
+                throw new TimeoutException("Agent did not respond to initialize");
             }
 
             // Check for agent error in initialize response
             if (initResponse.Error != null)
             {
                 var errMsg = initResponse.Error.Message ?? "Unknown error";
-                throw new Exception($"Agent initialize failed: {errMsg}");
+                throw new InvalidOperationException($"Agent initialize failed: {errMsg}");
             }
 
             // Calculate container cwd - preserve relative path from workspace root
@@ -329,14 +329,14 @@ public sealed class AcpProxy : IDisposable
             var sessionNewResponse = await session.SendAndWaitForResponseAsync(sessionNewRequest, sessionNewRequestId, TimeSpan.FromSeconds(30));
             if (sessionNewResponse == null)
             {
-                throw new Exception("Agent did not respond to session/new");
+                throw new TimeoutException("Agent did not respond to session/new");
             }
 
             // Check for agent error in session/new response
             if (sessionNewResponse.Error != null)
             {
                 var errMsg = sessionNewResponse.Error.Message ?? "Unknown error";
-                throw new Exception($"Agent session/new failed: {errMsg}");
+                throw new InvalidOperationException($"Agent session/new failed: {errMsg}");
             }
 
             // Extract agent's session ID - required for routing
@@ -349,7 +349,7 @@ public sealed class AcpProxy : IDisposable
             // Validate we got a session ID
             if (string.IsNullOrEmpty(session.AgentSessionId))
             {
-                throw new Exception("Agent did not return a session ID");
+                throw new InvalidOperationException("Agent did not return a session ID");
             }
 
             // Register session
