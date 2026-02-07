@@ -154,9 +154,9 @@ docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotny
 CI requires Cobertura coverage artifacts and merged reports. If no coverage artifacts are generated, the workflow fails.
 
 CI also enforces minimum line coverage thresholds:
-- `ContainAI.Cli` >= 90%
-- `ContainAI.Cli.Abstractions` >= 90%
-- `AgentClientProtocol.Proxy` >= 90%
+- `ContainAI.Cli` >= 97%
+- `ContainAI.Cli.Abstractions` >= 97%
+- `AgentClientProtocol.Proxy` >= 97%
 
 ## Common Pitfalls
 

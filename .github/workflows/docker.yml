@@ -442,7 +442,7 @@ jobs:
             -targetdir:artifacts/coverage/report \
             "-reporttypes:HtmlInline;Cobertura;Badges;TextSummary"
 
-      - name: Enforce .NET coverage thresholds (>= 90%)
+      - name: Enforce .NET coverage thresholds (>= 97%)
         run: |
           set -euo pipefail
           summary_file="artifacts/coverage/report/Summary.txt"
@@ -470,18 +470,18 @@ jobs:
             exit 1
           fi
 
-          awk -v v="$containai_cli_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
-            echo "ERROR: ContainAI.Cli coverage is ${containai_cli_pct}% (< 90%)"
+          awk -v v="$containai_cli_pct" 'BEGIN { exit (v + 0 >= 97 ? 0 : 1) }' || {
+            echo "ERROR: ContainAI.Cli coverage is ${containai_cli_pct}% (< 97%)"
             exit 1
           }
 
-          awk -v v="$abstractions_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
-            echo "ERROR: ContainAI.Cli.Abstractions coverage is ${abstractions_pct}% (< 90%)"
+          awk -v v="$abstractions_pct" 'BEGIN { exit (v + 0 >= 97 ? 0 : 1) }' || {
+            echo "ERROR: ContainAI.Cli.Abstractions coverage is ${abstractions_pct}% (< 97%)"
             exit 1
           }
 
-          awk -v v="$acp_proxy_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
-            echo "ERROR: AgentClientProtocol.Proxy coverage is ${acp_proxy_pct}% (< 90%)"
+          awk -v v="$acp_proxy_pct" 'BEGIN { exit (v + 0 >= 97 ? 0 : 1) }' || {
+            echo "ERROR: AgentClientProtocol.Proxy coverage is ${acp_proxy_pct}% (< 97%)"
             exit 1
           }
 

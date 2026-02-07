@@ -100,6 +100,15 @@ Specialist agents
 - Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch, `--build-setup` to configure buildx/binfmt, and `--image-prefix` to tag/push to a registry.
 - **Verbose pattern:** Commands are silent by default (Unix Rule of Silence). Info messages use `_cai_info()` which respects `_CAI_VERBOSE`. Use `--verbose` flag (long form only, no `-v`) or `CONTAINAI_VERBOSE=1` env var. Warnings/errors always emit to stderr. Precedence: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE`.
 
+## .NET 10 Migration Guardrails
+
+- Keep analyzers enabled on build (`RunAnalyzersDuringBuild=true`) with recommended + security + performance modes active.
+- Keep command surface statically modeled in `System.CommandLine`; avoid ad-hoc runtime command/option discovery.
+- Keep shell completion internal (`cai completion suggest`); do not add `dotnet-suggest` or other external completion dependencies.
+- Keep regex usage on source-generated regex (`[GeneratedRegex]`), not runtime regex construction.
+- Keep tests on `xunit.v3.mtp-v2` + Microsoft Testing Platform v2 and use Central Package Management for all package versions.
+- Keep coverage gates at or above 97% line coverage for `ContainAI.Cli`, `ContainAI.Cli.Abstractions`, and `AgentClientProtocol.Proxy`.
+
 See `.flow/memory/conventions.md` for discovered patterns.
 
 ## Things to Avoid

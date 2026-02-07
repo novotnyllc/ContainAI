@@ -119,9 +119,9 @@ E2E tests are documented for manual execution on self-hosted infrastructure.
 `docker.yml` test jobs run .NET unit tests with coverage in Cobertura format and generate merged reports. The build fails when coverage artifacts are missing.
 
 A hard threshold gate is enforced in CI:
-- `ContainAI.Cli` line coverage must be **>= 90%**
-- `ContainAI.Cli.Abstractions` line coverage must be **>= 90%**
-- `AgentClientProtocol.Proxy` line coverage must be **>= 90%**
+- `ContainAI.Cli` line coverage must be **>= 97%**
+- `ContainAI.Cli.Abstractions` line coverage must be **>= 97%**
+- `AgentClientProtocol.Proxy` line coverage must be **>= 97%**
 
 These thresholds are validated from the generated `Summary.txt` coverage report in CI.
 Test execution uses `xunit.v3.mtp-v2` on Microsoft Testing Platform v2.

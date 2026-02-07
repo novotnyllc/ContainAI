@@ -1,0 +1,170 @@
+<Project>
+
+  <PropertyGroup>
+    <ContainAIRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../..'))</ContainAIRepositoryRoot>
+    <ContainAIOutputDir Condition="'$(ContainAIOutputDir)'==''">$([System.IO.Path]::GetFullPath('$(ContainAIRepositoryRoot)/artifacts/cai-tarballs'))</ContainAIOutputDir>
+    <ContainAIVersion Condition="'$(ContainAIVersion)'==''">$(Version)</ContainAIVersion>
+    <ContainAIRuntimeIdentifiers Condition="'$(ContainAIRuntimeIdentifiers)'=='' and '$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</ContainAIRuntimeIdentifiers>
+  </PropertyGroup>
+
+  <Target Name="BuildContainAITarballs" DependsOnTargets="_ResolveContainAIVersion;_ValidateTarballInputs">
+    <ItemGroup>
+      <_ContainAIRids Include="$(ContainAIRuntimeIdentifiers)" />
+    </ItemGroup>
+
+    <MSBuild
+      Projects="$(MSBuildProjectFullPath)"
+      Targets="PackageContainAIRelease"
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=%(_ContainAIRids.Identity);ContainAIVersion=$(ContainAIVersion);ContainAIOutputDir=$(ContainAIOutputDir)" />
+  </Target>
+
+  <Target Name="_ValidateTarballInputs">
+    <Error Condition="'$(ContainAIRuntimeIdentifiers)'==''" Text="ContainAIRuntimeIdentifiers must be set (for example: linux-x64;linux-arm64)." />
+    <Error Condition="'$(ContainAIVersion)'==''" Text="ContainAIVersion must be set." />
+  </Target>
+
+  <Target Name="_ResolveContainAIVersion" Condition="'$(ContainAIVersion)'==''">
+    <Exec Command="dotnet nbgv get-version -v SemVer2" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" ItemName="_ContainAIVersionLines" />
+    </Exec>
+
+    <PropertyGroup>
+      <ContainAIVersion>@(_ContainAIVersionLines)</ContainAIVersion>
+    </PropertyGroup>
+
+    <Error Condition="'$(ContainAIVersion)'==''" Text="ContainAIVersion could not be resolved from Nerdbank.GitVersioning." />
+  </Target>
+
+  <PropertyGroup>
+    <ContainAIImagePrefix Condition="'$(ContainAIImagePrefix)'==''">containai</ContainAIImagePrefix>
+    <ContainAIImageTag Condition="'$(ContainAIImageTag)'==''">latest</ContainAIImageTag>
+    <ContainAILayer Condition="'$(ContainAILayer)'==''">all</ContainAILayer>
+    <ContainAIPlatforms Condition="'$(ContainAIPlatforms)'==''"></ContainAIPlatforms>
+    <ContainAIPush Condition="'$(ContainAIPush)'==''">false</ContainAIPush>
+    <ContainAILoad Condition="'$(ContainAILoad)'==''">false</ContainAILoad>
+    <ContainAIBuildSetup Condition="'$(ContainAIBuildSetup)'==''">false</ContainAIBuildSetup>
+    <ContainAIBuildxBuilder Condition="'$(ContainAIBuildxBuilder)'==''"></ContainAIBuildxBuilder>
+    <ContainAISkipDockerBuild Condition="'$(ContainAISkipDockerBuild)'==''">false</ContainAISkipDockerBuild>
+  </PropertyGroup>
+
+  <Target Name="BuildContainAIImages" DependsOnTargets="_ResolveContainAIVersion;_PrepareContainAIImageBuild">
+    <Error
+      Condition="'$(ContainAILayer)'!='all' and '$(ContainAILayer)'!='base' and '$(ContainAILayer)'!='sdks' and '$(ContainAILayer)'!='agents' and '$(ContainAILayer)'!='final'"
+      Text="ContainAILayer must be one of: all, base, sdks, agents, final." />
+
+    <PropertyGroup>
+      <_ContainAIBuildBase>false</_ContainAIBuildBase>
+      <_ContainAIBuildSdks>false</_ContainAIBuildSdks>
+      <_ContainAIBuildAgents>false</_ContainAIBuildAgents>
+      <_ContainAIBuildFinal>false</_ContainAIBuildFinal>
+      <_ContainAIBuildBase Condition="'$(ContainAILayer)'=='all' or '$(ContainAILayer)'=='base' or '$(ContainAILayer)'=='sdks' or '$(ContainAILayer)'=='agents' or '$(ContainAILayer)'=='final'">true</_ContainAIBuildBase>
+      <_ContainAIBuildSdks Condition="'$(ContainAILayer)'=='all' or '$(ContainAILayer)'=='sdks' or '$(ContainAILayer)'=='agents' or '$(ContainAILayer)'=='final'">true</_ContainAIBuildSdks>
+      <_ContainAIBuildAgents Condition="'$(ContainAILayer)'=='all' or '$(ContainAILayer)'=='agents' or '$(ContainAILayer)'=='final'">true</_ContainAIBuildAgents>
+      <_ContainAIBuildFinal Condition="'$(ContainAILayer)'=='all' or '$(ContainAILayer)'=='final'">true</_ContainAIBuildFinal>
+    </PropertyGroup>
+
+    <Message Importance="High" Text="Building ContainAI images (layer=$(ContainAILayer), prefix=$(ContainAIImagePrefix), tag=$(ContainAIImageTag), version=$(ContainAIVersion))" />
+    <Message Condition="'$(ContainAISkipDockerBuild)'=='true'" Importance="High" Text="ContainAISkipDockerBuild=true, skipping docker build execution." />
+
+    <Exec
+      Condition="'$(_ContainAIBuildBase)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.base&quot; -t &quot;$(ContainAIImagePrefix)/base:$(ContainAIImageTag)&quot; --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
+
+    <Exec
+      Condition="'$(_ContainAIBuildSdks)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.sdks&quot; -t &quot;$(ContainAIImagePrefix)/sdks:$(ContainAIImageTag)&quot; --build-arg BASE_IMAGE=$(ContainAIImagePrefix)/base:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
+
+    <Exec
+      Condition="'$(_ContainAIBuildAgents)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.agents&quot; -t &quot;$(ContainAIImagePrefix)/agents:$(ContainAIImageTag)&quot; --build-arg SDKS_IMAGE=$(ContainAIImagePrefix)/sdks:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
+
+    <Exec
+      Condition="'$(_ContainAIBuildFinal)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile&quot; -t &quot;$(ContainAIImagePrefix):$(ContainAIImageTag)&quot; --build-arg AGENTS_IMAGE=$(ContainAIImagePrefix)/agents:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
+  </Target>
+
+  <Target Name="_PrepareContainAIImageBuild">
+    <PropertyGroup>
+      <_ContainAIUseBuildx>false</_ContainAIUseBuildx>
+      <_ContainAIUseBuildx Condition="'$(ContainAIPlatforms)'!='' or '$(ContainAIPush)'=='true' or '$(ContainAILoad)'=='true'">true</_ContainAIUseBuildx>
+      <_ContainAIEffectiveBuildxBuilder>$(ContainAIBuildxBuilder)</_ContainAIEffectiveBuildxBuilder>
+      <_ContainAIEffectiveBuildxBuilder Condition="'$(_ContainAIEffectiveBuildxBuilder)'==''">containai-builder</_ContainAIEffectiveBuildxBuilder>
+      <_ContainAIPlatformsArg Condition="'$(ContainAIPlatforms)'!=''"> --platform $(ContainAIPlatforms)</_ContainAIPlatformsArg>
+      <_ContainAIPushArg Condition="'$(ContainAIPush)'=='true'"> --push</_ContainAIPushArg>
+      <_ContainAILoadArg Condition="'$(ContainAILoad)'=='true'"> --load</_ContainAILoadArg>
+      <_ContainAIBuilderArg Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildxBuilder)'!=''"> --builder $(ContainAIBuildxBuilder)</_ContainAIBuilderArg>
+      <_ContainAIDockerCommand>docker build</_ContainAIDockerCommand>
+      <_ContainAIDockerCommand Condition="'$(_ContainAIUseBuildx)'=='true'">docker buildx build$(_ContainAIBuilderArg)$(_ContainAIPlatformsArg)$(_ContainAIPushArg)$(_ContainAILoadArg)</_ContainAIDockerCommand>
+    </PropertyGroup>
+
+    <Exec
+      Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
+      Command="docker run --privileged --rm tonistiigi/binfmt --install all" />
+
+    <Exec
+      Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
+      Command="docker buildx inspect $(_ContainAIEffectiveBuildxBuilder)"
+      IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="_ContainAIBuildxInspectExitCode" />
+    </Exec>
+
+    <Exec
+      Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'!='0'"
+      Command="docker buildx create --name $(_ContainAIEffectiveBuildxBuilder) --use" />
+
+    <Exec
+      Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'=='0'"
+      Command="docker buildx use $(_ContainAIEffectiveBuildxBuilder)" />
+  </Target>
+
+  <Target Name="_ResolvePackageArch">
+    <PropertyGroup>
+      <ContainAIPackageArch Condition="'$(RuntimeIdentifier)'=='linux-x64'">linux-x64</ContainAIPackageArch>
+      <ContainAIPackageArch Condition="'$(RuntimeIdentifier)'=='linux-arm64'">linux-arm64</ContainAIPackageArch>
+      <ContainAIPackageArch Condition="'$(RuntimeIdentifier)'=='osx-x64'">macos-x64</ContainAIPackageArch>
+      <ContainAIPackageArch Condition="'$(RuntimeIdentifier)'=='osx-arm64'">macos-arm64</ContainAIPackageArch>
+    </PropertyGroup>
+
+    <Error Condition="'$(RuntimeIdentifier)'==''" Text="RuntimeIdentifier is required for PackageContainAIRelease." />
+    <Error Condition="'$(ContainAIPackageArch)'==''" Text="Unsupported RuntimeIdentifier '$(RuntimeIdentifier)'. Supported: linux-x64, linux-arm64, osx-x64, osx-arm64." />
+  </Target>
+
+  <Target Name="PackageContainAIRelease" DependsOnTargets="_ResolvePackageArch;Publish">
+    <PropertyGroup>
+      <ContainAIPackageName>containai-$(ContainAIVersion)-$(ContainAIPackageArch)</ContainAIPackageName>
+      <ContainAIStagingRoot>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)/package-staging'))</ContainAIStagingRoot>
+      <ContainAIPackageDir>$(ContainAIStagingRoot)/$(ContainAIPackageName)</ContainAIPackageDir>
+      <ContainAIPublishedBinaryPath>$(PublishDir)$(AssemblyName)$(ExecutableExtension)</ContainAIPublishedBinaryPath>
+      <ContainAITarballPath>$(ContainAIOutputDir)/$(ContainAIPackageName).tar.gz</ContainAITarballPath>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(ContainAIOutputDir)" />
+    <RemoveDir Directories="$(ContainAIStagingRoot)" />
+    <MakeDir Directories="$(ContainAIPackageDir);$(ContainAIPackageDir)/manifests;$(ContainAIPackageDir)/templates;$(ContainAIPackageDir)/container" />
+
+    <ItemGroup>
+      <_ManifestFiles Include="$(ContainAIRepositoryRoot)/src/manifests/*.toml" />
+      <_TemplateFiles Include="$(ContainAIRepositoryRoot)/src/templates/**" Exclude="$(ContainAIRepositoryRoot)/src/templates/**/" />
+      <_ContainerFiles Include="$(ContainAIRepositoryRoot)/src/container/**" Exclude="$(ContainAIRepositoryRoot)/src/container/**/" />
+      <_RootFiles Include="$(ContainAIRepositoryRoot)/install.sh;$(ContainAIRepositoryRoot)/LICENSE" />
+    </ItemGroup>
+
+    <Error Condition="!Exists('$(ContainAIPublishedBinaryPath)')" Text="Published cai binary not found: $(ContainAIPublishedBinaryPath)" />
+
+    <Copy SourceFiles="$(ContainAIPublishedBinaryPath)" DestinationFiles="$(ContainAIPackageDir)/cai" />
+    <Copy SourceFiles="@(_ManifestFiles)" DestinationFiles="@(_ManifestFiles->'$(ContainAIPackageDir)/manifests/%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_TemplateFiles)" DestinationFiles="@(_TemplateFiles->'$(ContainAIPackageDir)/templates/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_ContainerFiles)" DestinationFiles="@(_ContainerFiles->'$(ContainAIPackageDir)/container/%(RecursiveDir)%(Filename)%(Extension)')" />
+    <Copy SourceFiles="@(_RootFiles)" DestinationFiles="@(_RootFiles->'$(ContainAIPackageDir)/%(Filename)%(Extension)')" />
+
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Linux')) Or $([MSBuild]::IsOSPlatform('OSX'))"
+          Command="chmod +x &quot;$(ContainAIPackageDir)/cai&quot; &quot;$(ContainAIPackageDir)/install.sh&quot;" />
+
+    <Error Condition="!Exists('$(ContainAIPackageDir)/container/Dockerfile.template-system')" Text="Missing required runtime file in package staging: container/Dockerfile.template-system" />
+
+    <Exec Command="tar -czf &quot;$(ContainAITarballPath)&quot; -C &quot;$(ContainAIStagingRoot)&quot; &quot;$(ContainAIPackageName)&quot;" />
+
+    <Message Importance="High" Text="Created release tarball: $(ContainAITarballPath)" />
+  </Target>
+
+</Project>
