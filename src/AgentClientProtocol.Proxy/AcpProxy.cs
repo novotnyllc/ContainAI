@@ -110,9 +110,17 @@ public sealed class AcpProxy : IDisposable
         }
         finally
         {
-            await _cts.CancelAsync();
             _output.Complete();
-            try { await writerTask; } catch { }
+            try
+            {
+                await writerTask.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when external cancellation interrupts flush.
+            }
+
+            await _cts.CancelAsync().ConfigureAwait(false);
         }
 
         return 0;
