@@ -586,9 +586,10 @@ internal sealed partial class RootCommandBuilder
             var line = parseResult.GetValue(lineOption) ?? string.Empty;
             var requestedPosition = parseResult.GetValue(positionOption) ?? line.Length;
             var normalized = NormalizeCompletionInput(line, requestedPosition);
-            var completionResult = CommandLineParser.Parse(root, normalized.Line, configuration: null);
+            var completionArgs = NormalizeCompletionArguments(normalized.Line);
+            var completionResult = CommandLineParser.Parse(root, completionArgs, configuration: null);
 
-            foreach (var completion in completionResult.GetCompletions(normalized.Cursor))
+            foreach (var completion in completionResult.GetCompletions(position: null))
             {
                 var value = string.IsNullOrWhiteSpace(completion.InsertText) ? completion.Label : completion.InsertText;
                 if (string.IsNullOrWhiteSpace(value))
@@ -647,6 +648,45 @@ internal sealed partial class RootCommandBuilder
         }
 
         return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
+    }
+
+    private static IReadOnlyList<string> NormalizeCompletionArguments(string line)
+    {
+        var normalized = CommandLineParser.SplitCommandLine(line).ToArray();
+        if (normalized.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        normalized = normalized switch
+        {
+            ["--refresh", .. var refreshArgs] => ["refresh", .. refreshArgs],
+            ["-v" or "--version", .. var versionArgs] => ["version", .. versionArgs],
+            _ => normalized,
+        };
+
+        if (ShouldImplicitRunForCompletion(normalized))
+        {
+            return ["run", .. normalized];
+        }
+
+        return normalized;
+    }
+
+    private static bool ShouldImplicitRunForCompletion(IReadOnlyList<string> args)
+    {
+        if (args.Count == 0)
+        {
+            return false;
+        }
+
+        var firstToken = args[0];
+        if (CommandCatalog.RootParserTokens.Contains(firstToken))
+        {
+            return false;
+        }
+
+        return firstToken.StartsWith("-", StringComparison.Ordinal);
     }
 
     private static string BuildBashCompletionScript()
