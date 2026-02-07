@@ -20,6 +20,6 @@
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <!-- Microsoft Testing Platform extensions (coverage/trx) -->
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.0.4" />
-    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="1.9.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.1.0" />
   </ItemGroup>
 </Project>
