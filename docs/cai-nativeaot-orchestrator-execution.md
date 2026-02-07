@@ -49,7 +49,7 @@
 - Native publish: `dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true`
 - Integration loop:
   - `./tests/integration/test-secure-engine.sh` (skipped in container)
-  - `./tests/integration/test-sync-integration.sh` (passed)
+  - `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info` (passed)
   - `./tests/integration/test-dind.sh` (skipped in container)
   - `./tests/integration/test-acp-proxy.sh` (passed, now executed through `cai acp proxy`)
 - Native CLI smoke checks for changed command paths:

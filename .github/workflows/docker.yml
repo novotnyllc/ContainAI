@@ -34,7 +34,7 @@ jobs:
       - name: Lint shell scripts with shellcheck
         run: |
           echo "Running shellcheck on shell scripts..."
-          shellcheck -x install.sh src/build.sh scripts/*.sh scripts/ralph/*.sh src/container/*.sh src/container/lib/*.sh
+          shellcheck -x install.sh src/build.sh scripts/*.sh scripts/ralph/*.sh
 
       - name: Check manifest consistency
         run: dotnet run --project src/cai -- manifest check src/manifests
@@ -412,7 +412,7 @@ jobs:
           echo "============================================="
           echo "Running import integration tests (${{ matrix.arch }})"
           echo "============================================="
-          ./tests/integration/test-sync-integration.sh
+          dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
       - name: Run launch wrapper tests
         run: |
@@ -434,7 +434,7 @@ jobs:
           echo "Running .NET unit tests with coverage (${{ matrix.arch }})"
           echo "============================================="
           if find . -name '*Tests*.csproj' -o -name '*.Tests.csproj' | grep -q .; then
-            dotnet test --solution ContainAI.slnx --configuration Release --coverage --xunit-info
+            dotnet test --solution ContainAI.slnx --configuration Release -- --filter-not-trait "Category=SyncIntegration" --coverage --xunit-info
           else
             echo "No test projects found, skipping dotnet test"
           fi

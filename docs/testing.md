@@ -24,7 +24,7 @@ flowchart TB
     end
 
     subgraph T2["Tier 2: Integration (CI)"]
-        Sync["test-sync-integration.sh"]
+        Sync["dotnet test --project ... --filter-trait"]
         Docker["Standard Docker runtime"]
     end
 
@@ -61,10 +61,10 @@ Tests that run against standard Docker runtime:
 
 ```bash
 # Run all integration tests
-./tests/integration/test-sync-integration.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
 # Use a pre-built image (CI does this)
-IMAGE_NAME="containai:latest" ./tests/integration/test-sync-integration.sh
+IMAGE_NAME="containai:latest" dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 ```
 
 These tests cover:
@@ -133,9 +133,9 @@ docker volume rm $(docker volume ls -q --filter "label=containai.test=1") 2>/dev
 
 ## Adding New Tests
 
-When adding tests to `test-sync-integration.sh`:
+When adding tests to the sync integration suite:
 
-1. Use `create_test_volume NAME` and `create_test_container NAME` helpers
-2. Helpers automatically apply labels and register for cleanup
-3. Test names must be alphanumeric with dash/underscore only
-4. Add test function call to `main()` at the bottom of the file
+1. Add tests to `tests/ContainAI.Cli.Tests/SyncIntegrationTests.cs`
+2. Mark each new test with `[Trait("Category", "SyncIntegration")]`
+3. Use Docker volume names with random GUID suffixes for isolation
+4. Ensure every created volume/container is cleaned up in `finally` blocks

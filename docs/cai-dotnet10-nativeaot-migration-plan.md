@@ -268,7 +268,7 @@ Work continues until all are true:
    dotnet build
    dotnet test
    ./tests/integration/test-secure-engine.sh
-   ./tests/integration/test-sync-integration.sh
+   dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
    ./tests/integration/test-dind.sh
 
    # PR/review/CI state inspection

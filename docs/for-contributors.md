@@ -84,7 +84,6 @@ containai/
 │   │   ├── import.sh        # Dotfile sync
 │   │   └── ...              # Other modules
 │   ├── container/           # Container-specific content
-│   │   ├── entrypoint.sh    # Security validation
 │   │   └── Dockerfile*      # Image layers
 │   └── build.sh             # Build script
 ├── tests/
@@ -145,7 +144,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 shellcheck -x src/*.sh src/lib/*.sh
 
 # Integration tests
-./tests/integration/test-sync-integration.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
 # E2E tests (requires sysbox)
 ./tests/integration/test-secure-engine.sh

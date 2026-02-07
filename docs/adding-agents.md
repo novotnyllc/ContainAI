@@ -489,7 +489,7 @@ dotnet run --project src/cai -- manifest check src/manifests
 
 ```bash
 # Run sync integration tests
-./tests/integration/test-sync-integration.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 ```
 
 ### Tier 3: E2E Tests (Requires Sysbox + Container)

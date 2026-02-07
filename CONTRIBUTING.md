@@ -93,7 +93,6 @@ containai/
 │   │   ├── setup.sh         # Sysbox installation
 │   │   └── env.sh           # Environment handling
 │   └── container/           # Container-specific content
-│       ├── entrypoint.sh    # Container entrypoint (security validation)
 │       └── Dockerfile*      # Container image definitions
 ├── tests/                   # Test suites
 │   ├── unit/                # Unit tests (portable)
@@ -211,7 +210,7 @@ Integration tests are located in `tests/integration/`:
 | Script | Purpose |
 |--------|---------|
 | `test-secure-engine.sh` | Verifies Sysbox runtime and Docker context setup |
-| `test-sync-integration.sh` | Tests dotfile sync, config parsing, container lifecycle |
+| `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -- --filter-trait "Category=SyncIntegration"` | Tests dotfile sync, config parsing, container lifecycle |
 
 ### Documentation Validation
 
@@ -233,7 +232,7 @@ cd containai
 ./tests/integration/test-secure-engine.sh
 
 # Run sync integration tests (requires Docker)
-./tests/integration/test-sync-integration.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 ```
 
 ### Test Output Format
@@ -294,7 +293,7 @@ exit $FAILED
 1. **Run tests** to ensure nothing is broken:
    ```bash
    ./tests/integration/test-secure-engine.sh
-   ./tests/integration/test-sync-integration.sh
+   dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
    ```
 
 2. **Follow coding conventions** described above

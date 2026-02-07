@@ -28,7 +28,7 @@ cai doctor
 
 # Run integration tests (requires Docker)
 ./tests/integration/test-secure-engine.sh
-./tests/integration/test-sync-integration.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 ./tests/integration/test-dind.sh
 
 # Lint shell scripts
@@ -52,8 +52,7 @@ src/
 │   ├── ssh.sh          # SSH configuration
 │   └── ...             # Other modules
 ├── container/          # Container-specific content
-│   ├── containai-init.sh  # Container init script
-│   ├── entrypoint.sh      # Docker entrypoint
+│   ├── Dockerfile.template-system # Template wrapper
 │   ├── Dockerfile.base    # Base image
 │   ├── Dockerfile.sdks    # SDK layer
 │   ├── Dockerfile.agents  # Agent layer
