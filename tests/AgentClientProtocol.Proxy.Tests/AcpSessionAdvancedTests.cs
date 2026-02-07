@@ -115,6 +115,36 @@ public sealed class AcpSessionAdvancedTests
         Assert.Contains("\"sessionId\":\"proxy-1\"", lines[0], StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Dispose_WithPendingRequest_CancelsPendingWaiter()
+    {
+        using var session = new AcpSession("/workspace");
+        var request = new JsonRpcMessage
+        {
+            Id = JsonValue.Create("req-dispose"),
+            Method = "initialize",
+        };
+
+        var waitTask = session.SendAndWaitForResponseAsync(request, "req-dispose", TimeSpan.FromSeconds(30));
+        session.Dispose();
+
+        var response = await waitTask;
+        Assert.Null(response);
+    }
+
+    [Fact]
+    public void Dispose_WithNonStartedProcess_IgnoresKillErrors()
+    {
+        var session = new AcpSession("/workspace")
+        {
+            AgentProcess = new Process(),
+        };
+
+        var exception = Record.Exception(session.Dispose);
+
+        Assert.Null(exception);
+    }
+
     private sealed class TempFile : IDisposable
     {
         public TempFile() => Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"acp-session-{Guid.NewGuid():N}.log");

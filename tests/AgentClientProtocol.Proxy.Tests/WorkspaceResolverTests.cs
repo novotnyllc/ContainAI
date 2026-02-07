@@ -35,6 +35,17 @@ public sealed class WorkspaceResolverTests
         Assert.Equal(nested, resolved);
     }
 
+    [Fact]
+    public async Task ResolveAsync_WhenGitInvocationThrows_FallsBackToInputPath()
+    {
+        using var temp = new TempDirectory();
+        var missingPath = Path.Combine(temp.Path, "missing", "workspace");
+
+        var resolved = await WorkspaceResolver.ResolveAsync(missingPath, TestContext.Current.CancellationToken);
+
+        Assert.Equal(missingPath, resolved);
+    }
+
     private sealed class TempDirectory : IDisposable
     {
         public TempDirectory()

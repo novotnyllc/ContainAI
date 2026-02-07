@@ -72,6 +72,27 @@ public sealed class AcpProxyTests
     }
 
     [Fact]
+    public async Task RunAsync_InitializeNotification_DoesNotRespond()
+    {
+        var (exitCode, responses, stderr) = await RunProxyAsync(
+            [
+                ToLine(new JsonRpcMessage
+                {
+                    Method = "initialize",
+                    Params = new JsonObject
+                    {
+                        ["protocolVersion"] = "2025-01-01",
+                    },
+                }),
+            ],
+            new ThrowingSpawner("not used"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(stderr);
+        Assert.Empty(responses);
+    }
+
+    [Fact]
     public async Task RunAsync_SessionPromptForUnknownSession_ReturnsSessionNotFound()
     {
         var (exitCode, responses, _) = await RunProxyAsync(
@@ -140,6 +161,93 @@ public sealed class AcpProxyTests
         Assert.Contains("Failed to create session", responses[1].Error?.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RunAsync_RouteThrowsNonJsonException_ReportsProcessingError()
+    {
+        var (exitCode, responses, stderr) = await RunProxyAsync(
+            [
+                ToLine(new JsonRpcMessage
+                {
+                    Id = JsonValue.Create("req-throw"),
+                    Method = "session/prompt",
+                    Params = new JsonObject
+                    {
+                        ["sessionId"] = JsonValue.Create(42),
+                    },
+                }),
+            ],
+            new ThrowingSpawner("not used"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(responses);
+        Assert.Contains("Error processing message", stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_NullMessageLine_IsIgnored()
+    {
+        var (exitCode, responses, stderr) = await RunProxyAsync(
+            [
+                "null",
+            ],
+            new ThrowingSpawner("not used"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(responses);
+        Assert.Empty(stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_EditorResponseMessage_IsIgnored()
+    {
+        var (exitCode, responses, stderr) = await RunProxyAsync(
+            [
+                ToLine(new JsonRpcMessage
+                {
+                    Id = JsonValue.Create("editor-response"),
+                    Result = new JsonObject
+                    {
+                        ["ok"] = true,
+                    },
+                }),
+            ],
+            new ThrowingSpawner("not used"));
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(responses);
+        Assert.Empty(stderr);
+    }
+
+    [Fact]
+    public async Task RunAsync_ReadFailure_ReportsFatalAndReturnsOne()
+    {
+        using var stdin = new ThrowingReadStream();
+        using var stdout = new MemoryStream();
+        using var stderrWriter = new StringWriter();
+        using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: new ThrowingSpawner("not used"));
+
+        var exitCode = await proxy.RunAsync(stdin, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("Fatal error", stderrWriter.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_PreCanceledToken_CompletesWithoutFailure()
+    {
+        using var stdin = new MemoryStream();
+        using var stdout = new MemoryStream();
+        using var stderrWriter = new StringWriter();
+        using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: new ThrowingSpawner("not used"));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var exitCode = await proxy.RunAsync(stdin, cancellation.Token);
+
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("Fatal error", stderrWriter.ToString(), StringComparison.Ordinal);
+    }
+
     private static async Task<(int ExitCode, List<JsonRpcMessage> Responses, string Stderr)> RunProxyAsync(
         IReadOnlyList<string> lines,
         IAgentSpawner spawner)
@@ -178,5 +286,41 @@ public sealed class AcpProxyTests
             _ = agent;
             throw new InvalidOperationException(message);
         }
+    }
+
+    private sealed class ThrowingReadStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => 0;
+
+        public override long Position
+        {
+            get => 0;
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+            => throw new IOException("synthetic read failure");
+
+        public override long Seek(long offset, SeekOrigin origin)
+            => throw new NotSupportedException();
+
+        public override void SetLength(long value)
+            => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count)
+            => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromException<int>(new IOException("synthetic read failure"));
     }
 }

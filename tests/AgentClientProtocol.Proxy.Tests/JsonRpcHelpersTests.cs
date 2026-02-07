@@ -37,6 +37,16 @@ public class JsonRpcHelpersTests
     }
 
     [Fact]
+    public void NormalizeId_DecimalValue_UsesJsonFallback()
+    {
+        var id = JsonValue.Create(42.5m);
+
+        var result = JsonRpcHelpers.NormalizeId(id);
+
+        Assert.Equal("42.5", result);
+    }
+
+    [Fact]
     public void NormalizeId_Null_ReturnsNull()
     {
         var result = JsonRpcHelpers.NormalizeId(null);

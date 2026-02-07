@@ -178,4 +178,91 @@ public class PathTranslatorTests
 
         Assert.Equal(expected, result);
     }
+
+    [Fact]
+    public void TranslateToContainer_InvalidPath_ReturnsOriginal()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+        var invalidPath = "/home/user/projects/myapp/\0bad";
+
+        var result = translator.TranslateToContainer(invalidPath);
+
+        Assert.Equal(invalidPath, result);
+    }
+
+    [Fact]
+    public void TranslateToHost_RelativePath_ReturnsOriginal()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+
+        var result = translator.TranslateToHost("relative/path");
+
+        Assert.Equal("relative/path", result);
+    }
+
+    [Fact]
+    public void TranslateMcpServers_UnknownNodeFormat_PassesThroughClone()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+        var input = JsonValue.Create("raw-value")!;
+
+        var result = translator.TranslateMcpServers(input);
+
+        Assert.Equal("raw-value", result.GetValue<string>());
+        Assert.NotSame(input, result);
+    }
+
+    [Fact]
+    public void TranslateMcpServers_ArrayFormat_PreservesNonObjectEntries()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+        var mcpServers = new JsonArray
+        {
+            JsonValue.Create("literal-entry"),
+            new JsonObject
+            {
+                ["name"] = "filesystem",
+                ["args"] = new JsonArray((JsonNode)"/home/user/projects/myapp/docs"),
+            },
+        };
+
+        var result = Assert.IsType<JsonArray>(translator.TranslateMcpServers(mcpServers));
+        Assert.Equal("literal-entry", result[0]?.GetValue<string>());
+        Assert.Equal("/home/agent/workspace/docs", result[1]?["args"]?[0]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void TranslateMcpServers_ObjectFormat_PreservesNonObjectServerConfig()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+        var mcpServers = new JsonObject
+        {
+            ["server-name"] = JsonValue.Create("inline-config"),
+        };
+
+        var result = Assert.IsType<JsonObject>(translator.TranslateMcpServers(mcpServers));
+        Assert.Equal("inline-config", result["server-name"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void TranslateMcpServers_ArgsArray_PreservesNonStringValues()
+    {
+        var translator = new PathTranslator(HostWorkspace);
+        var mcpServers = new JsonObject
+        {
+            ["filesystem"] = new JsonObject
+            {
+                ["args"] = new JsonArray(
+                    JsonValue.Create(42),
+                    JsonValue.Create(true),
+                    JsonValue.Create("/home/user/projects/myapp/src")),
+            },
+        };
+
+        var result = Assert.IsType<JsonObject>(translator.TranslateMcpServers(mcpServers));
+        var args = Assert.IsType<JsonArray>(result["filesystem"]?["args"]);
+        Assert.Equal(42, args[0]?.GetValue<int>());
+        Assert.True(args[1]?.GetValue<bool>());
+        Assert.Equal("/home/agent/workspace/src", args[2]?.GetValue<string>());
+    }
 }

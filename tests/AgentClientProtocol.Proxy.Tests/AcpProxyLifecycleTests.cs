@@ -251,12 +251,177 @@ public sealed class AcpProxyLifecycleTests
         Assert.NotNull(promptResponse.Result);
     }
 
+    [Fact]
+    public async Task RunAsync_SessionNew_WhenCachedInitializeMissingVersion_UsesDefaultProtocolVersion()
+    {
+        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
+        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("init-default-version"),
+            Method = "initialize",
+            Params = new JsonObject(),
+        });
+        _ = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-default-version"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("new-default-version", response.Id?.GetValue<string>());
+        Assert.NotNull(response.Result?["sessionId"]);
+
+        await harness.CompleteInputAsync();
+        _ = await harness.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        var transcript = await spawner.ReadTranscriptLinesAsync(TestContext.Current.CancellationToken);
+        var forwardedInitialize = transcript.Single(line => line.Contains("\"method\":\"initialize\"", StringComparison.Ordinal));
+        Assert.Contains("\"protocolVersion\":\"2025-01-01\"", forwardedInitialize, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionNew_WhenAgentSessionNewErrorMissingMessage_ReturnsUnknownError()
+    {
+        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SessionNewErrorWithoutMessage);
+        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-error"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("new-error", response.Id?.GetValue<string>());
+        Assert.Equal(JsonRpcErrorCodes.SessionCreationFailed, response.Error?.Code);
+        Assert.Contains("Unknown error", response.Error?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionPrompt_WhenAgentEmitsBlankAndNullLines_ContinuesProcessing()
+    {
+        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.PromptOutputIncludesBlankAndNull);
+        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-blank-null"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var sessionResponse = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        var proxySessionId = sessionResponse.Result?["sessionId"]?.GetValue<string>();
+        Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("prompt-blank-null"),
+            Method = "session/prompt",
+            Params = new JsonObject
+            {
+                ["sessionId"] = proxySessionId,
+                ["prompt"] = "hi",
+            },
+        });
+
+        JsonRpcMessage? promptResponse = null;
+        for (var index = 0; index < 4 && promptResponse is null; index++)
+        {
+            var message = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+            if (message.Id?.GetValue<string>() == "prompt-blank-null")
+            {
+                promptResponse = message;
+            }
+        }
+
+        Assert.NotNull(promptResponse);
+        Assert.NotNull(promptResponse.Result);
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionEnd_WhenAgentDoesNotExit_StillAcknowledgesAfterTimeout()
+    {
+        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
+        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-slow-end"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var sessionResponse = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        var proxySessionId = sessionResponse.Result?["sessionId"]?.GetValue<string>();
+        Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("end-slow"),
+            Method = "session/end",
+            Params = new JsonObject
+            {
+                ["sessionId"] = proxySessionId,
+            },
+        });
+
+        var endResponse = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("end-slow", endResponse.Id?.GetValue<string>());
+        Assert.NotNull(endResponse.Result);
+    }
+
+    [Fact]
+    public async Task RunAsync_Shutdown_WhenAgentDoesNotExit_CompletesAfterTimeout()
+    {
+        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
+        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-shutdown-slow"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.NotNull(response.Result?["sessionId"]);
+
+        await harness.CompleteInputAsync();
+        var exitCode = await harness.WaitForExitAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(0, exitCode);
+    }
+
     private enum ScriptedAgentMode
     {
         Success,
         InitializeError,
         MissingSessionId,
         MalformedPromptOutput,
+        SessionNewErrorWithoutMessage,
+        PromptOutputIncludesBlankAndNull,
+        SlowSessionEnd,
     }
 
     private sealed class ScriptedAgentSpawner : IAgentSpawner, IAsyncDisposable
@@ -303,6 +468,8 @@ while IFS= read -r line; do
     id="$(extract_id "$line")"
     if [[ "$mode" == "MissingSessionId" ]]; then
       printf '{"jsonrpc":"2.0","id":"%s","result":{}}\n' "$id"
+    elif [[ "$mode" == "SessionNewErrorWithoutMessage" ]]; then
+      printf '{"jsonrpc":"2.0","id":"%s","error":{"code":-32603,"message":null}}\n' "$id"
     else
       printf '{"jsonrpc":"2.0","id":"%s","result":{"sessionId":"%s"}}\n' "$id" "$agent_session"
     fi
@@ -313,6 +480,9 @@ while IFS= read -r line; do
     id="$(extract_id "$line")"
     if [[ "$mode" == "MalformedPromptOutput" ]]; then
       printf '{ this is not json }\n'
+    elif [[ "$mode" == "PromptOutputIncludesBlankAndNull" ]]; then
+      printf '\n'
+      printf 'null\n'
     fi
     printf '{"jsonrpc":"2.0","method":"session/progress","params":{"sessionId":"%s","text":"working"}}\n' "$agent_session"
     printf '{"jsonrpc":"2.0","id":"%s","result":{"ok":true}}\n' "$id"
@@ -321,6 +491,9 @@ while IFS= read -r line; do
 
   if [[ "$line" == *'"method":"session/end"'* ]]; then
     id="$(extract_id "$line")"
+    if [[ "$mode" == "SlowSessionEnd" ]]; then
+      sleep 8
+    fi
     if [[ -n "$id" ]]; then
       printf '{"jsonrpc":"2.0","id":"%s","result":{}}\n' "$id"
     fi
@@ -430,7 +603,7 @@ done
         public async Task<JsonRpcMessage> ReadMessageAsync(CancellationToken cancellationToken)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
             var line = await _stdoutReader.ReadLineAsync(timeout.Token);
             Assert.False(string.IsNullOrWhiteSpace(line));

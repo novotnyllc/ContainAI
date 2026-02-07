@@ -1,6 +1,5 @@
 // Main ACP Proxy implementation
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -14,7 +13,6 @@ namespace AgentClientProtocol.Proxy;
 /// ACP terminating proxy that handles ACP protocol from editors,
 /// routes to containerized agents via cai exec.
 /// </summary>
-[SuppressMessage("Reliability", "CA2213:Disposable fields should be disposed", Justification = "stderr is owned by the host process and must not be disposed by AcpProxy.")]
 public sealed class AcpProxy : IDisposable
 {
     private readonly ConcurrentDictionary<string, AcpSession> _sessions = new();
@@ -22,7 +20,7 @@ public sealed class AcpProxy : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly string _agent;
     private readonly IAgentSpawner _agentSpawner;
-    private readonly TextWriter _stderr;
+    private readonly ErrorSink _errorSink;
 
     // Cached initialize params from editor (for forwarding to agents)
     private JsonNode? _cachedInitializeParams;
@@ -44,7 +42,7 @@ public sealed class AcpProxy : IDisposable
     {
         _agent = agent;
         _output = new OutputWriter(stdout);
-        _stderr = stderr;
+        _errorSink = new ErrorSink(stderr);
         _agentSpawner = agentSpawner ?? new AgentSpawner(directSpawn, stderr);
 
         // No validation - any agent name is accepted.
@@ -92,11 +90,11 @@ public sealed class AcpProxy : IDisposable
                 }
                 catch (JsonException ex)
                 {
-                    await _stderr.WriteLineAsync($"JSON parse error: {ex.Message}");
+                    await _errorSink.WriteLineAsync($"JSON parse error: {ex.Message}");
                 }
                 catch (Exception ex)
                 {
-                    await _stderr.WriteLineAsync($"Error processing message: {ex.Message}");
+                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}");
                 }
             }
 
@@ -105,7 +103,7 @@ public sealed class AcpProxy : IDisposable
         }
         catch (Exception ex)
         {
-            await _stderr.WriteLineAsync($"Fatal error: {ex.Message}");
+            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}");
             return 1;
         }
         finally
@@ -115,9 +113,9 @@ public sealed class AcpProxy : IDisposable
             {
                 await writerTask.ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
-                // Expected when external cancellation interrupts flush.
+                await _errorSink.WriteLineAsync($"Output flush canceled: {ex.Message}");
             }
 
             await _cts.CancelAsync().ConfigureAwait(false);
@@ -138,6 +136,11 @@ public sealed class AcpProxy : IDisposable
     {
         var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
         if (message == null)
+            return;
+
+        // Ignore editor-originated responses (no method + id/result-or-error).
+        // Proxy only handles requests/notifications from editor and forwards to agents.
+        if (message.Method == null && message.Id != null && (message.Result != null || message.Error != null))
             return;
 
         // Route based on method
@@ -203,7 +206,10 @@ public sealed class AcpProxy : IDisposable
             }
         };
 
-        await _output.EnqueueAsync(response);
+        if (message.Id != null)
+        {
+            await _output.EnqueueAsync(response);
+        }
     }
 
     private async Task HandleSessionNewAsync(JsonRpcMessage message)
@@ -358,7 +364,10 @@ public sealed class AcpProxy : IDisposable
                     ["sessionId"] = session.ProxySessionId
                 }
             };
-            await _output.EnqueueAsync(response);
+            if (message.Id != null)
+            {
+                await _output.EnqueueAsync(response);
+            }
         }
         catch (Exception ex)
         {
@@ -443,9 +452,9 @@ public sealed class AcpProxy : IDisposable
                 if (session.ReaderTask != null)
                     await session.ReaderTask.WaitAsync(cts.Token);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
-                // Timeout - proceed with cleanup
+                await _errorSink.WriteLineAsync($"Session end timeout for {session.ProxySessionId}: {ex.Message}");
             }
         }
         finally
@@ -480,7 +489,7 @@ public sealed class AcpProxy : IDisposable
         }
         catch (Exception ex)
         {
-            await _stderr.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}");
+            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}");
         }
     }
 
@@ -520,9 +529,9 @@ public sealed class AcpProxy : IDisposable
             // Forward to editor
             await _output.EnqueueAsync(message);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            // Skip malformed messages
+            await _errorSink.WriteLineAsync($"Malformed agent output skipped for session {session.ProxySessionId}: {ex.Message}");
         }
     }
 
@@ -553,9 +562,9 @@ public sealed class AcpProxy : IDisposable
                         if (session.ReaderTask != null)
                             await session.ReaderTask.WaitAsync(cts.Token);
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException ex)
                     {
-                        // Timeout
+                        await _errorSink.WriteLineAsync($"Session shutdown timeout for {session.ProxySessionId}: {ex.Message}");
                     }
                 }
                 finally
@@ -569,5 +578,11 @@ public sealed class AcpProxy : IDisposable
     public void Dispose()
     {
         _cts.Dispose();
+    }
+
+    private sealed class ErrorSink(TextWriter writer)
+    {
+        public ValueTask WriteLineAsync(string message)
+            => new(writer.WriteLineAsync(message));
     }
 }
