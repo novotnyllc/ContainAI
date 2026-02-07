@@ -4,8 +4,8 @@
 # of truth for config sync. Files are processed in sorted order by filename.
 # ==============================================================================
 #
-# If you modify manifests, regenerate _IMPORT_SYNC_MAP via gen-import-map.sh.
-# Run `scripts/check-manifest-consistency.sh` to verify alignment.
+# If you modify manifests, regenerate _IMPORT_SYNC_MAP via `cai manifest generate import-map`.
+# Run `cai manifest check src/manifests` to verify alignment.
 # CI enforces consistency between manifests and the import map.
 #
 # This manifest defines:

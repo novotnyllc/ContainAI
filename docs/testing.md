@@ -52,7 +52,7 @@ Host-side checks that don't require Docker:
 shellcheck -x src/*.sh src/lib/*.sh
 
 # Manifest consistency check
-./scripts/check-manifest-consistency.sh
+dotnet run --project src/cai -- manifest check src/manifests
 ```
 
 ### Tier 2: Integration Tests (CI - ubuntu-latest)

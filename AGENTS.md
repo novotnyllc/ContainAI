@@ -58,10 +58,7 @@ src/
 │   ├── Dockerfile.sdks    # SDK layer
 │   ├── Dockerfile.agents  # Agent layer
 │   └── Dockerfile         # Final image
-├── scripts/            # Generator scripts
-│   ├── gen-import-map.sh      # Generate _IMPORT_SYNC_MAP
-│   ├── gen-agent-wrappers.sh  # Generate launch wrappers
-│   └── gen-*.sh               # Other generators
+├── scripts/            # Operational scripts (install/docs/sysbox tooling)
 └── build.sh            # Build script
 
 tests/integration/      # Integration tests (require Docker)
@@ -74,8 +71,8 @@ docs/                   # Architecture, config, quickstart
 - **`src/manifests/*.toml` are the authoritative source** for what gets synced between host and container
 - Per-agent files with numeric prefixes ensure deterministic processing order
 - `src/lib/import-sync-map.sh` is generated from manifests (contains `_IMPORT_SYNC_MAP`)
-- Run `scripts/check-manifest-consistency.sh` to verify alignment (CI enforces this)
-- Generator scripts (`src/scripts/gen-*.sh`) read manifests to produce container artifacts
+- Run `dotnet run --project src/cai -- manifest check src/manifests` to verify alignment (CI enforces this)
+- `cai manifest generate ...` reads manifests to produce derived artifacts
 - User manifests go in `~/.config/containai/manifests/` (processed at runtime)
 
 # Agent Guidance: dotnet-skills

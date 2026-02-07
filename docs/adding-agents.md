@@ -431,32 +431,32 @@ The generators create container artifacts from the per-agent manifest files.
 
 ```bash
 # Generate import map (creates _IMPORT_SYNC_MAP)
-./src/scripts/gen-import-map.sh src/manifests/ src/lib/import-sync-map.sh
+dotnet run --project src/cai -- manifest generate import-map src/manifests src/lib/import-sync-map.sh
 
 # Generate Dockerfile symlink script
-./src/scripts/gen-dockerfile-symlinks.sh src/manifests/ artifacts/container-generated/symlinks.sh
+dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests artifacts/container-generated/symlinks.sh
 
 # Generate init directory script
-./src/scripts/gen-init-dirs.sh src/manifests/ artifacts/container-generated/init-dirs.sh
+dotnet run --project src/cai -- manifest generate init-dirs src/manifests artifacts/container-generated/init-dirs.sh
 
 # Generate link spec JSON for runtime repair
-./src/scripts/gen-container-link-spec.sh src/manifests/ artifacts/container-generated/link-spec.json
+dotnet run --project src/cai -- manifest generate container-link-spec src/manifests artifacts/container-generated/link-spec.json
 
 # Generate agent wrapper functions
-./src/scripts/gen-agent-wrappers.sh src/manifests/ artifacts/container-generated/containai-agents.sh
+dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests artifacts/container-generated/containai-agents.sh
 ```
 
-**Note**: The build script `./src/build.sh` runs these generators automatically before building the image. Manual execution is only needed for development/testing.
+**Note**: The build flow invokes manifest generation via `cai`/MSBuild. Manual execution is only needed for development/testing.
 
 ### Consistency Check
 
 After creating your manifest, run the consistency check:
 
 ```bash
-./scripts/check-manifest-consistency.sh
+dotnet run --project src/cai -- manifest check src/manifests
 ```
 
-This script:
+This command:
 - Parses all entries from `src/manifests/*.toml`
 - Compares against the generated `src/lib/import-sync-map.sh`
 - Reports any mismatches
@@ -482,7 +482,7 @@ Testing follows the tiered strategy documented in [docs/testing.md](testing.md).
 shellcheck -x src/*.sh src/lib/*.sh
 
 # Manifest consistency
-./scripts/check-manifest-consistency.sh
+dotnet run --project src/cai -- manifest check src/manifests
 ```
 
 ### Tier 2: Integration Tests
@@ -696,7 +696,7 @@ rg '\[agent\]' src/manifests/
 cat src/container/Dockerfile.agents
 
 # Check manifest/import map consistency
-./scripts/check-manifest-consistency.sh
+dotnet run --project src/cai -- manifest check src/manifests
 ```
 
 ### File Locations
@@ -707,8 +707,8 @@ cat src/container/Dockerfile.agents
 | `src/lib/import-sync-map.sh` | Generated `_IMPORT_SYNC_MAP` from manifests |
 | `src/lib/import.sh` | Import implementation (uses `_IMPORT_SYNC_MAP`) |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
-| `src/scripts/gen-*.sh` | Generator scripts for container artifacts |
-| `scripts/check-manifest-consistency.sh` | Manifest/import map consistency check |
+| `cai manifest generate ...` | Generator commands for container artifacts |
+| `cai manifest check src/manifests` | Manifest/import map consistency check |
 | `docs/testing.md` | Testing tier documentation |
 | `docs/custom-tools.md` | User guide for adding custom tools |
 

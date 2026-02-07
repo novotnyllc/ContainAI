@@ -10,7 +10,7 @@
 # 5. gen-agent-wrappers.sh produces expected output for agents with default_args
 # 6. gen-agent-wrappers.sh skips agents without default_args
 # 7. gen-import-map.sh produces expected _IMPORT_SYNC_MAP format
-# 8. check-manifest-consistency.sh validates manifests
+# 8. native `cai manifest check` validates manifests
 #
 # Note: cai-manifest.sh delegates to native `cai manifest parse` TOML parsing.
 # parse-toml.py is still used by this script for direct TOML validation checks.
@@ -480,13 +480,13 @@ else
 fi
 
 # ==============================================================================
-# Test: check-manifest-consistency.sh passes
+# Test: native manifest check passes
 # ==============================================================================
-test_start "check-manifest-consistency.sh passes on current manifests"
-if "$REPO_ROOT/scripts/check-manifest-consistency.sh" >/dev/null 2>&1; then
+test_start "cai manifest check passes on current manifests"
+if dotnet run --project "$REPO_ROOT/src/cai" -- manifest check --manifest-dir "$REPO_ROOT/src/manifests" >/dev/null 2>&1; then
     test_pass
 else
-    test_fail "check-manifest-consistency.sh failed"
+    test_fail "cai manifest check failed"
 fi
 
 # ==============================================================================

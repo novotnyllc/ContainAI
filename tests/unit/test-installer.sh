@@ -426,21 +426,14 @@ EOF
     rm -rf "$tmpdir"
 }
 
-test_package_release_script_copies_parse_toml() {
-    test_start "package-release script includes parse-toml.py in tarball payload"
-    if grep -q 'cp "\$SRC_DIR/parse-toml.py" "\$PACKAGE_DIR/parse-toml.py"' "$REPO_ROOT/scripts/package-release.sh"; then
+test_cai_packaging_target_includes_container_runtime_assets() {
+    test_start "cai packaging target includes container runtime assets"
+    if grep -Fq '<_ContainerFiles Include="$(ContainAIRepositoryRoot)/src/container/**"' "$REPO_ROOT/src/cai/cai.csproj" &&
+       grep -Fq '<Copy SourceFiles="@(_ContainerFiles)" DestinationFiles="@(_ContainerFiles->' "$REPO_ROOT/src/cai/cai.csproj" &&
+       grep -Fq 'Missing required runtime file in package staging: container/Dockerfile.template-system' "$REPO_ROOT/src/cai/cai.csproj"; then
         test_pass
     else
-        test_fail "scripts/package-release.sh does not copy parse-toml.py"
-    fi
-}
-
-test_package_release_script_copies_template_system_wrapper() {
-    test_start "package-release script includes template system wrapper in tarball payload"
-    if grep -q 'cp -r "\$SRC_DIR/container/"\* "\$PACKAGE_DIR/container/"' "$REPO_ROOT/scripts/package-release.sh"; then
-        test_pass
-    else
-        test_fail "scripts/package-release.sh does not copy container runtime assets"
+        test_fail "src/cai/cai.csproj is missing required container packaging entries"
     fi
 }
 
@@ -560,8 +553,7 @@ test_build_local_native_artifacts_source_checkout_uses_debug
 test_install_from_local_copies_parse_toml
 test_install_from_local_copies_template_system_wrapper
 test_install_from_local_removes_stale_git_metadata
-test_package_release_script_copies_parse_toml
-test_package_release_script_copies_template_system_wrapper
+test_cai_packaging_target_includes_container_runtime_assets
 test_run_auto_setup_invokes_dry_run_before_setup
 test_post_install_fresh_install_auto_runs_setup_noninteractive
 test_post_install_rerun_auto_runs_update_without_prompt
