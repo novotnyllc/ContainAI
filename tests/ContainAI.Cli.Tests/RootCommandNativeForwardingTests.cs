@@ -95,12 +95,49 @@ public sealed class RootCommandNativeForwardingTests
         Assert.Empty(runtime.NativeCalls);
     }
 
+    [Fact]
+    public async Task DoctorFix_AllWithTarget_FailsParser()
+    {
+        var runtime = new RecordingRuntime();
+
+        var exitCode = await CaiCli.RunAsync(["doctor", "fix", "--all", "container"], runtime, TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
+    [Fact]
+    public async Task DoctorFix_InvalidTarget_FailsParser()
+    {
+        var runtime = new RecordingRuntime();
+
+        var exitCode = await CaiCli.RunAsync(["doctor", "fix", "sandbox-1"], runtime, TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
+    [Fact]
+    public async Task ManifestCheck_WithOptionAndPositionalDirectory_FailsParser()
+    {
+        var runtime = new RecordingRuntime();
+
+        var exitCode = await CaiCli.RunAsync(
+            ["manifest", "check", "--manifest-dir", "src/manifests", "src/manifests"],
+            runtime,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
     public static TheoryData<string[], string[]> NativeForwardingCases()
     {
         return new TheoryData<string[], string[]>
         {
             { ["doctor", "--json", "--build-templates", "--reset-lima"], ["doctor", "--json", "--build-templates", "--reset-lima"] },
-            { ["doctor", "fix", "--all", "--dry-run", "container"], ["doctor", "fix", "--all", "--dry-run", "container"] },
+            { ["doctor", "fix", "--all", "--dry-run"], ["doctor", "fix", "--all", "--dry-run"] },
+            { ["doctor", "fix", "container", "sandbox-1"], ["doctor", "fix", "container", "sandbox-1"] },
             { ["validate", "--json"], ["validate", "--json"] },
             { ["setup", "--dry-run", "--verbose", "--skip-templates"], ["setup", "--dry-run", "--verbose", "--skip-templates"] },
             { ["export", "--output", "/tmp/out.tgz", "--container", "demo"], ["export", "--output", "/tmp/out.tgz", "--container", "demo"] },

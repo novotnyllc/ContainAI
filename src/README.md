@@ -107,7 +107,7 @@ cai import
 
 **`cai import` prerequisites:**
 - Docker Desktop (Linux, macOS, or Windows WSL2)
-- No external JSON/TOML/YAML parser dependencies (native `.NET` parsing in `cai`)
+- No external JSON/TOML parser dependencies (native `.NET` parsing in `cai`)
 
 **macOS users:** Docker Desktop must have file-sharing enabled for your home directory (`$HOME`). This is typically enabled by default in Settings > Resources > File sharing.
 
@@ -237,7 +237,7 @@ The `cai import` command syncs credentials and configuration from your host to t
 
 Inside the sandbox container, the volume mounts at `/mnt/agent-data` (e.g., `/mnt/agent-data/claude/credentials.json`).
 
-Additional configuration (plugins, settings, shell aliases, tmux, copilot) is also synced. For the complete list of synced paths, see `_IMPORT_SYNC_MAP` in `lib/import.sh`.
+Additional configuration (plugins, settings, shell aliases, tmux, copilot) is also synced. For the complete list of synced paths, see `src/manifests/*.toml` and generate derived mappings with `cai manifest generate import-map src/manifests`.
 
 **To remove synced credentials and reset the data volume:**
 ```bash

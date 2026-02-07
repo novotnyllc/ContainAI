@@ -1,12 +1,14 @@
 # CI Fixes Implementation Plan: User Manifests Import + macOS Lima Docker Access
 
+> Historical context: this plan was drafted against legacy shell files. The current implementation is .NET-native; equivalent logic now lives under `src/cai/`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Fix CI failures by syncing user manifest entries during import and making macOS Lima Docker access reliable on GitHub Actions (macos-15-intel).
 
 **Architecture:** Extend import pipeline to include user manifest entries by parsing host manifests at import time. For macOS Lima on CI, expose Docker via a TCP endpoint (forwarded to localhost) to avoid unix socket access issues, and ensure context creation targets the correct endpoint.
 
-**Tech Stack:** Bash (ContainAI CLI), GitHub Actions, Lima, Docker.
+**Tech Stack:** .NET 10 native CLI (`cai`), GitHub Actions, Lima, Docker.
 
 ---
 
@@ -38,12 +40,12 @@ FAIL with output similar to:
 ### Task 2: Add user manifest entries to import sync map (GREEN)
 
 **Files:**
-- Modify: `src/lib/import.sh`
-- Reference: `src/scripts/parse-manifest.sh`
+- Modify: `src/cai/NativeLifecycleCommandRuntime.cs`
+- Reference: `src/cai/ManifestTomlParser.cs`
 
 **Step 1: Implement user manifest parsing for import**
 
-Add helper functions in `src/lib/import.sh`:
+Add helper logic in `src/cai/NativeLifecycleCommandRuntime.cs`:
 - `_import_get_parse_manifest_script` (resolve parser path)
 - `_import_generate_user_manifest_entries` (parse user manifest dir and emit `/source/...:/target/...:flags` entries)
 
@@ -56,7 +58,7 @@ Parsing rules:
 
 **Step 2: Integrate parsed user entries**
 
-After `_IMPORT_SYNC_MAP` and before exclude rewriting:
+After manifest entries are loaded and before exclude rewriting:
 - Append parsed user entries to `sync_map_entries`
 - Honor `--no-secrets` by skipping entries with `s` flag
 - Emit dry-run info lines when `--dry-run` is set
@@ -74,7 +76,7 @@ Expected: PASS
 ### Task 3: Stabilize macOS Lima Docker access on CI (RED)
 
 **Files:**
-- Modify: `src/lib/setup.sh`
+- Modify: `src/cai/NativeLifecycleCommandRuntime.cs`
 - Modify: `.github/workflows/docker.yml` (only if needed for env or logs)
 
 **Step 1: Confirm failure signature**
@@ -88,7 +90,7 @@ From CI logs:
 ### Task 4: Use TCP Docker endpoint for Lima on GitHub Actions (GREEN)
 
 **Files:**
-- Modify: `src/lib/setup.sh`
+- Modify: `src/cai/NativeLifecycleCommandRuntime.cs`
 
 **Step 1: Add TCP mode helpers**
 
@@ -123,7 +125,7 @@ In CI (macos-15-intel), `cai setup` should:
 
 **Step 1: Commit changes**
 ```bash
-git add src/lib/import.sh src/lib/setup.sh docs/plans/2026-02-05-ci-fix-user-manifest-macos-lima.md
+git add src/cai/NativeLifecycleCommandRuntime.cs src/cai/ManifestTomlParser.cs docs/plans/2026-02-05-ci-fix-user-manifest-macos-lima.md
 git commit -m "fix(ci): sync user manifests and use TCP for macOS Lima in CI"
 ```
 

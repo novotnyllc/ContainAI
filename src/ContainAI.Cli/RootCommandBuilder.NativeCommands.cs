@@ -27,11 +27,12 @@ internal sealed partial class RootCommandBuilder
         var fixCommand = new Command("fix", "Run doctor remediation routines.");
         var allOption = new Option<bool>("--all");
         var dryRunOption = new Option<bool>("--dry-run");
-        var targetArgument = new Argument<string?>("target")
+        var targetArgument = new Argument<string>("target")
         {
             Arity = ArgumentArity.ZeroOrOne,
         };
-        var targetArgArgument = new Argument<string?>("target-arg")
+        targetArgument.AcceptOnlyFromAmong("container", "template");
+        var targetArgArgument = new Argument<string>("target-arg")
         {
             Arity = ArgumentArity.ZeroOrOne,
         };
@@ -40,6 +41,29 @@ internal sealed partial class RootCommandBuilder
         fixCommand.Options.Add(dryRunOption);
         fixCommand.Arguments.Add(targetArgument);
         fixCommand.Arguments.Add(targetArgArgument);
+        fixCommand.Validators.Add(result =>
+        {
+            var target = result.GetValue(targetArgument);
+            var targetArg = result.GetValue(targetArgArgument);
+            var includeAll = result.GetValue(allOption);
+            var hasTarget = !string.IsNullOrWhiteSpace(target);
+            var hasTargetArg = !string.IsNullOrWhiteSpace(targetArg);
+
+            if (hasTarget && target is not ("container" or "template"))
+            {
+                result.AddError("target must be 'container' or 'template'.");
+            }
+
+            if (includeAll && (hasTarget || hasTargetArg))
+            {
+                result.AddError("--all cannot be combined with target or target-arg.");
+            }
+
+            if (!hasTarget && hasTargetArg)
+            {
+                result.AddError("target-arg requires target.");
+            }
+        });
         fixCommand.SetAction((parseResult, cancellationToken) =>
         {
             var args = new List<string> { "doctor", "fix" };
@@ -458,17 +482,20 @@ internal sealed partial class RootCommandBuilder
         };
         check.Options.Add(manifestDirOption);
         check.Arguments.Add(manifestDirArgument);
+        check.Validators.Add(result =>
+        {
+            var fromOption = result.GetValue(manifestDirOption);
+            var fromArgument = result.GetValue(manifestDirArgument);
+            if (!string.IsNullOrWhiteSpace(fromOption) && !string.IsNullOrWhiteSpace(fromArgument))
+            {
+                result.AddError("Choose either --manifest-dir or manifest-dir argument.");
+            }
+        });
         check.SetAction((parseResult, cancellationToken) =>
         {
             var args = new List<string> { "manifest", "check" };
             var fromOption = parseResult.GetValue(manifestDirOption);
             var fromArgument = parseResult.GetValue(manifestDirArgument);
-            if (!string.IsNullOrWhiteSpace(fromOption) && !string.IsNullOrWhiteSpace(fromArgument))
-            {
-                Console.Error.WriteLine("ERROR: choose either --manifest-dir or manifest-dir argument");
-                return Task.FromResult(1);
-            }
-
             AppendOption(args, "--manifest-dir", fromOption);
             if (string.IsNullOrWhiteSpace(fromOption))
             {

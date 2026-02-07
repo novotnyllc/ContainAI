@@ -1,10 +1,12 @@
 # Docker CI Auto-Loop Implementation Plan
 
+> Historical context: this draft referenced removed shell generators. Use `cai manifest generate ...` for current .NET-native artifact generation.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Fix the Docker workflow failure and add an automatic local watcher that monitors the Docker workflow on `main` until it is green.
 
-**Architecture:** Update the Docker workflow to generate container files from `src/manifests/`. Add a local bash watcher script that polls the latest Docker workflow run on `main`, reports failures, and exits only when the run is green (no re-run attempts). Validate the generator scripts locally before pushing.
+**Architecture:** Update the Docker workflow to generate container files from `src/manifests/` via `cai manifest generate ...`. Add a local watcher that polls the latest Docker workflow run on `main`, reports failures, and exits only when the run is green (no re-run attempts). Validate manifest generation locally before pushing.
 
 **Tech Stack:** GitHub Actions, `gh` CLI, bash.
 
@@ -16,10 +18,10 @@
 **Step 1: Update generator inputs**
 ```bash
 # In Generate container files step
-./src/scripts/gen-dockerfile-symlinks.sh src/manifests artifacts/container-generated/symlinks.sh
-./src/scripts/gen-init-dirs.sh src/manifests artifacts/container-generated/init-dirs.sh
-./src/scripts/gen-container-link-spec.sh src/manifests artifacts/container-generated/link-spec.json
-./src/scripts/gen-agent-wrappers.sh src/manifests artifacts/container-generated/agent-wrappers.sh
+dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests artifacts/container-generated/symlinks.sh
+dotnet run --project src/cai -- manifest generate init-dirs src/manifests artifacts/container-generated/init-dirs.sh
+dotnet run --project src/cai -- manifest generate container-link-spec src/manifests artifacts/container-generated/link-spec.json
+dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests artifacts/container-generated/agent-wrappers.sh
 ```
 
 **Step 2: Commit**
@@ -99,10 +101,10 @@ mkdir -p /tmp/containai-ci
 
 **Step 2: Run generators locally**
 ```bash
-./src/scripts/gen-dockerfile-symlinks.sh src/manifests /tmp/containai-ci/symlinks.sh
-./src/scripts/gen-init-dirs.sh src/manifests /tmp/containai-ci/init-dirs.sh
-./src/scripts/gen-container-link-spec.sh src/manifests /tmp/containai-ci/link-spec.json
-./src/scripts/gen-agent-wrappers.sh src/manifests /tmp/containai-ci/agent-wrappers.sh
+dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests /tmp/containai-ci/symlinks.sh
+dotnet run --project src/cai -- manifest generate init-dirs src/manifests /tmp/containai-ci/init-dirs.sh
+dotnet run --project src/cai -- manifest generate container-link-spec src/manifests /tmp/containai-ci/link-spec.json
+dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests /tmp/containai-ci/agent-wrappers.sh
 ```
 
 **Expected:** all commands succeed and output files are created.

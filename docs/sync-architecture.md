@@ -20,8 +20,8 @@ flowchart LR
         HostConfigs["~/.claude<br/>~/.config/gh<br/>~/.gitconfig"]
     end
 
-    subgraph Sync["cai import (rsync)"]
-        SyncMap["_IMPORT_SYNC_MAP"]
+    subgraph Sync["cai import (native)"]
+        SyncMap["Manifest-derived import map"]
     end
 
     subgraph Volume["Docker Volume"]
@@ -64,24 +64,24 @@ flowchart TB
     end
 
     subgraph Components["Generated Components"]
-        Import["import.sh<br/>_IMPORT_SYNC_MAP"]
+        Import["cai manifest generate import-map"]
         Dockerfile["Dockerfile.agents<br/>Symlink creation"]
-        Init["containai-init.sh<br/>Directory structure"]
-        Wrappers["containai-agents.sh<br/>Launch wrappers"]
+        Init["cai system init<br/>Directory structure"]
+        Wrappers["manifest-generated<br/>Launch wrappers"]
     end
 
     subgraph Artifacts["Container Artifacts"]
-        SymlinksScript["generated/symlinks.sh"]
-        InitDirs["generated/init-dirs.sh"]
+        SymlinksScript["dockerfile-symlinks artifact"]
+        InitDirs["init-dirs artifact"]
         LinkSpec["generated/link-spec.json"]
         AgentWrappers["generated/containai-agents.sh"]
     end
 
-    Manifests -->|"gen-import-map.sh"| Import
-    Manifests -->|"gen-dockerfile-symlinks.sh"| SymlinksScript
-    Manifests -->|"gen-init-dirs.sh"| InitDirs
-    Manifests -->|"gen-container-link-spec.sh"| LinkSpec
-    Manifests -->|"gen-agent-wrappers.sh"| AgentWrappers
+    Manifests -->|"cai manifest generate import-map"| Import
+    Manifests -->|"cai manifest generate dockerfile-symlinks"| SymlinksScript
+    Manifests -->|"cai manifest generate init-dirs"| InitDirs
+    Manifests -->|"cai manifest generate container-link-spec"| LinkSpec
+    Manifests -->|"cai manifest generate agent-wrappers"| AgentWrappers
 
     SymlinksScript --> Dockerfile
     InitDirs --> Init
@@ -140,9 +140,9 @@ The `[agent]` section is only present for agents that need launch wrappers (agen
 
 ## Component Analysis
 
-### 1. Import Sync Map (import.sh)
+### 1. Import Sync Map (manifest-derived)
 
-The `_IMPORT_SYNC_MAP` array defines what gets synced from host `$HOME` to the data volume. This table shows representative examples; see `src/manifests/*.toml` for the complete list.
+The manifest-derived import mapping defines what gets synced from host `$HOME` to the data volume. This table shows representative examples; see `src/manifests/*.toml` for the complete list.
 
 | Source | Target | Flags | Description |
 |--------|--------|-------|-------------|
@@ -248,7 +248,7 @@ Symlinks created in the container image pointing to `/mnt/agent-data`:
 | `~/.config/starship.toml` | `/mnt/agent-data/config/starship.toml` | Starship prompt |
 | `~/.config/oh-my-posh` | `/mnt/agent-data/config/oh-my-posh` | Oh-My-Posh themes |
 
-### 3. containai-init.sh Directory Structure
+### 3. Runtime Init Directory Structure
 
 Directories and files created on first boot:
 
@@ -319,18 +319,18 @@ Directories and files created on first boot:
 
 ## Identified Mismatches
 
-### Missing from Import (synced but not imported from host)
+### Missing from Import
 
-1. **VS Code mcp.json files** - Dockerfile creates symlinks for `/mnt/agent-data/vscode-server/data/User/mcp.json` but import.sh only syncs the `mcp/` directory, not the `mcp.json` file
+None currently identified from built-in manifests and generated artifacts.
 
 ### Missing from Dockerfile (imported but no symlink)
 
 1. **`~/.claude/settings.local.json`** - Imported to volume but no symlink in Dockerfile
 2. **`~/.bashrc.d`** - Imported to `shell/bashrc.d` but linked differently (sourced via .bashrc hook, not symlinked directly)
 
-### Missing from containai-init.sh (symlinked but not created)
+### Missing from Runtime Init
 
-None - all symlinked paths are now created in containai-init.sh.
+None - all symlinked paths are created by `cai system init`.
 
 ### Naming Inconsistencies
 
@@ -397,8 +397,8 @@ flowchart LR
     end
 
     subgraph Container["Container Startup"]
-        GenLinks["gen-user-links.sh"]
-        GenWrappers["gen-user-wrappers.sh"]
+        InitRuntime["cai system init"]
+        ManifestRuntime["ManifestGenerators + ManifestApplier"]
     end
 
     subgraph Runtime["Runtime Artifacts"]
@@ -409,11 +409,11 @@ flowchart LR
 
     UserManifests -->|"cai import"| SyncOp
     SyncOp --> VolManifests
-    VolManifests -->|"containai-init.sh"| GenLinks
-    VolManifests -->|"containai-init.sh"| GenWrappers
-    GenLinks --> Symlinks
-    GenLinks --> LinkSpec
-    GenWrappers --> WrapperFuncs
+    VolManifests -->|"cai system init"| InitRuntime
+    InitRuntime --> ManifestRuntime
+    ManifestRuntime --> Symlinks
+    ManifestRuntime --> LinkSpec
+    ManifestRuntime --> WrapperFuncs
 
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff
     style Import fill:#0f3460,stroke:#16213e,color:#fff
@@ -424,9 +424,10 @@ flowchart LR
 
 1. User creates `~/.config/containai/manifests/mytool.toml`
 2. `cai import` syncs to `/mnt/agent-data/containai/manifests/`
-3. On container start, `containai-init.sh` calls:
-   - `gen-user-links.sh`: Creates symlinks, writes `user-link-spec.json`
-   - `gen-user-wrappers.sh`: Creates launch wrapper functions
+3. On container start, `cai system init` processes user manifests using managed C# runtime services:
+   - Generates `user-link-spec.json` from TOML manifests
+   - Creates user launch wrappers
+   - Applies symlinks and init directory policy
 
 ### Security Constraints
 
@@ -434,7 +435,7 @@ User manifests have security restrictions enforced at runtime:
 
 | Constraint | Enforcement |
 |------------|-------------|
-| `target` must resolve under `/mnt/agent-data` | Path validation with `realpath -m` |
+| `target` must resolve under `/mnt/agent-data` | Path validation in `ManifestApplier` |
 | `container_link` must be relative, no `..` | Pattern matching |
 | Binary must exist for wrapper generation | `command -v` check |
 | Invalid TOML files | Logged and skipped |
@@ -474,7 +475,7 @@ The `cai system link-repair` command reads both built-in and user link specs to 
 
 - Import implementation: `src/cai/NativeLifecycleCommandRuntime.cs`
 - Container symlinks: `src/container/Dockerfile.agents`
-- Runtime init: `src/container/containai-init.sh`
+- Runtime init: `src/cai/ContainerRuntimeCommandService.cs`
 - Per-agent manifests: `src/manifests/*.toml` (single source of truth)
 - User manifest generators: `src/cai/ManifestGenerators.cs` and `src/cai/ManifestApplier.cs`
 - User guide: [Custom Tools Guide](custom-tools.md)

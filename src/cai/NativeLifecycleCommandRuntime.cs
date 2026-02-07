@@ -1850,9 +1850,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 return fileInfo.LinkTarget;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // ignored
+            Debug.WriteLine($"Failed to read file symlink target for '{path}': {ex.Message}");
         }
 
         try
@@ -1863,9 +1863,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 return directoryInfo.LinkTarget;
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // ignored
+            Debug.WriteLine($"Failed to read directory symlink target for '{path}': {ex.Message}");
         }
 
         return null;
@@ -4768,17 +4768,21 @@ Examples:
     private static string BuildBashCompletionScript()
     {
         return """
-# ContainAI bash completion
-_cai_completions() {
-  local cur prev
+# shellcheck shell=bash
+_cai_completion() {
+  local line suggestions
+  line="${COMP_LINE:-cai}"
+  suggestions="$({ cai completion suggest --line "$line" --position "${COMP_POINT:-${#line}}"; } 2>/dev/null)"
   COMPREPLY=()
-  cur="${COMP_WORDS[COMP_CWORD]}"
-  prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="run shell exec doctor setup validate docker import export sync stop status gc ssh links config manifest template update refresh uninstall completion version help system acp"
-  COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
+  while IFS= read -r candidate; do
+    if [[ -n "$candidate" ]]; then
+      COMPREPLY+=("$candidate")
+    fi
+  done <<< "$suggestions"
 }
-complete -F _cai_completions cai
+
+complete -o default -o bashdefault -F _cai_completion cai
 """;
     }
 
@@ -4787,29 +4791,14 @@ complete -F _cai_completions cai
         return """
 #compdef cai
 
-_cai() {
-  local -a commands
-  commands=(
-    'run:Start or attach to sandbox container'
-    'shell:Open interactive shell in running container'
-    'exec:Run command in container'
-    'docker:Run docker with ContainAI context'
-    'status:Show container status'
-    'stop:Stop containers'
-    'gc:Garbage collect stale resources'
-    'ssh:Manage SSH configuration'
-    'config:Manage settings'
-    'template:Manage templates'
-    'completion:Generate completion scripts'
-    'version:Show version'
-    'help:Show help'
-    'system:Internal container runtime commands'
-    'acp:ACP tooling'
-  )
-  _describe 'command' commands
+_cai_completion() {
+  local line suggestions
+  line="${BUFFER:-cai}"
+  suggestions="$({ cai completion suggest --line "$line" --position "${CURSOR:-${#line}}"; } 2>/dev/null)"
+  compadd -- ${(f)suggestions}
 }
 
-_cai "$@"
+compdef _cai_completion cai
 """;
     }
 
@@ -4920,9 +4909,9 @@ _cai "$@"
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore cleanup failures during cancellation.
+                Debug.WriteLine($"Failed to kill process '{fileName}' during cancellation: {ex.Message}");
             }
         });
 
