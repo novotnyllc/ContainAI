@@ -75,7 +75,6 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
             args.Add("--verbose");
         }
 
-        AppendTokens(args, options.AdditionalArgs);
         return _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
     }
 
@@ -118,7 +117,25 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
             args.Add("--verbose");
         }
 
-        AppendTokens(args, options.AdditionalArgs);
+        AppendOption(args, "--credentials", options.Credentials);
+        AppendFlag(args, "--acknowledge-credential-risk", options.AcknowledgeCredentialRisk);
+        AppendOption(args, "--data-volume", options.DataVolume);
+        AppendOption(args, "--config", options.Config);
+        AppendOption(args, "--container", options.Container);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--debug", options.Debug);
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendOption(args, "--image-tag", options.ImageTag);
+        AppendOption(args, "--template", options.Template);
+        AppendOption(args, "--channel", options.Channel);
+        AppendOption(args, "--memory", options.Memory);
+        AppendOption(args, "--cpus", options.Cpus);
+        foreach (var env in options.Env)
+        {
+            args.Add("--env");
+            args.Add(env);
+        }
+
         if (options.CommandArgs.Count > 0)
         {
             args.Add("--");
@@ -151,7 +168,19 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
             args.Add("--verbose");
         }
 
-        AppendTokens(args, options.AdditionalArgs);
+        AppendFlag(args, "--fresh", options.Fresh);
+        AppendFlag(args, "--reset", options.Reset);
+        AppendOption(args, "--data-volume", options.DataVolume);
+        AppendOption(args, "--config", options.Config);
+        AppendOption(args, "--container", options.Container);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--debug", options.Debug);
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendOption(args, "--image-tag", options.ImageTag);
+        AppendOption(args, "--template", options.Template);
+        AppendOption(args, "--channel", options.Channel);
+        AppendOption(args, "--memory", options.Memory);
+        AppendOption(args, "--cpus", options.Cpus);
         AppendTokens(args, options.CommandArgs);
         return args;
     }
@@ -179,7 +208,14 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
             args.Add("--verbose");
         }
 
-        AppendTokens(args, options.AdditionalArgs);
+        AppendOption(args, "--container", options.Container);
+        AppendOption(args, "--template", options.Template);
+        AppendOption(args, "--channel", options.Channel);
+        AppendOption(args, "--data-volume", options.DataVolume);
+        AppendOption(args, "--config", options.Config);
+        AppendFlag(args, "--fresh", options.Fresh);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--debug", options.Debug);
         AppendTokens(args, options.CommandArgs);
         return args;
     }
@@ -189,6 +225,25 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         foreach (var value in values)
         {
             destination.Add(value);
+        }
+    }
+
+    private static void AppendOption(List<string> destination, string name, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        destination.Add(name);
+        destination.Add(value);
+    }
+
+    private static void AppendFlag(List<string> destination, string name, bool enabled)
+    {
+        if (enabled)
+        {
+            destination.Add(name);
         }
     }
 }

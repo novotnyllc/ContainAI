@@ -17,7 +17,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.RunExitCode, exitCode);
         Assert.Single(runtime.RunCalls);
-        Assert.Empty(runtime.RunCalls[0].AdditionalArgs);
+        Assert.Empty(runtime.RunCalls[0].Env);
         Assert.Empty(runtime.RunCalls[0].CommandArgs);
     }
 

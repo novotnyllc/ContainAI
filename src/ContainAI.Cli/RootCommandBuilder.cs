@@ -24,7 +24,20 @@ internal sealed partial class RootCommandBuilder
                 Detached: false,
                 Quiet: false,
                 Verbose: false,
-                AdditionalArgs: Array.Empty<string>(),
+                Credentials: null,
+                AcknowledgeCredentialRisk: false,
+                DataVolume: null,
+                Config: null,
+                Container: null,
+                Force: false,
+                Debug: false,
+                DryRun: false,
+                ImageTag: null,
+                Template: null,
+                Channel: null,
+                Memory: null,
+                Cpus: null,
+                Env: Array.Empty<string>(),
                 CommandArgs: Array.Empty<string>()),
             cancellationToken));
 
@@ -189,30 +202,6 @@ internal sealed partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var extras = new List<string>();
-            AppendOption(extras, "--credentials", parseResult.GetValue(credentialsOption));
-            AppendFlag(extras, "--acknowledge-credential-risk", parseResult.GetValue(acknowledgeCredentialRiskOption));
-            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
-            AppendOption(extras, "--config", parseResult.GetValue(configOption));
-            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
-            AppendFlag(extras, "--restart", parseResult.GetValue(restartOption));
-            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
-            AppendFlag(extras, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendOption(extras, "--image-tag", parseResult.GetValue(imageTagOption));
-            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
-            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
-            AppendOption(extras, "--memory", parseResult.GetValue(memoryOption));
-            AppendOption(extras, "--cpus", parseResult.GetValue(cpusOption));
-            foreach (var env in parseResult.GetValue(envOption) ?? [])
-            {
-                if (!string.IsNullOrWhiteSpace(env))
-                {
-                    extras.Add("--env");
-                    extras.Add(env);
-                }
-            }
-
             var commandArguments = parseResult.GetValue(commandArgs) ?? Array.Empty<string>();
 
             var workspace = parseResult.GetValue(workspaceOption);
@@ -236,7 +225,22 @@ internal sealed partial class RootCommandBuilder
                     Detached: parseResult.GetValue(detachedOption),
                     Quiet: parseResult.GetValue(quietOption),
                     Verbose: parseResult.GetValue(verboseOption),
-                    AdditionalArgs: extras,
+                    Credentials: parseResult.GetValue(credentialsOption),
+                    AcknowledgeCredentialRisk: parseResult.GetValue(acknowledgeCredentialRiskOption),
+                    DataVolume: parseResult.GetValue(dataVolumeOption),
+                    Config: parseResult.GetValue(configOption),
+                    Container: parseResult.GetValue(containerOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Debug: parseResult.GetValue(debugOption),
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    ImageTag: parseResult.GetValue(imageTagOption),
+                    Template: parseResult.GetValue(templateOption),
+                    Channel: parseResult.GetValue(channelOption),
+                    Memory: parseResult.GetValue(memoryOption),
+                    Cpus: parseResult.GetValue(cpusOption),
+                    Env: parseResult.GetValue(envOption)?
+                        .Where(static value => !string.IsNullOrWhiteSpace(value))
+                        .ToArray() ?? Array.Empty<string>(),
                     CommandArgs: commandArguments),
                 cancellationToken);
         });
@@ -343,21 +347,6 @@ internal sealed partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var extras = new List<string>();
-            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
-            AppendOption(extras, "--config", parseResult.GetValue(configOption));
-            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
-            AppendFlag(extras, "--restart", parseResult.GetValue(restartOption));
-            AppendFlag(extras, "--reset", parseResult.GetValue(resetOption));
-            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
-            AppendFlag(extras, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendOption(extras, "--image-tag", parseResult.GetValue(imageTagOption));
-            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
-            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
-            AppendOption(extras, "--memory", parseResult.GetValue(memoryOption));
-            AppendOption(extras, "--cpus", parseResult.GetValue(cpusOption));
-
             var workspace = parseResult.GetValue(workspaceOption);
             var positionalPath = parseResult.GetValue(pathArgument);
             if (string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(positionalPath))
@@ -368,9 +357,21 @@ internal sealed partial class RootCommandBuilder
             return runtime.RunShellAsync(
                 new ShellCommandOptions(
                     Workspace: workspace,
+                    Fresh: parseResult.GetValue(freshOption) || parseResult.GetValue(restartOption),
+                    Reset: parseResult.GetValue(resetOption),
                     Quiet: parseResult.GetValue(quietOption),
                     Verbose: parseResult.GetValue(verboseOption),
-                    AdditionalArgs: extras,
+                    DataVolume: parseResult.GetValue(dataVolumeOption),
+                    Config: parseResult.GetValue(configOption),
+                    Container: parseResult.GetValue(containerOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Debug: parseResult.GetValue(debugOption),
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    ImageTag: parseResult.GetValue(imageTagOption),
+                    Template: parseResult.GetValue(templateOption),
+                    Channel: parseResult.GetValue(channelOption),
+                    Memory: parseResult.GetValue(memoryOption),
+                    Cpus: parseResult.GetValue(cpusOption),
                     CommandArgs: Array.Empty<string>()),
                 cancellationToken);
         });
@@ -447,21 +448,19 @@ internal sealed partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var extras = new List<string>();
-            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
-            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
-            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
-            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
-            AppendOption(extras, "--config", parseResult.GetValue(configOption));
-            AppendFlag(extras, "--fresh", parseResult.GetValue(freshOption));
-            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
             return runtime.RunExecAsync(
                 new ExecCommandOptions(
                     Workspace: parseResult.GetValue(workspaceOption),
                     Quiet: parseResult.GetValue(quietOption),
                     Verbose: parseResult.GetValue(verboseOption),
-                    AdditionalArgs: extras,
+                    Container: parseResult.GetValue(containerOption),
+                    Template: parseResult.GetValue(templateOption),
+                    Channel: parseResult.GetValue(channelOption),
+                    DataVolume: parseResult.GetValue(dataVolumeOption),
+                    Config: parseResult.GetValue(configOption),
+                    Fresh: parseResult.GetValue(freshOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Debug: parseResult.GetValue(debugOption),
                     CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
                 cancellationToken);
         });
@@ -521,23 +520,20 @@ internal sealed partial class RootCommandBuilder
                 Json: parseResult.GetValue(jsonOption),
                 Workspace: parseResult.GetValue(workspaceOption),
                 Container: parseResult.GetValue(containerOption),
-                Verbose: parseResult.GetValue(verboseOption),
-                AdditionalArgs: Array.Empty<string>()),
+                Verbose: parseResult.GetValue(verboseOption)),
             cancellationToken));
 
         return command;
     }
 
     private static string[] BuildArgumentList(string[]? parsedArgs, IReadOnlyList<string> unmatchedTokens)
-    {
-        return (parsedArgs, unmatchedTokens.Count) switch
+        => (parsedArgs, unmatchedTokens.Count) switch
         {
             ({ Length: > 0 }, > 0) => [.. parsedArgs, .. unmatchedTokens],
             ({ Length: > 0 }, 0) => parsedArgs,
             (null or { Length: 0 }, > 0) => [.. unmatchedTokens],
             _ => Array.Empty<string>(),
         };
-    }
 
     private static Command CreateCompletionCommand(RootCommand root)
     {

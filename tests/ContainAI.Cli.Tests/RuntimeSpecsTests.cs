@@ -38,30 +38,88 @@ public sealed class RuntimeSpecsTests
     [Fact]
     public void RuntimeCommandOptions_RecordsCaptureValues()
     {
-        var run = new RunCommandOptions("/tmp/workspace", Fresh: true, Detached: true, Quiet: true, Verbose: false, AdditionalArgs: ["--debug"], CommandArgs: ["echo", "ok"]);
-        var shell = new ShellCommandOptions("/tmp/workspace", Quiet: false, Verbose: true, AdditionalArgs: ["--force"], CommandArgs: []);
-        var exec = new ExecCommandOptions("/tmp/workspace", Quiet: true, Verbose: true, AdditionalArgs: ["--fresh"], CommandArgs: ["bash", "-lc", "pwd"]);
+        var run = new RunCommandOptions(
+            "/tmp/workspace",
+            Fresh: true,
+            Detached: true,
+            Quiet: true,
+            Verbose: false,
+            Credentials: "copy",
+            AcknowledgeCredentialRisk: true,
+            DataVolume: "containai-data",
+            Config: "/tmp/config.toml",
+            Container: "containai-demo",
+            Force: true,
+            Debug: true,
+            DryRun: true,
+            ImageTag: "latest",
+            Template: "default",
+            Channel: "stable",
+            Memory: "8g",
+            Cpus: "4",
+            Env: ["FOO=bar"],
+            CommandArgs: ["echo", "ok"]);
+        var shell = new ShellCommandOptions(
+            "/tmp/workspace",
+            Fresh: true,
+            Reset: true,
+            Quiet: false,
+            Verbose: true,
+            DataVolume: "containai-data",
+            Config: "/tmp/config.toml",
+            Container: "containai-demo",
+            Force: true,
+            Debug: true,
+            DryRun: true,
+            ImageTag: "latest",
+            Template: "default",
+            Channel: "stable",
+            Memory: "8g",
+            Cpus: "4",
+            CommandArgs: []);
+        var exec = new ExecCommandOptions(
+            "/tmp/workspace",
+            Quiet: true,
+            Verbose: true,
+            Container: "containai-demo",
+            Template: "default",
+            Channel: "stable",
+            DataVolume: "containai-data",
+            Config: "/tmp/config.toml",
+            Fresh: true,
+            Force: true,
+            Debug: true,
+            CommandArgs: ["bash", "-lc", "pwd"]);
         var docker = new DockerCommandOptions(["images"]);
-        var status = new StatusCommandOptions(Json: true, Workspace: "/tmp/workspace", Container: "containai-demo", Verbose: true, AdditionalArgs: []);
+        var status = new StatusCommandOptions(Json: true, Workspace: "/tmp/workspace", Container: "containai-demo", Verbose: true);
 
         Assert.Equal("/tmp/workspace", run.Workspace);
         Assert.Equal(["echo", "ok"], run.CommandArgs);
-        Assert.Equal(["--debug"], run.AdditionalArgs);
+        Assert.Equal(["FOO=bar"], run.Env);
         Assert.True(run.Fresh);
         Assert.True(run.Detached);
         Assert.True(run.Quiet);
         Assert.False(run.Verbose);
+        Assert.Equal("copy", run.Credentials);
+        Assert.True(run.AcknowledgeCredentialRisk);
+        Assert.True(run.Force);
+        Assert.True(run.Debug);
+        Assert.True(run.DryRun);
 
         Assert.Equal("/tmp/workspace", shell.Workspace);
+        Assert.True(shell.Fresh);
+        Assert.True(shell.Reset);
         Assert.False(shell.Quiet);
         Assert.True(shell.Verbose);
-        Assert.Equal(["--force"], shell.AdditionalArgs);
+        Assert.True(shell.Force);
         Assert.Empty(shell.CommandArgs);
 
         Assert.Equal("/tmp/workspace", exec.Workspace);
         Assert.True(exec.Quiet);
         Assert.True(exec.Verbose);
-        Assert.Equal(["--fresh"], exec.AdditionalArgs);
+        Assert.True(exec.Fresh);
+        Assert.True(exec.Force);
+        Assert.True(exec.Debug);
         Assert.Equal(["bash", "-lc", "pwd"], exec.CommandArgs);
 
         Assert.Equal(["images"], docker.DockerArgs);
@@ -70,7 +128,6 @@ public sealed class RuntimeSpecsTests
         Assert.Equal("/tmp/workspace", status.Workspace);
         Assert.Equal("containai-demo", status.Container);
         Assert.True(status.Verbose);
-        Assert.Empty(status.AdditionalArgs);
     }
 
     [Fact]
@@ -80,8 +137,7 @@ public sealed class RuntimeSpecsTests
             Json: true,
             Workspace: "/tmp/workspace",
             Container: "containai-demo",
-            Verbose: false,
-            AdditionalArgs: ["--dry-run"]);
+            Verbose: false);
         var second = first with { };
 
         Assert.Equal(first, second);

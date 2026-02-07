@@ -54,7 +54,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
             "update" => RunUpdateAsync(args, cancellationToken),
             "refresh" => RunRefreshAsync(args, cancellationToken),
             "uninstall" => RunUninstallAsync(args, cancellationToken),
-            "completion" => RunCompletionAsync(args, cancellationToken),
             "config" => RunConfigAsync(args, cancellationToken),
             "manifest" => RunManifestAsync(args, cancellationToken),
             "template" => RunTemplateAsync(args, cancellationToken),
@@ -2804,33 +2803,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private Task<int> RunCompletionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var shell = args.Count > 1 ? args[1] : string.Empty;
-        if (shell is "" or "-h" or "--help")
-        {
-            _stdout.WriteLine("Usage: cai completion <bash|zsh>");
-            return Task.FromResult(0);
-        }
-
-        if (shell.Equals("bash", StringComparison.Ordinal))
-        {
-            _stdout.WriteLine(BuildBashCompletionScript());
-            return Task.FromResult(0);
-        }
-
-        if (shell.Equals("zsh", StringComparison.Ordinal))
-        {
-            _stdout.WriteLine(BuildZshCompletionScript());
-            return Task.FromResult(0);
-        }
-
-        _stderr.WriteLine($"Unknown shell: {shell}");
-        return Task.FromResult(1);
-    }
-
     private async Task<int> RunConfigAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2)
@@ -4234,12 +4206,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
     }
 
-    private static string NormalizeConfigKey(string key)
-    {
-        return string.Equals(key, "agent", StringComparison.Ordinal)
+    private static string NormalizeConfigKey(string key) => string.Equals(key, "agent", StringComparison.Ordinal)
             ? "agent.default"
             : key;
-    }
 
     private static (string? Workspace, string? Error) ResolveWorkspaceScope(ParsedConfigCommand parsed, string normalizedKey)
     {
@@ -4441,9 +4410,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return true;
     }
 
-    private static string GetRootHelpText()
-    {
-        return """
+    private static string GetRootHelpText() => """
 ContainAI - Run AI coding agents in a secure Docker sandbox
 
 Usage: cai [subcommand] [options]
@@ -4483,7 +4450,6 @@ Examples:
   cai stop --all
   cai doctor
 """;
-    }
 
     private static string EscapeJson(string value)
     {
@@ -4763,43 +4729,6 @@ Examples:
             var destinationSubdirectory = Path.Combine(destinationDirectory, Path.GetFileName(sourceSubdirectory));
             await CopyDirectoryAsync(sourceSubdirectory, destinationSubdirectory, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    private static string BuildBashCompletionScript()
-    {
-        return """
-# shellcheck shell=bash
-_cai_completion() {
-  local line suggestions
-  line="${COMP_LINE:-cai}"
-  suggestions="$({ cai completion suggest --line "$line" --position "${COMP_POINT:-${#line}}"; } 2>/dev/null)"
-  COMPREPLY=()
-
-  while IFS= read -r candidate; do
-    if [[ -n "$candidate" ]]; then
-      COMPREPLY+=("$candidate")
-    fi
-  done <<< "$suggestions"
-}
-
-complete -o default -o bashdefault -F _cai_completion cai
-""";
-    }
-
-    private static string BuildZshCompletionScript()
-    {
-        return """
-#compdef cai
-
-_cai_completion() {
-  local line suggestions
-  line="${BUFFER:-cai}"
-  suggestions="$({ cai completion suggest --line "$line" --position "${CURSOR:-${#line}}"; } 2>/dev/null)"
-  compadd -- ${(f)suggestions}
-}
-
-compdef _cai_completion cai
-""";
     }
 
     private static async Task<ProcessResult> RunProcessCaptureAsync(

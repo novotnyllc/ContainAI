@@ -8,8 +8,28 @@ internal static class RuntimeCoreCommandSpecFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string>(capacity: options.AdditionalArgs.Count + 2);
-        AppendArguments(arguments, options.AdditionalArgs);
+        var arguments = new List<string>();
+        AppendOption(arguments, "--credentials", options.Credentials);
+        AppendFlag(arguments, "--acknowledge-credential-risk", options.AcknowledgeCredentialRisk);
+        AppendOption(arguments, "--data-volume", options.DataVolume);
+        AppendOption(arguments, "--config", options.Config);
+        AppendOption(arguments, "--container", options.Container);
+        AppendFlag(arguments, "--fresh", options.Fresh);
+        AppendFlag(arguments, "--detached", options.Detached);
+        AppendFlag(arguments, "--force", options.Force);
+        AppendFlag(arguments, "--debug", options.Debug);
+        AppendFlag(arguments, "--dry-run", options.DryRun);
+        AppendOption(arguments, "--image-tag", options.ImageTag);
+        AppendOption(arguments, "--template", options.Template);
+        AppendOption(arguments, "--channel", options.Channel);
+        AppendOption(arguments, "--memory", options.Memory);
+        AppendOption(arguments, "--cpus", options.Cpus);
+        foreach (var env in options.Env)
+        {
+            arguments.Add("--env");
+            arguments.Add(env);
+        }
+
         AppendLoginShellCommand(arguments, options.CommandArgs);
 
         return new ProcessExecutionSpec(
@@ -27,8 +47,20 @@ internal static class RuntimeCoreCommandSpecFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string>(capacity: options.AdditionalArgs.Count + 2);
-        AppendArguments(arguments, options.AdditionalArgs);
+        var arguments = new List<string>();
+        AppendFlag(arguments, "--fresh", options.Fresh);
+        AppendFlag(arguments, "--reset", options.Reset);
+        AppendOption(arguments, "--data-volume", options.DataVolume);
+        AppendOption(arguments, "--config", options.Config);
+        AppendOption(arguments, "--container", options.Container);
+        AppendFlag(arguments, "--force", options.Force);
+        AppendFlag(arguments, "--debug", options.Debug);
+        AppendFlag(arguments, "--dry-run", options.DryRun);
+        AppendOption(arguments, "--image-tag", options.ImageTag);
+        AppendOption(arguments, "--template", options.Template);
+        AppendOption(arguments, "--channel", options.Channel);
+        AppendOption(arguments, "--memory", options.Memory);
+        AppendOption(arguments, "--cpus", options.Cpus);
         AppendLoginShellCommand(arguments, options.CommandArgs);
 
         return new ProcessExecutionSpec(
@@ -44,7 +76,7 @@ internal static class RuntimeCoreCommandSpecFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string>(capacity: options.AdditionalArgs.Count + options.CommandArgs.Count + 1);
+        var arguments = new List<string>();
         if (options.Quiet)
         {
             arguments.Add("-q");
@@ -55,7 +87,14 @@ internal static class RuntimeCoreCommandSpecFactory
             arguments.Add("-v");
         }
 
-        AppendArguments(arguments, options.AdditionalArgs);
+        AppendOption(arguments, "--container", options.Container);
+        AppendOption(arguments, "--template", options.Template);
+        AppendOption(arguments, "--channel", options.Channel);
+        AppendOption(arguments, "--data-volume", options.DataVolume);
+        AppendOption(arguments, "--config", options.Config);
+        AppendFlag(arguments, "--fresh", options.Fresh);
+        AppendFlag(arguments, "--force", options.Force);
+        AppendFlag(arguments, "--debug", options.Debug);
         AppendArguments(arguments, options.CommandArgs);
 
         return new ProcessExecutionSpec(
@@ -77,7 +116,7 @@ internal static class RuntimeCoreCommandSpecFactory
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var arguments = new List<string>(capacity: 8 + options.AdditionalArgs.Count)
+        var arguments = new List<string>(capacity: 8)
         {
             "ps",
             "--filter",
@@ -100,7 +139,6 @@ internal static class RuntimeCoreCommandSpecFactory
             arguments.Add("--no-trunc");
         }
 
-        AppendArguments(arguments, options.AdditionalArgs);
         return new DockerExecutionSpec(Arguments: arguments);
     }
 
@@ -121,6 +159,25 @@ internal static class RuntimeCoreCommandSpecFactory
         foreach (var arg in source)
         {
             destination.Add(arg);
+        }
+    }
+
+    private static void AppendOption(List<string> destination, string name, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        destination.Add(name);
+        destination.Add(value);
+    }
+
+    private static void AppendFlag(List<string> destination, string name, bool enabled)
+    {
+        if (enabled)
+        {
+            destination.Add(name);
         }
     }
 
