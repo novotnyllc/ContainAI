@@ -90,11 +90,29 @@ internal sealed partial class DevcontainerFeatureRuntime
             }
         }
 
+        if (!TryParseFeatureBoolean("ENABLECREDENTIALS", defaultValue: false, out var enableCredentials, out var enableCredentialsError))
+        {
+            await _stderr.WriteLineAsync(enableCredentialsError).ConfigureAwait(false);
+            return 1;
+        }
+
+        if (!TryParseFeatureBoolean("ENABLESSH", defaultValue: true, out var enableSsh, out var enableSshError))
+        {
+            await _stderr.WriteLineAsync(enableSshError).ConfigureAwait(false);
+            return 1;
+        }
+
+        if (!TryParseFeatureBoolean("INSTALLDOCKER", defaultValue: true, out var installDocker, out var installDockerError))
+        {
+            await _stderr.WriteLineAsync(installDockerError).ConfigureAwait(false);
+            return 1;
+        }
+
         var settings = new FeatureConfig(
             DataVolume: Environment.GetEnvironmentVariable("DATAVOLUME") ?? DefaultDataVolume,
-            EnableCredentials: ParseBoolean(Environment.GetEnvironmentVariable("ENABLECREDENTIALS"), false),
-            EnableSsh: ParseBoolean(Environment.GetEnvironmentVariable("ENABLESSH"), true),
-            InstallDocker: ParseBoolean(Environment.GetEnvironmentVariable("INSTALLDOCKER"), true),
+            EnableCredentials: enableCredentials,
+            EnableSsh: enableSsh,
+            InstallDocker: installDocker,
             RemoteUser: Environment.GetEnvironmentVariable("REMOTEUSER") ?? "auto");
 
         if (!ValidateFeatureConfig(settings, out var validationError))
@@ -447,7 +465,7 @@ internal sealed partial class DevcontainerFeatureRuntime
                 return 0;
             }
 
-            File.Delete(DefaultDockerPidFile);
+            await RunAsRootAsync("rm", ["-f", DefaultDockerPidFile], cancellationToken).ConfigureAwait(false);
         }
 
         if (await CommandSucceedsAsync("docker", ["info"], cancellationToken).ConfigureAwait(false))
@@ -492,19 +510,37 @@ internal sealed partial class DevcontainerFeatureRuntime
         return true;
     }
 
-    private static bool ParseBoolean(string? value, bool defaultValue)
+    private static bool TryParseFeatureBoolean(string name, bool defaultValue, out bool value, out string error)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        var rawValue = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(rawValue))
         {
-            return defaultValue;
+            value = defaultValue;
+            error = string.Empty;
+            return true;
         }
 
-        return value.Trim() switch
+        switch (rawValue.Trim())
         {
-            "true" or "TRUE" or "True" or "1" => true,
-            "false" or "FALSE" or "False" or "0" => false,
-            _ => defaultValue,
-        };
+            case "true":
+            case "TRUE":
+            case "True":
+            case "1":
+                value = true;
+                error = string.Empty;
+                return true;
+            case "false":
+            case "FALSE":
+            case "False":
+            case "0":
+                value = false;
+                error = string.Empty;
+                return true;
+            default:
+                value = defaultValue;
+                error = $"ERROR: Invalid {name} \"{rawValue}\". Must be true or false.";
+                return false;
+        }
     }
 
     private static bool IsSymlink(string path)
@@ -535,10 +571,21 @@ internal sealed partial class DevcontainerFeatureRuntime
 
     private static bool IsPortInUse(string portValue)
     {
-        return int.TryParse(portValue, out var port) &&
-               IPGlobalProperties.GetIPGlobalProperties()
-                   .GetActiveTcpListeners()
-                   .Any(endpoint => endpoint.Port == port);
+        if (!int.TryParse(portValue, out var port))
+        {
+            return false;
+        }
+
+        try
+        {
+            return IPGlobalProperties.GetIPGlobalProperties()
+                .GetActiveTcpListeners()
+                .Any(endpoint => endpoint.Port == port);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken)
