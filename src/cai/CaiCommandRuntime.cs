@@ -119,7 +119,12 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         }
 
         AppendTokens(args, options.AdditionalArgs);
-        AppendTokens(args, options.CommandArgs);
+        if (options.CommandArgs.Count > 0)
+        {
+            args.Add("--");
+            AppendTokens(args, options.CommandArgs);
+        }
+
         return args;
     }
 

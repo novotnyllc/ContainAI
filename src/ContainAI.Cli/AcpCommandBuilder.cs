@@ -5,7 +5,7 @@ namespace ContainAI.Cli;
 
 internal sealed class AcpCommandBuilder
 {
-    public Command Build(ICaiCommandRuntime runtime)
+    public static Command Build(ICaiCommandRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
 

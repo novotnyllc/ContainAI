@@ -5,8 +5,6 @@ namespace ContainAI.Cli;
 
 public static class CaiCli
 {
-    private static readonly RootCommandBuilder RootCommandBuilder = new();
-
     public static async Task<int> RunAsync(
         string[] args,
         ICaiCommandRuntime runtime,
@@ -72,7 +70,7 @@ public static class CaiCli
             return false;
         }
 
-        if (firstToken.StartsWith("-", StringComparison.Ordinal))
+        if (firstToken.StartsWith('-'))
         {
             return true;
         }

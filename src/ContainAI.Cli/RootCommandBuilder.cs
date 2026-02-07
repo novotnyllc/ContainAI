@@ -8,11 +8,7 @@ namespace ContainAI.Cli;
 
 internal sealed partial class RootCommandBuilder
 {
-    private readonly AcpCommandBuilder _acpCommandBuilder;
-
-    public RootCommandBuilder(AcpCommandBuilder? acpCommandBuilder = null) => _acpCommandBuilder = acpCommandBuilder ?? new AcpCommandBuilder();
-
-    public RootCommand Build(ICaiCommandRuntime runtime)
+    public static RootCommand Build(ICaiCommandRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
 
@@ -67,7 +63,7 @@ internal sealed partial class RootCommandBuilder
             root.Subcommands.Add(command);
         }
 
-        root.Subcommands.Add(_acpCommandBuilder.Build(runtime));
+        root.Subcommands.Add(AcpCommandBuilder.Build(runtime));
 
         return root;
     }
@@ -532,7 +528,7 @@ internal sealed partial class RootCommandBuilder
         return command;
     }
 
-    private static IReadOnlyList<string> BuildArgumentList(string[]? parsedArgs, IReadOnlyList<string> unmatchedTokens)
+    private static string[] BuildArgumentList(string[]? parsedArgs, IReadOnlyList<string> unmatchedTokens)
     {
         return (parsedArgs, unmatchedTokens.Count) switch
         {
@@ -589,7 +585,7 @@ internal sealed partial class RootCommandBuilder
             var completionArgs = NormalizeCompletionArguments(normalized.Line);
             var completionResult = CommandLineParser.Parse(root, completionArgs, configuration: null);
 
-            foreach (var completion in completionResult.GetCompletions(position: null))
+            foreach (var completion in completionResult.GetCompletions(position: normalized.Cursor))
             {
                 var value = string.IsNullOrWhiteSpace(completion.InsertText) ? completion.Label : completion.InsertText;
                 if (string.IsNullOrWhiteSpace(value))
@@ -650,7 +646,7 @@ internal sealed partial class RootCommandBuilder
         return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
     }
 
-    private static IReadOnlyList<string> NormalizeCompletionArguments(string line)
+    private static string[] NormalizeCompletionArguments(string line)
     {
         var normalized = CommandLineParser.SplitCommandLine(line).ToArray();
         if (normalized.Length == 0)
@@ -673,9 +669,9 @@ internal sealed partial class RootCommandBuilder
         return normalized;
     }
 
-    private static bool ShouldImplicitRunForCompletion(IReadOnlyList<string> args)
+    private static bool ShouldImplicitRunForCompletion(string[] args)
     {
-        if (args.Count == 0)
+        if (args.Length == 0)
         {
             return false;
         }
@@ -686,7 +682,17 @@ internal sealed partial class RootCommandBuilder
             return false;
         }
 
-        return firstToken.StartsWith("-", StringComparison.Ordinal);
+        if (firstToken.StartsWith('-'))
+        {
+            return true;
+        }
+
+        if (CommandCatalog.RoutedCommands.Any(command => command.StartsWith(firstToken, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return !CommandCatalog.RoutedCommands.Contains(firstToken);
     }
 
     private static string BuildBashCompletionScript()
@@ -723,7 +729,7 @@ internal sealed partial class RootCommandBuilder
 
     private static string ExpandHome(string path)
     {
-        if (!path.StartsWith("~", StringComparison.Ordinal))
+        if (!path.StartsWith('~'))
         {
             return path;
         }
