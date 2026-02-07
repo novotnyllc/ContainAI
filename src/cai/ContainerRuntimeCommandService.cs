@@ -31,7 +31,7 @@ internal sealed class ContainerRuntimeCommandService
     {
         if (args.Count < 2)
         {
-            await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links>").ConfigureAwait(false);
+            await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
             return 1;
         }
 
@@ -40,6 +40,7 @@ internal sealed class ContainerRuntimeCommandService
             "init" => await RunInitAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             "link-repair" => await RunLinkRepairAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             "watch-links" => await RunLinkWatcherAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            "devcontainer" => await new DevcontainerFeatureRuntime(_stdout, _stderr).RunAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             _ => await UnknownSystemSubcommandAsync(args[1]).ConfigureAwait(false),
         };
     }
@@ -47,7 +48,7 @@ internal sealed class ContainerRuntimeCommandService
     private async Task<int> UnknownSystemSubcommandAsync(string subcommand)
     {
         await _stderr.WriteLineAsync($"Unknown system subcommand: {subcommand}").ConfigureAwait(false);
-        await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links>").ConfigureAwait(false);
+        await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
         return 1;
     }
 

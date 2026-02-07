@@ -32,6 +32,6 @@
         }
     },
     "mounts": [],
-    "postCreateCommand": "/usr/local/share/containai/init.sh",
-    "postStartCommand": "/usr/local/share/containai/start.sh"
+    "postCreateCommand": "cai system devcontainer init",
+    "postStartCommand": "cai system devcontainer start"
 }

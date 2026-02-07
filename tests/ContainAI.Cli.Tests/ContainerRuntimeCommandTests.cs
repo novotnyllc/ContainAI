@@ -6,6 +6,21 @@ namespace ContainAI.Cli.Tests;
 public sealed class ContainerRuntimeCommandTests
 {
     [Fact]
+    public async Task SystemDevcontainerInstall_Help_ReturnsUsage()
+    {
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+        var exitCode = await runtime.RunAsync(
+            ["system", "devcontainer", "install", "--help"],
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("cai system devcontainer install", stdout.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SystemLinkRepair_CheckReturnsFailureWhenLinkIsMissing()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"cai-system-{Guid.NewGuid():N}");
