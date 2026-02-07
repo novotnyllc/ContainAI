@@ -50,7 +50,7 @@ jobs:
         id: bump
         run: |
           set -euo pipefail
-          current_version="$(dotnet nbgv get-version -v Version)"
+          current_version="$(dotnet nbgv get-version -v SimpleVersion)"
           IFS='.' read -r major minor patch <<< "$current_version"
           case "${{ inputs.bump_type }}" in
             major)
