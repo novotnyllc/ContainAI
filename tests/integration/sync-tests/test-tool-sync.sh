@@ -115,7 +115,7 @@ run_tool_sync_test() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then
@@ -181,7 +181,7 @@ run_git_sync_test() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then
@@ -530,7 +530,7 @@ run_tool_sync_test_with_config() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then

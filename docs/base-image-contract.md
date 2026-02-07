@@ -19,8 +19,8 @@ The reference implementation is `ghcr.io/novotnyllc/containai:latest`.
 |------|---------|
 | `/home/agent` | Agent user home directory |
 | `/mnt/agent-data` | Mount point for persistent data volume |
-| `/opt/containai` | ContainAI scripts and tools |
-| `/usr/local/lib/containai/init.sh` | Init script for workspace setup (invoked by containai-init.service) |
+| `/opt/containai` | ContainAI runtime assets (binary, manifests, templates) |
+| `/usr/local/bin/cai` | Native CLI entrypoint (invoked by systemd services) |
 
 ### User
 

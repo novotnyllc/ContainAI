@@ -53,7 +53,7 @@ flowchart TD
 
     SM -.->|"What we protect"| SRC1["src/lib/container.sh"]
     SM -.->|"Detection logic"| SRC2["src/lib/doctor.sh"]
-    ARCH -.->|"Entry security"| SRC3["src/container/entrypoint.sh"]
+    ARCH -.->|"Runtime init/link security"| SRC3["src/cai/ContainerRuntimeCommandService.cs"]
 ```
 
 ## Isolation Model
@@ -90,8 +90,8 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 | Input | Validation Location | Notes |
 |-------|---------------------|-------|
 | TOML config files | [config.sh](../src/lib/config.sh) | Parsed without shell eval |
-| Environment variables | [entrypoint.sh](../src/container/entrypoint.sh) | Key/value validation |
-| Volume mount paths | [entrypoint.sh](../src/container/entrypoint.sh) | Symlink and traversal checks |
+| Environment variables | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Key/value validation |
+| Volume mount paths | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Symlink and traversal checks |
 | Container names | [container.sh](../src/lib/container.sh) | RFC 1123 hostname compliance |
 
 ### In-Scope for Vulnerability Reports
@@ -115,7 +115,7 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 |------|---------------|
 | [src/lib/doctor.sh](../src/lib/doctor.sh) | Isolation detection and verification |
 | [src/lib/container.sh](../src/lib/container.sh) | Container start with isolation checks |
-| [src/container/entrypoint.sh](../src/container/entrypoint.sh) | Volume mount security, .env parsing |
+| [src/cai/ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Volume mount security, .env parsing |
 | [src/lib/config.sh](../src/lib/config.sh) | TOML parsing (no shell eval) |
 
 ## Reporting Vulnerabilities

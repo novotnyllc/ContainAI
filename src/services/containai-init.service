@@ -17,7 +17,7 @@ ConditionVirtualization=container
 Type=oneshot
 User=agent
 Environment=HOME=/home/agent
-ExecStart=/usr/local/lib/containai/init.sh
+ExecStart=/usr/local/bin/cai system init
 RemainAfterExit=yes
 
 [Install]

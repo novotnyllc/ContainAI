@@ -274,7 +274,7 @@ internal sealed class RootCommandBuilder
 
     private static Command CreateNativePassThroughCommand(string commandName, ICaiCommandRuntime runtime)
     {
-        var command = new Command(commandName)
+        var command = new Command(commandName, GetNativeCommandDescription(commandName))
         {
             TreatUnmatchedTokensAsErrors = false,
         };
@@ -291,6 +291,33 @@ internal sealed class RootCommandBuilder
         });
 
         return command;
+    }
+
+    private static string? GetNativeCommandDescription(string commandName)
+    {
+        return commandName switch
+        {
+            "doctor" => "Check system capabilities and diagnostics.",
+            "setup" => "Set up local runtime prerequisites.",
+            "validate" => "Validate runtime configuration.",
+            "import" => "Import host configuration into the data volume.",
+            "export" => "Export the data volume to a tarball.",
+            "sync" => "Run in-container sync operations.",
+            "stop" => "Stop managed containers.",
+            "gc" => "Garbage collect stale resources.",
+            "ssh" => "Manage SSH integration.",
+            "links" => "Check or repair container symlinks.",
+            "config" => "Read and write CLI configuration.",
+            "manifest" => "Parse manifests and generate derived artifacts.",
+            "template" => "Manage templates.",
+            "update" => "Update the local installation.",
+            "refresh" => "Refresh images and rebuild templates when requested.",
+            "uninstall" => "Remove local installation artifacts.",
+            "completion" => "Generate shell completions.",
+            "help" => "Show help.",
+            "system" => "Container-internal runtime commands.",
+            _ => null,
+        };
     }
 
     private static Command CreateVersionCommand(ICaiCommandRuntime runtime)

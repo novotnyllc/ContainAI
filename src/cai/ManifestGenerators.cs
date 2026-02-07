@@ -231,7 +231,7 @@ internal static class ManifestGenerators
         builder.AppendLine($"# Generated from {headerSource} - DO NOT EDIT");
         builder.AppendLine("# Regenerate with: cai manifest generate init-dirs src/manifests");
         builder.AppendLine("#");
-        builder.AppendLine("# This script is sourced by containai-init.sh to create volume structure.");
+        builder.AppendLine("# This script is consumed by cai system init to create volume structure.");
         builder.AppendLine("# It uses helper functions defined in the parent script:");
         builder.AppendLine("#   ensure_dir <path>          - create directory with validation");
         builder.AppendLine("#   ensure_file <path> [json]  - create file (json=true for {} init)");

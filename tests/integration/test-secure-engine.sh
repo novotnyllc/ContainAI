@@ -25,7 +25,7 @@ if ! source "$SRC_DIR/containai.sh"; then
 fi
 
 # ==============================================================================
-# Test helpers - match test-sync-integration.sh pattern
+# Test helpers - align with sync integration test output pattern
 # ==============================================================================
 
 # Color output helpers

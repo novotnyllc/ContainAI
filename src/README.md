@@ -35,7 +35,7 @@ This directory contains the ContainAI sandbox implementation:
 - `containai.sh` - CLI entry point (sources `lib/*.sh` modules)
 - `lib/` - Modular shell libraries
 - `container/Dockerfile*` - Container image definitions
-- `container/entrypoint.sh` - Container entrypoint with security validation
+- `cai` native runtime commands (`cai system ...`) - Container init/link orchestration
 
 **Manifest Files (`manifests/`):**
 

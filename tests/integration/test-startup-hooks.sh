@@ -3,7 +3,7 @@
 # Integration tests for ContainAI Startup Hooks
 # ==============================================================================
 # Verifies:
-# 1. containai-init.sh run_hooks function exists and works
+# 1. native `cai system init` hook orchestration exists and works
 # 2. Hooks at /etc/containai/template-hooks/startup.d/ are executed first
 # 3. Hooks at workspace .containai/hooks/startup.d/ are executed second
 # 4. Non-executable files are skipped with warning
@@ -85,66 +85,58 @@ cleanup() {
 trap cleanup EXIT
 
 # ==============================================================================
-# Test 1: containai-init.sh has run_hooks function
+# Test 1: native system init command has hook orchestration
 # ==============================================================================
 test_init_has_run_hooks() {
-    section "Test 1: containai-init.sh has run_hooks function"
+    section "Test 1: native system init command has hook orchestration"
 
-    local init_script="$SRC_DIR/container/containai-init.sh"
-
-    if [[ ! -f "$init_script" ]]; then
-        fail "containai-init.sh not found at $init_script"
+    local init_source="$SRC_DIR/cai/ContainerRuntimeCommandService.cs"
+    if [[ ! -f "$init_source" ]]; then
+        fail "ContainerRuntimeCommandService.cs not found at $init_source"
         return
     fi
-    pass "containai-init.sh exists"
+    pass "ContainerRuntimeCommandService.cs exists"
 
-    # Check for run_hooks function definition
-    if grep -q "^run_hooks()" "$init_script"; then
-        pass "run_hooks function defined in containai-init.sh"
+    if grep -q "RunHooksAsync" "$init_source"; then
+        pass "RunHooksAsync method defined"
     else
-        fail "run_hooks function not found in containai-init.sh"
+        fail "RunHooksAsync method not found"
     fi
 
-    # Check for template hooks path
-    if grep -q "/etc/containai/template-hooks/startup.d" "$init_script"; then
+    if grep -q "/etc/containai/template-hooks/startup.d" "$init_source"; then
         pass "Template hooks path configured"
     else
         fail "Template hooks path not configured"
     fi
 
-    # Check for workspace hooks path
-    if grep -q "/home/agent/workspace/.containai/hooks/startup.d" "$init_script"; then
+    if grep -q "/home/agent/workspace/.containai/hooks/startup.d" "$init_source"; then
         pass "Workspace hooks path configured"
     else
         fail "Workspace hooks path not configured"
     fi
 
-    # Check for LC_ALL=C sort for deterministic ordering
-    if grep -q "LC_ALL=C sort" "$init_script"; then
-        pass "Hooks use LC_ALL=C sort for deterministic ordering"
+    if grep -q "OrderBy" "$init_source"; then
+        pass "Hooks use deterministic sorting"
     else
-        fail "Hooks missing LC_ALL=C sort for deterministic ordering"
+        fail "Hooks sorting not found"
     fi
 
-    # Check for non-executable warning
-    if grep -qE "\[WARN\].*non-executable|Skipping non-executable" "$init_script"; then
+    if grep -q "Skipping non-executable hook" "$init_source"; then
         pass "Non-executable files are logged with warning"
     else
         fail "Non-executable warning not found"
     fi
 
-    # Check for error handling on hook failure
-    if grep -qE "\[ERROR\].*hook failed|Startup hook failed" "$init_script"; then
+    if grep -q "Startup hook failed" "$init_source"; then
         pass "Hook failure is logged as error"
     else
         fail "Hook failure error message not found"
     fi
 
-    # Check that failed hooks exit non-zero
-    if grep -q "exit 1" "$init_script"; then
-        pass "Script exits non-zero on hook failure"
+    if grep -q "throw new InvalidOperationException(\\\"Startup hook failed" "$init_source"; then
+        pass "Hook failure returns non-zero from init command"
     else
-        fail "Script does not exit non-zero on hook failure"
+        fail "Hook failure path not found"
     fi
 }
 
@@ -213,10 +205,6 @@ test_run_hooks_behavior() {
     # Create non-executable file
     printf '#!/bin/bash\necho "should-skip"' > "$test_dir/startup.d/30-nonexec.sh"
     # NOT chmod +x
-
-    # Source the run_hooks function from containai-init.sh
-    # We need to extract just the function for testing
-    local init_script="$SRC_DIR/container/containai-init.sh"
 
     # Create a test script that includes the function and runs it
     local test_script="$test_dir/test-runner.sh"

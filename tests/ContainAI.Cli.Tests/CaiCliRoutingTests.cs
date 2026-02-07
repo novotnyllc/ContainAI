@@ -136,6 +136,20 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
+    public async Task SystemCommand_UsesNativeLifecycleRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["system", "init", "--quiet"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Collection(
+            runtime.NativeCalls,
+            call => Assert.Equal(["system", "init", "--quiet"], call));
+    }
+
+    [Fact]
     public async Task UnknownFirstToken_UsesImplicitRunRouting()
     {
         var runtime = new FakeRuntime();

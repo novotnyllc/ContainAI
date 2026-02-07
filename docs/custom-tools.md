@@ -258,7 +258,7 @@ optional = true
    - User manifests from `~/.config/containai/manifests/` are synced to the data volume
    - Config files listed in `[[entries]]` are synced according to their flags
 
-2. **Container startup** (`containai-init.sh`):
+2. **Container startup** (`cai system init` via `containai-init.service`):
    - Reads user manifests from `/mnt/agent-data/containai/manifests/`
    - Creates symlinks for each `[[entries]]` with `container_link`
    - Generates launch wrappers for `[agent]` sections with `default_args`

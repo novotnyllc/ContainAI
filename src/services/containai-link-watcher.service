@@ -3,9 +3,9 @@
 #
 # Polls every 60 seconds, comparing:
 # - /.containai-imported-at (written by cai import)
-# - /.containai-links-checked-at (written by link-repair.sh)
+# - /.containai-links-checked-at (written by cai system link-repair)
 #
-# When a new import is detected, runs link-repair.sh to restore symlinks
+# When a new import is detected, runs native link repair to restore symlinks
 
 [Unit]
 Description=ContainAI link watcher (auto-repair symlinks after import)
@@ -16,7 +16,7 @@ ConditionVirtualization=container
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/lib/containai/link-watcher.sh
+ExecStart=/usr/local/bin/cai system watch-links
 Restart=on-failure
 RestartSec=10
 

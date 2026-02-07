@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace ContainAI.Cli.Host;
 
@@ -12,16 +14,19 @@ internal sealed class NativeLifecycleCommandRuntime
         "ghcr.io/containai/",
         "ghcr.io/novotnyllc/containai",
     ];
+    private static readonly Regex EnvVarNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly TextWriter _stdout;
     private readonly TextWriter _stderr;
     private readonly NativeSessionCommandRuntime _sessionRuntime;
+    private readonly ContainerRuntimeCommandService _containerRuntimeCommandService;
 
     public NativeLifecycleCommandRuntime(TextWriter? stdout = null, TextWriter? stderr = null)
     {
         _stdout = stdout ?? Console.Out;
         _stderr = stderr ?? Console.Error;
         _sessionRuntime = new NativeSessionCommandRuntime(_stdout, _stderr);
+        _containerRuntimeCommandService = new ContainerRuntimeCommandService(_stdout, _stderr);
     }
 
     public Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -57,6 +62,7 @@ internal sealed class NativeLifecycleCommandRuntime
             "ssh" => RunSshAsync(args, cancellationToken),
             "stop" => RunStopAsync(args, cancellationToken),
             "gc" => RunGcAsync(args, cancellationToken),
+            "system" => _containerRuntimeCommandService.RunAsync(args, cancellationToken),
             _ => Task.FromResult(1),
         };
     }
@@ -337,7 +343,7 @@ internal sealed class NativeLifecycleCommandRuntime
         var topic = args[1];
         return topic switch
         {
-            "config" => await WriteUsageAsync("Usage: cai config <list|get|set|unset> [options]").ConfigureAwait(false),
+            "config" => await WriteUsageAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false),
             "template" => await WriteUsageAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false),
             "ssh" => await WriteUsageAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false),
             "completion" => await WriteUsageAsync("Usage: cai completion <bash|zsh>").ConfigureAwait(false),
@@ -742,50 +748,1569 @@ internal sealed class NativeLifecycleCommandRuntime
 
     private async Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        var source = GetOptionValue(args, "--from");
-        var explicitVolume = GetOptionValue(args, "--data-volume");
-        var workspace = GetOptionValue(args, "--workspace") ?? Directory.GetCurrentDirectory();
-        var volume = await ResolveDataVolumeAsync(workspace, explicitVolume, cancellationToken).ConfigureAwait(false);
+        var options = ParseImportOptions(args);
+        if (options.Error is not null)
+        {
+            await _stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
+            return 1;
+        }
+
+        var workspace = string.IsNullOrWhiteSpace(options.Workspace)
+            ? Directory.GetCurrentDirectory()
+            : Path.GetFullPath(ExpandHomePath(options.Workspace));
+        var explicitConfigPath = string.IsNullOrWhiteSpace(options.ConfigPath)
+            ? null
+            : Path.GetFullPath(ExpandHomePath(options.ConfigPath));
+
+        if (!string.IsNullOrWhiteSpace(explicitConfigPath) && !File.Exists(explicitConfigPath))
+        {
+            await _stderr.WriteLineAsync($"Config file not found: {explicitConfigPath}").ConfigureAwait(false);
+            return 1;
+        }
+
+        var volume = await ResolveDataVolumeAsync(workspace, options.ExplicitVolume, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(volume))
         {
             await _stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
             return 1;
         }
 
-        var sourcePath = string.IsNullOrWhiteSpace(source) ? ResolveHomeDirectory() : ExpandHomePath(source);
+        var sourcePath = string.IsNullOrWhiteSpace(options.SourcePath)
+            ? ResolveHomeDirectory()
+            : Path.GetFullPath(ExpandHomePath(options.SourcePath));
         if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
         {
             await _stderr.WriteLineAsync($"Import source not found: {sourcePath}").ConfigureAwait(false);
             return 1;
         }
 
-        if (sourcePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+        var excludePriv = await ResolveImportExcludePrivAsync(workspace, explicitConfigPath, cancellationToken).ConfigureAwait(false);
+        var context = ResolveDockerContextName();
+
+        await _stdout.WriteLineAsync($"Using data volume: {volume}").ConfigureAwait(false);
+        if (options.DryRun)
         {
-            var archiveDir = Path.GetDirectoryName(Path.GetFullPath(sourcePath))!;
-            var archiveName = Path.GetFileName(sourcePath);
-            var restore = await DockerCaptureAsync(
-                ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{archiveDir}:/backup:ro", "alpine:3.20", "sh", "-lc", $"tar -xzf /backup/{archiveName} -C /mnt/agent-data"],
-                cancellationToken).ConfigureAwait(false);
-            if (restore.ExitCode != 0)
-            {
-                await _stderr.WriteLineAsync(restore.StandardError.Trim()).ConfigureAwait(false);
-                return 1;
-            }
+            await _stdout.WriteLineAsync($"Dry-run context: {context}").ConfigureAwait(false);
         }
-        else
+
+        if (!options.DryRun)
         {
-            var sourceFull = Path.GetFullPath(sourcePath);
-            var import = await DockerCaptureAsync(
-                ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{sourceFull}:/src:ro", "alpine:3.20", "sh", "-lc", "cp -a /src/. /mnt/agent-data/"],
-                cancellationToken).ConfigureAwait(false);
-            if (import.ExitCode != 0)
+            var ensureVolume = await DockerCaptureAsync(["volume", "create", volume], cancellationToken).ConfigureAwait(false);
+            if (ensureVolume.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(import.StandardError.Trim()).ConfigureAwait(false);
+                await _stderr.WriteLineAsync(ensureVolume.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
 
+        ManifestEntry[] manifestEntries;
+        try
+        {
+            var manifestDirectory = ResolveImportManifestDirectory();
+            manifestEntries = ManifestTomlParser.Parse(manifestDirectory, includeDisabled: false, includeSourceFile: false)
+                .Where(static entry => string.Equals(entry.Type, "entry", StringComparison.Ordinal))
+                .Where(static entry => !string.IsNullOrWhiteSpace(entry.Source))
+                .Where(static entry => !entry.Flags.Contains('G', StringComparison.Ordinal))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+
+        if (File.Exists(sourcePath))
+        {
+            if (!sourcePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+            {
+                await _stderr.WriteLineAsync($"Unsupported import source file type: {sourcePath}").ConfigureAwait(false);
+                return 1;
+            }
+
+            if (!options.DryRun)
+            {
+                var restoreCode = await RestoreArchiveImportAsync(volume, sourcePath, excludePriv, cancellationToken).ConfigureAwait(false);
+                if (restoreCode != 0)
+                {
+                    return restoreCode;
+                }
+
+                var applyOverrideCode = await ApplyImportOverridesAsync(
+                    volume,
+                    manifestEntries,
+                    options.NoSecrets,
+                    options.DryRun,
+                    options.Verbose,
+                    cancellationToken).ConfigureAwait(false);
+                if (applyOverrideCode != 0)
+                {
+                    return applyOverrideCode;
+                }
+            }
+
+            await _stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
+            return 0;
+        }
+
+        var additionalImportPaths = await ResolveAdditionalImportPathsAsync(
+            workspace,
+            explicitConfigPath,
+            excludePriv,
+            sourcePath,
+            options.Verbose,
+            cancellationToken).ConfigureAwait(false);
+
+        if (!options.DryRun)
+        {
+            var initCode = await InitializeImportTargetsAsync(volume, sourcePath, manifestEntries, options.NoSecrets, cancellationToken).ConfigureAwait(false);
+            if (initCode != 0)
+            {
+                return initCode;
+            }
+        }
+
+        foreach (var entry in manifestEntries)
+        {
+            if (options.NoSecrets && entry.Flags.Contains('s', StringComparison.Ordinal))
+            {
+                if (options.Verbose)
+                {
+                    await _stderr.WriteLineAsync($"Skipping secret entry: {entry.Source}").ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            var copyCode = await ImportManifestEntryAsync(
+                volume,
+                sourcePath,
+                entry,
+                excludePriv,
+                options.NoExcludes,
+                options.DryRun,
+                options.Verbose,
+                cancellationToken).ConfigureAwait(false);
+            if (copyCode != 0)
+            {
+                return copyCode;
+            }
+        }
+
+        if (!options.DryRun)
+        {
+            var secretPermissionsCode = await EnforceSecretPathPermissionsAsync(
+                volume,
+                manifestEntries,
+                options.NoSecrets,
+                options.Verbose,
+                cancellationToken).ConfigureAwait(false);
+            if (secretPermissionsCode != 0)
+            {
+                return secretPermissionsCode;
+            }
+        }
+
+        foreach (var additionalPath in additionalImportPaths)
+        {
+            var copyCode = await ImportAdditionalPathAsync(
+                volume,
+                additionalPath,
+                options.NoExcludes,
+                options.DryRun,
+                options.Verbose,
+                cancellationToken).ConfigureAwait(false);
+            if (copyCode != 0)
+            {
+                return copyCode;
+            }
+        }
+
+        var envCode = await ImportEnvironmentVariablesAsync(
+            volume,
+            workspace,
+            explicitConfigPath,
+            options.DryRun,
+            options.Verbose,
+            cancellationToken).ConfigureAwait(false);
+        if (envCode != 0)
+        {
+            return envCode;
+        }
+
+        var overrideCode = await ApplyImportOverridesAsync(
+            volume,
+            manifestEntries,
+            options.NoSecrets,
+            options.DryRun,
+            options.Verbose,
+            cancellationToken).ConfigureAwait(false);
+        if (overrideCode != 0)
+        {
+            return overrideCode;
+        }
+
         await _stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
+        return 0;
+    }
+
+    private async Task<int> EnforceSecretPathPermissionsAsync(
+        string volume,
+        IReadOnlyList<ManifestEntry> manifestEntries,
+        bool noSecrets,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var secretDirectories = new HashSet<string>(StringComparer.Ordinal);
+        var secretFiles = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in manifestEntries)
+        {
+            if (!entry.Flags.Contains('s', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (noSecrets)
+            {
+                continue;
+            }
+
+            var normalizedTarget = entry.Target.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
+            if (entry.Flags.Contains('d', StringComparison.Ordinal))
+            {
+                secretDirectories.Add(normalizedTarget);
+            }
+            else
+            {
+                secretFiles.Add(normalizedTarget);
+                var parent = Path.GetDirectoryName(normalizedTarget)?.Replace("\\", "/", StringComparison.Ordinal);
+                if (!string.IsNullOrWhiteSpace(parent))
+                {
+                    secretDirectories.Add(parent);
+                }
+            }
+        }
+
+        if (secretDirectories.Count == 0 && secretFiles.Count == 0)
+        {
+            return 0;
+        }
+
+        var commandBuilder = new StringBuilder();
+        foreach (var directory in secretDirectories.OrderBy(static value => value, StringComparer.Ordinal))
+        {
+            commandBuilder.Append("if [ -d '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append("' ]; then chmod 700 '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append("'; chown 1000:1000 '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append("' || true; fi; ");
+        }
+
+        foreach (var file in secretFiles.OrderBy(static value => value, StringComparer.Ordinal))
+        {
+            commandBuilder.Append("if [ -f '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append("' ]; then chmod 600 '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append("'; chown 1000:1000 '/target/");
+            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append("' || true; fi; ");
+        }
+
+        var result = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", commandBuilder.ToString()],
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                await _stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return 1;
+        }
+
+        if (verbose)
+        {
+            await _stdout.WriteLineAsync("[INFO] Enforced secret path permissions").ConfigureAwait(false);
+        }
+
+        return 0;
+    }
+
+    private static ParsedImportOptions ParseImportOptions(IReadOnlyList<string> args)
+    {
+        string? sourcePath = null;
+        string? explicitVolume = null;
+        string? workspace = null;
+        string? configPath = null;
+        var dryRun = false;
+        var noExcludes = false;
+        var noSecrets = false;
+        var verbose = false;
+
+        for (var index = 1; index < args.Count; index++)
+        {
+            var token = args[index];
+            switch (token)
+            {
+                case "--from":
+                    if (index + 1 >= args.Count)
+                    {
+                        return ParsedImportOptions.WithError("--from requires a value");
+                    }
+
+                    sourcePath = args[++index];
+                    break;
+                case "--data-volume":
+                    if (index + 1 >= args.Count)
+                    {
+                        return ParsedImportOptions.WithError("--data-volume requires a value");
+                    }
+
+                    explicitVolume = args[++index];
+                    break;
+                case "--workspace":
+                    if (index + 1 >= args.Count)
+                    {
+                        return ParsedImportOptions.WithError("--workspace requires a value");
+                    }
+
+                    workspace = args[++index];
+                    break;
+                case "--config":
+                    if (index + 1 >= args.Count)
+                    {
+                        return ParsedImportOptions.WithError("--config requires a value");
+                    }
+
+                    configPath = args[++index];
+                    break;
+                case "--dry-run":
+                    dryRun = true;
+                    break;
+                case "--no-excludes":
+                    noExcludes = true;
+                    break;
+                case "--no-secrets":
+                    noSecrets = true;
+                    break;
+                case "--verbose":
+                    verbose = true;
+                    break;
+                default:
+                    if (token.StartsWith("--from=", StringComparison.Ordinal))
+                    {
+                        sourcePath = token[7..];
+                    }
+                    else if (token.StartsWith("--data-volume=", StringComparison.Ordinal))
+                    {
+                        explicitVolume = token[14..];
+                    }
+                    else if (token.StartsWith("--workspace=", StringComparison.Ordinal))
+                    {
+                        workspace = token[12..];
+                    }
+                    else if (token.StartsWith("--config=", StringComparison.Ordinal))
+                    {
+                        configPath = token[9..];
+                    }
+                    else if (token.StartsWith("-", StringComparison.Ordinal))
+                    {
+                        return ParsedImportOptions.WithError($"Unknown import option: {token}");
+                    }
+                    else if (string.IsNullOrWhiteSpace(sourcePath))
+                    {
+                        sourcePath = token;
+                    }
+
+                    break;
+            }
+        }
+
+        return new ParsedImportOptions(sourcePath, explicitVolume, workspace, configPath, dryRun, noExcludes, noSecrets, verbose, null);
+    }
+
+    private async Task<bool> ResolveImportExcludePrivAsync(string workspace, string? explicitConfigPath, CancellationToken cancellationToken)
+    {
+        var configPath = !string.IsNullOrWhiteSpace(explicitConfigPath)
+            ? explicitConfigPath
+            : ResolveConfigPath(workspace);
+        if (!File.Exists(configPath))
+        {
+            return true;
+        }
+
+        var result = await RunParseTomlAsync(["--file", configPath, "--key", "import.exclude_priv"], cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            return true;
+        }
+
+        return !bool.TryParse(result.StandardOutput.Trim(), out var parsed) || parsed;
+    }
+
+    private async Task<IReadOnlyList<AdditionalImportPath>> ResolveAdditionalImportPathsAsync(
+        string workspace,
+        string? explicitConfigPath,
+        bool excludePriv,
+        string sourceRoot,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var configPath = !string.IsNullOrWhiteSpace(explicitConfigPath)
+            ? explicitConfigPath
+            : ResolveConfigPath(workspace);
+        if (!File.Exists(configPath))
+        {
+            return [];
+        }
+
+        var result = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            if (verbose && !string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                await _stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return [];
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(result.StandardOutput);
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("import", out var importElement) ||
+                importElement.ValueKind != JsonValueKind.Object ||
+                !importElement.TryGetProperty("additional_paths", out var pathsElement))
+            {
+                return [];
+            }
+
+            if (pathsElement.ValueKind != JsonValueKind.Array)
+            {
+                await _stderr.WriteLineAsync("[WARN] [import].additional_paths must be a list; ignoring").ConfigureAwait(false);
+                return [];
+            }
+
+            var values = new List<AdditionalImportPath>();
+            var seenSources = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in pathsElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.String)
+                {
+                    await _stderr.WriteLineAsync($"[WARN] [import].additional_paths item must be a string; got {item.ValueKind}").ConfigureAwait(false);
+                    continue;
+                }
+
+                var rawPath = item.GetString();
+                if (!TryResolveAdditionalImportPath(rawPath, sourceRoot, excludePriv, out var resolved, out var warning))
+                {
+                    if (!string.IsNullOrWhiteSpace(warning))
+                    {
+                        await _stderr.WriteLineAsync(warning).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+
+                if (!seenSources.Add(resolved.SourcePath))
+                {
+                    continue;
+                }
+
+                values.Add(resolved);
+            }
+
+            return values;
+        }
+        catch (JsonException ex)
+        {
+            if (verbose)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Failed to parse config JSON for additional paths: {ex.Message}").ConfigureAwait(false);
+            }
+
+            return [];
+        }
+    }
+
+    private static bool TryResolveAdditionalImportPath(
+        string? rawPath,
+        string sourceRoot,
+        bool excludePriv,
+        out AdditionalImportPath resolved,
+        out string? warning)
+    {
+        resolved = default;
+        warning = null;
+
+        if (string.IsNullOrWhiteSpace(rawPath))
+        {
+            warning = "[WARN] [import].additional_paths entry is empty; skipping";
+            return false;
+        }
+
+        if (rawPath.Contains(':', StringComparison.Ordinal))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' contains ':'; skipping";
+            return false;
+        }
+
+        var effectiveHome = Path.GetFullPath(sourceRoot);
+        var expandedPath = rawPath;
+        if (rawPath.StartsWith("~", StringComparison.Ordinal))
+        {
+            expandedPath = rawPath.Length == 1
+                ? effectiveHome
+                : rawPath[1] switch
+                {
+                    '/' or '\\' => Path.Combine(effectiveHome, rawPath[2..]),
+                    _ => rawPath,
+                };
+        }
+        if (rawPath.StartsWith('~') && !rawPath.StartsWith("~/", StringComparison.Ordinal) && !rawPath.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' uses unsupported user-home expansion; use ~/...";
+            return false;
+        }
+
+        if (!Path.IsPathRooted(expandedPath))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' must be ~/... or absolute under HOME";
+            return false;
+        }
+
+        var fullPath = Path.GetFullPath(expandedPath);
+        if (!IsPathWithinDirectory(fullPath, effectiveHome))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' escapes HOME; skipping";
+            return false;
+        }
+
+        if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+        {
+            return false;
+        }
+
+        if (ContainsSymlinkComponent(effectiveHome, fullPath))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' contains symlink components; skipping";
+            return false;
+        }
+
+        var targetRelativePath = MapAdditionalPathTarget(effectiveHome, fullPath);
+        if (string.IsNullOrWhiteSpace(targetRelativePath))
+        {
+            warning = $"[WARN] [import].additional_paths '{rawPath}' resolved to an empty target; skipping";
+            return false;
+        }
+
+        var isDirectory = Directory.Exists(fullPath);
+        var applyPrivFilter = excludePriv && IsBashrcDirectoryPath(effectiveHome, fullPath);
+        resolved = new AdditionalImportPath(fullPath, targetRelativePath, isDirectory, applyPrivFilter);
+        return true;
+    }
+
+    private static bool IsPathWithinDirectory(string path, string directory)
+    {
+        var normalizedDirectory = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var normalizedPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.Equals(normalizedPath, normalizedDirectory, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return normalizedPath.StartsWith(
+            normalizedDirectory + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal);
+    }
+
+    private static bool ContainsSymlinkComponent(string baseDirectory, string fullPath)
+    {
+        var relative = Path.GetRelativePath(baseDirectory, fullPath);
+        if (relative.StartsWith("..", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        var current = Path.GetFullPath(baseDirectory);
+        var segments = relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        foreach (var segment in segments)
+        {
+            current = Path.Combine(current, segment);
+            if (!File.Exists(current) && !Directory.Exists(current))
+            {
+                continue;
+            }
+
+            if (IsSymbolicLinkPath(current))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string MapAdditionalPathTarget(string homeDirectory, string fullPath)
+    {
+        var relative = Path.GetRelativePath(homeDirectory, fullPath).Replace('\\', '/');
+        if (string.Equals(relative, ".", StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+
+        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var first = segments[0];
+        if (first.StartsWith(".", StringComparison.Ordinal))
+        {
+            first = first.TrimStart('.');
+        }
+
+        if (string.IsNullOrWhiteSpace(first))
+        {
+            return string.Empty;
+        }
+
+        segments[0] = first;
+        return string.Join('/', segments);
+    }
+
+    private static bool IsBashrcDirectoryPath(string homeDirectory, string fullPath)
+    {
+        var normalized = Path.GetFullPath(fullPath);
+        var bashrcDir = Path.Combine(Path.GetFullPath(homeDirectory), ".bashrc.d");
+        return IsPathWithinDirectory(normalized, bashrcDir);
+    }
+
+    private async Task<int> ImportAdditionalPathAsync(
+        string volume,
+        AdditionalImportPath additionalPath,
+        bool noExcludes,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        if (dryRun)
+        {
+            await _stdout.WriteLineAsync($"[DRY-RUN] Would sync additional path {additionalPath.SourcePath} -> {additionalPath.TargetPath}").ConfigureAwait(false);
+            return 0;
+        }
+
+        if (verbose && noExcludes)
+        {
+            await _stdout.WriteLineAsync("[INFO] --no-excludes does not disable .priv. filtering for additional paths").ConfigureAwait(false);
+        }
+
+        var ensureCommand = additionalPath.IsDirectory
+            ? $"mkdir -p '/target/{EscapeForSingleQuotedShell(additionalPath.TargetPath)}'"
+            : $"mkdir -p \"$(dirname '/target/{EscapeForSingleQuotedShell(additionalPath.TargetPath)}')\"";
+        var ensureResult = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", ensureCommand],
+            cancellationToken).ConfigureAwait(false);
+        if (ensureResult.ExitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(ensureResult.StandardError))
+            {
+                await _stderr.WriteLineAsync(ensureResult.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return 1;
+        }
+
+        var rsyncArgs = new List<string>
+        {
+            "run",
+            "--rm",
+            "--entrypoint",
+            "rsync",
+            "-v",
+            $"{volume}:/target",
+            "-v",
+            $"{additionalPath.SourcePath}:/source:ro",
+            ResolveRsyncImage(),
+            "-a",
+        };
+
+        if (additionalPath.ApplyPrivFilter)
+        {
+            rsyncArgs.Add("--exclude=*.priv.*");
+        }
+
+        if (additionalPath.IsDirectory)
+        {
+            rsyncArgs.Add("/source/");
+            rsyncArgs.Add($"/target/{additionalPath.TargetPath.TrimEnd('/')}/");
+        }
+        else
+        {
+            rsyncArgs.Add("/source");
+            rsyncArgs.Add($"/target/{additionalPath.TargetPath}");
+        }
+
+        var result = await DockerCaptureAsync(rsyncArgs, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+            var normalizedError = errorOutput.Trim();
+            if (normalizedError.Contains("could not make way for new symlink", StringComparison.OrdinalIgnoreCase) &&
+                !normalizedError.Contains("cannot delete non-empty directory", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedError += $"{Environment.NewLine}cannot delete non-empty directory";
+            }
+
+            await _stderr.WriteLineAsync(normalizedError).ConfigureAwait(false);
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static string ResolveDockerContextName()
+    {
+        var explicitContext = Environment.GetEnvironmentVariable("DOCKER_CONTEXT");
+        if (!string.IsNullOrWhiteSpace(explicitContext))
+        {
+            return explicitContext;
+        }
+
+        return "default";
+    }
+
+    private static string ResolveRsyncImage()
+    {
+        var configured = Environment.GetEnvironmentVariable("CONTAINAI_RSYNC_IMAGE");
+        return string.IsNullOrWhiteSpace(configured) ? "instrumentisto/rsync-ssh" : configured;
+    }
+
+    private async Task<int> RestoreArchiveImportAsync(string volume, string archivePath, bool excludePriv, CancellationToken cancellationToken)
+    {
+        var clear = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", "find /mnt/agent-data -mindepth 1 -delete"],
+            cancellationToken).ConfigureAwait(false);
+        if (clear.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(clear.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        var archiveDirectory = Path.GetDirectoryName(archivePath)!;
+        var archiveName = Path.GetFileName(archivePath);
+        var extractArgs = new List<string>
+        {
+            "run",
+            "--rm",
+            "-v",
+            $"{volume}:/mnt/agent-data",
+            "-v",
+            $"{archiveDirectory}:/backup:ro",
+            "alpine:3.20",
+            "tar",
+        };
+        if (excludePriv)
+        {
+            extractArgs.Add("--exclude=./shell/bashrc.d/*.priv.*");
+            extractArgs.Add("--exclude=shell/bashrc.d/*.priv.*");
+        }
+
+        extractArgs.Add("-xzf");
+        extractArgs.Add($"/backup/{archiveName}");
+        extractArgs.Add("-C");
+        extractArgs.Add("/mnt/agent-data");
+
+        var extract = await DockerCaptureAsync(extractArgs, cancellationToken).ConfigureAwait(false);
+        if (extract.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(extract.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private async Task<int> InitializeImportTargetsAsync(
+        string volume,
+        string sourceRoot,
+        IReadOnlyList<ManifestEntry> entries,
+        bool noSecrets,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in entries)
+        {
+            if (noSecrets && entry.Flags.Contains('s', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var sourcePath = Path.GetFullPath(Path.Combine(sourceRoot, entry.Source));
+            var sourceExists = Directory.Exists(sourcePath) || File.Exists(sourcePath);
+            var isDirectory = entry.Flags.Contains('d', StringComparison.Ordinal);
+            var isFile = entry.Flags.Contains('f', StringComparison.Ordinal);
+            if (entry.Optional && !sourceExists)
+            {
+                continue;
+            }
+
+            if (isDirectory)
+            {
+                var command = $"mkdir -p '/mnt/agent-data/{EscapeForSingleQuotedShell(entry.Target)}' && chown -R 1000:1000 '/mnt/agent-data/{EscapeForSingleQuotedShell(entry.Target)}' || true";
+                if (entry.Flags.Contains('s', StringComparison.Ordinal))
+                {
+                    command += $" && chmod 700 '/mnt/agent-data/{EscapeForSingleQuotedShell(entry.Target)}'";
+                }
+
+                var ensureDir = await DockerCaptureAsync(
+                    ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", command],
+                    cancellationToken).ConfigureAwait(false);
+                if (ensureDir.ExitCode != 0)
+                {
+                    await _stderr.WriteLineAsync(ensureDir.StandardError.Trim()).ConfigureAwait(false);
+                    return 1;
+                }
+
+                continue;
+            }
+
+            if (!isFile)
+            {
+                continue;
+            }
+
+            if (entry.Optional && !sourceExists)
+            {
+                continue;
+            }
+
+            var ensureFileCommand = new StringBuilder();
+            ensureFileCommand.Append($"dest='/mnt/agent-data/{EscapeForSingleQuotedShell(entry.Target)}'; ");
+            ensureFileCommand.Append("mkdir -p \"$(dirname \"$dest\")\"; ");
+            ensureFileCommand.Append("if [ ! -f \"$dest\" ]; then : > \"$dest\"; fi; ");
+            if (entry.Flags.Contains('j', StringComparison.Ordinal))
+            {
+                ensureFileCommand.Append("if [ ! -s \"$dest\" ]; then printf '{}' > \"$dest\"; fi; ");
+            }
+
+            ensureFileCommand.Append("chown 1000:1000 \"$dest\" || true; ");
+            if (entry.Flags.Contains('s', StringComparison.Ordinal))
+            {
+                ensureFileCommand.Append("chmod 600 \"$dest\"; ");
+            }
+
+            var ensureFile = await DockerCaptureAsync(
+                ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", ensureFileCommand.ToString()],
+                cancellationToken).ConfigureAwait(false);
+            if (ensureFile.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(ensureFile.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private async Task<int> ImportManifestEntryAsync(
+        string volume,
+        string sourceRoot,
+        ManifestEntry entry,
+        bool excludePriv,
+        bool noExcludes,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var sourceAbsolutePath = Path.GetFullPath(Path.Combine(sourceRoot, entry.Source));
+        var sourceExists = Directory.Exists(sourceAbsolutePath) || File.Exists(sourceAbsolutePath);
+        if (!sourceExists)
+        {
+            if (verbose && !entry.Optional)
+            {
+                await _stderr.WriteLineAsync($"Source not found: {entry.Source}").ConfigureAwait(false);
+            }
+
+            return 0;
+        }
+
+        if (dryRun)
+        {
+            await _stdout.WriteLineAsync($"[DRY-RUN] Would sync {entry.Source} -> {entry.Target}").ConfigureAwait(false);
+            return 0;
+        }
+
+        var isDirectory = entry.Flags.Contains('d', StringComparison.Ordinal) && Directory.Exists(sourceAbsolutePath);
+        var normalizedSource = entry.Source.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
+        var normalizedTarget = entry.Target.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
+
+        var rsyncArgs = new List<string>
+        {
+            "run",
+            "--rm",
+            "--entrypoint",
+            "rsync",
+            "-v",
+            $"{volume}:/target",
+            "-v",
+            $"{sourceRoot}:/source:ro",
+            ResolveRsyncImage(),
+            "-a",
+        };
+
+        if (entry.Flags.Contains('m', StringComparison.Ordinal))
+        {
+            rsyncArgs.Add("--delete");
+        }
+
+        if (entry.Flags.Contains('x', StringComparison.Ordinal))
+        {
+            rsyncArgs.Add("--exclude=.system/");
+        }
+
+        if (entry.Flags.Contains('p', StringComparison.Ordinal) && excludePriv)
+        {
+            rsyncArgs.Add("--exclude=*.priv.*");
+        }
+
+        if (isDirectory)
+        {
+            rsyncArgs.Add($"/source/{normalizedSource.TrimEnd('/')}/");
+            rsyncArgs.Add($"/target/{normalizedTarget.TrimEnd('/')}/");
+        }
+        else
+        {
+            rsyncArgs.Add($"/source/{normalizedSource}");
+            rsyncArgs.Add($"/target/{normalizedTarget}");
+        }
+
+        var result = await DockerCaptureAsync(rsyncArgs, cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+            await _stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        var postCopyCode = await ApplyManifestPostCopyRulesAsync(
+            volume,
+            entry,
+            dryRun,
+            verbose,
+            cancellationToken).ConfigureAwait(false);
+        if (postCopyCode != 0)
+        {
+            return postCopyCode;
+        }
+
+        if (isDirectory)
+        {
+            var symlinkCode = await RelinkImportedDirectorySymlinksAsync(
+                volume,
+                sourceAbsolutePath,
+                normalizedTarget,
+                cancellationToken).ConfigureAwait(false);
+            if (symlinkCode != 0)
+            {
+                return symlinkCode;
+            }
+        }
+
+        return 0;
+    }
+
+    private async Task<int> RelinkImportedDirectorySymlinksAsync(
+        string volume,
+        string sourceDirectoryPath,
+        string targetRelativePath,
+        CancellationToken cancellationToken)
+    {
+        var symlinks = CollectSymlinksForRelink(sourceDirectoryPath);
+        if (symlinks.Count == 0)
+        {
+            return 0;
+        }
+
+        var operations = new List<(string LinkPath, string RelativeTarget)>();
+        foreach (var symlink in symlinks)
+        {
+            if (!Path.IsPathRooted(symlink.Target))
+            {
+                continue;
+            }
+
+            var absoluteTarget = Path.GetFullPath(symlink.Target);
+            if (!IsPathWithinDirectory(absoluteTarget, sourceDirectoryPath))
+            {
+                await _stderr.WriteLineAsync($"[WARN] preserving external absolute symlink: {symlink.RelativePath} -> {symlink.Target}").ConfigureAwait(false);
+                continue;
+            }
+
+            if (!File.Exists(absoluteTarget) && !Directory.Exists(absoluteTarget))
+            {
+                // Preserve broken internal links as-is so import does not silently rewrite them.
+                continue;
+            }
+
+            var sourceRelativeTarget = Path.GetRelativePath(sourceDirectoryPath, absoluteTarget).Replace('\\', '/');
+            var volumeLinkPath = $"/target/{targetRelativePath.TrimEnd('/')}/{symlink.RelativePath.TrimStart('/')}";
+            var volumeTargetPath = $"/target/{targetRelativePath.TrimEnd('/')}/{sourceRelativeTarget.TrimStart('/')}";
+            var volumeParentPath = NormalizePosixPath(Path.GetDirectoryName(volumeLinkPath)?.Replace('\\', '/') ?? "/target");
+            var relativeTarget = ComputeRelativePosixPath(volumeParentPath, NormalizePosixPath(volumeTargetPath));
+            operations.Add((NormalizePosixPath(volumeLinkPath), relativeTarget));
+        }
+
+        if (operations.Count == 0)
+        {
+            return 0;
+        }
+
+        var commandBuilder = new StringBuilder();
+        foreach (var operation in operations)
+        {
+            commandBuilder.Append("link='");
+            commandBuilder.Append(EscapeForSingleQuotedShell(operation.LinkPath));
+            commandBuilder.Append("'; ");
+            commandBuilder.Append("mkdir -p \"$(dirname \"$link\")\"; ");
+            commandBuilder.Append("rm -rf -- \"$link\"; ");
+            commandBuilder.Append("ln -sfn -- '");
+            commandBuilder.Append(EscapeForSingleQuotedShell(operation.RelativeTarget));
+            commandBuilder.Append("' \"$link\"; ");
+        }
+
+        var result = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", commandBuilder.ToString()],
+            cancellationToken).ConfigureAwait(false);
+        if (result.ExitCode != 0)
+        {
+            var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+            await _stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private static List<ImportedSymlink> CollectSymlinksForRelink(string sourceDirectoryPath)
+    {
+        var symlinks = new List<ImportedSymlink>();
+        var stack = new Stack<string>();
+        stack.Push(sourceDirectoryPath);
+        while (stack.Count > 0)
+        {
+            var currentDirectory = stack.Pop();
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(currentDirectory);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (var entry in entries)
+            {
+                if (IsSymbolicLinkPath(entry))
+                {
+                    var linkTarget = ReadSymlinkTarget(entry);
+                    if (!string.IsNullOrWhiteSpace(linkTarget))
+                    {
+                        var relativePath = Path.GetRelativePath(sourceDirectoryPath, entry).Replace('\\', '/');
+                        symlinks.Add(new ImportedSymlink(relativePath, linkTarget));
+                    }
+
+                    continue;
+                }
+
+                if (Directory.Exists(entry))
+                {
+                    stack.Push(entry);
+                }
+            }
+        }
+
+        return symlinks;
+    }
+
+    private static string? ReadSymlinkTarget(string path)
+    {
+        try
+        {
+            var fileInfo = new FileInfo(path);
+            if (!string.IsNullOrWhiteSpace(fileInfo.LinkTarget))
+            {
+                return fileInfo.LinkTarget;
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        try
+        {
+            var directoryInfo = new DirectoryInfo(path);
+            if (!string.IsNullOrWhiteSpace(directoryInfo.LinkTarget))
+            {
+                return directoryInfo.LinkTarget;
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        return null;
+    }
+
+    private static string NormalizePosixPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "/";
+        }
+
+        var normalized = path.Replace('\\', '/');
+        normalized = normalized.Replace("//", "/", StringComparison.Ordinal);
+        return string.IsNullOrWhiteSpace(normalized) ? "/" : normalized;
+    }
+
+    private static string ComputeRelativePosixPath(string fromDirectory, string toPath)
+    {
+        var fromParts = NormalizePosixPath(fromDirectory).Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var toParts = NormalizePosixPath(toPath).Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var maxShared = Math.Min(fromParts.Length, toParts.Length);
+        var shared = 0;
+        while (shared < maxShared && string.Equals(fromParts[shared], toParts[shared], StringComparison.Ordinal))
+        {
+            shared++;
+        }
+
+        var segments = new List<string>();
+        for (var index = shared; index < fromParts.Length; index++)
+        {
+            segments.Add("..");
+        }
+
+        for (var index = shared; index < toParts.Length; index++)
+        {
+            segments.Add(toParts[index]);
+        }
+
+        return segments.Count == 0 ? "." : string.Join('/', segments);
+    }
+
+    private async Task<int> ApplyManifestPostCopyRulesAsync(
+        string volume,
+        ManifestEntry entry,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        if (dryRun)
+        {
+            return 0;
+        }
+
+        var normalizedTarget = entry.Target.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
+        if (entry.Flags.Contains('g', StringComparison.Ordinal))
+        {
+            var gitFilterCode = await ApplyGitConfigFilterAsync(volume, normalizedTarget, verbose, cancellationToken).ConfigureAwait(false);
+            if (gitFilterCode != 0)
+            {
+                return gitFilterCode;
+            }
+        }
+
+        if (!entry.Flags.Contains('s', StringComparison.Ordinal))
+        {
+            return 0;
+        }
+
+        var chmodMode = entry.Flags.Contains('d', StringComparison.Ordinal) ? "700" : "600";
+        var chmodCommand = $"target='/target/{EscapeForSingleQuotedShell(normalizedTarget)}'; " +
+                           "if [ -e \"$target\" ]; then chmod " + chmodMode + " \"$target\"; fi; " +
+                           "if [ -e \"$target\" ]; then chown 1000:1000 \"$target\" || true; fi";
+        var chmodResult = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", chmodCommand],
+            cancellationToken).ConfigureAwait(false);
+        if (chmodResult.ExitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(chmodResult.StandardError))
+            {
+                await _stderr.WriteLineAsync(chmodResult.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return 1;
+        }
+
+        return 0;
+    }
+
+    private async Task<int> ApplyGitConfigFilterAsync(
+        string volume,
+        string targetRelativePath,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var filterScript = $"target='/target/{EscapeForSingleQuotedShell(targetRelativePath)}'; " +
+                           "if [ ! -f \"$target\" ]; then exit 0; fi; " +
+                           "tmp=\"$target.tmp\"; " +
+                           "awk '\n" +
+                           "BEGIN { section=\"\" }\n" +
+                           "/^[[:space:]]*\\[[^]]+\\][[:space:]]*$/ {\n" +
+                           "  section=$0;\n" +
+                           "  gsub(/^[[:space:]]*\\[/, \"\", section);\n" +
+                           "  gsub(/\\][[:space:]]*$/, \"\", section);\n" +
+                           "  section=tolower(section);\n" +
+                           "  print $0;\n" +
+                           "  next;\n" +
+                           "}\n" +
+                           "{\n" +
+                           "  lower=tolower($0);\n" +
+                           "  if (section==\"credential\" && lower ~ /^[[:space:]]*helper[[:space:]]*=/) next;\n" +
+                           "  if ((section==\"commit\" || section==\"tag\") && lower ~ /^[[:space:]]*gpgsign[[:space:]]*=/) next;\n" +
+                           "  if (section==\"gpg\" && (lower ~ /^[[:space:]]*program[[:space:]]*=/ || lower ~ /^[[:space:]]*format[[:space:]]*=/)) next;\n" +
+                           "  if (section==\"user\" && lower ~ /^[[:space:]]*signingkey[[:space:]]*=/) next;\n" +
+                           "  print $0;\n" +
+                           "}\n" +
+                           "' \"$target\" > \"$tmp\"; " +
+                           "mv \"$tmp\" \"$target\"; " +
+                           "if ! grep -Eiq \"^[[:space:]]*directory[[:space:]]*=[[:space:]]*/home/agent/workspace[[:space:]]*$\" \"$target\"; then " +
+                           "  printf '\\n[safe]\\n\\tdirectory = /home/agent/workspace\\n' >> \"$target\"; " +
+                           "fi; " +
+                           "chown 1000:1000 \"$target\" || true";
+
+        var filterResult = await DockerCaptureAsync(
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", filterScript],
+            cancellationToken).ConfigureAwait(false);
+        if (filterResult.ExitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(filterResult.StandardError))
+            {
+                await _stderr.WriteLineAsync(filterResult.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return 1;
+        }
+
+        if (verbose)
+        {
+            await _stdout.WriteLineAsync($"[INFO] Applied git filter to {targetRelativePath}").ConfigureAwait(false);
+        }
+
+        return 0;
+    }
+
+    private async Task<int> ApplyImportOverridesAsync(
+        string volume,
+        IReadOnlyList<ManifestEntry> manifestEntries,
+        bool noSecrets,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var overridesDirectory = Path.Combine(ResolveHomeDirectory(), ".config", "containai", "import-overrides");
+        if (!Directory.Exists(overridesDirectory))
+        {
+            return 0;
+        }
+
+        var overrideFiles = Directory.EnumerateFiles(overridesDirectory, "*", SearchOption.AllDirectories)
+            .OrderBy(static path => path, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var file in overrideFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (IsSymbolicLinkPath(file))
+            {
+                await _stderr.WriteLineAsync($"Skipping override symlink: {file}").ConfigureAwait(false);
+                continue;
+            }
+
+            var relative = Path.GetRelativePath(overridesDirectory, file).Replace("\\", "/", StringComparison.Ordinal);
+            if (!relative.StartsWith(".", StringComparison.Ordinal))
+            {
+                relative = "." + relative;
+            }
+
+            if (!TryMapSourcePathToTarget(relative, manifestEntries, out var mappedTarget, out var mappedFlags))
+            {
+                if (verbose)
+                {
+                    await _stderr.WriteLineAsync($"Skipping unmapped override path: {relative}").ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            if (noSecrets && mappedFlags.Contains('s', StringComparison.Ordinal))
+            {
+                if (verbose)
+                {
+                    await _stderr.WriteLineAsync($"Skipping secret override due to --no-secrets: {relative}").ConfigureAwait(false);
+                }
+
+                continue;
+            }
+
+            if (dryRun)
+            {
+                await _stdout.WriteLineAsync($"[DRY-RUN] Would apply override {relative} -> {mappedTarget}").ConfigureAwait(false);
+                continue;
+            }
+
+            var command = $"src='/override/{EscapeForSingleQuotedShell(relative.TrimStart('/'))}'; " +
+                          $"dest='/target/{EscapeForSingleQuotedShell(mappedTarget)}'; " +
+                          "mkdir -p \"$(dirname \"$dest\")\"; cp -f \"$src\" \"$dest\"; chown 1000:1000 \"$dest\" || true";
+            var copy = await DockerCaptureAsync(
+                ["run", "--rm", "-v", $"{volume}:/target", "-v", $"{overridesDirectory}:/override:ro", "alpine:3.20", "sh", "-lc", command],
+                cancellationToken).ConfigureAwait(false);
+            if (copy.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync(copy.StandardError.Trim()).ConfigureAwait(false);
+                return 1;
+            }
+        }
+
+        return 0;
+    }
+
+    private async Task<int> ImportEnvironmentVariablesAsync(
+        string volume,
+        string workspace,
+        string? explicitConfigPath,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken)
+    {
+        var configPath = !string.IsNullOrWhiteSpace(explicitConfigPath)
+            ? explicitConfigPath
+            : ResolveConfigPath(workspace);
+        if (!File.Exists(configPath))
+        {
+            return 0;
+        }
+
+        var configResult = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
+        if (configResult.ExitCode != 0)
+        {
+            if (!string.IsNullOrWhiteSpace(configResult.StandardError))
+            {
+                await _stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
+            }
+
+            return 1;
+        }
+
+        if (!string.IsNullOrWhiteSpace(configResult.StandardError))
+        {
+            await _stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
+        }
+
+        using var configDocument = JsonDocument.Parse(configResult.StandardOutput);
+        if (configDocument.RootElement.ValueKind != JsonValueKind.Object ||
+            !configDocument.RootElement.TryGetProperty("env", out var envSection))
+        {
+            return 0;
+        }
+
+        if (envSection.ValueKind != JsonValueKind.Object)
+        {
+            await _stderr.WriteLineAsync("[WARN] [env] section must be a table; skipping env import").ConfigureAwait(false);
+            return 0;
+        }
+
+        var importKeys = new List<string>();
+        if (!envSection.TryGetProperty("import", out var importArray))
+        {
+            await _stderr.WriteLineAsync("[WARN] [env].import missing, treating as empty list").ConfigureAwait(false);
+        }
+        else if (importArray.ValueKind != JsonValueKind.Array)
+        {
+            await _stderr.WriteLineAsync($"[WARN] [env].import must be a list, got {importArray.ValueKind}; treating as empty list").ConfigureAwait(false);
+        }
+        else
+        {
+            var itemIndex = 0;
+            foreach (var value in importArray.EnumerateArray())
+            {
+                if (value.ValueKind == JsonValueKind.String)
+                {
+                    var key = value.GetString();
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        importKeys.Add(key);
+                    }
+                }
+                else
+                {
+                    await _stderr.WriteLineAsync($"[WARN] [env].import[{itemIndex}] must be a string, got {value.ValueKind}; skipping").ConfigureAwait(false);
+                }
+
+                itemIndex++;
+            }
+        }
+
+        var dedupedImportKeys = new List<string>();
+        var seenKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var key in importKeys)
+        {
+            if (seenKeys.Add(key))
+            {
+                dedupedImportKeys.Add(key);
+            }
+        }
+
+        if (dedupedImportKeys.Count == 0)
+        {
+            if (verbose)
+            {
+                await _stdout.WriteLineAsync("[INFO] Empty env allowlist, skipping env import").ConfigureAwait(false);
+            }
+
+            return 0;
+        }
+
+        var validatedKeys = new List<string>(dedupedImportKeys.Count);
+        foreach (var key in dedupedImportKeys)
+        {
+            if (!EnvVarNamePattern.IsMatch(key))
+            {
+                await _stderr.WriteLineAsync($"[WARN] Invalid env var name in allowlist: {key}").ConfigureAwait(false);
+                continue;
+            }
+
+            validatedKeys.Add(key);
+        }
+
+        if (validatedKeys.Count == 0)
+        {
+            return 0;
+        }
+
+        var workspaceRoot = Path.GetFullPath(ExpandHomePath(workspace));
+        var fileVariables = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (envSection.TryGetProperty("env_file", out var envFileElement) && envFileElement.ValueKind == JsonValueKind.String)
+        {
+            var envFile = envFileElement.GetString();
+            if (!string.IsNullOrWhiteSpace(envFile))
+            {
+                var envFileResolution = ResolveEnvFilePath(workspaceRoot, envFile);
+                if (envFileResolution.Error is not null)
+                {
+                    await _stderr.WriteLineAsync(envFileResolution.Error).ConfigureAwait(false);
+                    return 1;
+                }
+
+                if (envFileResolution.Path is not null)
+                {
+                    var parsed = ParseEnvFile(envFileResolution.Path);
+                    foreach (var warning in parsed.Warnings)
+                    {
+                        await _stderr.WriteLineAsync(warning).ConfigureAwait(false);
+                    }
+
+                    foreach (var (key, value) in parsed.Values)
+                    {
+                        if (validatedKeys.Contains(key, StringComparer.Ordinal))
+                        {
+                            fileVariables[key] = value;
+                        }
+                    }
+                }
+            }
+        }
+
+        var fromHost = false;
+        if (envSection.TryGetProperty("from_host", out var fromHostElement))
+        {
+            if (fromHostElement.ValueKind == JsonValueKind.True)
+            {
+                fromHost = true;
+            }
+            else if (fromHostElement.ValueKind != JsonValueKind.False)
+            {
+                await _stderr.WriteLineAsync("[WARN] [env].from_host must be a boolean; using false").ConfigureAwait(false);
+            }
+        }
+        var merged = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (key, value) in fileVariables)
+        {
+            merged[key] = value;
+        }
+
+        if (fromHost)
+        {
+            foreach (var key in validatedKeys)
+            {
+                var envValue = Environment.GetEnvironmentVariable(key);
+                if (envValue is null)
+                {
+                    await _stderr.WriteLineAsync($"[WARN] Missing host env var: {key}").ConfigureAwait(false);
+                    continue;
+                }
+
+                if (envValue.Contains('\n', StringComparison.Ordinal))
+                {
+                    await _stderr.WriteLineAsync($"[WARN] source=host: key '{key}' skipped (multiline value)").ConfigureAwait(false);
+                    continue;
+                }
+
+                merged[key] = envValue;
+            }
+        }
+
+        if (merged.Count == 0)
+        {
+            return 0;
+        }
+
+        if (dryRun)
+        {
+            foreach (var key in merged.Keys.OrderBy(static value => value, StringComparer.Ordinal))
+            {
+                await _stdout.WriteLineAsync($"[DRY-RUN] env key: {key}").ConfigureAwait(false);
+            }
+
+            return 0;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var key in validatedKeys)
+        {
+            if (!merged.TryGetValue(key, out var value))
+            {
+                continue;
+            }
+
+            builder.Append(key);
+            builder.Append('=');
+            builder.Append(value);
+            builder.Append('\n');
+        }
+
+        var writeCommand = "set -e; target='/mnt/agent-data/.env'; if [ -L \"$target\" ]; then echo '.env target is symlink' >&2; exit 1; fi; " +
+                           "tmp='/mnt/agent-data/.env.tmp'; cat > \"$tmp\"; chmod 600 \"$tmp\"; chown 1000:1000 \"$tmp\" || true; mv -f \"$tmp\" \"$target\"";
+        var write = await DockerCaptureAsync(
+            ["run", "--rm", "-i", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", writeCommand],
+            cancellationToken,
+            builder.ToString()).ConfigureAwait(false);
+        if (write.ExitCode != 0)
+        {
+            await _stderr.WriteLineAsync(write.StandardError.Trim()).ConfigureAwait(false);
+            return 1;
+        }
+
         return 0;
     }
 
@@ -984,7 +2509,9 @@ internal sealed class NativeLifecycleCommandRuntime
         {
             "exec",
             containerName,
-            "/usr/local/lib/containai/link-repair.sh",
+            "cai",
+            "system",
+            "link-repair",
         };
 
         if (string.Equals(subcommand, "check", StringComparison.Ordinal))
@@ -1308,7 +2835,7 @@ internal sealed class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2)
         {
-            await _stderr.WriteLineAsync("Usage: cai config <list|get|set|unset> [options]").ConfigureAwait(false);
+            await _stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
             return 1;
         }
 
@@ -1319,7 +2846,12 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        var configPath = ResolveUserConfigPath();
+        if (string.Equals(parsed.Action, "resolve-volume", StringComparison.Ordinal))
+        {
+            return await ConfigResolveVolumeAsync(parsed, cancellationToken).ConfigureAwait(false);
+        }
+
+        var configPath = ResolveConfigPath(parsed.Workspace);
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
         if (!File.Exists(configPath))
         {
@@ -1682,6 +3214,20 @@ internal sealed class NativeLifecycleCommandRuntime
         return 0;
     }
 
+    private static string ResolveImportManifestDirectory()
+    {
+        var candidates = ResolveManifestDirectoryCandidates();
+        foreach (var candidate in candidates)
+        {
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException($"manifest directory not found; tried: {string.Join(", ", candidates)}");
+    }
+
     private static string ResolveManifestDirectory(string? userProvidedPath)
     {
         if (!string.IsNullOrWhiteSpace(userProvidedPath))
@@ -1689,17 +3235,53 @@ internal sealed class NativeLifecycleCommandRuntime
             return Path.GetFullPath(ExpandHomePath(userProvidedPath));
         }
 
-        var current = Directory.GetCurrentDirectory();
-        var srcCandidate = Path.Combine(current, "src", "manifests");
-        if (Directory.Exists(srcCandidate))
+        var candidates = ResolveManifestDirectoryCandidates();
+        foreach (var candidate in candidates)
         {
-            return srcCandidate;
+            if (Directory.Exists(candidate))
+            {
+                return candidate;
+            }
         }
 
-        var directCandidate = Path.Combine(current, "manifests");
-        return Directory.Exists(directCandidate)
-            ? directCandidate
-            : srcCandidate;
+        return candidates[0];
+    }
+
+    private static string[] ResolveManifestDirectoryCandidates()
+    {
+        var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        static void AddCandidate(ICollection<string> target, ISet<string> seenSet, string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return;
+            }
+
+            var fullPath = Path.GetFullPath(path);
+            if (seenSet.Add(fullPath))
+            {
+                target.Add(fullPath);
+            }
+        }
+
+        var installRoot = InstallMetadata.ResolveInstallDirectory();
+        AddCandidate(candidates, seen, Path.Combine(installRoot, "manifests"));
+        AddCandidate(candidates, seen, Path.Combine(installRoot, "src", "manifests"));
+
+        var appBase = Path.GetFullPath(AppContext.BaseDirectory);
+        AddCandidate(candidates, seen, Path.Combine(appBase, "manifests"));
+        AddCandidate(candidates, seen, Path.Combine(appBase, "..", "manifests"));
+        AddCandidate(candidates, seen, Path.Combine(appBase, "..", "..", "manifests"));
+        AddCandidate(candidates, seen, Path.Combine(appBase, "..", "..", "..", "manifests"));
+
+        var current = Directory.GetCurrentDirectory();
+        AddCandidate(candidates, seen, Path.Combine(current, "manifests"));
+        AddCandidate(candidates, seen, Path.Combine(current, "src", "manifests"));
+
+        AddCandidate(candidates, seen, "/opt/containai/manifests");
+        return candidates.ToArray();
     }
 
     private async Task<int> ConfigListAsync(string configPath, CancellationToken cancellationToken)
@@ -1840,6 +3422,22 @@ internal sealed class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        return 0;
+    }
+
+    private async Task<int> ConfigResolveVolumeAsync(ParsedConfigCommand parsed, CancellationToken cancellationToken)
+    {
+        var workspace = string.IsNullOrWhiteSpace(parsed.Workspace)
+            ? Directory.GetCurrentDirectory()
+            : Path.GetFullPath(ExpandHomePath(parsed.Workspace));
+
+        var volume = await ResolveDataVolumeAsync(workspace, parsed.Key, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(volume))
+        {
+            return 1;
+        }
+
+        await _stdout.WriteLineAsync(volume).ConfigureAwait(false);
         return 0;
     }
 
@@ -2272,6 +3870,20 @@ internal sealed class NativeLifecycleCommandRuntime
         return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
+    private async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken, string standardInput)
+    {
+        var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
+        var dockerArgs = new List<string>();
+        if (!string.IsNullOrWhiteSpace(context))
+        {
+            dockerArgs.Add("--context");
+            dockerArgs.Add(context);
+        }
+
+        dockerArgs.AddRange(args);
+        return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
+    }
+
     private async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
         foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
@@ -2410,6 +4022,12 @@ internal sealed class NativeLifecycleCommandRuntime
         };
     }
 
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
     private static string ResolveUserConfigPath()
     {
         var home = ResolveHomeDirectory();
@@ -2418,7 +4036,78 @@ internal sealed class NativeLifecycleCommandRuntime
             ? Path.Combine(home, ".config")
             : xdgConfigHome;
 
-        return Path.Combine(configRoot, "containai", "config.toml");
+        return Path.Combine(configRoot, "containai", ConfigFileNames[0]);
+    }
+
+    private static string? TryFindExistingUserConfigPath()
+    {
+        var home = ResolveHomeDirectory();
+        var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var configRoot = string.IsNullOrWhiteSpace(xdgConfigHome)
+            ? Path.Combine(home, ".config")
+            : xdgConfigHome;
+        var containAiConfigDirectory = Path.Combine(configRoot, "containai");
+        foreach (var fileName in ConfigFileNames)
+        {
+            var candidate = Path.Combine(containAiConfigDirectory, fileName);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string ResolveConfigPath(string? workspacePath)
+    {
+        var explicitConfigPath = Environment.GetEnvironmentVariable("CONTAINAI_CONFIG");
+        if (!string.IsNullOrWhiteSpace(explicitConfigPath))
+        {
+            return Path.GetFullPath(ExpandHomePath(explicitConfigPath));
+        }
+
+        var workspaceConfigPath = TryFindWorkspaceConfigPath(workspacePath);
+        if (!string.IsNullOrWhiteSpace(workspaceConfigPath))
+        {
+            return workspaceConfigPath;
+        }
+
+        var userConfigPath = TryFindExistingUserConfigPath();
+        return userConfigPath ?? ResolveUserConfigPath();
+    }
+
+    private static string? TryFindWorkspaceConfigPath(string? workspacePath)
+    {
+        var startPath = string.IsNullOrWhiteSpace(workspacePath)
+            ? Directory.GetCurrentDirectory()
+            : ExpandHomePath(workspacePath);
+        var normalizedStart = Path.GetFullPath(startPath);
+        var current = File.Exists(normalizedStart)
+            ? Path.GetDirectoryName(normalizedStart)
+            : normalizedStart;
+
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            foreach (var fileName in ConfigFileNames)
+            {
+                var candidate = Path.Combine(current, ".containai", fileName);
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            var parent = Directory.GetParent(current);
+            if (parent is null || string.Equals(parent.FullName, current, StringComparison.Ordinal))
+            {
+                break;
+            }
+
+            current = parent.FullName;
+        }
+
+        return null;
     }
 
     private static string ResolveTemplatesDirectory()
@@ -2477,7 +4166,7 @@ internal sealed class NativeLifecycleCommandRuntime
             return envVolume;
         }
 
-        var configPath = ResolveUserConfigPath();
+        var configPath = ResolveConfigPath(workspace);
         if (!File.Exists(configPath))
         {
             return "containai-data";
@@ -2625,6 +4314,7 @@ internal sealed class NativeLifecycleCommandRuntime
             "get" when tail.Count >= 2 => new ParsedConfigCommand(action, tail[1], null, global, workspace, null),
             "set" when tail.Count >= 3 => new ParsedConfigCommand(action, tail[1], tail[2], global, workspace, null),
             "unset" when tail.Count >= 2 => new ParsedConfigCommand(action, tail[1], null, global, workspace, null),
+            "resolve-volume" => new ParsedConfigCommand(action, tail.Count >= 2 ? tail[1] : null, null, false, workspace, null),
             _ => ParsedConfigCommand.WithError("invalid config command usage"),
         };
     }
@@ -2783,6 +4473,7 @@ Subcommands:
   completion    Generate shell completion scripts
   version       Show version
   help          Show this help message
+  system        Internal container runtime commands
   acp           ACP proxy tooling
 
 Examples:
@@ -2809,6 +4500,175 @@ Examples:
             .Replace("\t", "\\t", StringComparison.Ordinal);
     }
 
+    private static bool IsSymbolicLinkPath(string path)
+    {
+        try
+        {
+            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryMapSourcePathToTarget(
+        string sourceRelativePath,
+        IReadOnlyList<ManifestEntry> entries,
+        out string targetRelativePath,
+        out string flags)
+    {
+        targetRelativePath = string.Empty;
+        flags = string.Empty;
+
+        var normalizedSource = sourceRelativePath.Replace("\\", "/", StringComparison.Ordinal);
+        ManifestEntry? match = null;
+        var bestLength = -1;
+        string? suffix = null;
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.Source))
+            {
+                continue;
+            }
+
+            var entrySource = entry.Source.Replace("\\", "/", StringComparison.Ordinal).TrimEnd('/');
+            var isDirectory = entry.Flags.Contains('d', StringComparison.Ordinal);
+            if (isDirectory)
+            {
+                var prefix = $"{entrySource}/";
+                if (!normalizedSource.StartsWith(prefix, StringComparison.Ordinal) &&
+                    !string.Equals(normalizedSource, entrySource, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (entrySource.Length <= bestLength)
+                {
+                    continue;
+                }
+
+                match = entry;
+                bestLength = entrySource.Length;
+                suffix = string.Equals(normalizedSource, entrySource, StringComparison.Ordinal)
+                    ? string.Empty
+                    : normalizedSource[prefix.Length..];
+                continue;
+            }
+
+            if (!string.Equals(normalizedSource, entrySource, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (entrySource.Length <= bestLength)
+            {
+                continue;
+            }
+
+            match = entry;
+            bestLength = entrySource.Length;
+            suffix = null;
+        }
+
+        if (match is null)
+        {
+            return false;
+        }
+
+        flags = match.Value.Flags;
+        targetRelativePath = string.IsNullOrEmpty(suffix)
+            ? match.Value.Target
+            : $"{match.Value.Target.TrimEnd('/')}/{suffix}";
+        return true;
+    }
+
+    private static string EscapeForSingleQuotedShell(string value)
+        => value.Replace("'", "'\"'\"'", StringComparison.Ordinal);
+
+    private static EnvFilePathResolution ResolveEnvFilePath(string workspaceRoot, string envFile)
+    {
+        if (Path.IsPathRooted(envFile))
+        {
+            return new EnvFilePathResolution(null, $"env_file path rejected: absolute paths are not allowed (must be workspace-relative): {envFile}");
+        }
+
+        var candidate = Path.GetFullPath(Path.Combine(workspaceRoot, envFile));
+        var workspacePrefix = workspaceRoot.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal)
+            ? workspaceRoot
+            : workspaceRoot + Path.DirectorySeparatorChar;
+        if (!candidate.StartsWith(workspacePrefix, StringComparison.Ordinal) && !string.Equals(candidate, workspaceRoot, StringComparison.Ordinal))
+        {
+            return new EnvFilePathResolution(null, $"env_file path rejected: outside workspace boundary: {envFile}");
+        }
+
+        if (!File.Exists(candidate))
+        {
+            return new EnvFilePathResolution(null, null);
+        }
+
+        if (IsSymbolicLinkPath(candidate))
+        {
+            return new EnvFilePathResolution(null, $"env_file is a symlink (rejected): {candidate}");
+        }
+
+        return new EnvFilePathResolution(candidate, null);
+    }
+
+    private static ParsedEnvFile ParseEnvFile(string filePath)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        var warnings = new List<string>();
+        using var reader = new StreamReader(filePath);
+        var lineNumber = 0;
+        while (reader.ReadLine() is { } line)
+        {
+            lineNumber++;
+            var normalized = line.TrimEnd('\r');
+            if (string.IsNullOrWhiteSpace(normalized) || normalized.StartsWith('#'))
+            {
+                continue;
+            }
+
+            if (normalized.StartsWith("export ", StringComparison.Ordinal))
+            {
+                normalized = normalized[7..].TrimStart();
+            }
+
+            var separatorIndex = normalized.IndexOf('=', StringComparison.Ordinal);
+            if (separatorIndex <= 0)
+            {
+                warnings.Add($"[WARN] line {lineNumber}: no = found - skipping");
+                continue;
+            }
+
+            var key = normalized[..separatorIndex];
+            var value = normalized[(separatorIndex + 1)..];
+            if (!EnvVarNamePattern.IsMatch(key))
+            {
+                warnings.Add($"[WARN] line {lineNumber}: key '{key}' invalid format - skipping");
+                continue;
+            }
+
+            if (value.StartsWith('"') && !value[1..].Contains('"', StringComparison.Ordinal))
+            {
+                warnings.Add($"[WARN] line {lineNumber}: key '{key}' skipped (multiline value)");
+                continue;
+            }
+
+            if (value.StartsWith('\'') && !value[1..].Contains('\'', StringComparison.Ordinal))
+            {
+                warnings.Add($"[WARN] line {lineNumber}: key '{key}' skipped (multiline value)");
+                continue;
+            }
+
+            values[key] = value;
+        }
+
+        return new ParsedEnvFile(values, warnings);
+    }
+
     private async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
@@ -2817,7 +4677,7 @@ Examples:
 
     private async Task<string?> ResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
-        var configPath = ResolveUserConfigPath();
+        var configPath = ResolveConfigPath(workspace);
         if (File.Exists(configPath))
         {
             var workspaceResult = await RunParseTomlAsync(
@@ -2912,7 +4772,7 @@ _cai_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  local cmds="run shell exec doctor setup validate docker import export sync stop status gc ssh links config manifest template update refresh uninstall completion version help acp"
+  local cmds="run shell exec doctor setup validate docker import export sync stop status gc ssh links config manifest template update refresh uninstall completion version help system acp"
   COMPREPLY=( $(compgen -W "$cmds" -- "$cur") )
 }
 complete -F _cai_completions cai
@@ -2940,6 +4800,7 @@ _cai() {
     'completion:Generate completion scripts'
     'version:Show version'
     'help:Show help'
+    'system:Internal container runtime commands'
     'acp:ACP tooling'
   )
   _describe 'command' commands
@@ -2952,7 +4813,8 @@ _cai "$@"
     private static async Task<ProcessResult> RunProcessCaptureAsync(
         string fileName,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? standardInput = null)
     {
         using var process = new Process
         {
@@ -2961,6 +4823,7 @@ _cai "$@"
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                RedirectStandardInput = standardInput is not null,
             },
         };
 
@@ -2995,6 +4858,13 @@ _cai "$@"
                 Console.Error.WriteLine($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
             }
         });
+
+        if (standardInput is not null)
+        {
+            await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken).ConfigureAwait(false);
+            await process.StandardInput.FlushAsync().ConfigureAwait(false);
+            process.StandardInput.Close();
+        }
 
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -3058,6 +4928,36 @@ _cai "$@"
     }
 
     private readonly record struct ProcessResult(int ExitCode, string StandardOutput, string StandardError);
+
+    private readonly record struct ParsedImportOptions(
+        string? SourcePath,
+        string? ExplicitVolume,
+        string? Workspace,
+        string? ConfigPath,
+        bool DryRun,
+        bool NoExcludes,
+        bool NoSecrets,
+        bool Verbose,
+        string? Error)
+    {
+        public static ParsedImportOptions WithError(string error)
+            => new(null, null, null, null, false, false, false, false, error);
+    }
+
+    private readonly record struct AdditionalImportPath(
+        string SourcePath,
+        string TargetPath,
+        bool IsDirectory,
+        bool ApplyPrivFilter);
+
+    private readonly record struct ImportedSymlink(
+        string RelativePath,
+        string Target);
+
+    private readonly record struct EnvFilePathResolution(string? Path, string? Error);
+    private readonly record struct ParsedEnvFile(
+        IReadOnlyDictionary<string, string> Values,
+        IReadOnlyList<string> Warnings);
 
     private readonly record struct ParsedConfigCommand(
         string Action,

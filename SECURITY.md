@@ -46,9 +46,9 @@ ContainAI enforces the following security measures:
 |------------|----------|-------------|
 | Isolation availability check | `src/lib/doctor.sh` | Verifies Sysbox runtime is available before starting containers |
 | Fail-closed on unknown errors | `src/lib/container.sh` | Blocks execution rather than proceeding with unknown status |
-| Symlink traversal defense | `src/container/entrypoint.sh` | `reject_symlink()` and `verify_path_under_data_dir()` prevent path escape |
-| Volume mount TOCTOU protection | `src/container/entrypoint.sh` | Validates paths before and after resolution |
-| Safe .env parsing | `src/container/entrypoint.sh` | CRLF handling, key validation, no shell eval |
+| Symlink traversal defense | `src/cai/ContainerRuntimeCommandService.cs` | Path-root validation and symlink checks prevent path escape |
+| Volume mount TOCTOU protection | `src/cai/ContainerRuntimeCommandService.cs` | Validates paths before link/env operations |
+| Safe .env parsing | `src/cai/ContainerRuntimeCommandService.cs` | CRLF handling, key validation, no shell eval |
 | Credential isolation | `src/lib/container.sh` | Credentials stay inside container by default |
 | Docker socket access denied | `src/lib/container.sh` | Host Docker socket not mounted by default |
 
@@ -159,4 +159,4 @@ For detailed technical information about ContainAI's security implementation, se
 - [`src/lib/docker.sh`](src/lib/docker.sh) - containai-docker context and daemon management
 - [`src/lib/container.sh`](src/lib/container.sh) - Container start with Sysbox runtime enforcement
 - [`src/lib/network.sh`](src/lib/network.sh) - Network security iptables rules
-- [`src/container/entrypoint.sh`](src/container/entrypoint.sh) - Volume mount security and .env parsing
+- [`src/cai/ContainerRuntimeCommandService.cs`](src/cai/ContainerRuntimeCommandService.cs) - Volume mount security, init flow, and .env parsing

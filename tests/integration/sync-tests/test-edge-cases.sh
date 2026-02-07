@@ -110,7 +110,7 @@ run_edge_test() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then
@@ -476,7 +476,7 @@ test_concurrent_containers() {
 
     # Import to both volumes
     local import_output1 import_output2
-    import_output1=$(HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol1" 2>&1) || {
+    import_output1=$(HOME="$SYNC_TEST_PROFILE_HOME" "$SYNC_TEST_CAI_BIN" import --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol1" 2>&1) || {
         sync_test_fail "concurrent-containers: import to vol1 failed"
         printf '%s\n' "$import_output1" >&2
         "${DOCKER_CMD[@]}" rm -f "$container1" "$container2" 2>/dev/null || true
@@ -484,7 +484,7 @@ test_concurrent_containers() {
         find "${SYNC_TEST_FIXTURE_HOME:?}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
         return
     }
-    import_output2=$(HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol2" 2>&1) || {
+    import_output2=$(HOME="$SYNC_TEST_PROFILE_HOME" "$SYNC_TEST_CAI_BIN" import --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$vol2" 2>&1) || {
         sync_test_fail "concurrent-containers: import to vol2 failed"
         printf '%s\n' "$import_output2" >&2
         "${DOCKER_CMD[@]}" rm -f "$container1" "$container2" 2>/dev/null || true

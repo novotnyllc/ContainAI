@@ -185,18 +185,34 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 COPY src/services/docker.service.d/ /etc/systemd/system/docker.service.d/
 
 # =============================================================================
+# CONTAINAI CLI
+# Install native cai binary + runtime manifests so system services can use cai.
+# =============================================================================
+ARG TARGETARCH
+RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
+    set -euo pipefail; \
+    tarball=""; \
+    case "${TARGETARCH:-}" in \
+        amd64) tarball="$(ls -1 /tmp/cai/containai-*-linux-x64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        arm64) tarball="$(ls -1 /tmp/cai/containai-*-linux-arm64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        *) echo "ERROR: Unsupported TARGETARCH: ${TARGETARCH:-unset}" >&2; exit 1 ;; \
+    esac; \
+    if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
+        echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
+        echo "Run dotnet msbuild src/cai/cai.csproj -t:BuildContainAITarballs before building this image." >&2; \
+        exit 1; \
+    fi; \
+    rm -rf /opt/containai; \
+    mkdir -p /opt/containai; \
+    tar -xzf "$tarball" -C /opt/containai --strip-components 1
+RUN ln -sf /opt/containai/cai /usr/local/bin/cai
+
+# =============================================================================
 # CONTAINAI-INIT SERVICE (required by docker.service drop-in)
 # =============================================================================
-COPY src/container/containai-init.sh /usr/local/lib/containai/init.sh
 COPY src/services/containai-init.service /etc/systemd/system/containai-init.service
-RUN chmod +x /usr/local/lib/containai/init.sh && \
-    mkdir -p /etc/systemd/system/multi-user.target.wants && \
+RUN mkdir -p /etc/systemd/system/multi-user.target.wants && \
     ln -sf /etc/systemd/system/containai-init.service /etc/systemd/system/multi-user.target.wants/containai-init.service
-
-# User manifest runtime support (symlinks + wrapper generation)
-COPY src/container/lib/gen-user-links.sh /usr/local/lib/containai/
-COPY src/container/lib/gen-user-wrappers.sh /usr/local/lib/containai/
-RUN chmod +x /usr/local/lib/containai/gen-user-links.sh /usr/local/lib/containai/gen-user-wrappers.sh
 
 # =============================================================================
 # ESSENTIAL TOOLS

@@ -120,7 +120,7 @@ run_shell_sync_test() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then
@@ -576,7 +576,7 @@ test_ohmyzsh_custom_synced_assertions() {
 # ==============================================================================
 # Test 10: R flag replaces existing directory via link-repair
 # ==============================================================================
-# The R flag means "remove existing first" - verifies that link-repair.sh
+# The R flag means "remove existing first" - verifies that native link-repair
 # replaces a real directory at ~/.oh-my-zsh/custom with the correct symlink.
 # This tests the repair mechanism directly (not restart-based, since repair
 # is triggered by link-watcher on import timestamp change, not by restart).
@@ -619,10 +619,10 @@ test_ohmyzsh_rflag_assertions() {
         return 1
     fi
 
-    # Phase 3: Explicitly trigger link-repair.sh to simulate repair mechanism
-    # This is how the R flag is applied - link-repair removes existing and recreates symlink
-    if ! exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/link-repair.sh --fix --quiet 2>/dev/null; then
-        printf '%s\n' "[DEBUG] Phase 3: link-repair.sh failed" >&2
+    # Phase 3: Explicitly trigger native link repair to simulate repair mechanism
+    # This is how the R flag is applied - repair removes existing and recreates symlink
+    if ! exec_in_container "$SYNC_TEST_CONTAINER" cai system link-repair --fix --quiet 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 3: cai system link-repair failed" >&2
         return 1
     fi
 

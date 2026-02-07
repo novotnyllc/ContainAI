@@ -2,8 +2,8 @@
 # ==============================================================================
 # Sync Test Helpers for E2E Testing
 # ==============================================================================
-# Reusable test infrastructure for sync E2E tests. Patterns adapted from
-# test-sync-integration.sh.
+# Reusable test infrastructure for sync E2E tests. Patterns aligned with
+# the native C# sync integration suite.
 #
 # Usage: source this file in your test scripts
 #   source "$(dirname "${BASH_SOURCE[0]}")/sync-test-helpers.sh"
@@ -26,6 +26,15 @@ set -euo pipefail
 SYNC_TEST_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SYNC_TEST_REPO_ROOT="$(cd "$SYNC_TEST_HELPERS_DIR/../.." && pwd)"
 SYNC_TEST_SRC_DIR="$SYNC_TEST_REPO_ROOT/src"
+SYNC_TEST_CAI_BIN="${SYNC_TEST_CAI_BIN:-$SYNC_TEST_REPO_ROOT/artifacts/bin/cai/release/cai}"
+if [[ ! -x "$SYNC_TEST_CAI_BIN" ]]; then
+    if command -v cai >/dev/null 2>&1; then
+        SYNC_TEST_CAI_BIN="$(command -v cai)"
+    else
+        printf '%s\n' "[FAIL] cai binary not found (expected at $SYNC_TEST_CAI_BIN)" >&2
+        exit 1
+    fi
+fi
 
 # ==============================================================================
 # Docker Context Selection
@@ -582,7 +591,7 @@ assert_no_content_marker_in_volume() {
 # Run cai import with hermetic HOME override (profile import mode)
 # Usage: run_cai_import [extra_args...]
 run_cai_import() {
-    HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" "$@" 2>&1
+    HOME="$SYNC_TEST_FIXTURE_HOME" "$SYNC_TEST_CAI_BIN" import "$@" 2>&1
 }
 
 # Run cai import with separate HOME and --from to avoid profile import detection
@@ -595,7 +604,7 @@ run_cai_import_from() {
     if [[ -z "$SYNC_TEST_PROFILE_HOME" ]]; then
         init_profile_home >/dev/null
     fi
-    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import "$@"' _ "$SYNC_TEST_SRC_DIR" --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+    HOME="$SYNC_TEST_PROFILE_HOME" "$SYNC_TEST_CAI_BIN" import --from "$SYNC_TEST_FIXTURE_HOME" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
 }
 
 # Run cai import as profile import (HOME == source, no --from)
@@ -604,7 +613,7 @@ run_cai_import_from() {
 run_cai_import_profile() {
     # $1=SRC_DIR, $2=DATA_VOLUME, $3+=extra args
     # After shift: $1=DATA_VOLUME, $2+=extra args
-    HOME="$SYNC_TEST_FIXTURE_HOME" bash -c 'source "$1/containai.sh" && shift && cai import --data-volume "$1" "${@:2}"' _ "$SYNC_TEST_SRC_DIR" "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+    HOME="$SYNC_TEST_FIXTURE_HOME" "$SYNC_TEST_CAI_BIN" import --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
 }
 
 # ==============================================================================

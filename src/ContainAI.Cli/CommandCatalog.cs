@@ -28,6 +28,7 @@ internal static class CommandCatalog
         "completion",
         "version",
         "help",
+        "system",
         "acp",
     ];
 

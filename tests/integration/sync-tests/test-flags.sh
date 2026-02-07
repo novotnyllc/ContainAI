@@ -9,7 +9,7 @@
 # - s flag: 600 file permissions verified
 # - j flag: {} created for non-optional fj entries
 # - j flag: optional fjo entries NOT created when missing
-# - R flag: symlink replaces conflicting directory via link-repair
+# - R flag: symlink replaces conflicting directory via native link-repair
 # - x flag: .system/ excluded from Codex/Pi skills
 # - o flag: missing optional = no target
 # - cai import --dry-run: [DRY-RUN] output, no volume changes
@@ -124,7 +124,7 @@ run_flags_test() {
     SYNC_TEST_CONTAINER="test-${test_name}-${SYNC_TEST_RUN_ID}"
 
     # Run init script to create symlinks (since we bypassed systemd)
-    exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/init.sh >/dev/null 2>&1 || true
+    exec_in_container "$SYNC_TEST_CONTAINER" cai system init >/dev/null 2>&1 || true
 
     # Run test
     if "$test_fn"; then
@@ -242,7 +242,7 @@ test_json_init_optional_skipped_assertions() {
 # Test 4: R Flag (Remove Existing Before Symlink) via link-repair
 # ==============================================================================
 # The R flag removes existing path before creating symlink.
-# This is enforced by link-repair.sh when repairing links.
+# This is enforced by native `cai system link-repair` when repairing links.
 
 setup_R_flag_symlink_fixture() {
     local fixture="${SYNC_TEST_FIXTURE_HOME:-$(create_fixture_home)}"
@@ -281,9 +281,9 @@ test_R_flag_symlink_assertions() {
         return 1
     fi
 
-    # Phase 3: Explicitly trigger link-repair.sh to simulate repair mechanism
-    if ! exec_in_container "$SYNC_TEST_CONTAINER" /usr/local/lib/containai/link-repair.sh --fix --quiet 2>/dev/null; then
-        printf '%s\n' "[DEBUG] Phase 3: link-repair.sh failed" >&2
+    # Phase 3: Explicitly trigger native link-repair to simulate repair mechanism
+    if ! exec_in_container "$SYNC_TEST_CONTAINER" cai system link-repair --fix --quiet 2>/dev/null; then
+        printf '%s\n' "[DEBUG] Phase 3: cai system link-repair failed" >&2
         return 1
     fi
 
@@ -522,7 +522,7 @@ run_cai_export() {
     if [[ -z "$SYNC_TEST_PROFILE_HOME" ]]; then
         init_profile_home >/dev/null
     fi
-    HOME="$SYNC_TEST_PROFILE_HOME" bash -c 'source "$1/containai.sh" && shift && cai export "$@"' _ "$SYNC_TEST_SRC_DIR" --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
+    HOME="$SYNC_TEST_PROFILE_HOME" "$SYNC_TEST_CAI_BIN" export --data-volume "$SYNC_TEST_DATA_VOLUME" "$@" 2>&1
 }
 
 # ==============================================================================
