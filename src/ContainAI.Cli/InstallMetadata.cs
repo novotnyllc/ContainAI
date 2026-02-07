@@ -2,6 +2,15 @@ using System.Reflection;
 
 namespace ContainAI.Cli.Host;
 
+public enum InstallType
+{
+    Installed,
+    Local,
+    Git,
+}
+
+public readonly record struct InstallVersionInfo(string Version, InstallType InstallType, string InstallDir);
+
 public static class InstallMetadata
 {
     private static readonly string[] RootMarkers =
@@ -11,12 +20,12 @@ public static class InstallMetadata
         "install.sh",
     ];
 
-    public static (string Version, string InstallType, string InstallDir) ResolveVersionInfo()
+    public static InstallVersionInfo ResolveVersionInfo()
     {
         var installDir = ResolveInstallDirectory();
         var version = ResolveVersion();
         var installType = ResolveInstallType(installDir);
-        return (version, installType, installDir);
+        return new InstallVersionInfo(version, installType, installDir);
     }
 
     public static string ResolveInstallDirectory()
@@ -62,20 +71,30 @@ public static class InstallMetadata
         return string.IsNullOrWhiteSpace(assemblyVersion) ? "0.0.0" : assemblyVersion;
     }
 
-    public static string ResolveInstallType(string installDir)
+    public static InstallType ResolveInstallType(string installDir)
     {
         if (Directory.Exists(Path.Combine(installDir, ".git")))
         {
-            return "git";
+            return InstallType.Git;
         }
 
         var normalized = installDir.Replace('\\', '/');
         if (normalized.Contains("/.local/share/containai", StringComparison.Ordinal))
         {
-            return "local";
+            return InstallType.Local;
         }
 
-        return "installed";
+        return InstallType.Installed;
+    }
+
+    public static string GetInstallTypeLabel(InstallType installType)
+    {
+        return installType switch
+        {
+            InstallType.Git => "git",
+            InstallType.Local => "local",
+            _ => "installed",
+        };
     }
 
     private static bool IsInstallRoot(string path)

@@ -1,11 +1,12 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Encodings.Web;
 using ContainAI.Cli.Abstractions;
 using ContainAI.Cli.Host;
 
 namespace ContainAI.Cli;
 
-internal sealed class RootCommandBuilder
+internal sealed partial class RootCommandBuilder
 {
     private readonly AcpCommandBuilder _acpCommandBuilder;
 
@@ -17,7 +18,7 @@ internal sealed class RootCommandBuilder
 
         var root = new RootCommand("ContainAI native CLI")
         {
-            TreatUnmatchedTokensAsErrors = false,
+            TreatUnmatchedTokensAsErrors = true,
         };
 
         root.SetAction((_, cancellationToken) => runtime.RunRunAsync(
@@ -35,10 +36,32 @@ internal sealed class RootCommandBuilder
         {
             var command = name switch
             {
+                "run" => CreateRunCommand(runtime),
+                "shell" => CreateShellCommand(runtime),
+                "exec" => CreateExecCommand(runtime),
+                "doctor" => CreateDoctorCommand(runtime),
+                "setup" => CreateSetupCommand(runtime),
+                "validate" => CreateValidateCommand(runtime),
                 "docker" => CreateDockerCommand(runtime),
+                "import" => CreateImportCommand(runtime),
+                "export" => CreateExportCommand(runtime),
+                "sync" => CreateSyncCommand(runtime),
+                "stop" => CreateStopCommand(runtime),
                 "status" => CreateStatusCommand(runtime),
+                "gc" => CreateGcCommand(runtime),
+                "ssh" => CreateSshCommand(runtime),
+                "links" => CreateLinksCommand(runtime),
+                "config" => CreateConfigCommand(runtime),
+                "manifest" => CreateManifestCommand(runtime),
+                "template" => CreateTemplateCommand(runtime),
+                "update" => CreateUpdateCommand(runtime),
+                "refresh" => CreateRefreshCommand(runtime),
+                "uninstall" => CreateUninstallCommand(runtime),
+                "help" => CreateHelpCommand(runtime),
+                "system" => CreateSystemCommand(runtime),
+                "completion" => CreateCompletionCommand(root),
                 "version" => CreateVersionCommand(runtime),
-                _ => CreateNativePassThroughCommand(name, runtime),
+                _ => throw new InvalidOperationException($"Unsupported routed command '{name}'."),
             };
 
             root.Subcommands.Add(command);
@@ -51,10 +74,7 @@ internal sealed class RootCommandBuilder
 
     private static Command CreateRunCommand(ICaiCommandRuntime runtime)
     {
-        var command = new Command("run", "Start or attach to a runtime shell.")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var command = new Command("run", "Start or attach to a runtime shell.");
 
         var workspaceOption = new Option<string?>("--workspace", "-w")
         {
@@ -64,9 +84,37 @@ internal sealed class RootCommandBuilder
         {
             Description = "Request a fresh runtime environment.",
         };
+        var restartOption = new Option<bool>("--restart")
+        {
+            Description = "Alias for --fresh.",
+        };
         var detachedOption = new Option<bool>("--detached", "-d")
         {
             Description = "Run in detached mode.",
+        };
+        var credentialsOption = new Option<string?>("--credentials")
+        {
+            Description = "Credential mode (for example: copy).",
+        };
+        var acknowledgeCredentialRiskOption = new Option<bool>("--acknowledge-credential-risk")
+        {
+            Description = "Acknowledge credential risk for credential import modes.",
+        };
+        var dataVolumeOption = new Option<string?>("--data-volume")
+        {
+            Description = "Data volume override.",
+        };
+        var configOption = new Option<string?>("--config")
+        {
+            Description = "Path to config file.",
+        };
+        var containerOption = new Option<string?>("--container")
+        {
+            Description = "Attach to a specific container.",
+        };
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Force operation where supported.",
         };
         var quietOption = new Option<bool>("--quiet", "-q")
         {
@@ -75,6 +123,44 @@ internal sealed class RootCommandBuilder
         var verboseOption = new Option<bool>("--verbose")
         {
             Description = "Enable verbose output.",
+        };
+        var debugOption = new Option<bool>("--debug", "-D")
+        {
+            Description = "Enable debug output.",
+        };
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Show planned actions without executing.",
+        };
+        var imageTagOption = new Option<string?>("--image-tag")
+        {
+            Description = "Override image tag.",
+        };
+        var templateOption = new Option<string?>("--template")
+        {
+            Description = "Template name.",
+        };
+        var channelOption = new Option<string?>("--channel")
+        {
+            Description = "Channel override.",
+        };
+        var memoryOption = new Option<string?>("--memory")
+        {
+            Description = "Container memory limit.",
+        };
+        var cpusOption = new Option<string?>("--cpus")
+        {
+            Description = "Container CPU limit.",
+        };
+        var envOption = new Option<string[]>("--env", "-e")
+        {
+            Description = "Environment variable assignment.",
+            AllowMultipleArgumentsPerToken = false,
+        };
+        var pathArgument = new Argument<string?>("path")
+        {
+            Arity = ArgumentArity.ZeroOrOne,
+            Description = "Workspace path (optional positional form).",
         };
         var commandArgs = new Argument<string[]>("command")
         {
@@ -84,35 +170,119 @@ internal sealed class RootCommandBuilder
 
         command.Options.Add(workspaceOption);
         command.Options.Add(freshOption);
+        command.Options.Add(restartOption);
         command.Options.Add(detachedOption);
+        command.Options.Add(credentialsOption);
+        command.Options.Add(acknowledgeCredentialRiskOption);
+        command.Options.Add(dataVolumeOption);
+        command.Options.Add(configOption);
+        command.Options.Add(containerOption);
+        command.Options.Add(forceOption);
         command.Options.Add(quietOption);
         command.Options.Add(verboseOption);
+        command.Options.Add(debugOption);
+        command.Options.Add(dryRunOption);
+        command.Options.Add(imageTagOption);
+        command.Options.Add(templateOption);
+        command.Options.Add(channelOption);
+        command.Options.Add(memoryOption);
+        command.Options.Add(cpusOption);
+        command.Options.Add(envOption);
+        command.Arguments.Add(pathArgument);
         command.Arguments.Add(commandArgs);
 
-        command.SetAction((parseResult, cancellationToken) => runtime.RunRunAsync(
-            new RunCommandOptions(
-                Workspace: parseResult.GetValue(workspaceOption),
-                Fresh: parseResult.GetValue(freshOption),
-                Detached: parseResult.GetValue(detachedOption),
-                Quiet: parseResult.GetValue(quietOption),
-                Verbose: parseResult.GetValue(verboseOption),
-                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
-                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
-            cancellationToken));
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var extras = new List<string>();
+            AppendOption(extras, "--credentials", parseResult.GetValue(credentialsOption));
+            AppendFlag(extras, "--acknowledge-credential-risk", parseResult.GetValue(acknowledgeCredentialRiskOption));
+            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
+            AppendOption(extras, "--config", parseResult.GetValue(configOption));
+            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
+            AppendFlag(extras, "--restart", parseResult.GetValue(restartOption));
+            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
+            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
+            AppendFlag(extras, "--dry-run", parseResult.GetValue(dryRunOption));
+            AppendOption(extras, "--image-tag", parseResult.GetValue(imageTagOption));
+            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
+            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
+            AppendOption(extras, "--memory", parseResult.GetValue(memoryOption));
+            AppendOption(extras, "--cpus", parseResult.GetValue(cpusOption));
+            foreach (var env in parseResult.GetValue(envOption) ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(env))
+                {
+                    extras.Add("--env");
+                    extras.Add(env);
+                }
+            }
+
+            var commandArguments = parseResult.GetValue(commandArgs) ?? Array.Empty<string>();
+
+            var workspace = parseResult.GetValue(workspaceOption);
+            var positionalPath = parseResult.GetValue(pathArgument);
+            if (string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(positionalPath))
+            {
+                if (Directory.Exists(ExpandHome(positionalPath)))
+                {
+                    workspace = positionalPath;
+                }
+                else
+                {
+                    commandArguments = [positionalPath, .. commandArguments];
+                }
+            }
+
+            return runtime.RunRunAsync(
+                new RunCommandOptions(
+                    Workspace: workspace,
+                    Fresh: parseResult.GetValue(freshOption) || parseResult.GetValue(restartOption),
+                    Detached: parseResult.GetValue(detachedOption),
+                    Quiet: parseResult.GetValue(quietOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    AdditionalArgs: extras,
+                    CommandArgs: commandArguments),
+                cancellationToken);
+        });
 
         return command;
     }
 
     private static Command CreateShellCommand(ICaiCommandRuntime runtime)
     {
-        var command = new Command("shell", "Open an interactive login shell.")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var command = new Command("shell", "Open an interactive login shell.");
 
         var workspaceOption = new Option<string?>("--workspace", "-w")
         {
             Description = "Workspace path for shell execution.",
+        };
+        var dataVolumeOption = new Option<string?>("--data-volume")
+        {
+            Description = "Data volume override.",
+        };
+        var configOption = new Option<string?>("--config")
+        {
+            Description = "Path to config file.",
+        };
+        var containerOption = new Option<string?>("--container")
+        {
+            Description = "Attach to a specific container.",
+        };
+        var freshOption = new Option<bool>("--fresh")
+        {
+            Description = "Request a fresh runtime environment.",
+        };
+        var restartOption = new Option<bool>("--restart")
+        {
+            Description = "Alias for --fresh.",
+        };
+        var resetOption = new Option<bool>("--reset")
+        {
+            Description = "Create a reset volume shell session.",
+        };
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Force operation where supported.",
         };
         var quietOption = new Option<bool>("--quiet", "-q")
         {
@@ -122,39 +292,131 @@ internal sealed class RootCommandBuilder
         {
             Description = "Enable verbose output.",
         };
-        var commandArgs = new Argument<string[]>("command")
+        var debugOption = new Option<bool>("--debug", "-D")
         {
-            Arity = ArgumentArity.ZeroOrMore,
-            Description = "Optional command to execute in the login shell.",
+            Description = "Enable debug output.",
+        };
+        var dryRunOption = new Option<bool>("--dry-run")
+        {
+            Description = "Show planned actions without executing.",
+        };
+        var imageTagOption = new Option<string?>("--image-tag")
+        {
+            Description = "Override image tag.",
+        };
+        var templateOption = new Option<string?>("--template")
+        {
+            Description = "Template name.",
+        };
+        var channelOption = new Option<string?>("--channel")
+        {
+            Description = "Channel override.",
+        };
+        var memoryOption = new Option<string?>("--memory")
+        {
+            Description = "Container memory limit.",
+        };
+        var cpusOption = new Option<string?>("--cpus")
+        {
+            Description = "Container CPU limit.",
+        };
+        var pathArgument = new Argument<string?>("path")
+        {
+            Arity = ArgumentArity.ZeroOrOne,
+            Description = "Workspace path (optional positional form).",
         };
 
         command.Options.Add(workspaceOption);
+        command.Options.Add(dataVolumeOption);
+        command.Options.Add(configOption);
+        command.Options.Add(containerOption);
+        command.Options.Add(freshOption);
+        command.Options.Add(restartOption);
+        command.Options.Add(resetOption);
+        command.Options.Add(forceOption);
         command.Options.Add(quietOption);
         command.Options.Add(verboseOption);
-        command.Arguments.Add(commandArgs);
+        command.Options.Add(debugOption);
+        command.Options.Add(dryRunOption);
+        command.Options.Add(imageTagOption);
+        command.Options.Add(templateOption);
+        command.Options.Add(channelOption);
+        command.Options.Add(memoryOption);
+        command.Options.Add(cpusOption);
+        command.Arguments.Add(pathArgument);
 
-        command.SetAction((parseResult, cancellationToken) => runtime.RunShellAsync(
-            new ShellCommandOptions(
-                Workspace: parseResult.GetValue(workspaceOption),
-                Quiet: parseResult.GetValue(quietOption),
-                Verbose: parseResult.GetValue(verboseOption),
-                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
-                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
-            cancellationToken));
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var extras = new List<string>();
+            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
+            AppendOption(extras, "--config", parseResult.GetValue(configOption));
+            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
+            AppendFlag(extras, "--restart", parseResult.GetValue(restartOption));
+            AppendFlag(extras, "--reset", parseResult.GetValue(resetOption));
+            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
+            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
+            AppendFlag(extras, "--dry-run", parseResult.GetValue(dryRunOption));
+            AppendOption(extras, "--image-tag", parseResult.GetValue(imageTagOption));
+            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
+            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
+            AppendOption(extras, "--memory", parseResult.GetValue(memoryOption));
+            AppendOption(extras, "--cpus", parseResult.GetValue(cpusOption));
+
+            var workspace = parseResult.GetValue(workspaceOption);
+            var positionalPath = parseResult.GetValue(pathArgument);
+            if (string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(positionalPath))
+            {
+                workspace = positionalPath;
+            }
+
+            return runtime.RunShellAsync(
+                new ShellCommandOptions(
+                    Workspace: workspace,
+                    Quiet: parseResult.GetValue(quietOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    AdditionalArgs: extras,
+                    CommandArgs: Array.Empty<string>()),
+                cancellationToken);
+        });
 
         return command;
     }
 
     private static Command CreateExecCommand(ICaiCommandRuntime runtime)
     {
-        var command = new Command("exec", "Execute a command through SSH.")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var command = new Command("exec", "Execute a command through SSH.");
 
         var workspaceOption = new Option<string?>("--workspace", "-w")
         {
             Description = "Workspace path for command execution.",
+        };
+        var containerOption = new Option<string?>("--container")
+        {
+            Description = "Attach to a specific container.",
+        };
+        var templateOption = new Option<string?>("--template")
+        {
+            Description = "Template name.",
+        };
+        var channelOption = new Option<string?>("--channel")
+        {
+            Description = "Channel override.",
+        };
+        var dataVolumeOption = new Option<string?>("--data-volume")
+        {
+            Description = "Data volume override.",
+        };
+        var configOption = new Option<string?>("--config")
+        {
+            Description = "Path to config file.",
+        };
+        var freshOption = new Option<bool>("--fresh")
+        {
+            Description = "Request a fresh runtime environment.",
+        };
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Force operation where supported.",
         };
         var quietOption = new Option<bool>("--quiet", "-q")
         {
@@ -164,25 +426,49 @@ internal sealed class RootCommandBuilder
         {
             Description = "Enable verbose output.",
         };
+        var debugOption = new Option<bool>("--debug", "-D")
+        {
+            Description = "Enable debug output.",
+        };
         var commandArgs = new Argument<string[]>("command")
         {
-            Arity = ArgumentArity.ZeroOrMore,
+            Arity = ArgumentArity.OneOrMore,
             Description = "Command and arguments passed to ssh.",
         };
 
         command.Options.Add(workspaceOption);
+        command.Options.Add(containerOption);
+        command.Options.Add(templateOption);
+        command.Options.Add(channelOption);
+        command.Options.Add(dataVolumeOption);
+        command.Options.Add(configOption);
+        command.Options.Add(freshOption);
+        command.Options.Add(forceOption);
         command.Options.Add(quietOption);
         command.Options.Add(verboseOption);
+        command.Options.Add(debugOption);
         command.Arguments.Add(commandArgs);
 
-        command.SetAction((parseResult, cancellationToken) => runtime.RunExecAsync(
-            new ExecCommandOptions(
-                Workspace: parseResult.GetValue(workspaceOption),
-                Quiet: parseResult.GetValue(quietOption),
-                Verbose: parseResult.GetValue(verboseOption),
-                AdditionalArgs: parseResult.UnmatchedTokens.ToArray(),
-                CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
-            cancellationToken));
+        command.SetAction((parseResult, cancellationToken) =>
+        {
+            var extras = new List<string>();
+            AppendOption(extras, "--container", parseResult.GetValue(containerOption));
+            AppendOption(extras, "--template", parseResult.GetValue(templateOption));
+            AppendOption(extras, "--channel", parseResult.GetValue(channelOption));
+            AppendOption(extras, "--data-volume", parseResult.GetValue(dataVolumeOption));
+            AppendOption(extras, "--config", parseResult.GetValue(configOption));
+            AppendFlag(extras, "--fresh", parseResult.GetValue(freshOption));
+            AppendFlag(extras, "--force", parseResult.GetValue(forceOption));
+            AppendFlag(extras, "--debug", parseResult.GetValue(debugOption));
+            return runtime.RunExecAsync(
+                new ExecCommandOptions(
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Quiet: parseResult.GetValue(quietOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    AdditionalArgs: extras,
+                    CommandArgs: parseResult.GetValue(commandArgs) ?? Array.Empty<string>()),
+                cancellationToken);
+        });
 
         return command;
     }
@@ -210,10 +496,7 @@ internal sealed class RootCommandBuilder
 
     private static Command CreateStatusCommand(ICaiCommandRuntime runtime)
     {
-        var command = new Command("status", "Show runtime container status.")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var command = new Command("status", "Show runtime container status.");
 
         var jsonOption = new Option<bool>("--json")
         {
@@ -243,7 +526,7 @@ internal sealed class RootCommandBuilder
                 Workspace: parseResult.GetValue(workspaceOption),
                 Container: parseResult.GetValue(containerOption),
                 Verbose: parseResult.GetValue(verboseOption),
-                AdditionalArgs: parseResult.UnmatchedTokens.ToArray()),
+                AdditionalArgs: Array.Empty<string>()),
             cancellationToken));
 
         return command;
@@ -251,81 +534,174 @@ internal sealed class RootCommandBuilder
 
     private static IReadOnlyList<string> BuildArgumentList(string[]? parsedArgs, IReadOnlyList<string> unmatchedTokens)
     {
-        if ((parsedArgs is null || parsedArgs.Length == 0) && unmatchedTokens.Count == 0)
+        return (parsedArgs, unmatchedTokens.Count) switch
         {
-            return Array.Empty<string>();
-        }
-
-        var all = new List<string>(
-            capacity: (parsedArgs?.Length ?? 0) + unmatchedTokens.Count);
-
-        if (parsedArgs is not null && parsedArgs.Length > 0)
-        {
-            all.AddRange(parsedArgs);
-        }
-
-        if (unmatchedTokens.Count > 0)
-        {
-            all.AddRange(unmatchedTokens);
-        }
-
-        return all;
+            ({ Length: > 0 }, > 0) => [.. parsedArgs, .. unmatchedTokens],
+            ({ Length: > 0 }, 0) => parsedArgs,
+            (null or { Length: 0 }, > 0) => [.. unmatchedTokens],
+            _ => Array.Empty<string>(),
+        };
     }
 
-    private static Command CreateNativePassThroughCommand(string commandName, ICaiCommandRuntime runtime)
+    private static Command CreateCompletionCommand(RootCommand root)
     {
-        var command = new Command(commandName, GetNativeCommandDescription(commandName))
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var completionCommand = new Command("completion", "Generate shell completion scripts.");
 
-        command.SetAction((parseResult, cancellationToken) =>
+        var bashCommand = new Command("bash", "Emit Bash completion script.");
+        bashCommand.SetAction((_, cancellationToken) =>
         {
-            var forwarded = new List<string>(capacity: parseResult.UnmatchedTokens.Count + 1)
-            {
-                commandName,
-            };
-
-            forwarded.AddRange(parseResult.UnmatchedTokens);
-            return runtime.RunNativeAsync(forwarded, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.Out.WriteLine(BuildBashCompletionScript());
+            return Task.FromResult(0);
         });
 
-        return command;
+        var zshCommand = new Command("zsh", "Emit Zsh completion script.");
+        zshCommand.SetAction((_, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Console.Out.WriteLine(BuildZshCompletionScript());
+            return Task.FromResult(0);
+        });
+
+        var suggestCommand = new Command("suggest", "Resolve completions for shell integration.")
+        {
+            Hidden = true,
+        };
+        var lineOption = new Option<string>("--line")
+        {
+            Description = "Full command line as typed in the shell.",
+            Required = true,
+        };
+        var positionOption = new Option<int?>("--position")
+        {
+            Description = "Cursor position in the command line text.",
+        };
+
+        suggestCommand.Options.Add(lineOption);
+        suggestCommand.Options.Add(positionOption);
+        suggestCommand.SetAction((parseResult, cancellationToken) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var line = parseResult.GetValue(lineOption) ?? string.Empty;
+            var requestedPosition = parseResult.GetValue(positionOption) ?? line.Length;
+            var normalized = NormalizeCompletionInput(line, requestedPosition);
+            var completionResult = CommandLineParser.Parse(root, normalized.Line, configuration: null);
+
+            foreach (var completion in completionResult.GetCompletions(normalized.Cursor))
+            {
+                var value = string.IsNullOrWhiteSpace(completion.InsertText) ? completion.Label : completion.InsertText;
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                Console.Out.WriteLine(value);
+            }
+
+            return Task.FromResult(0);
+        });
+
+        completionCommand.Subcommands.Add(bashCommand);
+        completionCommand.Subcommands.Add(zshCommand);
+        completionCommand.Subcommands.Add(suggestCommand);
+
+        return completionCommand;
     }
 
-    private static string? GetNativeCommandDescription(string commandName)
+    private static (string Line, int Cursor) NormalizeCompletionInput(string line, int position)
     {
-        return commandName switch
+        if (string.IsNullOrEmpty(line))
         {
-            "doctor" => "Check system capabilities and diagnostics.",
-            "setup" => "Set up local runtime prerequisites.",
-            "validate" => "Validate runtime configuration.",
-            "import" => "Import host configuration into the data volume.",
-            "export" => "Export the data volume to a tarball.",
-            "sync" => "Run in-container sync operations.",
-            "stop" => "Stop managed containers.",
-            "gc" => "Garbage collect stale resources.",
-            "ssh" => "Manage SSH integration.",
-            "links" => "Check or repair container symlinks.",
-            "config" => "Read and write CLI configuration.",
-            "manifest" => "Parse manifests and generate derived artifacts.",
-            "template" => "Manage templates.",
-            "update" => "Update the local installation.",
-            "refresh" => "Refresh images and rebuild templates when requested.",
-            "uninstall" => "Remove local installation artifacts.",
-            "completion" => "Generate shell completions.",
-            "help" => "Show help.",
-            "system" => "Container-internal runtime commands.",
-            _ => null,
-        };
+            return (string.Empty, 0);
+        }
+
+        var clampedPosition = Math.Clamp(position, 0, line.Length);
+        var start = 0;
+        while (start < line.Length && char.IsWhiteSpace(line[start]))
+        {
+            start++;
+        }
+
+        var end = start;
+        while (end < line.Length && !char.IsWhiteSpace(line[end]))
+        {
+            end++;
+        }
+
+        if (end == start)
+        {
+            return (line, clampedPosition);
+        }
+
+        var invocationToken = line[start..end];
+        if (!string.Equals(Path.GetFileNameWithoutExtension(invocationToken), "cai", StringComparison.OrdinalIgnoreCase))
+        {
+            return (line, clampedPosition);
+        }
+
+        var trimStart = end;
+        while (trimStart < line.Length && char.IsWhiteSpace(line[trimStart]))
+        {
+            trimStart++;
+        }
+
+        return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
+    }
+
+    private static string BuildBashCompletionScript()
+        => """
+           # shellcheck shell=bash
+           _cai_completion() {
+             local line suggestions
+             line="${COMP_LINE:-cai}"
+             suggestions="$({ cai completion suggest --line "$line" --position "${COMP_POINT:-${#line}}"; } 2>/dev/null)"
+             COMPREPLY=()
+
+             while IFS= read -r candidate; do
+               if [[ -n "$candidate" ]]; then
+                 COMPREPLY+=("$candidate")
+               fi
+             done <<< "$suggestions"
+           }
+
+           complete -o default -o bashdefault -F _cai_completion cai
+           """;
+
+    private static string BuildZshCompletionScript()
+        => """
+           #compdef cai
+           _cai_completion() {
+             local line suggestions
+             line="${BUFFER:-cai}"
+             suggestions="$({ cai completion suggest --line "$line" --position "${CURSOR:-${#line}}"; } 2>/dev/null)"
+             compadd -- ${(f)suggestions}
+           }
+
+           compdef _cai_completion cai
+           """;
+
+    private static string ExpandHome(string path)
+    {
+        if (!path.StartsWith("~", StringComparison.Ordinal))
+        {
+            return path;
+        }
+
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+        {
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        }
+
+        return path.Length == 1
+            ? home!
+            : Path.Combine(home!, path[2..]);
     }
 
     private static Command CreateVersionCommand(ICaiCommandRuntime runtime)
     {
-        var versionCommand = new Command("version")
-        {
-            TreatUnmatchedTokensAsErrors = false,
-        };
+        var versionCommand = new Command("version");
 
         var jsonOption = new Option<bool>("--json")
         {
@@ -335,26 +711,14 @@ internal sealed class RootCommandBuilder
 
         versionCommand.SetAction((parseResult, cancellationToken) =>
         {
-            var useNativeJson = parseResult.GetValue(jsonOption) && parseResult.UnmatchedTokens.Count == 0;
-            if (useNativeJson)
+            if (parseResult.GetValue(jsonOption))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Console.Out.WriteLine(GetVersionJson());
                 return Task.FromResult(0);
             }
 
-            var forwarded = new List<string>(capacity: parseResult.UnmatchedTokens.Count + 2)
-            {
-                "version",
-            };
-
-            if (parseResult.GetValue(jsonOption))
-            {
-                forwarded.Add("--json");
-            }
-
-            forwarded.AddRange(parseResult.UnmatchedTokens);
-            return runtime.RunNativeAsync(forwarded, cancellationToken);
+            return runtime.RunNativeAsync(["version"], cancellationToken);
         });
 
         return versionCommand;
@@ -362,8 +726,9 @@ internal sealed class RootCommandBuilder
 
     internal static string GetVersionJson()
     {
-        var (version, installType, installDir) = InstallMetadata.ResolveVersionInfo();
+        var versionInfo = InstallMetadata.ResolveVersionInfo();
+        var installType = InstallMetadata.GetInstallTypeLabel(versionInfo.InstallType);
 
-        return $"{{\"version\":\"{JavaScriptEncoder.Default.Encode(version)}\",\"install_type\":\"{JavaScriptEncoder.Default.Encode(installType)}\",\"install_dir\":\"{JavaScriptEncoder.Default.Encode(installDir)}\"}}";
+        return $"{{\"version\":\"{JavaScriptEncoder.Default.Encode(versionInfo.Version)}\",\"install_type\":\"{JavaScriptEncoder.Default.Encode(installType)}\",\"install_dir\":\"{JavaScriptEncoder.Default.Encode(versionInfo.InstallDir)}\"}}";
     }
 }

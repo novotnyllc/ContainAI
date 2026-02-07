@@ -29,11 +29,12 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["run", "--fresh", "--detached", "echo", "ok"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Empty(runtime.RunCalls);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["run", "--fresh", "--detached", "echo", "ok"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.True(runtime.RunCalls[0].Fresh);
+        Assert.True(runtime.RunCalls[0].Detached);
+        Assert.Equal(["echo", "ok"], runtime.RunCalls[0].CommandArgs);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -44,11 +45,10 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["shell", "--workspace", "/tmp/workspace"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Empty(runtime.ShellCalls);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["shell", "--workspace", "/tmp/workspace"], call));
+        Assert.Equal(FakeRuntime.ShellExitCode, exitCode);
+        Assert.Single(runtime.ShellCalls);
+        Assert.Equal("/tmp/workspace", runtime.ShellCalls[0].Workspace);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -59,11 +59,10 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["exec", "ssh-target", "echo", "hi"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Empty(runtime.ExecCalls);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["exec", "ssh-target", "echo", "hi"], call));
+        Assert.Equal(FakeRuntime.ExecExitCode, exitCode);
+        Assert.Single(runtime.ExecCalls);
+        Assert.Equal(["ssh-target", "echo", "hi"], runtime.ExecCalls[0].CommandArgs);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -94,17 +93,67 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task NativeLifecycleCommand_UnknownSubcommand_IsForwardedToNativeRuntime()
+    public async Task StatusCommand_UnknownOption_ReturnsParserError()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["status", "--not-a-real-option"], runtime, cancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.StatusCalls);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
+    [Fact]
+    public async Task RunCommand_OptionLikeToken_IsTreatedAsCommandArg()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["run", "--not-a-real-option"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.Equal(["--not-a-real-option"], runtime.RunCalls[0].CommandArgs);
+    }
+
+    [Fact]
+    public async Task ShellCommand_OptionLikeToken_IsTreatedAsPositionalPath()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["shell", "--not-a-real-option"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.ShellExitCode, exitCode);
+        Assert.Single(runtime.ShellCalls);
+        Assert.Equal("--not-a-real-option", runtime.ShellCalls[0].Workspace);
+    }
+
+    [Fact]
+    public async Task ExecCommand_OptionLikeToken_IsTreatedAsCommandArg()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["exec", "--not-a-real-option"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.ExecExitCode, exitCode);
+        Assert.Single(runtime.ExecCalls);
+        Assert.Equal(["--not-a-real-option"], runtime.ExecCalls[0].CommandArgs);
+    }
+
+    [Fact]
+    public async Task NativeLifecycleCommand_UnknownSubcommand_ReturnsParserError()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["config", "mystery-subcommand", "--json"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["config", "mystery-subcommand", "--json"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -122,17 +171,103 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task CompletionCommand_UsesNativeLifecycleRuntime()
+    public async Task CompletionCommand_Bash_EmitsNativeSystemCommandLineScript()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
 
-        var exitCode = await CaiCli.RunAsync(["completion", "bash"], runtime, cancellationToken);
+        try
+        {
+            var exitCode = await CaiCli.RunAsync(["completion", "bash"], runtime, cancellationToken);
+            Assert.Equal(0, exitCode);
+            Assert.Contains("cai completion suggest", writer.ToString(), StringComparison.Ordinal);
+            Assert.Empty(runtime.NativeCalls);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["completion", "bash"], call));
+    [Fact]
+    public async Task CompletionCommand_Zsh_EmitsNativeSystemCommandLineScript()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            var exitCode = await CaiCli.RunAsync(["completion", "zsh"], runtime, cancellationToken);
+            Assert.Equal(0, exitCode);
+            Assert.Contains("#compdef cai", writer.ToString(), StringComparison.Ordinal);
+            Assert.Contains("cai completion suggest", writer.ToString(), StringComparison.Ordinal);
+            Assert.Empty(runtime.NativeCalls);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    [Fact]
+    public async Task CompletionCommand_Suggest_ReturnsContextualSuggestions()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            var exitCode = await CaiCli.RunAsync(
+                ["completion", "suggest", "--line", "cai st", "--position", "6"],
+                runtime,
+                cancellationToken);
+
+            Assert.Equal(0, exitCode);
+            var output = writer.ToString();
+            Assert.Contains("status", output, StringComparison.Ordinal);
+            Assert.Contains("stop", output, StringComparison.Ordinal);
+            Assert.DoesNotContain("completion", output, StringComparison.Ordinal);
+            Assert.Empty(runtime.NativeCalls);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    [Fact]
+    public async Task CompletionCommand_Suggest_SupportsAbsoluteCommandPathInput()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            var exitCode = await CaiCli.RunAsync(
+                ["completion", "suggest", "--line", "/usr/local/bin/cai st", "--position", "21"],
+                runtime,
+                cancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("status", writer.ToString(), StringComparison.Ordinal);
+            Assert.Empty(runtime.NativeCalls);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
     }
 
     [Fact]
@@ -157,11 +292,10 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["mystery", "token"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Empty(runtime.RunCalls);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["run", "mystery", "token"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.Equal(["mystery", "token"], runtime.RunCalls[0].CommandArgs);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -172,11 +306,11 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["--fresh", "/tmp/workspace"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Empty(runtime.RunCalls);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["run", "--fresh", "/tmp/workspace"], call));
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.True(runtime.RunCalls[0].Fresh);
+        Assert.Equal(["/tmp/workspace"], runtime.RunCalls[0].CommandArgs);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -258,15 +392,15 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task AcpProxy_WithAdditionalArgument_InvokesRuntimeWithAgent()
+    public async Task AcpProxy_WithAdditionalArgument_ReturnsParserError()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["acp", "proxy", "claude", "extra"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
-        Assert.Equal(["claude"], runtime.AcpCalls);
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.AcpCalls);
         Assert.Empty(runtime.NativeCalls);
     }
 
@@ -355,6 +489,18 @@ public sealed class CaiCliRoutingTests
         {
             Console.SetOut(originalOut);
         }
+    }
+
+    [Fact]
+    public async Task Version_UnknownOption_ReturnsParserError()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(["version", "--bogus"], runtime, cancellationToken);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Theory]

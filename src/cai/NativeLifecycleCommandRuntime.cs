@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class NativeLifecycleCommandRuntime
+internal sealed partial class NativeLifecycleCommandRuntime
 {
     private static readonly string[] ContainAiImagePrefixes =
     [
@@ -14,7 +14,6 @@ internal sealed class NativeLifecycleCommandRuntime
         "ghcr.io/containai/",
         "ghcr.io/novotnyllc/containai",
     ];
-    private static readonly Regex EnvVarNamePattern = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private readonly TextWriter _stdout;
     private readonly TextWriter _stderr;
@@ -362,15 +361,16 @@ internal sealed class NativeLifecycleCommandRuntime
     {
         cancellationToken.ThrowIfCancellationRequested();
         var json = args.Contains("--json", StringComparer.Ordinal);
-        var (version, installType, installDir) = InstallMetadata.ResolveVersionInfo();
+        var versionInfo = InstallMetadata.ResolveVersionInfo();
+        var installType = InstallMetadata.GetInstallTypeLabel(versionInfo.InstallType);
 
         if (json)
         {
-            await _stdout.WriteLineAsync($"{{\"version\":\"{version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(installDir)}\"}}").ConfigureAwait(false);
+            await _stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
             return 0;
         }
 
-        await _stdout.WriteLineAsync(version).ConfigureAwait(false);
+        await _stdout.WriteLineAsync(versionInfo.Version).ConfigureAwait(false);
         return 0;
     }
 
@@ -2184,7 +2184,7 @@ internal sealed class NativeLifecycleCommandRuntime
         var validatedKeys = new List<string>(dedupedImportKeys.Count);
         foreach (var key in dedupedImportKeys)
         {
-            if (!EnvVarNamePattern.IsMatch(key))
+            if (!EnvVarNameRegex().IsMatch(key))
             {
                 await _stderr.WriteLineAsync($"[WARN] Invalid env var name in allowlist: {key}").ConfigureAwait(false);
                 continue;
@@ -4645,7 +4645,7 @@ Examples:
 
             var key = normalized[..separatorIndex];
             var value = normalized[(separatorIndex + 1)..];
-            if (!EnvVarNamePattern.IsMatch(key))
+            if (!EnvVarNameRegex().IsMatch(key))
             {
                 warnings.Add($"[WARN] line {lineNumber}: key '{key}' invalid format - skipping");
                 continue;
@@ -4668,6 +4668,9 @@ Examples:
 
         return new ParsedEnvFile(values, warnings);
     }
+
+    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex EnvVarNameRegex();
 
     private async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {

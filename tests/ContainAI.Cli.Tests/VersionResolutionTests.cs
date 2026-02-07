@@ -24,13 +24,6 @@ public sealed class VersionResolutionTests
     {
         var installDir = Path.Combine("/tmp", ".local", "share", "containai");
         var installType = InstallMetadata.ResolveInstallType(installDir);
-        Assert.Equal("local", installType);
-    }
-
-    private static string CreateTemporaryDirectory()
-    {
-        var path = Path.Combine(Path.GetTempPath(), $"cai-version-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(path);
-        return path;
+        Assert.Equal(InstallType.Local, installType);
     }
 }

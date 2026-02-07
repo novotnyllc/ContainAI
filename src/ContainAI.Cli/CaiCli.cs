@@ -50,20 +50,14 @@ public static class CaiCli
 
     private static string[] NormalizeRootAliases(string[] args)
     {
-        if (args.Length > 0 && args[0] == "--refresh")
+        if (args is ["--refresh", .. var refreshArgs])
         {
-            var normalized = new string[args.Length];
-            normalized[0] = "refresh";
-            Array.Copy(args, 1, normalized, 1, args.Length - 1);
-            return normalized;
+            return ["refresh", .. refreshArgs];
         }
 
-        if (args.Length > 0 && (args[0] == "-v" || args[0] == "--version"))
+        if (args is ["-v" or "--version", .. var versionArgs])
         {
-            var normalized = new string[args.Length];
-            normalized[0] = "version";
-            Array.Copy(args, 1, normalized, 1, args.Length - 1);
-            return normalized;
+            return ["version", .. versionArgs];
         }
 
         return args;

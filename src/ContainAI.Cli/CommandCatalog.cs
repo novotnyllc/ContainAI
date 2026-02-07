@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 namespace ContainAI.Cli;
 
 internal static class CommandCatalog
@@ -32,12 +34,14 @@ internal static class CommandCatalog
         "acp",
     ];
 
-    public static readonly IReadOnlySet<string> RoutedCommands = new HashSet<string>(RoutedCommandOrder, StringComparer.Ordinal);
+    public static readonly FrozenSet<string> RoutedCommands =
+        RoutedCommandOrder.ToFrozenSet(StringComparer.Ordinal);
 
-    public static readonly IReadOnlySet<string> RootParserTokens = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "help",
-        "--help",
-        "-h",
-    };
+    public static readonly FrozenSet<string> RootParserTokens =
+        new[]
+        {
+            "help",
+            "--help",
+            "-h",
+        }.ToFrozenSet(StringComparer.Ordinal);
 }
