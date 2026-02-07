@@ -89,10 +89,10 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 
 | Input | Validation Location | Notes |
 |-------|---------------------|-------|
-| TOML config files | [config.sh](../src/lib/config.sh) | Parsed without shell eval |
+| TOML config files | [TomlCommandProcessor.cs](../src/cai/TomlCommandProcessor.cs) | Parsed without shell eval |
 | Environment variables | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Key/value validation |
 | Volume mount paths | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Symlink and traversal checks |
-| Container names | [container.sh](../src/lib/container.sh) | RFC 1123 hostname compliance |
+| Container names | [ContainerNameGenerator.cs](../src/cai/ContainerNameGenerator.cs) | RFC 1123 hostname compliance |
 
 ### In-Scope for Vulnerability Reports
 
@@ -113,10 +113,10 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 
 | File | Security Role |
 |------|---------------|
-| [src/lib/doctor.sh](../src/lib/doctor.sh) | Isolation detection and verification |
-| [src/lib/container.sh](../src/lib/container.sh) | Container start with isolation checks |
+| [src/cai/NativeLifecycleCommandRuntime.cs](../src/cai/NativeLifecycleCommandRuntime.cs) | Isolation detection and verification |
+| [src/cai/NativeSessionCommandRuntime.cs](../src/cai/NativeSessionCommandRuntime.cs) | Container start with isolation checks |
 | [src/cai/ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Volume mount security, .env parsing |
-| [src/lib/config.sh](../src/lib/config.sh) | TOML parsing (no shell eval) |
+| [src/cai/TomlCommandProcessor.cs](../src/cai/TomlCommandProcessor.cs) | TOML parsing (no shell eval) |
 
 ## Reporting Vulnerabilities
 

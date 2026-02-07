@@ -29,11 +29,11 @@ Before running `cai setup`, ensure you have:
 |-------------|---------|---------------|
 | Bash | 4.0+ | `bash --version` |
 | Docker CLI | Any recent | `docker --version` |
-| jq | Any | `jq --version` |
 | ripgrep (rg) | Any | `rg --version` |
 | OpenSSH client | 7.3+ | `ssh -V` |
 
 **Note on Docker:** Only the Docker CLI is required. On Linux/WSL2, ContainAI installs and manages its own dockerd bundle - you do not need Docker Engine or Docker Desktop installed. On macOS, ContainAI uses a Lima VM.
+**Note on parsing dependencies:** `cai` uses native `.NET` JSON/TOML/YAML parsers, so `jq`/Python are not required for core config parsing.
 
 ### WSL2 (Windows)
 

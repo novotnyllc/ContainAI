@@ -479,7 +479,7 @@ Testing follows the tiered strategy documented in [docs/testing.md](testing.md).
 
 ```bash
 # Shell script linting
-shellcheck -x src/*.sh src/lib/*.sh
+shellcheck -x install.sh
 
 # Manifest consistency
 dotnet run --project src/cai -- manifest check src/manifests

@@ -31,10 +31,10 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
 
-      - name: Lint shell scripts with shellcheck
+      - name: Lint installer script with shellcheck
         run: |
-          echo "Running shellcheck on shell scripts..."
-          shellcheck -x install.sh scripts/*.sh scripts/ralph/*.sh
+          echo "Running shellcheck on install.sh..."
+          shellcheck -x install.sh
 
       - name: Check manifest consistency
         run: dotnet run --project src/cai -- manifest check src/manifests
@@ -289,9 +289,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-
-      - name: Install build dependencies
-        run: ./scripts/install-build-dependencies.sh -y
 
       - name: Install and run NBGV
         id: nbgv

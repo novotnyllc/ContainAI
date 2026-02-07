@@ -865,7 +865,6 @@ These environment variables override config file values:
 |----------|-------------------|------------------------------|
 | File not found | Silent (use defaults) | **Error** |
 | Parse error (invalid TOML) | Warning (use defaults) | **Error** |
-| Python unavailable | Warning (use defaults) | **Error** |
 | Invalid volume name | **Error** | **Error** |
 | Invalid context name | Warning (ignored) | Warning (ignored) |
 | Multiline exclude pattern | Dropped silently | Dropped silently |
@@ -889,16 +888,11 @@ Volume name contains invalid characters.
 ```
 TOML syntax error in discovered config (using defaults).
 
-```
-[WARN] Python not found, cannot parse config. Using defaults.
-```
-Python 3 with TOML support not available.
-
 ## Implementation Details
 
 Configuration is implemented in:
-- [`lib/config.sh`](../src/lib/config.sh) - Bash config resolution
-- [`parse-toml.py`](../src/parse-toml.py) - TOML parsing (requires Python 3.11+ or `tomli`/`toml` package)
+- [`NativeSessionCommandRuntime.cs`](../src/cai/NativeSessionCommandRuntime.cs) - Config discovery and workspace resolution
+- [`TomlCommandProcessor.cs`](../src/cai/TomlCommandProcessor.cs) - TOML parsing and mutation logic
 
 Key functions:
 - `_containai_find_config()` - Discovery with git boundary
@@ -926,7 +920,7 @@ For full details on synced paths, see [Sync Architecture](sync-architecture.md).
 
 ## See Also
 
-- [Configuration Examples](examples/) - Copy-paste configs for common scenarios
+- [Configuration Examples](examples/team-shared.toml) - Copy-paste configs for common scenarios
 - [Quickstart Guide](quickstart.md) - Getting started with ContainAI
 - [Technical README](../src/README.md) - Full CLI documentation
 - [SECURITY.md](../SECURITY.md) - Security model and guarantees

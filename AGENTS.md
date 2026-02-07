@@ -27,8 +27,8 @@ dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all 
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
 dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=SyncIntegration" --xunit-info
 
-# Lint shell scripts
-shellcheck -x install.sh scripts/*.sh scripts/ralph/*.sh
+# Lint installer script
+shellcheck -x install.sh
 ```
 
 ## Project Structure

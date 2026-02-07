@@ -577,32 +577,6 @@ sudo apt install coreutils
 sudo apt install perl
 ```
 
-### "jq is not installed"
-
-**Symptom:**
-```
-[ERROR] jq is not installed (required for JSON processing)
-```
-
-**Diagnosis:**
-```bash
-which jq
-jq --version
-```
-
-**Solution:**
-
-**macOS:**
-```bash
-brew install jq
-```
-
-**Linux:**
-```bash
-sudo apt install jq  # Ubuntu/Debian
-sudo dnf install jq  # Fedora
-```
-
 ### "ripgrep (rg) is not installed"
 
 **Symptom:**
@@ -946,7 +920,7 @@ ls -la /path/to/.containai/config.toml
 
 Check TOML syntax:
 ```bash
-python3 -c "import tomllib; tomllib.load(open('.containai/config.toml', 'rb'))"
+cai config list
 ```
 
 **Common causes:**
@@ -1545,7 +1519,6 @@ Quick reference of error messages and their section in this guide:
 | "systemd failed to start" | [Container Startup Issues](#systemd-failed-to-start) |
 | "Docker is not installed" | [Installation Issues](#docker-is-not-installed-or-not-in-path) |
 | "No timeout command available" | [Installation Issues](#no-timeout-command-available) |
-| "jq is not installed" | [Installation Issues](#jq-is-not-installed) |
 | "ripgrep (rg) is not installed" | [Installation Issues](#ripgrep-rg-is-not-installed) |
 | "OpenSSH version too old" | [Installation Issues](#openssh-version-too-old) |
 | "containai-docker context not found" | [Sysbox Issues](#containai-docker-context-not-found) |

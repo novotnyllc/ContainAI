@@ -193,10 +193,10 @@ Common pitfalls to avoid are documented in [.flow/memory/pitfalls.md](.flow/memo
 Before submitting docs changes, validate internal links:
 
 ```bash
-./scripts/check-doc-links.sh
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=Docs" --xunit-info
 ```
 
-This script validates all internal markdown links (relative paths and anchors) in `docs/` and root markdown files. It catches broken links, invalid anchors, and handles GitHub's duplicate heading behavior.
+The docs link validation tests check internal markdown links (relative paths and anchors) in `docs/` and root markdown files.
 
 ### Running Tests
 

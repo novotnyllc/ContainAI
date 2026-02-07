@@ -47,9 +47,6 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install build dependencies
-        run: ./scripts/install-build-dependencies.sh -y
-
       - name: Install and run NBGV
         id: nbgv
         run: |

@@ -133,7 +133,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 
 | Tier | Location | Requirements |
 |------|----------|--------------|
-| Linting | CI | None (shellcheck) |
+| Linting | CI | None (shellcheck on installer script) |
 | Integration | `tests/integration/` | Docker |
 | E2E | Manual | Sysbox runtime |
 
@@ -141,7 +141,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 
 ```bash
 # Linting
-shellcheck -x src/*.sh src/lib/*.sh
+shellcheck -x install.sh
 
 # Integration tests
 dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info

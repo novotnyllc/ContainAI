@@ -19,7 +19,7 @@ ContainAI uses a tiered testing strategy:
 }}}%%
 flowchart TB
     subgraph T1["Tier 1: Linting (CI)"]
-        Shell["shellcheck"]
+        Shell["shellcheck install.sh"]
         Manifest["manifest consistency"]
     end
 
@@ -49,7 +49,7 @@ Host-side checks that don't require Docker:
 
 ```bash
 # Shell script linting
-shellcheck -x src/*.sh src/lib/*.sh
+shellcheck -x install.sh
 
 # Manifest consistency check
 dotnet run --project src/cai -- manifest check src/manifests
