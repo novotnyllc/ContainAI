@@ -393,9 +393,15 @@ internal static partial class ContainAiDockerProxy
                     reservedPorts.Add(parsedPort);
                 }
             }
-            catch
+            catch (IOException ex)
             {
                 // Ignore stale files and continue allocation.
+                _ = ex;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                // Ignore stale files and continue allocation.
+                _ = ex;
             }
         }
 
@@ -764,12 +770,9 @@ internal static partial class ContainAiDockerProxy
         return new ProcessResult(process.ExitCode, stdout, stderr);
     }
 
-    private static IEnumerable<string> SplitLines(string text)
-    {
-        return text
+    private static IEnumerable<string> SplitLines(string text) => text
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(static value => !string.IsNullOrWhiteSpace(value));
-    }
 
     private static string ResolveHomeDirectory()
     {

@@ -158,6 +158,16 @@ CI also enforces minimum line coverage thresholds:
 - `ContainAI.Cli.Abstractions` >= 97%
 - `AgentClientProtocol.Proxy` >= 97%
 
+### Shell Fixture Guidance (Tests)
+
+When test code writes Bash fixture scripts from C# raw string literals, normalize line endings to LF before writing:
+
+```csharp
+File.WriteAllText(scriptPath, script.ReplaceLineEndings("\n"));
+```
+
+CRLF shell fixtures can fail on Linux with immediate process exit (for example, surfacing as `Broken pipe` during ACP lifecycle tests).
+
 ## Common Pitfalls
 
 Before coding, review [.flow/memory/pitfalls.md](../.flow/memory/pitfalls.md) for 36+ documented gotchas:

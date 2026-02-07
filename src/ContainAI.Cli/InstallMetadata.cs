@@ -88,14 +88,12 @@ public static class InstallMetadata
     }
 
     public static string GetInstallTypeLabel(InstallType installType)
-    {
-        return installType switch
+        => installType switch
         {
             InstallType.Git => "git",
             InstallType.Local => "local",
             _ => "installed",
         };
-    }
 
     private static bool IsInstallRoot(string path)
     {

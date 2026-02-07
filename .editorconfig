@@ -218,6 +218,12 @@ dotnet_diagnostic.CA2146.severity = error
 dotnet_diagnostic.CA2147.severity = error
 dotnet_diagnostic.CA2149.severity = error
 dotnet_diagnostic.CA2200.severity = error
+
+[tests/**/*.cs]
+# xUnit naming convention intentionally uses underscores in test method names.
+dotnet_diagnostic.CA1707.severity = none
+# Test assemblies do not need CLS compliance.
+dotnet_diagnostic.CA1014.severity = none
 dotnet_diagnostic.CA2202.severity = error
 dotnet_diagnostic.CA2207.severity = error
 dotnet_diagnostic.CA2212.severity = error

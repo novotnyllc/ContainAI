@@ -46,6 +46,19 @@ public sealed class WorkspaceResolverTests
         Assert.Equal(missingPath, resolved);
     }
 
+    [Fact]
+    public async Task ResolveAsync_WhenCancelled_ThrowsOperationCanceledException()
+    {
+        using var temp = new TempDirectory();
+        var nested = Path.Combine(temp.Path, "nested", "workspace");
+        Directory.CreateDirectory(nested);
+
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => WorkspaceResolver.ResolveAsync(nested, cts.Token));
+    }
+
     private sealed class TempDirectory : IDisposable
     {
         public TempDirectory()

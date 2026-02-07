@@ -38,8 +38,7 @@ public static class JsonRpcHelpers
     /// Creates an error response for a request.
     /// </summary>
     public static JsonRpcMessage CreateErrorResponse(JsonNode? id, int code, string message, JsonNode? data = null)
-    {
-        return new JsonRpcMessage
+        => new()
         {
             Id = id,
             Error = new JsonRpcError
@@ -49,17 +48,14 @@ public static class JsonRpcHelpers
                 Data = data
             }
         };
-    }
 
     /// <summary>
     /// Creates a success response for a request.
     /// </summary>
     public static JsonRpcMessage CreateSuccessResponse(JsonNode? id, JsonNode? result)
-    {
-        return new JsonRpcMessage
+        => new()
         {
             Id = id,
             Result = result
         };
-    }
 }

@@ -392,9 +392,15 @@ internal sealed partial class DevcontainerFeatureRuntime
         {
             Directory.Delete(tempDirectory, recursive: true);
         }
-        catch
+        catch (IOException ex)
         {
-            // ignore cleanup failures
+            // Ignore cleanup failures.
+            _ = ex;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            // Ignore cleanup failures.
+            _ = ex;
         }
 
         await _stdout.WriteLineAsync($"\nPassed: {passed} checks").ConfigureAwait(false);
@@ -779,10 +785,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         }
     }
 
-    private static bool IsRunningAsRoot()
-    {
-        return string.Equals(Environment.UserName, "root", StringComparison.Ordinal);
-    }
+    private static bool IsRunningAsRoot() => string.Equals(Environment.UserName, "root", StringComparison.Ordinal);
 
     private static async Task<ProcessResult> RunProcessCaptureAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {

@@ -71,8 +71,5 @@ internal static class ContainerNameGenerator
         return string.IsNullOrWhiteSpace(cleaned) ? fallback : cleaned;
     }
 
-    public static string TrimTrailingDash(string value)
-    {
-        return value.TrimEnd('-');
-    }
+    public static string TrimTrailingDash(string value) => value.TrimEnd('-');
 }

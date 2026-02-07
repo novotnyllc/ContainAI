@@ -455,10 +455,7 @@ internal static class ManifestGenerators
         return values;
     }
 
-    private static bool ReadBool(TomlTable table, string key)
-    {
-        return table.TryGetValue(key, out var value) && value is bool b && b;
-    }
+    private static bool ReadBool(TomlTable table, string key) => table.TryGetValue(key, out var value) && value is bool b && b;
 
     private readonly record struct ManifestLinkSpec(string Link, string Target, bool RemoveFirst);
 

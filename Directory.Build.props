@@ -18,8 +18,8 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
-    <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <AnalysisMode>Recommended</AnalysisMode>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>All</AnalysisMode>
     <AnalysisModeSecurity>All</AnalysisModeSecurity>
     <AnalysisModePerformance>All</AnalysisModePerformance>
   </PropertyGroup>

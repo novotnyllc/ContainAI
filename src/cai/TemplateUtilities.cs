@@ -24,10 +24,7 @@ internal static partial class TemplateUtilities
         return Path.Combine(ResolveTemplatesDirectory(homeDirectory), name, "Dockerfile");
     }
 
-    public static bool IsValidTemplateName(string templateName)
-    {
-        return !string.IsNullOrWhiteSpace(templateName) && TemplateNameRegex.IsMatch(templateName);
-    }
+    public static bool IsValidTemplateName(string templateName) => !string.IsNullOrWhiteSpace(templateName) && TemplateNameRegex.IsMatch(templateName);
 
     public static string ComputeTemplateFingerprint(string dockerfileContent)
     {

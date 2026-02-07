@@ -154,9 +154,15 @@ public sealed class AcpSession : IDisposable
         {
             AgentProcess?.Kill();
         }
-        catch
+        catch (InvalidOperationException ex)
         {
-            // Ignore errors killing process
+            // Process already exited/disposed.
+            _ = ex;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // Platform kill errors during teardown are non-fatal.
+            _ = ex;
         }
         AgentProcess?.Dispose();
 

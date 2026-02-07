@@ -440,7 +440,7 @@ public sealed class AcpProxyLifecycleTests
             _transcriptPath = Path.Combine(_tempRoot, "transcript.log");
             AgentSessionId = $"agent-{Guid.NewGuid():N}";
 
-            File.WriteAllText(_scriptPath, """
+            var script = """
 #!/usr/bin/env bash
 set -euo pipefail
 mode="$1"
@@ -500,7 +500,8 @@ while IFS= read -r line; do
     exit 0
   fi
 done
-""");
+""";
+            File.WriteAllText(_scriptPath, script.ReplaceLineEndings("\n"));
             EnsureExecutable(_scriptPath);
         }
 

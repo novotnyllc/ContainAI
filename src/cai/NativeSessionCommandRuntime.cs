@@ -1222,10 +1222,7 @@ Host {containerName}
         return $"{ContainAiRepo}:{DefaultImageTag}";
     }
 
-    private static string NormalizeWorkspacePath(string path)
-    {
-        return Path.GetFullPath(ExpandHome(path));
-    }
+    private static string NormalizeWorkspacePath(string path) => Path.GetFullPath(ExpandHome(path));
 
     private static string ExpandHome(string value)
     {
@@ -1471,10 +1468,7 @@ Host {containerName}
         return string.Equals(trimmed, "<no value>", StringComparison.Ordinal) ? string.Empty : trimmed;
     }
 
-    private static string SanitizeNameComponent(string value, string fallback)
-    {
-        return ContainerNameGenerator.SanitizeNameComponent(value, fallback);
-    }
+    private static string SanitizeNameComponent(string value, string fallback) => ContainerNameGenerator.SanitizeNameComponent(value, fallback);
 
     private static string SanitizeHostname(string value)
     {
@@ -1495,10 +1489,7 @@ Host {containerName}
         return string.IsNullOrWhiteSpace(cleaned) ? "container" : cleaned;
     }
 
-    private static string TrimTrailingDash(string value)
-    {
-        return ContainerNameGenerator.TrimTrailingDash(value);
-    }
+    private static string TrimTrailingDash(string value) => ContainerNameGenerator.TrimTrailingDash(value);
 
     private static string GenerateWorkspaceVolumeName(string workspace)
     {
@@ -1537,9 +1528,20 @@ Host {containerName}
                 }
             }
         }
-        catch
+        catch (InvalidOperationException ex)
+        {
+            // Process startup/read failed; keep default branch token.
+            _ = ex;
+        }
+        catch (Win32Exception ex)
+        {
+            // Git not available; keep default branch token.
+            _ = ex;
+        }
+        catch (IOException ex)
         {
             // Keep default branch token for reset volume generation.
+            _ = ex;
         }
 
         return $"{repo}-{branch}-{timestamp}";
@@ -1551,20 +1553,11 @@ Host {containerName}
         return string.IsNullOrWhiteSpace(trimmed) ? fallback : trimmed;
     }
 
-    private static string GetRunUsageText()
-    {
-        return "Usage: cai run [path] [options] [-- command]";
-    }
+    private static string GetRunUsageText() => "Usage: cai run [path] [options] [-- command]";
 
-    private static string GetShellUsageText()
-    {
-        return "Usage: cai shell [path] [options]";
-    }
+    private static string GetShellUsageText() => "Usage: cai shell [path] [options]";
 
-    private static string GetExecUsageText()
-    {
-        return "Usage: cai exec [options] [--] <command> [args...]";
-    }
+    private static string GetExecUsageText() => "Usage: cai exec [options] [--] <command> [args...]";
 
     private static ParseResult ParseRunOptions(IReadOnlyList<string> args)
     {
@@ -2169,9 +2162,15 @@ Host {containerName}
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch
+            catch (InvalidOperationException ex)
+            {
+                // Process exited between HasExited check and Kill.
+                _ = ex;
+            }
+            catch (Win32Exception ex)
             {
                 // Ignore cleanup failures.
+                _ = ex;
             }
         });
 
@@ -2217,9 +2216,15 @@ Host {containerName}
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch
+            catch (InvalidOperationException ex)
+            {
+                // Process exited between HasExited check and Kill.
+                _ = ex;
+            }
+            catch (Win32Exception ex)
             {
                 // Ignore cleanup failures.
+                _ = ex;
             }
         });
 

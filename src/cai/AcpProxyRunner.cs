@@ -23,20 +23,11 @@ internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
         TextWriter stderr,
         bool directSpawn) => _proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
 
-    public void Cancel()
-    {
-        _proxy.Cancel();
-    }
+    public void Cancel() => _proxy.Cancel();
 
-    public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken)
-    {
-        return _proxy.RunAsync(stdin, cancellationToken);
-    }
+    public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken) => _proxy.RunAsync(stdin, cancellationToken);
 
-    public void Dispose()
-    {
-        _proxy.Dispose();
-    }
+    public void Dispose() => _proxy.Dispose();
 }
 
 internal sealed class AcpProxyRunner

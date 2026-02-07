@@ -787,14 +787,11 @@ internal sealed class ContainerRuntimeCommandService
         await LogInfoAsync(quiet, $"Workspace symlink created: {hostWorkspace} -> {workspaceDir}").ConfigureAwait(false);
     }
 
-    private static bool IsAllowedWorkspacePrefix(string path)
-    {
-        return path.StartsWith("/home/", StringComparison.Ordinal) ||
+    private static bool IsAllowedWorkspacePrefix(string path) => path.StartsWith("/home/", StringComparison.Ordinal) ||
                path.StartsWith("/tmp/", StringComparison.Ordinal) ||
                path.StartsWith("/mnt/", StringComparison.Ordinal) ||
                path.StartsWith("/workspaces/", StringComparison.Ordinal) ||
                path.StartsWith("/Users/", StringComparison.Ordinal);
-    }
 
     private async Task ProcessUserManifestsAsync(string dataDir, string homeDir, bool quiet)
     {
@@ -966,10 +963,7 @@ internal sealed class ContainerRuntimeCommandService
         }
     }
 
-    private async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments)
-    {
-        _ = await RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None).ConfigureAwait(false);
-    }
+    private async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments) => _ = await RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None).ConfigureAwait(false);
 
     private async Task<ProcessCaptureResult> RunAsRootCaptureAsync(
         string executable,

@@ -26,17 +26,12 @@ public sealed class OutputWriter
     /// Enqueues a message to be written to stdout.
     /// </summary>
     public async Task EnqueueAsync(JsonRpcMessage message, CancellationToken cancellationToken = default)
-    {
-        await _channel.Writer.WriteAsync(message, cancellationToken);
-    }
+        => await _channel.Writer.WriteAsync(message, cancellationToken);
 
     /// <summary>
     /// Signals that no more messages will be enqueued.
     /// </summary>
-    public void Complete()
-    {
-        _channel.Writer.Complete();
-    }
+    public void Complete() => _channel.Writer.Complete();
 
     /// <summary>
     /// Runs the output writer loop, writing messages to stdout as NDJSON.

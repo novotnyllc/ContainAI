@@ -39,7 +39,7 @@ public sealed class AgentSpawnerTests
         var argsFile = Path.Combine(temp.Path, "args.log");
         var envFile = Path.Combine(temp.Path, "env.log");
 
-        await File.WriteAllTextAsync(fakeCaiPath, $$"""
+        var script = $$"""
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$CAI_NO_UPDATE_CHECK" > "{{envFile}}"
@@ -47,7 +47,8 @@ printf '%s\n' "$@" > "{{argsFile}}"
 while IFS= read -r _; do
   :
 done
-""", TestContext.Current.CancellationToken);
+""";
+        await File.WriteAllTextAsync(fakeCaiPath, script.ReplaceLineEndings("\n"), TestContext.Current.CancellationToken);
         EnsureExecutable(fakeCaiPath);
 
         using var session = new AcpSession("/tmp/workspace");
@@ -72,6 +73,48 @@ done
 
         var env = await File.ReadAllTextAsync(envFile, TestContext.Current.CancellationToken);
         Assert.Contains("1", env, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SpawnAgent_DirectSpawn_ForwardsStderrOutput()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = new TempDirectory();
+        var fakeAgentPath = Path.Combine(temp.Path, "fake-agent");
+        await File.WriteAllTextAsync(
+            fakeAgentPath,
+            "#!/usr/bin/env bash\nprintf 'forwarded-error\\n' >&2\n",
+            TestContext.Current.CancellationToken);
+        EnsureExecutable(fakeAgentPath);
+
+        using var session = new AcpSession("/tmp/workspace");
+        var stderrLineReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var stderr = new MatchNotifyingStringWriter("forwarded-error", stderrLineReceived);
+        var spawner = new AgentSpawner(directSpawn: true, stderr);
+
+        using var process = spawner.SpawnAgent(session, fakeAgentPath);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+
+        await stderrLineReceived.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        Assert.Contains("forwarded-error", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class MatchNotifyingStringWriter(string expected, TaskCompletionSource completionSource) : StringWriter
+    {
+        public override void WriteLine(string? value)
+        {
+            base.WriteLine(value);
+
+            if (!string.IsNullOrWhiteSpace(value) &&
+                value.Contains(expected, StringComparison.Ordinal))
+            {
+                completionSource.TrySetResult();
+            }
+        }
     }
 
     private static async Task WaitForFileAsync(string path, CancellationToken cancellationToken)

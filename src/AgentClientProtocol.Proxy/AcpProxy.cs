@@ -127,10 +127,7 @@ public sealed class AcpProxy : IDisposable
     /// <summary>
     /// Signals the proxy to stop.
     /// </summary>
-    public void Cancel()
-    {
-        _cts.Cancel();
-    }
+    public void Cancel() => _cts.Cancel();
 
     private async Task ProcessMessageAsync(string line)
     {
@@ -575,10 +572,7 @@ public sealed class AcpProxy : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        _cts.Dispose();
-    }
+    public void Dispose() => _cts.Dispose();
 
     private sealed class ErrorSink(TextWriter writer)
     {

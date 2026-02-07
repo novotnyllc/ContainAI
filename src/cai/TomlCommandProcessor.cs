@@ -378,19 +378,16 @@ internal static partial class TomlCommandProcessor
         return builder.ToString();
     }
 
-    private static object? NormalizeTomlValue(object? value)
+    private static object? NormalizeTomlValue(object? value) => value switch
     {
-        return value switch
-        {
-            null => null,
-            TomlTable table => table.ToDictionary(static pair => pair.Key, static pair => NormalizeTomlValue(pair.Value), StringComparer.Ordinal),
-            TomlTableArray tableArray => tableArray.Select(NormalizeTomlValue).ToList(),
-            IList<object?> list => list.Select(NormalizeTomlValue).ToList(),
-            DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
-            DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
-            _ => value,
-        };
-    }
+        null => null,
+        TomlTable table => table.ToDictionary(static pair => pair.Key, static pair => NormalizeTomlValue(pair.Value), StringComparer.Ordinal),
+        TomlTableArray tableArray => tableArray.Select(NormalizeTomlValue).ToList(),
+        IList<object?> list => list.Select(NormalizeTomlValue).ToList(),
+        DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
+        _ => value,
+    };
 
     private static void WriteJsonValue(StringBuilder builder, object? value)
     {
@@ -492,18 +489,15 @@ internal static partial class TomlCommandProcessor
         builder.Append('"');
     }
 
-    private static string FormatValue(object? value)
+    private static string FormatValue(object? value) => value switch
     {
-        return value switch
-        {
-            null => string.Empty,
-            bool boolValue => boolValue ? "true" : "false",
-            byte or sbyte or short or ushort or int or uint or long or ulong => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
-            float or double or decimal => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
-            string stringValue => stringValue,
-            _ => SerializeJsonValue(value),
-        };
-    }
+        null => string.Empty,
+        bool boolValue => boolValue ? "true" : "false",
+        byte or sbyte or short or ushort or int or uint or long or ulong => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+        float or double or decimal => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+        string stringValue => stringValue,
+        _ => SerializeJsonValue(value),
+    };
 
     private static bool TryGetNestedValue(TomlTable table, string key, out object? value)
     {
@@ -926,17 +920,11 @@ internal static partial class TomlCommandProcessor
         return $"\"{value}\"";
     }
 
-    private static string EscapeTomlKey(string value)
-    {
-        return value
+    private static string EscapeTomlKey(string value) => value
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
-    }
 
-    private static bool IsAnyTableHeader(string trimmed)
-    {
-        return trimmed.StartsWith("[", StringComparison.Ordinal);
-    }
+    private static bool IsAnyTableHeader(string trimmed) => trimmed.StartsWith("[", StringComparison.Ordinal);
 
     private static bool IsTargetHeader(string trimmed, string header)
     {
@@ -1196,9 +1184,15 @@ internal static partial class TomlCommandProcessor
                 UnixFileMode.UserWrite |
                 UnixFileMode.UserExecute);
         }
-        catch
+        catch (UnauthorizedAccessException ex)
         {
             // Best effort only.
+            _ = ex;
+        }
+        catch (IOException ex)
+        {
+            // Best effort only.
+            _ = ex;
         }
     }
 
@@ -1216,9 +1210,15 @@ internal static partial class TomlCommandProcessor
                 UnixFileMode.UserRead |
                 UnixFileMode.UserWrite);
         }
-        catch
+        catch (UnauthorizedAccessException ex)
         {
             // Best effort only.
+            _ = ex;
+        }
+        catch (IOException ex)
+        {
+            // Best effort only.
+            _ = ex;
         }
     }
 

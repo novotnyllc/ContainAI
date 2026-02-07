@@ -75,9 +75,15 @@ internal sealed class CommandRuntimeService : ICommandRuntimeService
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch
+            catch (InvalidOperationException ex)
             {
-                // Ignore cleanup failures during cancellation.
+                // Process exited between HasExited check and Kill.
+                _ = ex;
+            }
+            catch (Win32Exception ex)
+            {
+                // Non-fatal process termination failure during cancellation.
+                _ = ex;
             }
         });
 
