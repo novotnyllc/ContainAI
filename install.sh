@@ -888,6 +888,10 @@ WRAPPER_PART2
     chmod +x "$wrapper"
     success "Created cai wrapper at $wrapper"
 
+    local containai_docker_wrapper="$BIN_DIR/containai-docker"
+    ln -sfn "cai" "$containai_docker_wrapper"
+    success "Created containai-docker wrapper at $containai_docker_wrapper"
+
     # Check PATH and update shell config
     if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         warn "$BIN_DIR is not in your PATH"
