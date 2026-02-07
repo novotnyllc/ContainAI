@@ -442,7 +442,7 @@ jobs:
             -targetdir:artifacts/coverage/report \
             "-reporttypes:HtmlInline;Cobertura;Badges;TextSummary"
 
-      - name: Enforce .NET coverage threshold (>= 90%)
+      - name: Enforce .NET coverage thresholds (>= 90%)
         run: |
           set -euo pipefail
           summary_file="artifacts/coverage/report/Summary.txt"
@@ -453,6 +453,7 @@ jobs:
 
           containai_cli_pct="$(awk '/^ContainAI\.Cli[[:space:]]+[0-9.]+%$/ {gsub("%","",$NF); print $NF; exit}' "$summary_file")"
           abstractions_pct="$(awk '/^ContainAI\.Cli\.Abstractions[[:space:]]+[0-9.]+%$/ {gsub("%","",$NF); print $NF; exit}' "$summary_file")"
+          acp_proxy_pct="$(awk '/^AgentClientProtocol\.Proxy[[:space:]]+[0-9.]+%$/ {gsub("%","",$NF); print $NF; exit}' "$summary_file")"
 
           if [[ -z "$containai_cli_pct" ]]; then
             echo "ERROR: Could not determine coverage for ContainAI.Cli from $summary_file"
@@ -461,6 +462,11 @@ jobs:
 
           if [[ -z "$abstractions_pct" ]]; then
             echo "ERROR: Could not determine coverage for ContainAI.Cli.Abstractions from $summary_file"
+            exit 1
+          fi
+
+          if [[ -z "$acp_proxy_pct" ]]; then
+            echo "ERROR: Could not determine coverage for AgentClientProtocol.Proxy from $summary_file"
             exit 1
           fi
 
@@ -474,7 +480,12 @@ jobs:
             exit 1
           }
 
-          echo "Coverage gate passed: ContainAI.Cli=${containai_cli_pct}%, ContainAI.Cli.Abstractions=${abstractions_pct}%"
+          awk -v v="$acp_proxy_pct" 'BEGIN { exit (v + 0 >= 90 ? 0 : 1) }' || {
+            echo "ERROR: AgentClientProtocol.Proxy coverage is ${acp_proxy_pct}% (< 90%)"
+            exit 1
+          }
+
+          echo "Coverage gate passed: ContainAI.Cli=${containai_cli_pct}%, ContainAI.Cli.Abstractions=${abstractions_pct}%, AgentClientProtocol.Proxy=${acp_proxy_pct}%"
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4

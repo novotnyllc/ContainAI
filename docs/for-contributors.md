@@ -95,8 +95,8 @@ ContainAI uses a .NET 10 native CLI with strong typing and deterministic behavio
 | Pattern | Why |
 |---------|-----|
 | `System.CommandLine` entrypoint | Structured command/subcommand parsing |
-| `System.Text.Json` + `Tomlyn` | Native JSON/TOML parsing without external parsers |
-| `xunit.v3` + MTP | Consistent local/CI test execution and coverage |
+| `System.Text.Json` + `Tomlyn` + YAML parser | Native JSON/TOML/YAML parsing without external parsers |
+| `xunit.v3.mtp-v2` + Microsoft Testing Platform v2 | Consistent local/CI test execution and coverage |
 | NBGV (`dotnet nbgv`) | Versioning from Git metadata |
 
 See [.flow/memory/conventions.md](../.flow/memory/conventions.md) for the full list.
@@ -156,6 +156,7 @@ CI requires Cobertura coverage artifacts and merged reports. If no coverage arti
 CI also enforces minimum line coverage thresholds:
 - `ContainAI.Cli` >= 90%
 - `ContainAI.Cli.Abstractions` >= 90%
+- `AgentClientProtocol.Proxy` >= 90%
 
 ## Common Pitfalls
 

@@ -107,7 +107,7 @@ cai import
 
 **`cai import` prerequisites:**
 - Docker Desktop (Linux, macOS, or Windows WSL2)
-- No external JSON/TOML parser dependencies (native `.NET` parsing in `cai`)
+- No external JSON/TOML/YAML parser dependencies (native `.NET` parsing in `cai`)
 
 **macOS users:** Docker Desktop must have file-sharing enabled for your home directory (`$HOME`). This is typically enabled by default in Settings > Resources > File sharing.
 

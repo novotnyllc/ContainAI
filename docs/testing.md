@@ -121,8 +121,10 @@ E2E tests are documented for manual execution on self-hosted infrastructure.
 A hard threshold gate is enforced in CI:
 - `ContainAI.Cli` line coverage must be **>= 90%**
 - `ContainAI.Cli.Abstractions` line coverage must be **>= 90%**
+- `AgentClientProtocol.Proxy` line coverage must be **>= 90%**
 
 These thresholds are validated from the generated `Summary.txt` coverage report in CI.
+Test execution uses `xunit.v3.mtp-v2` on Microsoft Testing Platform v2.
 
 ## Test Resource Cleanup
 
