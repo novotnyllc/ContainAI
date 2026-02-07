@@ -43,9 +43,9 @@ flowchart LR
 ```
 
 The import/sync system has three main components that must stay synchronized:
-1. **Host-side sync** (`src/lib/import.sh`): Uses `_IMPORT_SYNC_MAP` to define source->target mappings for rsync
+1. **Host-side sync** (`src/cai/NativeLifecycleCommandRuntime.cs`): Uses manifest-driven native copy rules for source->target mappings
 2. **Container image symlinks** (`src/container/Dockerfile.agents`): Creates build-time symlinks from home directories to `/mnt/agent-data`
-3. **Runtime init** (`src/container/containai-init.sh`): Ensures volume directory structure exists on first boot
+3. **Runtime init** (`src/cai/ContainerRuntimeCommandService.cs`): Ensures volume directory structure exists on first boot
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
@@ -466,15 +466,15 @@ mytool() {
 
 ### Link Repair
 
-The `link-repair.sh` script reads both built-in and user link specs to repair symlinks:
+The `cai system link-repair` command reads both built-in and user link specs to repair symlinks:
 - Built-in: `/usr/local/lib/containai/link-spec.json`
 - User: `/mnt/agent-data/containai/user-link-spec.json`
 
 ## References
 
-- Import implementation: `src/lib/import.sh`
+- Import implementation: `src/cai/NativeLifecycleCommandRuntime.cs`
 - Container symlinks: `src/container/Dockerfile.agents`
 - Runtime init: `src/container/containai-init.sh`
 - Per-agent manifests: `src/manifests/*.toml` (single source of truth)
-- User manifest generators: `src/container/lib/gen-user-links.sh`, `src/container/lib/gen-user-wrappers.sh`
+- User manifest generators: `src/cai/ManifestGenerators.cs` and `src/cai/ManifestApplier.cs`
 - User guide: [Custom Tools Guide](custom-tools.md)

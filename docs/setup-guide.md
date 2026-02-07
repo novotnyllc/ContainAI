@@ -247,8 +247,8 @@ ContainAI installs and manages its own dockerd bundle on WSL2 - you do not need 
 #### Run Setup
 
 ```bash
-# Source ContainAI CLI
-source /path/to/containai/src/containai.sh
+# Ensure cai is installed and on PATH
+export PATH="$HOME/.local/bin:$PATH"
 
 # Run setup (silent by default)
 cai setup
@@ -350,8 +350,8 @@ ContainAI installs and manages its own dockerd bundle on Linux - you do not need
 #### Run Setup
 
 ```bash
-# Source ContainAI CLI
-source /path/to/containai/src/containai.sh
+# Ensure cai is installed and on PATH
+export PATH="$HOME/.local/bin:$PATH"
 
 # Run setup (silent by default)
 cai setup
@@ -407,8 +407,8 @@ macOS uses Lima to run a Linux VM with Docker and Sysbox. This provides the same
 #### Run Setup
 
 ```bash
-# Source ContainAI CLI
-source /path/to/containai/src/containai.sh
+# Ensure cai is installed and on PATH
+export PATH="$HOME/.local/bin:$PATH"
 
 # Run setup (silent by default; may take several minutes for Lima VM creation)
 cai setup

@@ -51,8 +51,8 @@ flowchart TD
         BIC
     end
 
-    SM -.->|"What we protect"| SRC1["src/lib/container.sh"]
-    SM -.->|"Detection logic"| SRC2["src/lib/doctor.sh"]
+    SM -.->|"What we protect"| SRC1["src/cai/NativeSessionCommandRuntime.cs"]
+    SM -.->|"Detection logic"| SRC2["src/cai/NativeLifecycleCommandRuntime.cs"]
     ARCH -.->|"Runtime init/link security"| SRC3["src/cai/ContainerRuntimeCommandService.cs"]
 ```
 

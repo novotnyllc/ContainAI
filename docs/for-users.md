@@ -4,11 +4,11 @@
 
 ## Start Here
 
-1. **Install** - Clone the repo and source the CLI:
+1. **Install** - Clone the repo and install `cai`:
    ```bash
    git clone https://github.com/novotnyllc/containai.git
    cd containai
-   source src/containai.sh
+   ./install.sh --yes --no-setup
    ```
 
 2. **Setup isolation** (one-time):

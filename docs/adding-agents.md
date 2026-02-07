@@ -430,8 +430,8 @@ The generators create container artifacts from the per-agent manifest files.
 ### Generator Commands
 
 ```bash
-# Generate import map (creates _IMPORT_SYNC_MAP)
-dotnet run --project src/cai -- manifest generate import-map src/manifests src/lib/import-sync-map.sh
+# Generate import map metadata
+dotnet run --project src/cai -- manifest generate import-map src/manifests artifacts/container-generated/import-sync-map.sh
 
 # Generate Dockerfile symlink script
 dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests artifacts/container-generated/symlinks.sh
@@ -458,14 +458,14 @@ dotnet run --project src/cai -- manifest check src/manifests
 
 This command:
 - Parses all entries from `src/manifests/*.toml`
-- Compares against the generated `src/lib/import-sync-map.sh`
+- Validates generated manifest-derived artifacts and mappings
 - Reports any mismatches
 
 CI enforces this check - builds will fail if manifests and generated code diverge.
 
 ### What the Generators Create
 
-- **import-sync-map.sh**: Generated `_IMPORT_SYNC_MAP` array from manifest entries
+- **import-sync-map.sh**: Generated import map metadata from manifest entries
 - **symlinks.sh**: Shell script run during Docker build to create symlinks from container home to data volume paths
 - **init-dirs.sh**: Shell script run on container first boot to create directory structure with correct permissions
 - **link-spec.json**: JSON specification for runtime link verification and repair
@@ -500,7 +500,7 @@ These tests require a Linux host with sysbox installed.
 
 ```bash
 # Build image with new agent
-./src/build.sh
+dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Create and start container
 cai run --container test-agent
@@ -704,8 +704,8 @@ dotnet run --project src/cai -- manifest check src/manifests
 | File | Purpose |
 |------|---------|
 | `src/manifests/*.toml` | Per-agent manifest files (authoritative source) |
-| `src/lib/import-sync-map.sh` | Generated `_IMPORT_SYNC_MAP` from manifests |
-| `src/lib/import.sh` | Import implementation (uses `_IMPORT_SYNC_MAP`) |
+| `artifacts/container-generated/import-sync-map.sh` | Generated import map metadata |
+| `src/cai/NativeLifecycleCommandRuntime.cs` | Import implementation |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
 | `cai manifest generate ...` | Generator commands for container artifacts |
 | `cai manifest check src/manifests` | Manifest/import map consistency check |

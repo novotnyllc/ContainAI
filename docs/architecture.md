@@ -474,17 +474,16 @@ Inside the system container (`/etc/docker/daemon.json`):
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
-        Main["src/containai.sh<br/>(entry point)"]
-        Cmds["Commands<br/>(run, shell, doctor, import)"]
+        Main["src/cai/Program.cs<br/>(entry point)"]
+        Cmds["src/ContainAI.Cli<br/>(System.CommandLine surface)"]
     end
 
     subgraph Lib["Library Layer"]
         direction TB
-        Core["core.sh<br/>(logging)"]
-        SSH["ssh.sh<br/>(SSH infrastructure)"]
-        Container["container.sh<br/>(lifecycle)"]
-        Config["config.sh<br/>(TOML parsing)"]
-        Doctor["doctor.sh<br/>(health checks)"]
+        Runtime["NativeLifecycleCommandRuntime.cs<br/>(core command orchestration)"]
+        Session["NativeSessionCommandRuntime.cs<br/>(run/shell/exec lifecycle)"]
+        Container["ContainerRuntimeCommandService.cs<br/>(container-internal runtime)"]
+        Manifest["ManifestTomlParser.cs<br/>(TOML parsing)"]
     end
 
     subgraph Runtime["Container Runtime"]
@@ -505,15 +504,15 @@ flowchart LR
 
 ## Modular Library Structure
 
-The CLI sources modular shell libraries from `src/lib/`:
+The CLI is split into native C# runtime components:
 
-| Module | Purpose | Key Functions |
-|--------|---------|---------------|
-| `core.sh` | Logging utilities | `_cai_info`, `_cai_error`, `_cai_warn`, `_cai_ok` |
-| `platform.sh` | OS/platform detection | `_cai_detect_platform`, `_cai_is_wsl` |
-| `docker.sh` | Docker helpers | `_cai_docker_available`, `_cai_docker_version` |
-| `doctor.sh` | Health checks | `_cai_doctor`, `_cai_select_context` |
-| `config.sh` | TOML config parsing | `_containai_parse_config`, `_containai_resolve_volume` |
+| Module | Purpose | Key Types |
+|--------|---------|-----------|
+| `src/cai/Program.cs` | Native host entrypoint | `Program` |
+| `src/ContainAI.Cli/` | Command parser/routing | `CaiCli`, `RootCommandBuilder` |
+| `src/cai/NativeLifecycleCommandRuntime.cs` | Host command orchestration | `NativeLifecycleCommandRuntime` |
+| `src/cai/NativeSessionCommandRuntime.cs` | Session lifecycle and SSH flow | `NativeSessionCommandRuntime` |
+| `src/cai/ContainerRuntimeCommandService.cs` | Container-side init/link/runtime commands | `ContainerRuntimeCommandService` |
 | `container.sh` | Container lifecycle | `_containai_start_container`, `_containai_stop_all` |
 | `import.sh` | Dotfile sync | `_containai_import` |
 | `export.sh` | Volume backup | `_containai_export` |

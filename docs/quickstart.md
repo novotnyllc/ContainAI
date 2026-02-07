@@ -21,28 +21,21 @@ git clone https://github.com/novotnyllc/containai.git
 cd containai
 ```
 
-**Verify:**
-```bash
-ls src/containai.sh
-# Should show: src/containai.sh
-```
-
-## Step 2: Source the CLI
+## Step 2: Install the CLI
 
 ```bash
-source src/containai.sh
+./install.sh --yes --no-setup
 ```
 
 **Verify:**
 ```bash
 cai --help | head -3
 # Should show:
-# ContainAI - Run AI coding agents in a secure Docker sandbox
-#
-# Usage: containai [subcommand] [options]
+# ContainAI native CLI
+# ...
 ```
 
-> **Note:** You must source the script (not execute it) to add the `cai` command to your shell. Add this to your `~/.bashrc` for persistence.
+> **Note:** `install.sh` places `cai` in `~/.local/bin` by default. Ensure `~/.local/bin` is on your `PATH`.
 
 ## CLI Output Behavior
 
@@ -307,10 +300,10 @@ See [Configuration Reference](configuration.md#template-section) for template co
 
 ```bash
 # Add to ~/.bashrc for permanent access
-echo 'source /path/to/containai/src/containai.sh' >> ~/.bashrc
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 
-# Or source manually each session
-source src/containai.sh
+# Or in current shell session
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
 ### Platform-specific notes
@@ -319,7 +312,7 @@ source src/containai.sh
 |----------|-------|-------|
 | Linux | bash | Native support |
 | WSL2 | bash | Native support |
-| macOS | zsh default | Run `bash` first, then source |
+| macOS | zsh default | Run `bash` first if needed |
 | macOS | bash | Direct support |
 
 ### Minimum versions

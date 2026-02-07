@@ -4,7 +4,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 ## Maintenance Policy
 
-**Source of truth**: The CLI implementation (`src/containai.sh`) is the authoritative source. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output (e.g., `-D/--debug`, `--credentials`).
+**Source of truth**: The native CLI implementation (`src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/`) is authoritative. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output.
 
 **Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell completion scripts also support these advanced flags.
 
@@ -14,7 +14,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Check `src/containai.sh` for the canonical flag definitions. The completion flags (search for `run_flags=`, `shell_flags=`, etc.) list all supported options.
+**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/RootCommandBuilder.cs` for canonical command/flag routing.
 
 ## Quick Reference
 
@@ -146,8 +146,8 @@ containai [subcommand] [options]
 
 **Notes:**
 - `cai` and `containai` are aliases
-- **Installed usage:** The `install.sh` script creates a wrapper at `~/.local/bin/cai` that sources automatically
-- **Development usage:** Source directly with `source src/containai.sh`
+- **Installed usage:** The `install.sh` script installs `cai` to `~/.local/bin/cai`
+- **Development usage:** Run directly with `dotnet run --project src/cai -- <command>`
 - Requires Bash 4.0+
 
 ---

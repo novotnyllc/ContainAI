@@ -74,7 +74,7 @@ from_host = true
 #           run: |
 #             # Install ContainAI
 #             ./install.sh
-#             source src/containai.sh
+#             export PATH="$HOME/.local/bin:$PATH"
 #
 #         - name: Run agent task
 #           env:
@@ -86,7 +86,7 @@ from_host = true
 #         - name: Cleanup
 #           if: always()
 #           run: |
-#             source src/containai.sh
+#             export PATH="$HOME/.local/bin:$PATH"
 #             cai docker volume rm "ci-${{ github.run_id }}" || true
 # =============================================================================
 
@@ -101,10 +101,10 @@ from_host = true
 #       CONTAINAI_DATA_VOLUME: "ci-${CI_PIPELINE_ID}"
 #     script:
 #       - ./install.sh
-#       - source src/containai.sh
+#       - export PATH="$HOME/.local/bin:$PATH"
 #       - cai -- "Review changes since $CI_MERGE_REQUEST_DIFF_BASE_SHA"
 #     after_script:
-#       - source src/containai.sh && cai docker volume rm "ci-${CI_PIPELINE_ID}" || true
+#       - export PATH="$HOME/.local/bin:$PATH" && cai docker volume rm "ci-${CI_PIPELINE_ID}" || true
 # =============================================================================
 
 # =============================================================================
