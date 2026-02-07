@@ -1,4 +1,0 @@
-# Native binaries directory
-# acp-proxy - ACP terminating proxy for editor integration
-#
-# Build and install: ../acp-proxy/build.sh --install
