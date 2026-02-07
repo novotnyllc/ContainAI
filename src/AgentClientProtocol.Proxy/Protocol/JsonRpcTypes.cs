@@ -1,4 +1,5 @@
 // JSON-RPC 2.0 message types with System.Text.Json source generation for AOT
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -63,6 +64,7 @@ public sealed class JsonRpcError
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(JsonRpcMessage))]
 [JsonSerializable(typeof(JsonRpcError))]
+[ExcludeFromCodeCoverage]
 public sealed partial class AcpJsonContext : JsonSerializerContext
 {
 }

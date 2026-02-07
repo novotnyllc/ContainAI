@@ -11,16 +11,19 @@ public sealed class AgentSpawner : IAgentSpawner
 {
     private readonly bool _directSpawn;
     private readonly TextWriter _stderr;
+    private readonly string _caiExecutable;
 
     /// <summary>
     /// Creates a new agent spawner.
     /// </summary>
     /// <param name="directSpawn">If true, spawns the agent directly; otherwise wraps with cai exec.</param>
     /// <param name="stderr">Stream to forward agent stderr to.</param>
-    public AgentSpawner(bool directSpawn, TextWriter stderr)
+    /// <param name="caiExecutable">ContainAI executable path used for container-side execution.</param>
+    public AgentSpawner(bool directSpawn, TextWriter stderr, string caiExecutable = "cai")
     {
         _directSpawn = directSpawn;
         _stderr = stderr;
+        _caiExecutable = caiExecutable;
     }
 
     /// <summary>
@@ -73,7 +76,7 @@ public sealed class AgentSpawner : IAgentSpawner
             // 3. If found, exec's the agent with --acp
             var psi = new ProcessStartInfo
             {
-                FileName = "cai",
+                FileName = _caiExecutable,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -119,9 +122,9 @@ public sealed class AgentSpawner : IAgentSpawner
                     await _stderr.WriteLineAsync(line);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore errors during stderr forwarding
+                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
             }
         });
 
