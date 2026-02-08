@@ -4,7 +4,7 @@ Source code for ContainAI's native `.NET 10` CLI and container artifacts.
 
 ## Overview
 
-ContainAI is now implemented as a native `.NET 10` CLI (`cai`) with `System.CommandLine` command routing and NativeAOT publish support.
+ContainAI is implemented as a native `.NET 10` CLI (`cai`) with `System.CommandLine` command routing and NativeAOT publish support.
 
 Key implementation areas:
 

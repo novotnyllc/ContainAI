@@ -10,15 +10,34 @@
    cd containai
    ```
 
-2. **Build the native CLI**:
+2. **Bootstrap local install paths and wrapper**:
+   ```bash
+   ./install.sh --local --yes --no-setup
+   ```
+
+3. **Build the native CLI and test projects**:
    ```bash
    dotnet build ContainAI.slnx -c Release
    ```
 
-3. **Verify your environment**:
+4. **Verify your environment**:
    ```bash
    cai doctor
    ```
+
+## Build Container Images (When Required)
+
+Build image layers whenever your change affects container artifacts, runtime images, Dockerfiles, manifests consumed by image assembly, or systemd/runtime packaging behavior.
+
+```bash
+# Build all layers
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+
+# Build a single layer during iteration
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+```
+
+For pure CLI/library/docs changes, image rebuilds are optional unless tests in your branch explicitly depend on freshly built images.
 
 ## Recommended Reading Order
 
