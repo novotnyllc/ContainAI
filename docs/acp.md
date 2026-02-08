@@ -76,6 +76,7 @@ sequenceDiagram
 - **Session IDs**: Proxy namespaces session IDs to prevent collisions between agents
 - **Output**: Serialized through single writer to prevent interleaved output
 - **Transport runtime**: Agent processes are launched through `CliWrap` and bridged with channel-based stdin/stdout forwarding (no direct `Process.Start` calls in production ACP code)
+- **Protocol model**: JSON-RPC contracts are strongly typed (`JsonRpcEnvelope`, `JsonRpcId`, `JsonRpcData`) and source-generated for AOT safety.
 
 ## Multiple Sessions
 
