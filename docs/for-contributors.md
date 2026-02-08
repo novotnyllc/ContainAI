@@ -101,7 +101,7 @@ ContainAI uses a .NET 10 native CLI with strong typing and deterministic behavio
 
 See [.flow/memory/conventions.md](../.flow/memory/conventions.md) for the full list.
 
-**Command surface**: Commands/options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. Shell completion uses the built-in `cai completion suggest` path; `dotnet-suggest` is not required.
+**Command surface**: Commands/options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and related command builder files. Shell completion uses the built-in `cai completion suggest` path; `dotnet-suggest` is not required.
 For core session commands (`run`, `shell`, `exec`), parsed `System.CommandLine` option models are passed directly into runtime typed APIs (no argv reconstruction/reparse loop in the call path).
 
 ### Verbose Pattern

@@ -504,7 +504,7 @@ flowchart LR
 
 ### CLI Command Surface
 
-ContainAI's CLI command surface is **statically declared** in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. There is no runtime discovery or plugin-based command loading; the compiled command model is the source of truth for parsing and completion.
+ContainAI's CLI command surface is **statically declared** in `src/ContainAI.Cli/RootCommandBuilder.cs` and related command builder files. There is no runtime discovery or plugin-based command loading; the compiled command model is the source of truth for parsing and completion.
 
 Shell completion uses the built-in `cai completion suggest` path implemented by the CLI itself. This removes any dependency on external completion helpers such as `dotnet-suggest`.
 

@@ -73,7 +73,7 @@ These tests cover:
 - Plugin loading
 - Symlink handling
 - Environment variable import
-- Hot-reload and data migration scenarios
+- Hot-reload and data persistence scenarios
 
 ### Tier 3: E2E Smoke Tests (Manual - requires sysbox)
 

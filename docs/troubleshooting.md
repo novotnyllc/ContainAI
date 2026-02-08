@@ -481,7 +481,7 @@ docker --context containai-docker exec <container-name> cat /etc/ssh/ssh_host_ed
    cai run /path/to/workspace --fresh
    ```
 
-2. **Manually clean the old key:**
+2. **Manually clean the stale key:**
    ```bash
    ssh-keygen -R "[localhost]:2301" -f ~/.config/containai/known_hosts
    ```
@@ -1054,7 +1054,7 @@ or
 ```
 [ERROR] Invalid credentials
 ```
-or agent cannot access GitHub, APIs, or other services that previously worked.
+or agent cannot access GitHub, APIs, or other services that should be reachable.
 
 **Diagnosis:**
 ```bash

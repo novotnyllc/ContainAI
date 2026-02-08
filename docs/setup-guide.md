@@ -162,21 +162,15 @@ On Linux and WSL2, ContainAI installs and manages its own Docker daemon bundle. 
 ```
 /opt/containai/
 ├── docker/
-│   ├── 27.3.1/              # Previous version (kept for rollback)
-│   │   ├── dockerd
-│   │   ├── docker
-│   │   ├── containerd
-│   │   └── ...
-│   └── 27.4.0/              # Current version
+│   └── <version>/
 │       ├── dockerd
 │       ├── docker
 │       ├── containerd
 │       └── ...
 ├── bin/                     # Stable symlinks (systemd uses these)
-│   ├── dockerd -> ../docker/27.4.0/dockerd
-│   ├── docker -> ../docker/27.4.0/docker
+│   ├── dockerd -> ../docker/<version>/dockerd
+│   ├── docker -> ../docker/<version>/docker
 │   └── ...
-└── VERSION                  # Contains current version string
 ```
 
 ### Updating the bundle
@@ -849,7 +843,7 @@ cai update --stop-containers
 ### Version Detection
 
 ContainAI checks for updates by comparing:
-- **dockerd bundle**: Local version in `/opt/containai/VERSION` vs latest from download.docker.com
+- **dockerd bundle**: Local version from `/opt/containai/bin/dockerd --version` vs latest from download.docker.com
 - **Sysbox**: Local `sysbox-runc --version` vs latest from GitHub releases
 - **Systemd unit**: Local unit content vs expected template
 

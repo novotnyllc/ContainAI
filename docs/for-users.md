@@ -76,7 +76,7 @@ Choose your workflow:
 | Mode | Command | Use Case |
 |------|---------|----------|
 | Persistent | `cai` | Long-lived dev environment with saved state |
-| Fresh volume | `cai --reset` | Starts fresh with new volume (old preserved) |
+| Fresh volume | `cai --reset` | Starts fresh with a new volume (existing volume retained for manual cleanup) |
 | Force recreate | `cai --restart` | Recreate container, keep data volume |
 
 See [Lifecycle](lifecycle.md) for details on container and volume management.

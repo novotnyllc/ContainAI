@@ -6,7 +6,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 **Source of truth**: The native CLI implementation (`src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/`) is authoritative. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output.
 
-**Command surface**: Commands and options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. There is no runtime discovery or plugin-based command loading.
+**Command surface**: Commands and options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and related command builder files. There is no runtime discovery or plugin-based command loading.
 
 **Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell integrations can call `cai completion suggest` for advanced completion contexts.
 
@@ -16,7 +16,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs`, `src/ContainAI.Cli/RootCommandBuilder.cs`, and `src/ContainAI.Cli/CommandCatalog.cs` for canonical command/flag routing.
+**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/RootCommandBuilder.cs` for canonical command/flag routing.
 
 ## Quick Reference
 
@@ -489,7 +489,7 @@ cai setup [options]
 
 **What It Does (Linux):**
 1. Detects distribution
-2. Cleans up previous ContainAI paths
+2. Cleans up existing ContainAI paths
 3. Downloads and installs Sysbox
 4. Creates isolated Docker daemon:
    - Config: `/etc/containai/docker/daemon.json`

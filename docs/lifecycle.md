@@ -203,7 +203,7 @@ This removes and recreates the container while preserving the data volume. Usefu
 cai --reset
 ```
 
-This generates a new unique volume name, effectively starting from scratch. The old volume remains but is no longer referenced.
+This generates a new unique volume name, effectively starting from scratch. The prior volume remains available for manual cleanup.
 
 ## Volume Lifecycle
 
@@ -227,7 +227,7 @@ Data volumes persist independently of containers. This separation ensures your a
 | `cai stop` | Stopped | Preserved |
 | `cai stop --remove` | Removed | Preserved |
 | `cai --fresh` | Recreated | Preserved |
-| `cai --reset` | Recreated | New volume (old preserved) |
+| `cai --reset` | Recreated | New volume (existing volume retained for manual cleanup) |
 | `docker volume rm` | N/A | Deleted |
 
 ### Finding Your Volume
