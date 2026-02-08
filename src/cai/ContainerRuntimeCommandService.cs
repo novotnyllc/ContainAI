@@ -146,7 +146,32 @@ internal sealed class ContainerRuntimeCommandService
             await LogInfoAsync(quiet, "ContainAI initialization complete").ConfigureAwait(false);
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (JsonException ex)
+        {
+            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (ArgumentException ex)
+        {
+            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (NotSupportedException ex)
         {
             await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -228,7 +253,32 @@ internal sealed class ContainerRuntimeCommandService
                 {
                     await ProcessLinkSpecAsync(userSpecPath, mode, quiet, "user-defined links", stats, cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (InvalidOperationException ex)
+                {
+                    stats.Errors++;
+                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (IOException ex)
+                {
+                    stats.Errors++;
+                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    stats.Errors++;
+                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (JsonException ex)
+                {
+                    stats.Errors++;
+                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (ArgumentException ex)
+                {
+                    stats.Errors++;
+                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (NotSupportedException ex)
                 {
                     stats.Errors++;
                     await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
@@ -254,7 +304,32 @@ internal sealed class ContainerRuntimeCommandService
 
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (JsonException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (ArgumentException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (NotSupportedException ex)
         {
             await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -543,7 +618,32 @@ internal sealed class ContainerRuntimeCommandService
             {
                 _ = ManifestApplier.ApplyInitDirs(manifestsDir, dataDir);
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                EnsureFallbackVolumeStructure(dataDir);
+            }
+            catch (IOException ex)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                EnsureFallbackVolumeStructure(dataDir);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                EnsureFallbackVolumeStructure(dataDir);
+            }
+            catch (JsonException ex)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                EnsureFallbackVolumeStructure(dataDir);
+            }
+            catch (ArgumentException ex)
+            {
+                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                EnsureFallbackVolumeStructure(dataDir);
+            }
+            catch (NotSupportedException ex)
             {
                 await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
@@ -585,9 +685,14 @@ internal sealed class ContainerRuntimeCommandService
 
         try
         {
-            _ = File.OpenRead(envFilePath);
+            using var stream = File.OpenRead(envFilePath);
         }
-        catch
+        catch (IOException)
+        {
+            await _stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
+            return;
+        }
+        catch (UnauthorizedAccessException)
         {
             await _stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
             return;
@@ -819,7 +924,27 @@ internal sealed class ContainerRuntimeCommandService
             Directory.CreateDirectory(Path.GetDirectoryName(userSpecPath)!);
             await File.WriteAllTextAsync(userSpecPath, userSpec.Content).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (JsonException ex)
+        {
+            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (ArgumentException ex)
+        {
+            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (NotSupportedException ex)
         {
             await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
@@ -902,7 +1027,23 @@ internal sealed class ContainerRuntimeCommandService
             var mode = File.GetUnixFileMode(path);
             return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
         }
-        catch
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
         {
             return false;
         }
@@ -931,7 +1072,11 @@ internal sealed class ContainerRuntimeCommandService
         {
             return (await File.ReadAllTextAsync(path).ConfigureAwait(false)).Trim();
         }
-        catch
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
         {
             return null;
         }
@@ -1002,7 +1147,15 @@ internal sealed class ContainerRuntimeCommandService
         {
             return string.Equals(Environment.UserName, "root", StringComparison.Ordinal);
         }
-        catch
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
         {
             return false;
         }

@@ -321,8 +321,8 @@ internal static partial class ContainAiDockerProxy
 
         if (!quiet)
         {
-            Console.Error.WriteLine($"[cai-docker] Warning: volume {dataVolume} may contain credentials");
-            Console.Error.WriteLine("[cai-docker] Warning: set enableCredentials=true for trusted repositories");
+            await Console.Error.WriteLineAsync($"[cai-docker] Warning: volume {dataVolume} may contain credentials").ConfigureAwait(false);
+            await Console.Error.WriteLineAsync("[cai-docker] Warning: set enableCredentials=true for trusted repositories").ConfigureAwait(false);
         }
 
         return false;
@@ -387,7 +387,7 @@ internal static partial class ContainAiDockerProxy
         {
             try
             {
-                var fileText = File.ReadAllText(file).Trim();
+                var fileText = (await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false)).Trim();
                 if (int.TryParse(fileText, out var parsedPort))
                 {
                     reservedPorts.Add(parsedPort);
@@ -427,7 +427,11 @@ internal static partial class ContainAiDockerProxy
                 .GetActiveTcpListeners()
                 .Any(endpoint => endpoint.Port == port);
         }
-        catch
+        catch (NetworkInformationException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
         {
             return false;
         }
@@ -558,7 +562,27 @@ internal static partial class ContainAiDockerProxy
 
             return false;
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            stderr.WriteLine($"[cai-docker] Warning: failed to parse devcontainer config: {ex.Message}");
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            stderr.WriteLine($"[cai-docker] Warning: failed to parse devcontainer config: {ex.Message}");
+            return false;
+        }
+        catch (JsonException ex)
+        {
+            stderr.WriteLine($"[cai-docker] Warning: failed to parse devcontainer config: {ex.Message}");
+            return false;
+        }
+        catch (ArgumentException ex)
+        {
+            stderr.WriteLine($"[cai-docker] Warning: failed to parse devcontainer config: {ex.Message}");
+            return false;
+        }
+        catch (NotSupportedException ex)
         {
             stderr.WriteLine($"[cai-docker] Warning: failed to parse devcontainer config: {ex.Message}");
             return false;
@@ -675,14 +699,13 @@ internal static partial class ContainAiDockerProxy
     {
         Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 
-        FileStream? stream = null;
         for (var attempt = 0; attempt < 100; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                break;
+                await using var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None).ConfigureAwait(false);
+                return await action().ConfigureAwait(false);
             }
             catch (IOException)
             {
@@ -690,15 +713,7 @@ internal static partial class ContainAiDockerProxy
             }
         }
 
-        if (stream is null)
-        {
-            return await action().ConfigureAwait(false);
-        }
-
-        await using (stream.ConfigureAwait(false))
-        {
-            return await action().ConfigureAwait(false);
-        }
+        return await action().ConfigureAwait(false);
     }
 
     private static async Task<int> RunDockerInteractiveAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -726,7 +741,7 @@ internal static partial class ContainAiDockerProxy
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"Failed to start 'docker': {ex.Message}");
+            await Console.Error.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
 
@@ -759,7 +774,15 @@ internal static partial class ContainAiDockerProxy
                 return new ProcessResult(127, string.Empty, "docker process failed to start");
             }
         }
-        catch (Exception ex)
+        catch (Win32Exception ex)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (NotSupportedException ex)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }
