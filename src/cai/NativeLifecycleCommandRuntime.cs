@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
@@ -63,6 +64,24 @@ internal sealed partial class NativeLifecycleCommandRuntime
             "system" => containerRuntimeCommandService.RunAsync(args, cancellationToken),
             _ => Task.FromResult(1),
         };
+    }
+
+    public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return sessionRuntime.RunRunAsync(options, cancellationToken);
+    }
+
+    public Task<int> RunShellAsync(ShellCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return sessionRuntime.RunShellAsync(options, cancellationToken);
+    }
+
+    public Task<int> RunExecAsync(ExecCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return sessionRuntime.RunExecAsync(options, cancellationToken);
     }
 
     private async Task<int> RunDockerAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)

@@ -1,6 +1,7 @@
 using System.Security;
 using System.Text;
 using System.Text.Json;
+using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
@@ -59,6 +60,12 @@ internal sealed class NativeSessionCommandRuntime
         return await RunSessionAsync(parse.Options with { Mode = SessionMode.Run }, cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunSessionAsync(ToSessionOptions(options), cancellationToken);
+    }
+
     public async Task<int> RunShellAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var parse = ParseShellOptions(args);
@@ -75,6 +82,12 @@ internal sealed class NativeSessionCommandRuntime
         }
 
         return await RunSessionAsync(parse.Options with { Mode = SessionMode.Shell }, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<int> RunShellAsync(ShellCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunSessionAsync(ToSessionOptions(options), cancellationToken);
     }
 
     public async Task<int> RunExecAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -94,6 +107,78 @@ internal sealed class NativeSessionCommandRuntime
 
         return await RunSessionAsync(parse.Options with { Mode = SessionMode.Exec }, cancellationToken).ConfigureAwait(false);
     }
+
+    public Task<int> RunExecAsync(ExecCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunSessionAsync(ToSessionOptions(options), cancellationToken);
+    }
+
+    private static SessionCommandOptions ToSessionOptions(RunCommandOptions options)
+        => SessionCommandOptions.Create(SessionMode.Run) with
+        {
+            Workspace = options.Workspace,
+            DataVolume = options.DataVolume,
+            ExplicitConfig = options.Config,
+            Container = options.Container,
+            Template = options.Template,
+            ImageTag = options.ImageTag,
+            Channel = options.Channel,
+            Memory = options.Memory,
+            Cpus = options.Cpus,
+            Credentials = options.Credentials,
+            AcknowledgeCredentialRisk = options.AcknowledgeCredentialRisk,
+            Fresh = options.Fresh,
+            Force = options.Force,
+            Detached = options.Detached,
+            Quiet = options.Quiet,
+            Verbose = options.Verbose,
+            Debug = options.Debug,
+            DryRun = options.DryRun,
+            CommandArgs = options.CommandArgs,
+            EnvVars = [.. options.Env],
+        };
+
+    private static SessionCommandOptions ToSessionOptions(ShellCommandOptions options)
+        => SessionCommandOptions.Create(SessionMode.Shell) with
+        {
+            Workspace = options.Workspace,
+            DataVolume = options.DataVolume,
+            ExplicitConfig = options.Config,
+            Container = options.Container,
+            Template = options.Template,
+            ImageTag = options.ImageTag,
+            Channel = options.Channel,
+            Memory = options.Memory,
+            Cpus = options.Cpus,
+            Fresh = options.Fresh,
+            Reset = options.Reset,
+            Force = options.Force,
+            Quiet = options.Quiet,
+            Verbose = options.Verbose,
+            Debug = options.Debug,
+            DryRun = options.DryRun,
+            CommandArgs = options.CommandArgs,
+            EnvVars = [],
+        };
+
+    private static SessionCommandOptions ToSessionOptions(ExecCommandOptions options)
+        => SessionCommandOptions.Create(SessionMode.Exec) with
+        {
+            Workspace = options.Workspace,
+            DataVolume = options.DataVolume,
+            ExplicitConfig = options.Config,
+            Container = options.Container,
+            Template = options.Template,
+            Channel = options.Channel,
+            Fresh = options.Fresh,
+            Force = options.Force,
+            Quiet = options.Quiet,
+            Verbose = options.Verbose,
+            Debug = options.Debug,
+            CommandArgs = options.CommandArgs,
+            EnvVars = [],
+        };
 
     private async Task<int> RunSessionAsync(SessionCommandOptions options, CancellationToken cancellationToken)
     {
