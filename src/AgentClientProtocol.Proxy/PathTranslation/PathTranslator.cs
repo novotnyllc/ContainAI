@@ -47,12 +47,9 @@ public sealed class PathTranslator
         {
             return hostPath; // Invalid path format
         }
-        catch (NotSupportedException)
+        catch (SystemException ex) when (ex is NotSupportedException or PathTooLongException)
         {
-            return hostPath; // Invalid path format
-        }
-        catch (PathTooLongException)
-        {
+            _ = ex;
             return hostPath; // Invalid path format
         }
 

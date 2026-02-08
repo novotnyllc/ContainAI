@@ -75,6 +75,7 @@ sequenceDiagram
 - **Framing**: NDJSON (newline-delimited JSON), not `Content-Length` headers like LSP
 - **Session IDs**: Proxy namespaces session IDs to prevent collisions between agents
 - **Output**: Serialized through single writer to prevent interleaved output
+- **Transport runtime**: Agent processes are launched through `CliWrap` and bridged with channel-based stdin/stdout forwarding (no direct `Process.Start` calls in production ACP code)
 
 ## Multiple Sessions
 

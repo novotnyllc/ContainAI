@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Reflection;
 using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
 using Xunit;
@@ -248,6 +249,27 @@ public sealed class AcpProxyTests
         Assert.DoesNotContain("Fatal error", stderrWriter.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void MergeExtensionData_WithSourceEntries_ClonesIntoDestination()
+    {
+        var mergeMethod = typeof(AcpProxy).GetMethod(
+            "MergeExtensionData",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(mergeMethod);
+
+        var destination = new Dictionary<string, JsonElement>();
+        using var json = JsonDocument.Parse("""{"custom":"value"}""");
+        var source = new Dictionary<string, JsonElement>
+        {
+            ["custom"] = json.RootElement.GetProperty("custom").Clone(),
+        };
+
+        mergeMethod!.Invoke(obj: null, parameters: [destination, source]);
+
+        Assert.True(destination.ContainsKey("custom"));
+        Assert.Equal("value", destination["custom"].GetString());
+    }
+
     private static async Task<(int ExitCode, List<JsonRpcMessage> Responses, string Stderr)> RunProxyAsync(
         IReadOnlyList<string> lines,
         IAgentSpawner spawner)
@@ -280,10 +302,11 @@ public sealed class AcpProxyTests
 
     private sealed class ThrowingSpawner(string message) : IAgentSpawner
     {
-        public System.Diagnostics.Process SpawnAgent(AcpSession session, string agent)
+        public Task SpawnAgentAsync(AcpSession session, string agent, CancellationToken cancellationToken = default)
         {
             _ = session;
             _ = agent;
+            _ = cancellationToken;
             throw new InvalidOperationException(message);
         }
     }

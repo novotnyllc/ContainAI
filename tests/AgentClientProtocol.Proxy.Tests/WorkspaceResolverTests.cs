@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using CliWrap.Buffered;
 using AgentClientProtocol.Proxy.PathTranslation;
 using Xunit;
 
@@ -57,6 +59,73 @@ public sealed class WorkspaceResolverTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => WorkspaceResolver.ResolveAsync(nested, cts.Token));
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenGitLookupThrowsInvalidOperation_FallsBackToInputPath()
+    {
+        using var temp = new TempDirectory();
+        var nested = Path.Combine(temp.Path, "nested", "workspace");
+        Directory.CreateDirectory(nested);
+
+        var resolved = await WorkspaceResolver.ResolveAsync(
+            nested,
+            static (_, _) => throw new InvalidOperationException("synthetic failure"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(nested, resolved);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenGitLookupThrowsIOException_FallsBackToInputPath()
+    {
+        using var temp = new TempDirectory();
+        var nested = Path.Combine(temp.Path, "nested", "workspace");
+        Directory.CreateDirectory(nested);
+
+        var resolved = await WorkspaceResolver.ResolveAsync(
+            nested,
+            static (_, _) => throw new IOException("synthetic io failure"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(nested, resolved);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenGitLookupThrowsWin32Exception_FallsBackToInputPath()
+    {
+        using var temp = new TempDirectory();
+        var nested = Path.Combine(temp.Path, "nested", "workspace");
+        Directory.CreateDirectory(nested);
+
+        var resolved = await WorkspaceResolver.ResolveAsync(
+            nested,
+            static (_, _) => throw new Win32Exception("synthetic win32 failure"),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(nested, resolved);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenGitLookupReturnsRoot_TrimsAndReturnsGitRoot()
+    {
+        using var temp = new TempDirectory();
+        var nested = Path.Combine(temp.Path, "nested", "workspace");
+        Directory.CreateDirectory(nested);
+
+        var gitRoot = Path.Combine(temp.Path, "repo-root");
+        var resolved = await WorkspaceResolver.ResolveAsync(
+            nested,
+            (_, _) => Task.FromResult(
+                new BufferedCommandResult(
+                    0,
+                    DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow,
+                    gitRoot + Environment.NewLine,
+                    string.Empty)),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(gitRoot, resolved);
     }
 
     private sealed class TempDirectory : IDisposable

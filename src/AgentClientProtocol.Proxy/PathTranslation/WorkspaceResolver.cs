@@ -18,52 +18,36 @@ public static class WorkspaceResolver
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The workspace root path.</returns>
     public static async Task<string> ResolveAsync(string cwd, CancellationToken cancellationToken = default)
+        => await ResolveAsync(cwd, ExecuteGitRootLookupAsync, cancellationToken).ConfigureAwait(false);
+
+    internal static async Task<string> ResolveAsync(
+        string cwd,
+        Func<string, CancellationToken, Task<BufferedCommandResult>> gitRootLookup,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(gitRootLookup);
+
         // Try git root first
         try
         {
-            var result = await Cli.Wrap("git")
-                .WithArguments(args => args
-                    .Add("-C").Add(cwd)
-                    .Add("rev-parse")
-                    .Add("--show-toplevel"))
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
+            var result = await gitRootLookup(cwd, cancellationToken).ConfigureAwait(false);
 
             if (result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput))
             {
                 return result.StandardOutput.Trim();
             }
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-
-            // Git not available or failed; fall back to workspace marker walk.
-            _ = ex;
+            // Git invocation failed; fall back to workspace marker walk.
         }
-        catch (IOException ex)
+        catch (IOException) when (!cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-
             // Git output capture failed; fall back to workspace marker walk.
-            _ = ex;
         }
-        catch (System.ComponentModel.Win32Exception ex)
+        catch (System.ComponentModel.Win32Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-
             // Git executable not available; fall back to workspace marker walk.
-            _ = ex;
         }
 
         // Walk up looking for .containai/config.toml
@@ -81,4 +65,13 @@ public static class WorkspaceResolver
         // Fall back to cwd
         return cwd;
     }
+
+    private static Task<BufferedCommandResult> ExecuteGitRootLookupAsync(string cwd, CancellationToken cancellationToken)
+        => Cli.Wrap("git")
+            .WithArguments(args => args
+                .Add("-C").Add(cwd)
+                .Add("rev-parse")
+                .Add("--show-toplevel"))
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
 }

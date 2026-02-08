@@ -1,7 +1,8 @@
-// Agent process spawning using System.Diagnostics.Process
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
+using System.Threading.Channels;
+using CliWrap;
+using CliWrap.Exceptions;
 
 namespace AgentClientProtocol.Proxy.Sessions;
 
@@ -28,123 +29,120 @@ public sealed class AgentSpawner : IAgentSpawner
         _caiExecutable = caiExecutable;
     }
 
-    /// <summary>
-    /// Spawns an agent process for a session.
-    /// Sets up stdin/stdout pipes and starts the stderr forwarding task.
-    /// </summary>
-    /// <param name="session">The session to spawn the agent for.</param>
-    /// <param name="agent">The agent binary name (any agent supporting --acp flag).</param>
-    /// <returns>The spawned process.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when the agent binary cannot be found or started.
-    /// </exception>
-    public Process SpawnAgent(AcpSession session, string agent)
+    /// <inheritdoc />
+    public async Task SpawnAgentAsync(AcpSession session, string agent, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
-        Process? process;
+        ArgumentException.ThrowIfNullOrWhiteSpace(agent);
+
+        var input = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+        var output = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            AllowSynchronousContinuations = false,
+        });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var command = BuildCommand(session, agent)
+            .WithValidation(CommandResultValidation.None)
+            .WithStandardInputPipe(PipeSource.Create((stream, token) => PumpInputAsync(input.Reader, stream, token)))
+            .WithStandardOutputPipe(PipeTarget.ToDelegate((line, token) => output.Writer.WriteAsync(line, token).AsTask(), Utf8NoBom))
+            .WithStandardErrorPipe(PipeTarget.ToDelegate((line, _) => _stderr.WriteLineAsync(line), Utf8NoBom));
+
+        var executionTask = RunCommandAsync(command, output.Writer, started, session.CancellationToken);
+        session.AttachAgentTransport(input.Writer, output.Reader, executionTask);
+
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is CommandExecutionException or InvalidOperationException or IOException or Win32Exception)
+        {
+            session.Cancel();
+            throw CreateStartFailure(agent, ex);
+        }
+    }
+
+    private static InvalidOperationException CreateStartFailure(string agent, Exception ex) =>
+        new(
+            $"Agent '{agent}' not found. Ensure the agent binary is installed and in PATH.",
+            ex);
+
+    private Command BuildCommand(AcpSession session, string agent)
+    {
         if (_directSpawn)
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = agent,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardInputEncoding = Utf8NoBom,
-                StandardOutputEncoding = Utf8NoBom,
-                StandardErrorEncoding = Utf8NoBom,
-            };
-            psi.ArgumentList.Add("--acp");
-
-            try
-            {
-                process = Process.Start(psi);
-            }
-            catch (Win32Exception ex)
-            {
-                // Binary not found or not executable
-                throw new InvalidOperationException(
-                    $"Agent '{agent}' not found. Ensure the agent binary is installed and in PATH.",
-                    ex);
-            }
-        }
-        else
-        {
-            // Container-side preflight check: wrap the agent command to detect missing binaries
-            // and provide a clear error message. Agent is passed as a positional parameter ($1)
-            // to avoid shell injection risks.
-            //
-            // The wrapper script:
-            // 1. Checks if the agent binary exists in the container (command -v)
-            // 2. If not found, prints a clear error and exits with code 127
-            // 3. If found, exec's the agent with --acp
-            var psi = new ProcessStartInfo
-            {
-                FileName = _caiExecutable,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                StandardInputEncoding = Utf8NoBom,
-                StandardOutputEncoding = Utf8NoBom,
-                StandardErrorEncoding = Utf8NoBom,
-            };
-            // Use ArgumentList to safely pass arguments without quoting issues
-            psi.ArgumentList.Add("exec");
-            psi.ArgumentList.Add("--workspace");
-            psi.ArgumentList.Add(session.Workspace);
-            psi.ArgumentList.Add("--quiet");
-            psi.ArgumentList.Add("--");
-            psi.ArgumentList.Add("bash");
-            // Use -c (not -lc) to avoid login shell sourcing profile files that could
-            // emit output to stdout and corrupt the ACP JSON-RPC stream
-            psi.ArgumentList.Add("-c");
-            // Safe: agent passed as $1, not interpolated into shell string
-            // Use 'exec --' to safely handle agent names that start with '-'
-            psi.ArgumentList.Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec -- \"$1\" --acp");
-            psi.ArgumentList.Add("--");  // End of bash -c options
-            psi.ArgumentList.Add(agent); // $1 for the script
-
-            // Prevent stdout pollution from child cai processes
-            psi.Environment["CAI_NO_UPDATE_CHECK"] = "1";
-
-            process = Process.Start(psi);
+            return Cli.Wrap(agent)
+                .WithArguments(args => args.Add("--acp"));
         }
 
-        if (process == null)
+        return Cli.Wrap(_caiExecutable)
+            .WithEnvironmentVariables(env => env.Set("CAI_NO_UPDATE_CHECK", "1"))
+            .WithArguments(args => args
+                .Add("exec")
+                .Add("--workspace")
+                .Add(session.Workspace)
+                .Add("--quiet")
+                .Add("--")
+                .Add("bash")
+                // Use -c (not -lc) to avoid login shell profile output on stdout.
+                .Add("-c")
+                // Safe: agent name passed as $1, not string-interpolated into shell body.
+                .Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec -- \"$1\" --acp")
+                .Add("--")
+                .Add(agent));
+    }
+
+    private async Task RunCommandAsync(
+        Command command,
+        ChannelWriter<string> output,
+        TaskCompletionSource started,
+        CancellationToken cancellationToken)
+    {
+        try
         {
-            throw new InvalidOperationException($"Failed to start agent process: {agent}");
+            var result = await command.ExecuteAsync(
+                static _ => { },
+                _ => started.TrySetResult(),
+                cancellationToken,
+                cancellationToken).ConfigureAwait(false);
+
+            started.TrySetResult();
+            if (result.ExitCode != 0)
+            {
+                await _stderr.WriteLineAsync($"Agent process exited with code {result.ExitCode}.").ConfigureAwait(false);
+            }
         }
-
-        // Forward stderr to our stderr
-        _ = Task.Run(async () =>
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                var errReader = process.StandardError;
-                string? line;
-                while ((line = await errReader.ReadLineAsync().ConfigureAwait(false)) != null)
-                {
-                    await _stderr.WriteLineAsync(line).ConfigureAwait(false);
-                }
-            }
-            catch (ObjectDisposedException ex)
-            {
-                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
-            }
-            catch (InvalidOperationException ex)
-            {
-                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
-            }
-            catch (IOException ex)
-            {
-                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
-            }
-        });
+            started.TrySetCanceled(cancellationToken);
+        }
+        catch (Exception ex) when (ex is CommandExecutionException or InvalidOperationException or IOException or Win32Exception)
+        {
+            started.TrySetException(ex);
+        }
+        finally
+        {
+            output.TryComplete();
+        }
+    }
 
-        return process;
+    private static async Task PumpInputAsync(ChannelReader<string> input, Stream output, CancellationToken cancellationToken)
+    {
+        using var writer = new StreamWriter(output, Utf8NoBom, leaveOpen: true)
+        {
+            AutoFlush = true,
+        };
+
+        await foreach (var line in input.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            await writer.WriteLineAsync(line.AsMemory(), cancellationToken).ConfigureAwait(false);
+        }
     }
 }

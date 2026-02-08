@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using System.Threading.Channels;
 using System.Text.Json.Nodes;
 using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
@@ -9,7 +9,7 @@ namespace AgentClientProtocol.Proxy.Tests;
 public sealed class AcpSessionAdvancedTests
 {
     [Fact]
-    public async Task WriteToAgentAsync_WhenAgentProcessMissing_DoesNotThrow()
+    public async Task WriteToAgentAsync_WhenAgentTransportMissing_DoesNotThrow()
     {
         using var session = new AcpSession("/workspace");
 
@@ -80,26 +80,12 @@ public sealed class AcpSessionAdvancedTests
     }
 
     [Fact]
-    public async Task WriteToAgentAsync_WritesJsonLineToAgentStdin()
+    public async Task WriteToAgentAsync_WritesJsonLineToTransportInput()
     {
-        using var temp = new TempFile();
-        var psi = new ProcessStartInfo("bash")
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        psi.ArgumentList.Add("-c");
-        psi.ArgumentList.Add($"cat > '{temp.Path}'");
-
-        using var process = Process.Start(psi);
-        Assert.NotNull(process);
-
-        using var session = new AcpSession("/workspace")
-        {
-            AgentProcess = process,
-        };
+        var input = Channel.CreateUnbounded<string>();
+        var output = Channel.CreateUnbounded<string>();
+        using var session = new AcpSession("/workspace");
+        session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
 
         await session.WriteToAgentAsync(new JsonRpcMessage
         {
@@ -108,13 +94,49 @@ public sealed class AcpSessionAdvancedTests
             Params = new JsonObject { ["sessionId"] = "proxy-1" },
         }).ConfigureAwait(true);
 
-        process.StandardInput.Close();
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        var line = await input.Reader.ReadAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
+        Assert.Contains("\"method\":\"session/prompt\"", line, StringComparison.Ordinal);
+        Assert.Contains("\"sessionId\":\"proxy-1\"", line, StringComparison.Ordinal);
+    }
 
-        var lines = await File.ReadAllLinesAsync(temp.Path, TestContext.Current.CancellationToken).ConfigureAwait(true);
-        Assert.Single(lines);
-        Assert.Contains("\"method\":\"session/prompt\"", lines[0], StringComparison.Ordinal);
-        Assert.Contains("\"sessionId\":\"proxy-1\"", lines[0], StringComparison.Ordinal);
+    [Fact]
+    public async Task WriteToAgentAsync_WhenTransportInputChannelClosed_DoesNotThrow()
+    {
+        var input = Channel.CreateUnbounded<string>();
+        var output = Channel.CreateUnbounded<string>();
+        using var session = new AcpSession("/workspace");
+        session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
+        input.Writer.TryComplete();
+
+        await session.WriteToAgentAsync(new JsonRpcMessage
+        {
+            Method = "session/prompt",
+            Params = new JsonObject
+            {
+                ["sessionId"] = "proxy-closed",
+            },
+        }).ConfigureAwait(true);
+    }
+
+    [Fact]
+    public async Task SendAndWaitForResponseAsync_WhenAgentTaskCompletesEarly_ReturnsNull()
+    {
+        var input = Channel.CreateUnbounded<string>();
+        var output = Channel.CreateUnbounded<string>();
+        using var session = new AcpSession("/workspace");
+        session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
+
+        var request = new JsonRpcMessage
+        {
+            Id = JsonValue.Create("req-finished"),
+            Method = "initialize",
+        };
+
+        var response = await session
+            .SendAndWaitForResponseAsync(request, "req-finished", TimeSpan.FromSeconds(5))
+            .ConfigureAwait(true);
+
+        Assert.Null(response);
     }
 
     [Fact]
@@ -132,33 +154,5 @@ public sealed class AcpSessionAdvancedTests
 
         var response = await waitTask.ConfigureAwait(true);
         Assert.Null(response);
-    }
-
-    [Fact]
-    public void Dispose_WithNonStartedProcess_IgnoresKillErrors()
-    {
-        using var session = new AcpSession("/workspace")
-        {
-            AgentProcess = new Process(),
-        };
-
-        var exception = Record.Exception(session.Dispose);
-
-        Assert.Null(exception);
-    }
-
-    private sealed class TempFile : IDisposable
-    {
-        public TempFile() => Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"acp-session-{Guid.NewGuid():N}.log");
-
-        public string Path { get; }
-
-        public void Dispose()
-        {
-            if (File.Exists(Path))
-            {
-                File.Delete(Path);
-            }
-        }
     }
 }

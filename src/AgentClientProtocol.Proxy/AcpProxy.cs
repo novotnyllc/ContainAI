@@ -50,10 +50,7 @@ public sealed class AcpProxy : IDisposable
         _errorSink = new ErrorSink(stderr);
         _agentSpawner = agentSpawner ?? new AgentSpawner(directSpawn, stderr);
 
-        // No validation - any agent name is accepted.
-        // Validation happens at runtime when the agent binary is executed.
-        // - For direct spawn: Process.Start() will fail if binary doesn't exist
-        // - For containerized: cai exec wraps with preflight check for clear error
+        // No static allow-list here; agent validation happens when spawn starts.
     }
 
     /// <summary>
@@ -110,17 +107,7 @@ public sealed class AcpProxy : IDisposable
             // stdin EOF or cancellation - graceful shutdown
             await ShutdownAsync().ConfigureAwait(false);
         }
-        catch (InvalidOperationException ex)
-        {
-            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
-            return 1;
-        }
-        catch (IOException ex)
-        {
-            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
-            return 1;
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -239,8 +226,7 @@ public sealed class AcpProxy : IDisposable
             var pathTranslator = new PathTranslator(workspace);
 
             // Spawn agent process
-            var process = _agentSpawner.SpawnAgent(session, _agent);
-            session.AgentProcess = process;
+            await _agentSpawner.SpawnAgentAsync(session, _agent, _cts.Token).ConfigureAwait(false);
 
             // Start reader task to handle out-of-order responses and notifications
             session.ReaderTask = Task.Run(() => ReadAgentOutputLoopAsync(session));
@@ -342,47 +328,7 @@ public sealed class AcpProxy : IDisposable
                 await _output.EnqueueAsync(response).ConfigureAwait(false);
             }
         }
-        catch (InvalidOperationException ex)
-        {
-            // Clean up on failure
-            session.Dispose();
-
-            // Only respond if this was a request (has id)
-            if (message.Id != null)
-            {
-                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
-                    message.Id,
-                    JsonRpcErrorCodes.SessionCreationFailed,
-                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
-            }
-        }
-        catch (TimeoutException ex)
-        {
-            // Clean up on failure
-            session.Dispose();
-
-            // Only respond if this was a request (has id)
-            if (message.Id != null)
-            {
-                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
-                    message.Id,
-                    JsonRpcErrorCodes.SessionCreationFailed,
-                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
-            }
-        }
-        catch (JsonException ex)
-        {
-            session.Dispose();
-
-            if (message.Id != null)
-            {
-                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
-                    message.Id,
-                    JsonRpcErrorCodes.SessionCreationFailed,
-                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
-            }
-        }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or JsonException or IOException)
         {
             session.Dispose();
 
@@ -486,25 +432,16 @@ public sealed class AcpProxy : IDisposable
     {
         try
         {
-            var reader = session.AgentProcess?.StandardOutput;
-            if (reader == null)
+            var output = session.AgentOutput;
+            if (output == null)
                 return;
 
-            string? line;
-            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
+            await foreach (var line in output.ReadAllAsync(session.CancellationToken).ConfigureAwait(false))
             {
                 await ReadAgentOutputAsync(session, line).ConfigureAwait(false);
             }
         }
-        catch (IOException ex)
-        {
-            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException ex)
-        {
-            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
             await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
         }

@@ -1,4 +1,5 @@
-using System.Diagnostics;
+using System.Text.Json.Nodes;
+using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
 using Xunit;
 
@@ -7,28 +8,28 @@ namespace AgentClientProtocol.Proxy.Tests;
 public sealed class AgentSpawnerTests
 {
     [Fact]
-    public void SpawnAgent_DirectSpawn_WithMissingBinary_ThrowsWithClearMessage()
+    public async Task SpawnAgent_DirectSpawn_WithMissingBinary_ThrowsWithClearMessage()
     {
         using var session = new AcpSession("/tmp/workspace");
         var spawner = new AgentSpawner(directSpawn: true, TextWriter.Null);
         var missingAgent = $"containai-missing-{Guid.NewGuid():N}";
 
-        var exception = Assert.Throws<InvalidOperationException>(() => spawner.SpawnAgent(session, missingAgent));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => spawner.SpawnAgentAsync(session, missingAgent, TestContext.Current.CancellationToken));
 
         Assert.Contains($"Agent '{missingAgent}' not found", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SpawnAgent_DirectSpawn_StartsProcess()
+    public async Task SpawnAgent_DirectSpawn_StartsTransport()
     {
         using var session = new AcpSession("/tmp/workspace");
-        var stderr = new StringWriter();
-        var spawner = new AgentSpawner(directSpawn: true, stderr);
+        var spawner = new AgentSpawner(directSpawn: true, TextWriter.Null);
 
-        using var process = spawner.SpawnAgent(session, "sh");
-
-        Assert.NotNull(process);
-        Assert.True(process.WaitForExit(milliseconds: 5_000));
+        await spawner.SpawnAgentAsync(session, "sh", TestContext.Current.CancellationToken);
+        Assert.NotNull(session.AgentOutput);
+        Assert.NotNull(session.AgentExecutionTask);
+        session.Cancel();
     }
 
     [Fact]
@@ -53,11 +54,23 @@ done
 
         using var session = new AcpSession("/tmp/workspace");
         var spawner = new AgentSpawner(directSpawn: false, TextWriter.Null, fakeCaiPath);
-        using var process = spawner.SpawnAgent(session, "claude");
+        await spawner.SpawnAgentAsync(session, "claude", TestContext.Current.CancellationToken);
+        await session.WriteToAgentAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("probe"),
+            Method = "session/prompt",
+            Params = new JsonObject
+            {
+                ["sessionId"] = "proxy-1",
+            },
+        }).ConfigureAwait(true);
 
         await WaitForFileAsync(argsFile, TestContext.Current.CancellationToken);
-        process.Kill(entireProcessTree: true);
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        session.Cancel();
+        if (session.AgentExecutionTask != null)
+        {
+            await session.AgentExecutionTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        }
 
         var args = await File.ReadAllLinesAsync(argsFile, TestContext.Current.CancellationToken);
         Assert.Equal("exec", args[0]);
@@ -96,11 +109,42 @@ done
         using var stderr = new MatchNotifyingStringWriter("forwarded-error", stderrLineReceived);
         var spawner = new AgentSpawner(directSpawn: true, stderr);
 
-        using var process = spawner.SpawnAgent(session, fakeAgentPath);
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-
+        await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
         await stderrLineReceived.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        if (session.AgentExecutionTask != null)
+        {
+            await session.AgentExecutionTask.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        }
         Assert.Contains("forwarded-error", stderr.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SpawnAgent_DirectSpawn_WhenAgentExitsNonZero_ReportsExitCode()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var temp = new TempDirectory();
+        var fakeAgentPath = Path.Combine(temp.Path, "fake-agent-fail");
+        await File.WriteAllTextAsync(
+            fakeAgentPath,
+            "#!/usr/bin/env bash\nexit 7\n",
+            TestContext.Current.CancellationToken);
+        EnsureExecutable(fakeAgentPath);
+
+        using var session = new AcpSession("/tmp/workspace");
+        using var stderr = new StringWriter();
+        var spawner = new AgentSpawner(directSpawn: true, stderr);
+        await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
+
+        if (session.AgentExecutionTask != null)
+        {
+            await session.AgentExecutionTask.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Contains("exited with code 7", stderr.ToString(), StringComparison.Ordinal);
     }
 
     private sealed class MatchNotifyingStringWriter(string expected, TaskCompletionSource completionSource) : StringWriter

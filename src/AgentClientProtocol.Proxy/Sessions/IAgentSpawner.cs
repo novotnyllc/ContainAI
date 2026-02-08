@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace AgentClientProtocol.Proxy.Sessions;
 
 /// <summary>
@@ -7,5 +5,5 @@ namespace AgentClientProtocol.Proxy.Sessions;
 /// </summary>
 public interface IAgentSpawner
 {
-    Process SpawnAgent(AcpSession session, string agent);
+    Task SpawnAgentAsync(AcpSession session, string agent, CancellationToken cancellationToken = default);
 }

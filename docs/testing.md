@@ -126,6 +126,13 @@ A hard threshold gate is enforced in CI:
 These thresholds are validated from the generated `Summary.txt` coverage report in CI.
 Test execution uses `xunit.v3.mtp-v2` on Microsoft Testing Platform v2.
 
+Example local proxy coverage check (MTP v2 style):
+
+```bash
+dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj -c Release -- --coverage --coverage-output-format cobertura --coverage-output artifacts/TestResults/proxy-only.cobertura.xml
+reportgenerator "-reports:artifacts/bin/AgentClientProtocol.Proxy.Tests/release/TestResults/artifacts/TestResults/proxy-only.cobertura.xml" "-targetdir:artifacts/TestResults/ProxyOnlyCoverage" "-reporttypes:TextSummary"
+```
+
 ## Test Resource Cleanup
 
 Integration tests use labeled Docker resources for safe cleanup:

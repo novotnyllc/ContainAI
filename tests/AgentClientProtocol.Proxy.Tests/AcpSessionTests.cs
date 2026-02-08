@@ -88,28 +88,6 @@ public class AcpSessionTests
     }
 
     [Fact]
-    public void Dispose_WhenAgentProcessAlreadyExited_CompletesWithoutError()
-    {
-        using var session = new AcpSession("/workspace");
-        var startInfo = OperatingSystem.IsWindows()
-            ? new System.Diagnostics.ProcessStartInfo("cmd", "/c exit 0")
-            : new System.Diagnostics.ProcessStartInfo("sh", "-c true");
-        startInfo.UseShellExecute = false;
-
-        using var process = new System.Diagnostics.Process
-        {
-            StartInfo = startInfo,
-        };
-
-        Assert.True(process.Start());
-        Assert.True(process.WaitForExit(5_000));
-        session.AgentProcess = process;
-
-        var exception = Record.Exception(() => session.Dispose());
-        Assert.Null(exception);
-    }
-
-    [Fact]
     public void ProxySessionId_IsValidGuid()
     {
         using var session = new AcpSession("/workspace");

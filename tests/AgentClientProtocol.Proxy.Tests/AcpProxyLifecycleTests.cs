@@ -1,8 +1,8 @@
-using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
 using Xunit;
@@ -28,6 +28,7 @@ public sealed class AcpProxyLifecycleTests
                 ["protocolVersion"] = "2025-01-01",
                 ["clientInfo"] = new JsonObject { ["name"] = "editor" },
                 ["capabilities"] = new JsonObject { ["streaming"] = true },
+                ["customInitializeFlag"] = "enabled",
             },
         });
 
@@ -62,6 +63,7 @@ public sealed class AcpProxyLifecycleTests
                             Path.Combine(workspace, "docs"))
                     },
                 },
+                ["customSessionField"] = "present",
             },
         });
 
@@ -182,6 +184,54 @@ public sealed class AcpProxyLifecycleTests
         Assert.Equal("new-missing", response.Id?.GetValue<string>());
         Assert.Equal(JsonRpcErrorCodes.SessionCreationFailed, response.Error?.Code);
         Assert.Contains("did not return a session ID", response.Error?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionNew_WhenAgentDoesNotRespondToInitialize_ReturnsSessionCreationError()
+    {
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.NoInitializeResponse);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-init-timeout"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("new-init-timeout", response.Id?.GetValue<string>());
+        Assert.Equal(JsonRpcErrorCodes.SessionCreationFailed, response.Error?.Code);
+        Assert.Contains("did not respond to initialize", response.Error?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_SessionNew_WhenAgentDoesNotRespondToSessionNew_ReturnsSessionCreationError()
+    {
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.NoSessionNewResponse);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
+
+        await harness.WriteAsync(new JsonRpcMessage
+        {
+            Id = JsonValue.Create("new-session-timeout"),
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("new-session-timeout", response.Id?.GetValue<string>());
+        Assert.Equal(JsonRpcErrorCodes.SessionCreationFailed, response.Error?.Code);
+        Assert.Contains("did not respond to session/new", response.Error?.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -437,7 +487,9 @@ public sealed class AcpProxyLifecycleTests
     {
         Success,
         InitializeError,
+        NoInitializeResponse,
         MissingSessionId,
+        NoSessionNewResponse,
         MalformedPromptOutput,
         SessionNewErrorWithoutMessage,
         PromptOutputIncludesBlankAndNull,
@@ -446,152 +498,197 @@ public sealed class AcpProxyLifecycleTests
 
     private sealed class ScriptedAgentSpawner : IAgentSpawner, IAsyncDisposable
     {
-        private readonly string _tempRoot;
-        private readonly string _scriptPath;
-        private readonly string _transcriptPath;
+        private readonly Lock _gate = new();
+        private readonly List<string> _transcript = [];
         private readonly ScriptedAgentMode _mode;
 
         public ScriptedAgentSpawner(ScriptedAgentMode mode)
         {
             _mode = mode;
-            _tempRoot = Path.Combine(Path.GetTempPath(), $"acp-agent-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(_tempRoot);
-            _scriptPath = Path.Combine(_tempRoot, "agent.sh");
-            _transcriptPath = Path.Combine(_tempRoot, "transcript.log");
             AgentSessionId = $"agent-{Guid.NewGuid():N}";
-
-            var script = """
-#!/usr/bin/env bash
-set -euo pipefail
-mode="$1"
-transcript="$2"
-agent_session="$3"
-
-extract_id() {
-  printf '%s\n' "$1" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p'
-}
-
-while IFS= read -r line; do
-  printf '%s\n' "$line" >> "$transcript"
-
-  if [[ "$line" == *'"method":"initialize"'* ]]; then
-    id="$(extract_id "$line")"
-    if [[ "$mode" == "InitializeError" ]]; then
-      printf '{"jsonrpc":"2.0","id":"%s","error":{"code":-32603,"message":"initialize failed"}}\n' "$id"
-    else
-      printf '{"jsonrpc":"2.0","id":"%s","result":{"capabilities":{"ok":true}}}\n' "$id"
-    fi
-    continue
-  fi
-
-  if [[ "$line" == *'"method":"session/new"'* ]]; then
-    id="$(extract_id "$line")"
-    if [[ "$mode" == "MissingSessionId" ]]; then
-      printf '{"jsonrpc":"2.0","id":"%s","result":{}}\n' "$id"
-    elif [[ "$mode" == "SessionNewErrorWithoutMessage" ]]; then
-      printf '{"jsonrpc":"2.0","id":"%s","error":{"code":-32603,"message":null}}\n' "$id"
-    else
-      printf '{"jsonrpc":"2.0","id":"%s","result":{"sessionId":"%s"}}\n' "$id" "$agent_session"
-    fi
-    continue
-  fi
-
-  if [[ "$line" == *'"method":"session/prompt"'* ]]; then
-    id="$(extract_id "$line")"
-    if [[ "$mode" == "MalformedPromptOutput" ]]; then
-      printf '{ this is not json }\n'
-    elif [[ "$mode" == "PromptOutputIncludesBlankAndNull" ]]; then
-      printf '\n'
-      printf 'null\n'
-    fi
-    printf '{"jsonrpc":"2.0","method":"session/progress","params":{"sessionId":"%s","text":"working"}}\n' "$agent_session"
-    printf '{"jsonrpc":"2.0","id":"%s","result":{"ok":true}}\n' "$id"
-    continue
-  fi
-
-  if [[ "$line" == *'"method":"session/end"'* ]]; then
-    id="$(extract_id "$line")"
-    if [[ "$mode" == "SlowSessionEnd" ]]; then
-      sleep 8
-    fi
-    if [[ -n "$id" ]]; then
-      printf '{"jsonrpc":"2.0","id":"%s","result":{}}\n' "$id"
-    fi
-    exit 0
-  fi
-done
-""";
-            File.WriteAllText(_scriptPath, script.ReplaceLineEndings("\n"));
-            EnsureExecutable(_scriptPath);
         }
 
         public string AgentSessionId { get; }
 
-        public Process SpawnAgent(AcpSession session, string agent)
+        public Task SpawnAgentAsync(AcpSession session, string agent, CancellationToken cancellationToken = default)
         {
-            _ = session;
             _ = agent;
-
-            var startInfo = new ProcessStartInfo("bash")
+            var input = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
             {
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            startInfo.ArgumentList.Add(_scriptPath);
-            startInfo.ArgumentList.Add(_mode.ToString());
-            startInfo.ArgumentList.Add(_transcriptPath);
-            startInfo.ArgumentList.Add(AgentSessionId);
-
-            return Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start scripted agent.");
+                SingleReader = true,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false,
+            });
+            var output = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false,
+            });
+            var executionTask = RunScriptedAgentAsync(input.Reader, output.Writer, session.CancellationToken);
+            session.AttachAgentTransport(input.Writer, output.Reader, executionTask);
+            return Task.CompletedTask;
         }
 
-        public async Task<IReadOnlyList<string>> ReadTranscriptLinesAsync(CancellationToken cancellationToken)
+        private async Task RunScriptedAgentAsync(ChannelReader<string> input, ChannelWriter<string> output, CancellationToken cancellationToken)
         {
-            if (!File.Exists(_transcriptPath))
+            try
             {
-                return [];
-            }
+                await foreach (var line in input.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    lock (_gate)
+                    {
+                        _transcript.Add(line);
+                    }
 
-            return await File.ReadAllLinesAsync(_transcriptPath, cancellationToken).ConfigureAwait(false);
+                    var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+                    if (message == null || string.IsNullOrWhiteSpace(message.Method))
+                    {
+                        continue;
+                    }
+
+                    var requestId = JsonRpcHelpers.NormalizeId(message.Id);
+                    switch (message.Method)
+                    {
+                        case "initialize":
+                            if (_mode == ScriptedAgentMode.InitializeError)
+                            {
+                                await WriteMessageAsync(output, new JsonRpcMessage
+                                {
+                                    Id = JsonValue.Create(requestId),
+                                    Error = new JsonRpcError
+                                    {
+                                        Code = JsonRpcErrorCodes.InternalError,
+                                        Message = "initialize failed",
+                                    },
+                                }, cancellationToken).ConfigureAwait(false);
+                            }
+                            else if (_mode == ScriptedAgentMode.NoInitializeResponse)
+                            {
+                                return;
+                            }
+                            else
+                            {
+                                await WriteMessageAsync(output, new JsonRpcMessage
+                                {
+                                    Id = JsonValue.Create(requestId),
+                                    Result = new JsonObject
+                                    {
+                                        ["capabilities"] = new JsonObject
+                                        {
+                                            ["ok"] = true,
+                                        },
+                                    },
+                                }, cancellationToken).ConfigureAwait(false);
+                            }
+                            break;
+
+                        case "session/new":
+                            if (_mode == ScriptedAgentMode.MissingSessionId)
+                            {
+                                await WriteMessageAsync(output, new JsonRpcMessage
+                                {
+                                    Id = JsonValue.Create(requestId),
+                                    Result = new JsonObject(),
+                                }, cancellationToken).ConfigureAwait(false);
+                            }
+                            else if (_mode == ScriptedAgentMode.SessionNewErrorWithoutMessage)
+                            {
+                                await output.WriteAsync(
+                                    $"{{\"jsonrpc\":\"2.0\",\"id\":\"{requestId}\",\"error\":{{\"code\":-32603,\"message\":null}}}}",
+                                    cancellationToken).ConfigureAwait(false);
+                            }
+                            else if (_mode == ScriptedAgentMode.NoSessionNewResponse)
+                            {
+                                return;
+                            }
+                            else
+                            {
+                                await WriteMessageAsync(output, new JsonRpcMessage
+                                {
+                                    Id = JsonValue.Create(requestId),
+                                    Result = new JsonObject
+                                    {
+                                        ["sessionId"] = AgentSessionId,
+                                    },
+                                }, cancellationToken).ConfigureAwait(false);
+                            }
+                            break;
+
+                        case "session/prompt":
+                            if (_mode == ScriptedAgentMode.MalformedPromptOutput)
+                            {
+                                await output.WriteAsync("{ this is not json }", cancellationToken).ConfigureAwait(false);
+                            }
+                            else if (_mode == ScriptedAgentMode.PromptOutputIncludesBlankAndNull)
+                            {
+                                await output.WriteAsync(string.Empty, cancellationToken).ConfigureAwait(false);
+                                await output.WriteAsync("null", cancellationToken).ConfigureAwait(false);
+                            }
+
+                            await WriteMessageAsync(output, new JsonRpcMessage
+                            {
+                                Method = "session/progress",
+                                Params = new JsonObject
+                                {
+                                    ["sessionId"] = AgentSessionId,
+                                    ["text"] = "working",
+                                },
+                            }, cancellationToken).ConfigureAwait(false);
+
+                            await WriteMessageAsync(output, new JsonRpcMessage
+                            {
+                                Id = JsonValue.Create(requestId),
+                                Result = new JsonObject
+                                {
+                                    ["ok"] = true,
+                                },
+                            }, cancellationToken).ConfigureAwait(false);
+                            break;
+
+                        case "session/end":
+                            if (_mode == ScriptedAgentMode.SlowSessionEnd)
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(requestId))
+                            {
+                                await WriteMessageAsync(output, new JsonRpcMessage
+                                {
+                                    Id = JsonValue.Create(requestId),
+                                    Result = new JsonObject(),
+                                }, cancellationToken).ConfigureAwait(false);
+                            }
+
+                            return;
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                output.TryComplete();
+            }
         }
 
-        public async ValueTask DisposeAsync()
+        public Task<IReadOnlyList<string>> ReadTranscriptLinesAsync(CancellationToken cancellationToken)
         {
-            for (var attempt = 0; attempt < 5; attempt++)
+            cancellationToken.ThrowIfCancellationRequested();
+            lock (_gate)
             {
-                if (!Directory.Exists(_tempRoot))
-                {
-                    return;
-                }
-
-                try
-                {
-                    Directory.Delete(_tempRoot, recursive: true);
-                    return;
-                }
-                catch (IOException) when (attempt < 4)
-                {
-                    await Task.Delay(50).ConfigureAwait(false);
-                }
-                catch (UnauthorizedAccessException) when (attempt < 4)
-                {
-                    await Task.Delay(50).ConfigureAwait(false);
-                }
+                return Task.FromResult<IReadOnlyList<string>>(_transcript.ToArray());
             }
         }
 
-        private static void EnsureExecutable(string path)
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                return;
-            }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-            File.SetUnixFileMode(
-                path,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        private static Task WriteMessageAsync(ChannelWriter<string> output, JsonRpcMessage message, CancellationToken cancellationToken)
+        {
+            var payload = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+            return output.WriteAsync(payload, cancellationToken).AsTask();
         }
     }
 
