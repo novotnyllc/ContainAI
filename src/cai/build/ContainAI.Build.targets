@@ -15,7 +15,7 @@
     <MSBuild
       Projects="$(MSBuildProjectFullPath)"
       Targets="PackageContainAIRelease"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=%(_ContainAIRids.Identity);ContainAIVersion=$(ContainAIVersion);ContainAIOutputDir=$(ContainAIOutputDir)" />
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=%(_ContainAIRids.Identity);ContainAIVersion=$(ContainAIVersion);ContainAIOutputDir=$(ContainAIOutputDir);SelfContained=true;PublishAot=true;PublishTrimmed=true" />
   </Target>
 
   <Target Name="_ValidateTarballInputs">
@@ -129,7 +129,19 @@
     <Error Condition="'$(ContainAIPackageArch)'==''" Text="Unsupported RuntimeIdentifier '$(RuntimeIdentifier)'. Supported: linux-x64, linux-arm64, osx-x64, osx-arm64." />
   </Target>
 
-  <Target Name="PackageContainAIRelease" DependsOnTargets="_ResolvePackageArch;Publish">
+  <Target Name="_PublishContainAIReleaseBinary" DependsOnTargets="_ResolvePackageArch">
+    <MSBuild
+      Projects="$(MSBuildProjectFullPath)"
+      Targets="Restore"
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishAot=true;PublishTrimmed=true;NoRestore=false" />
+
+    <MSBuild
+      Projects="$(MSBuildProjectFullPath)"
+      Targets="Publish"
+      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishAot=true;PublishTrimmed=true;NoRestore=true" />
+  </Target>
+
+  <Target Name="PackageContainAIRelease" DependsOnTargets="_ResolvePackageArch;_PublishContainAIReleaseBinary">
     <PropertyGroup>
       <ContainAIPackageName>containai-$(ContainAIVersion)-$(ContainAIPackageArch)</ContainAIPackageName>
       <ContainAIStagingRoot>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)/package-staging'))</ContainAIStagingRoot>
