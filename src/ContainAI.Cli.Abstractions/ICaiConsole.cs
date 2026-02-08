@@ -4,7 +4,7 @@ namespace ContainAI.Cli.Abstractions;
 
 public interface ICaiConsole
 {
-    TextWriter StdOut { get; }
+    TextWriter OutputWriter { get; }
 
-    TextWriter StdErr { get; }
+    TextWriter ErrorWriter { get; }
 }

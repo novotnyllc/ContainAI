@@ -568,7 +568,7 @@ internal static partial class RootCommandBuilder
                     continue;
                 }
 
-                await console.StdOut.WriteLineAsync(value).ConfigureAwait(false);
+                await console.OutputWriter.WriteLineAsync(value).ConfigureAwait(false);
             }
 
             return 0;
@@ -701,7 +701,7 @@ internal static partial class RootCommandBuilder
             if (parseResult.GetValue(jsonOption))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await console.StdOut.WriteLineAsync(GetVersionJson()).ConfigureAwait(false);
+                await console.OutputWriter.WriteLineAsync(GetVersionJson()).ConfigureAwait(false);
                 return 0;
             }
 

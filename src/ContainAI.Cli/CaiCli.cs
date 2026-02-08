@@ -84,7 +84,7 @@ public static class CaiCli
     private static InvocationConfiguration CreateInvocationConfiguration(ICaiConsole console)
         => new()
         {
-            Output = console.StdOut,
-            Error = console.StdErr,
+            Output = console.OutputWriter,
+            Error = console.ErrorWriter,
         };
 }

@@ -710,9 +710,9 @@ public sealed class CaiCliRoutingTests
     {
         public StringWriter Output { get; } = new();
 
-        public TextWriter StdOut => Output;
+        public TextWriter OutputWriter => Output;
 
-        public TextWriter StdErr { get; } = TextWriter.Null;
+        public TextWriter ErrorWriter { get; } = TextWriter.Null;
     }
 
     private sealed class FakeRuntime : ICaiCommandRuntime

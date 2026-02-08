@@ -5,15 +5,15 @@ namespace ContainAI.Cli;
 
 internal sealed class CaiConsole : ICaiConsole
 {
-    public static ICaiConsole System { get; } = new CaiConsole(Console.Out, Console.Error);
+    public static ICaiConsole System => new CaiConsole(Console.Out, Console.Error);
 
     public CaiConsole(TextWriter output, TextWriter error)
     {
-        StdOut = output ?? throw new ArgumentNullException(nameof(output));
-        StdErr = error ?? throw new ArgumentNullException(nameof(error));
+        OutputWriter = output ?? throw new ArgumentNullException(nameof(output));
+        ErrorWriter = error ?? throw new ArgumentNullException(nameof(error));
     }
 
-    public TextWriter StdOut { get; }
+    public TextWriter OutputWriter { get; }
 
-    public TextWriter StdErr { get; }
+    public TextWriter ErrorWriter { get; }
 }
