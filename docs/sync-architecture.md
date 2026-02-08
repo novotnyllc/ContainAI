@@ -143,7 +143,7 @@ The manifest-derived import mapping defines what gets synced from host `$HOME` t
 | `/source/.config/gh` | `/target/config/gh` | `ds` | GitHub CLI config (directory, secret) |
 | `/source/.config/opencode/opencode.json` | `/target/config/opencode/opencode.json` | `fjs` | OpenCode config (file, JSON init, secret) |
 | `/source/.config/opencode/agents` | `/target/config/opencode/agents` | `d` | OpenCode agents (directory) |
-| `/source/.tmux.conf` | `/target/config/tmux/tmux.conf` | `f` | tmux legacy config (fallback) |
+| `/source/.tmux.conf` | `/target/config/tmux/tmux.conf` | `f` | tmux dotfile config (fallback) |
 | `/source/.config/tmux` | `/target/config/tmux` | `d` | tmux XDG config (preferred) |
 | `/source/.local/share/tmux` | `/target/local/share/tmux` | `d` | tmux data (directory) |
 | `/source/.local/share/fonts` | `/target/local/share/fonts` | `d` | User fonts (directory) |
@@ -326,16 +326,16 @@ None - all symlinked paths are created by `cai system init`.
 
 ## XDG Config Preference
 
-For tools that support both legacy and XDG config locations, ContainAI prefers the XDG location:
+For tools that support both dotfile and XDG config locations, ContainAI prefers the XDG location:
 
-| Tool | Legacy Location | XDG Location | Behavior |
+| Tool | Dotfile Location | XDG Location | Behavior |
 |------|-----------------|--------------|----------|
 | tmux | `~/.tmux.conf` | `~/.config/tmux/` | Both synced; XDG preferred |
 
-**tmux precedence:** The legacy `~/.tmux.conf` is synced first to `/target/config/tmux/tmux.conf`, then the XDG `~/.config/tmux/` directory is synced over it. This ensures:
-- If only legacy exists: it becomes available at the XDG location in the container
+**tmux precedence:** The dotfile `~/.tmux.conf` is synced first to `/target/config/tmux/tmux.conf`, then the XDG `~/.config/tmux/` directory is synced over it. This ensures:
+- If only the dotfile exists: it becomes available at the XDG location in the container
 - If only XDG exists: it is used directly
-- If both exist: XDG wins (overwrites the legacy file)
+- If both exist: XDG wins (overwrites the dotfile content)
 
 ## Exclude Pattern Behavior
 

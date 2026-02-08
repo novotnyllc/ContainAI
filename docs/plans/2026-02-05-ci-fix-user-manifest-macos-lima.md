@@ -1,6 +1,6 @@
 # CI Fixes Implementation Plan: User Manifests Import + macOS Lima Docker Access
 
-> Historical context: this plan was drafted against legacy shell files. The current implementation is .NET-native; equivalent logic now lives under `src/cai/`.
+> Historical context: this plan was drafted against earlier shell files. The current implementation is .NET-native; equivalent logic now lives under `src/cai/`.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 

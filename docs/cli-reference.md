@@ -222,9 +222,9 @@ cai [path] [options] [-- <agent-args>]
 | `--allow-host-credentials` | Errors at runtime (unsupported with Sysbox) |
 | `--allow-host-docker-socket` | Errors at runtime (unsupported with Sysbox) |
 | `--mount-docker-socket` | Errors at runtime (unsupported with Sysbox) |
-| `--i-understand-this-exposes-host-credentials` | Rejected by parser (legacy unsafe flag removed) |
-| `--i-understand-this-grants-root-access` | Rejected by parser (legacy unsafe flag removed) |
-| `--please-root-my-host` | Rejected by parser (legacy unsafe flag removed) |
+| `--i-understand-this-exposes-host-credentials` | Rejected by parser (unsupported unsafe flag) |
+| `--i-understand-this-grants-root-access` | Rejected by parser (unsupported unsafe flag) |
+| `--please-root-my-host` | Rejected by parser (unsupported unsafe flag) |
 
 **Note:** Host credential sharing and Docker socket mounting are not available with Sysbox isolation. Use `cai import` for credentials and the built-in Docker-in-Docker for container operations.
 
@@ -490,7 +490,7 @@ cai setup [options]
 
 **What It Does (Linux):**
 1. Detects distribution
-2. Cleans up legacy ContainAI paths
+2. Cleans up previous ContainAI paths
 3. Downloads and installs Sysbox
 4. Creates isolated Docker daemon:
    - Config: `/etc/containai/docker/daemon.json`
@@ -1254,7 +1254,7 @@ cai update [options]
 - Docker context verification
 - Dockerd bundle version
 - Sysbox version
-- Legacy path cleanup
+- Path cleanup
 
 **macOS Lima:**
 - If template unchanged: apt update/upgrade in VM

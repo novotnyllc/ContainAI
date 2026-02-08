@@ -1,7 +1,5 @@
 # ContainAI Source (src/)
 
-> **⚠️ Path Changed:** This directory was formerly `agent-sandbox/`. A symlink at `agent-sandbox/` exists for backward compatibility. Please update your scripts to use `src/` paths. The `agent-sandbox/` symlink will be removed in v2.0.
-
 Source code for ContainAI - the secure Docker sandbox for AI coding agents.
 
 ## Table of Contents

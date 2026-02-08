@@ -242,7 +242,7 @@ Root commands and subcommands:
 1. Installer shell remains for now; runtime shell is replaced.
 2. Command naming/flag cleanup is permitted if functionality remains.
 3. Linux + macOS native artifacts are mandatory in this phase.
-4. No backward-compat shell alias layer is required.
+4. No shell alias compatibility layer is required.
 
 ### Completion Criteria ("Keep Going Until")
 Work continues until all are true:

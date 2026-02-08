@@ -28,13 +28,13 @@
 - `c3bfc35` update release packaging to include `cai` artifact (remove `acp-proxy` artifact dependency)
 
 ### Review-Agent Passes
-- Correctness/regression review: completed against current no-legacy diff.
+- Correctness/regression review: completed against current native-only diff.
   - Addressed findings:
     - `stop --export` behavior restored
     - `gc` confirmation gating restored
     - docker context fallback (`containai-docker` -> `containai-secure` -> `docker-containai`)
     - `update --lima-recreate` no longer ignored
-- Architecture/factoring review: completed against current no-legacy diff.
+- Architecture/factoring review: completed against current native-only diff.
   - No blocking architecture findings.
 
 ### .NET Skills Applied
@@ -67,7 +67,7 @@
   - `reportgenerator -reports:artifacts/coverage/coverage.cobertura.xml -targetdir:artifacts/coverage/report -reporttypes:HtmlSummary -riskhotspotassemblyfilters:+* -riskhotspotclassfilters:+*`
 
 ### Notable Migration Decisions
-- Removed legacy shell bridge interfaces and implementations from runtime CLI path.
+- Removed shell bridge interfaces and implementations from runtime CLI path.
 - `cai` command surface routes through `System.CommandLine` into native runtime handlers.
 - ACP proxy remains integrated via `cai acp proxy <agent>`.
-- Added direct native lifecycle command tests in xUnit v3 (`NativeLifecycleParityTests`) to guard no-legacy command semantics.
+- Added direct native lifecycle command tests in xUnit v3 (`NativeLifecycleParityTests`) to guard native command semantics.

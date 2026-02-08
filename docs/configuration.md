@@ -138,7 +138,7 @@ Credential handling configuration.
 mode = "none"
 ```
 
-**Security restriction:** Setting `credentials.mode = "host"` in config is **ignored**. Host credentials require explicit CLI opt-in via `--allow-host-credentials` (or legacy `--credentials=host`). This prevents config files from escalating privileges without user awareness.
+**Security restriction:** Setting `credentials.mode = "host"` in config is **ignored**. Host credentials require explicit CLI opt-in via `--allow-host-credentials`. This prevents config files from escalating privileges without user awareness.
 
 ### `[secure_engine]` Section
 
@@ -908,13 +908,13 @@ ContainAI automatically syncs common development tool configurations from your h
 
 ### XDG Precedence
 
-For tools that support both legacy and XDG config locations, ContainAI prefers the XDG location:
+For tools that support both dotfile and XDG config locations, ContainAI prefers the XDG location:
 
-| Tool | Legacy Location | XDG Location | Behavior |
+| Tool | Dotfile Location | XDG Location | Behavior |
 |------|-----------------|--------------|----------|
-| tmux | `~/.tmux.conf` | `~/.config/tmux/` | XDG preferred; legacy used as fallback |
+| tmux | `~/.tmux.conf` | `~/.config/tmux/` | XDG preferred; dotfile used as fallback |
 
-If both locations exist, the XDG configuration takes precedence. If only the legacy location exists, it will be synced to the XDG target path in the container.
+If both locations exist, the XDG configuration takes precedence. If only the dotfile location exists, it will be synced to the XDG target path in the container.
 
 For full details on synced paths, see [Sync Architecture](sync-architecture.md).
 
