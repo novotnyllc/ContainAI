@@ -107,10 +107,14 @@ Specialist agents
 
 - Keep analyzers enabled on build (`RunAnalyzersDuringBuild=true`) with recommended + security + performance modes active.
 - Keep command surface statically modeled in `System.CommandLine`; avoid ad-hoc runtime command/option discovery.
+- Keep core config parsing in-process with `.NET` libraries (`System.Text.Json`, `CsToml`); do not reintroduce parser executable dependencies (`jq`, `yq`, Python) for CLI config paths.
 - Keep shell completion internal (`cai completion suggest`); do not add `dotnet-suggest` or other external completion dependencies.
 - Keep regex usage on source-generated regex (`[GeneratedRegex]`), not runtime regex construction.
 - Keep tests on `xunit.v3.mtp-v2` + Microsoft Testing Platform v2 and use Central Package Management for all package versions.
 - Keep coverage gates at or above 97% line coverage for `ContainAI.Cli`, `ContainAI.Cli.Abstractions`, and `AgentClientProtocol.Proxy`.
+- Validate naming/style analyzer enforcement with:
+  - `dotnet build ContainAI.slnx -c Release -warnaserror`
+  - `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`
 
 See `.flow/memory/conventions.md` for discovered patterns.
 
