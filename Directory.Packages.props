@@ -5,14 +5,14 @@
   </PropertyGroup>
   <!-- Global packages applied to all projects -->
   <ItemGroup>
-    <GlobalPackageReference Include="Nerdbank.GitVersioning" Version="3.7.112" PrivateAssets="all" />
+    <GlobalPackageReference Include="Nerdbank.GitVersioning" Version="3.9.50" PrivateAssets="all" />
   </ItemGroup>
   <!-- Explicitly versioned packages -->
   <ItemGroup>
     <!-- CLI parsing (AOT-compatible, used by .NET CLI itself) -->
     <PackageVersion Include="System.CommandLine" Version="2.0.2" />
     <!-- JSON-RPC implementation (AOT-compatible with SystemTextJsonFormatter) -->
-    <PackageVersion Include="StreamJsonRpc" Version="2.22.23" />
+    <PackageVersion Include="StreamJsonRpc" Version="2.24.84" />
     <!-- Process execution (AOT-compatible) -->
     <PackageVersion Include="CliWrap" Version="3.10.0" />
     <PackageVersion Include="Tomlyn" Version="0.20.0" />
