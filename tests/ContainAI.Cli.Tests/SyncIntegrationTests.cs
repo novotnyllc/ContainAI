@@ -1,12 +1,10 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using ContainAI.Cli.Host;
 using Xunit;
 
 namespace ContainAI.Cli.Tests;
 
-[SuppressMessage("Performance", "CA1515:Consider making public types internal", Justification = "xUnit collection definition types must be public for test discovery.")]
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class SyncIntegrationGroup
 {

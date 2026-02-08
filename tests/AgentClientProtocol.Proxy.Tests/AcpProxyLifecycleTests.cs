@@ -649,7 +649,8 @@ public sealed class AcpProxyLifecycleTests
                         case "session/end":
                             if (mode == ScriptedAgentMode.SlowSessionEnd)
                             {
-                                await Task.Delay(TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
+                                using var timeoutTimer = new PeriodicTimer(TimeSpan.FromSeconds(8));
+                                _ = await timeoutTimer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false);
                             }
 
                             if (!string.IsNullOrWhiteSpace(requestId))
