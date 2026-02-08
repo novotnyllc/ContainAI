@@ -7,16 +7,6 @@ This document describes how to run ContainAI tests locally and in CI.
 ContainAI uses a tiered testing strategy:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph T1["Tier 1: Linting (CI)"]
         Shell["shellcheck install.sh"]

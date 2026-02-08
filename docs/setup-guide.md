@@ -84,16 +84,6 @@ The `cai setup` command installs and configures multiple components. Here's what
 ### Installation Summary
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Docker["Docker Layer"]
         Daemon["containai-docker.service<br/>/var/run/containai-docker.sock"]
@@ -190,16 +180,6 @@ Updates are applied atomically by swapping symlinks and restarting the `containa
 ## Platform Selection
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     Start["What OS?"]
     Start -->|Windows| WSL["Use WSL2<br/>Ubuntu/Debian distro"]

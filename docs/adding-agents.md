@@ -9,16 +9,6 @@ This guide explains how to add support for a new AI coding agent to ContainAI.
 Adding an agent involves five steps:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     S1["1. Research<br/>Installation & config"]
     S2["2. Dockerfile<br/>Add to Dockerfile.agents"]

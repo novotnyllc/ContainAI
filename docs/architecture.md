@@ -47,16 +47,6 @@ This makes system containers ideal for AI coding agents that need to:
 Sysbox automatically maps container root (UID 0) to an unprivileged host user. No manual `/etc/subuid` or `/etc/subgid` configuration required.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Container["System Container"]
         CRoot["root (UID 0)"]
@@ -101,16 +91,6 @@ With Sysbox, containers can run Docker without `--privileged`:
 ContainAI uses a dedicated Docker installation separate from Docker Desktop:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Host["Host System"]
         DD["Docker Desktop<br/>(if present, NOT used)"]
@@ -166,25 +146,6 @@ The dedicated docker-ce instance (`/etc/containai/docker/daemon.json`):
 ## Container Lifecycle
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'background': '#f5f5f5',
-  'actorBkg': '#1a1a2e',
-  'actorTextColor': '#ffffff',
-  'actorBorder': '#16213e',
-  'actorLineColor': '#606060',
-  'signalColor': '#606060',
-  'signalTextColor': '#1a1a2e',
-  'labelBoxBkgColor': '#0f3460',
-  'labelBoxBorderColor': '#16213e',
-  'labelTextColor': '#ffffff',
-  'loopTextColor': '#1a1a2e',
-  'noteBkgColor': '#0f3460',
-  'noteTextColor': '#ffffff',
-  'noteBorderColor': '#16213e',
-  'activationBkgColor': '#16213e',
-  'activationBorderColor': '#0f3460',
-  'sequenceNumberColor': '#1a1a2e'
-}}}%%
 sequenceDiagram
     participant User
     participant CLI as cai CLI
@@ -279,25 +240,6 @@ All container access uses SSH instead of `docker attach` or direct execution. Th
 - Standard SSH tooling (scp, rsync)
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'background': '#f5f5f5',
-  'actorBkg': '#1a1a2e',
-  'actorTextColor': '#ffffff',
-  'actorBorder': '#16213e',
-  'actorLineColor': '#606060',
-  'signalColor': '#606060',
-  'signalTextColor': '#1a1a2e',
-  'labelBoxBkgColor': '#0f3460',
-  'labelBoxBorderColor': '#16213e',
-  'labelTextColor': '#ffffff',
-  'loopTextColor': '#1a1a2e',
-  'noteBkgColor': '#0f3460',
-  'noteTextColor': '#ffffff',
-  'noteBorderColor': '#16213e',
-  'activationBkgColor': '#16213e',
-  'activationBorderColor': '#0f3460',
-  'sequenceNumberColor': '#1a1a2e'
-}}}%%
 sequenceDiagram
     participant User
     participant CLI as cai shell
@@ -343,16 +285,6 @@ sequenceDiagram
 ## Systemd Service Dependencies
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     subgraph Targets["Systemd Targets"]
         LocalFS["local-fs.target"]
@@ -399,16 +331,6 @@ flowchart TD
 Sysbox enables secure Docker-in-Docker without `--privileged`:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Host["Host System"]
         HostDocker["ContainAI docker-ce<br/>Runtime: sysbox-runc"]
@@ -461,16 +383,6 @@ Inside the system container (`/etc/docker/daemon.json`):
 ## Component Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph CLI["CLI Layer"]
         direction TB
@@ -529,16 +441,6 @@ The CLI is split into native C# runtime components:
 ### Module Dependencies
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     Main["Program.cs"] --> Cli["ContainAI.Cli (System.CommandLine)"]
     Cli --> Runtime["NativeLifecycleCommandRuntime.cs"]
@@ -559,25 +461,6 @@ flowchart TD
 ### CLI to Container via SSH
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'background': '#f5f5f5',
-  'actorBkg': '#1a1a2e',
-  'actorTextColor': '#ffffff',
-  'actorBorder': '#16213e',
-  'actorLineColor': '#606060',
-  'signalColor': '#606060',
-  'signalTextColor': '#1a1a2e',
-  'labelBoxBkgColor': '#0f3460',
-  'labelBoxBorderColor': '#16213e',
-  'labelTextColor': '#ffffff',
-  'loopTextColor': '#1a1a2e',
-  'noteBkgColor': '#0f3460',
-  'noteTextColor': '#ffffff',
-  'noteBorderColor': '#16213e',
-  'activationBkgColor': '#16213e',
-  'activationBorderColor': '#0f3460',
-  'sequenceNumberColor': '#1a1a2e'
-}}}%%
 sequenceDiagram
     participant User
     participant CLI as cai (Program.cs)
@@ -601,16 +484,6 @@ sequenceDiagram
 ## Volume Architecture
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         Workspace["Workspace<br/>(/path/to/project)"]
@@ -677,16 +550,6 @@ flowchart LR
 Sysbox provides multiple isolation layers:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Host["Host (TRUSTED)"]
         HostKernel["Kernel"]

@@ -21,7 +21,6 @@
 ## Security Documentation Hierarchy
 
 ```mermaid
-%%{init: {'theme': 'base'}}%%
 flowchart TD
 
     START["Start Here"]

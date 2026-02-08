@@ -7,16 +7,6 @@ This guide explains how ContainAI manages container lifecycle: creation, startin
 ContainAI containers are designed to be persistent workspaces for AI coding agents. Unlike traditional ephemeral containers, they maintain state across sessions through data volumes and are identified by workspace-derived names.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 stateDiagram-v2
     [*] --> Running: cai run (first use)
     Running --> Running: cai run (attach)

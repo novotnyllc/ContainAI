@@ -52,7 +52,6 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 ## Command Hierarchy
 
 ```mermaid
-%%{init: {'theme': 'base'}}%%
 flowchart TB
 
     cai[cai]

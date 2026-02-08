@@ -30,21 +30,6 @@ Configure your editor to use `cai acp proxy <agent>`:
 ## How It Works
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'background': '#f5f5f5',
-  'actorBkg': '#1a1a2e',
-  'actorTextColor': '#ffffff',
-  'actorBorder': '#16213e',
-  'actorLineColor': '#606060',
-  'signalColor': '#606060',
-  'signalTextColor': '#1a1a2e',
-  'labelBoxBkgColor': '#0f3460',
-  'labelBoxBorderColor': '#16213e',
-  'labelTextColor': '#ffffff',
-  'noteBkgColor': '#0f3460',
-  'noteTextColor': '#ffffff',
-  'noteBorderColor': '#16213e'
-}}}%%
 sequenceDiagram
     participant Editor
     participant Proxy as cai acp proxy (Proxy)

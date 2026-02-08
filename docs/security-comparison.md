@@ -45,16 +45,6 @@ AI coding agents need sandboxing to prevent malicious or mistaken commands from 
 Before comparing solutions, it helps to understand what each isolation mechanism provides:
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Layers["Isolation Layers (weakest to strongest)"]
         direction TB
@@ -113,16 +103,6 @@ flowchart TB
 **What it is**: An experimental AI agent workspace feature in Docker Desktop 4.50+ (December 2025).
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         DD["Docker Desktop"]
@@ -160,16 +140,6 @@ flowchart LR
 **What it is**: Enhanced Container Isolation - Sysbox integrated into Docker Desktop, available only on Business tier.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         DD["Docker Desktop Business"]
@@ -214,16 +184,6 @@ flowchart LR
 **What it is**: Open-source system containers using the same Sysbox runtime as Docker ECI, but free and running on your own docker-ce installation.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         CAI["ContainAI docker-ce"]
@@ -267,16 +227,6 @@ flowchart LR
 **What it is**: Anthropic's Sandbox Runtime - lightweight process sandboxing used by Claude Code for basic isolation.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         SRT["SRT Runtime"]
@@ -336,16 +286,6 @@ flowchart LR
 **What it is**: A user-space kernel that intercepts all syscalls, providing the strongest syscall-level isolation available in containers.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Host["Host System"]
         Kernel["Linux Kernel"]
@@ -390,16 +330,6 @@ flowchart TB
 **What it is**: MicroVMs - true VM isolation with container-like ergonomics.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Host["Host System"]
         HostKernel["Host Linux Kernel"]
@@ -504,16 +434,6 @@ ContainAI provides all of this with strong isolation through Sysbox.
 ## Choosing the Right Solution
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     Start["Does your agent need<br/>Docker-in-Docker?"]
 

@@ -23,16 +23,6 @@ ContainAI searches for configuration in this order:
 6. If `XDG_CONFIG_HOME` is not set, defaults to `~/.config`
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     Start["Start at cwd"]
     Start --> Check{"Check for<br/>.containai/config.toml"}
@@ -65,16 +55,6 @@ flowchart TD
 Configuration values are resolved with this precedence (highest to lowest):
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     CLI["1. CLI Flags<br/>--data-volume, --agent"]
     ENV["2. Environment Variables<br/>CONTAINAI_DATA_VOLUME"]

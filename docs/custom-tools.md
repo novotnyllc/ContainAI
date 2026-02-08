@@ -7,16 +7,6 @@ This guide explains how to sync your own tools and configurations to ContainAI c
 ## Do I Need a Manifest?
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     Start["I installed a tool<br/>and want it in ContainAI"]
     Q1{"Just syncing<br/>config files?"}

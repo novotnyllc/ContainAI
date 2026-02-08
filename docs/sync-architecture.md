@@ -5,16 +5,6 @@ This document describes the config synchronization system between the host and c
 ## Overview
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         HostConfigs["~/.claude<br/>~/.config/gh<br/>~/.gitconfig"]
@@ -48,16 +38,6 @@ The import/sync system has three main components that must stay synchronized:
 3. **Runtime init** (`src/cai/ContainerRuntimeCommandService.cs`): Ensures volume directory structure exists on first boot
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph Source["Single Source of Truth"]
         Manifests["src/manifests/*.toml<br/>(per-agent files)"]
@@ -361,16 +341,6 @@ Users can add custom tool configurations by creating manifest files in `~/.confi
 User manifests are processed at container startup (not build time):
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     subgraph Host["Host System"]
         UserManifests["~/.config/containai/manifests/*.toml"]

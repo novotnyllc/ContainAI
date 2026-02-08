@@ -36,16 +36,6 @@ An AI agent runs `npm install` on a project. Unknown to anyone, a dependency thr
 ### The Attack Chain
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     A["npm install"] --> B["postinstall script runs"]
     B --> C["Script exploits container"]
@@ -134,16 +124,6 @@ Note: The `<!-- ... -->` HTML comment above is **invisible** when rendered - tha
 ### The Attack Chain
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     A["Agent reads file"] --> B["Hidden instructions parsed"]
     B --> C["Agent executes commands"]
@@ -215,16 +195,6 @@ Note: The exact file descriptor number (`<N>`) varies by environment; the attack
 ### The Attack Chain
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     A["Malicious Dockerfile"] --> B["Exploits fd leak"]
     B --> C["Accesses host filesystem"]
@@ -307,16 +277,6 @@ docker run --privileged ...
 ### The Attack Chain
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     A["Compromised code in<br/>privileged container"] --> B["mount /dev/sda1 /mnt"]
     B --> C["Full host filesystem access"]
@@ -398,16 +358,6 @@ The Docker socket is not just "access to run containers." It is **root access to
 ### The Attack Chain
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart LR
     A["Container with<br/>socket access"] --> B["docker run -v /:/host alpine"]
     B --> C["chroot /host"]
@@ -473,16 +423,6 @@ Mounting the rootful Docker socket is generally equivalent to giving root access
 Security is not about finding the one perfect solution. It is about **layering defenses** so that when (not if) one layer fails, others catch the attack.
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     subgraph Layers["Defense Layers"]
         L1["Code Review & Dependency Scanning"]

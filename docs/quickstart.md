@@ -78,16 +78,6 @@ cai doctor
 ### Runtime Decision Tree
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TD
     doctor["cai doctor"]
     doctor --> sysbox["Sysbox<br/>[OK]"]
@@ -150,16 +140,6 @@ When you ran `cai`, ContainAI:
 5. **Started the AI agent** - Claude (or your configured agent) is ready to use
 
 ```mermaid
-%%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#1a1a2e',
-  'primaryTextColor': '#ffffff',
-  'primaryBorderColor': '#16213e',
-  'secondaryColor': '#0f3460',
-  'tertiaryColor': '#1a1a2e',
-  'lineColor': '#a0a0a0',
-  'textColor': '#ffffff',
-  'background': '#0d1117'
-}}}%%
 flowchart TB
     subgraph host["Your Host Machine"]
         subgraph runtime["Sysbox Runtime"]
