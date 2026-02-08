@@ -17,11 +17,10 @@
 
 **Step 1: Update generator inputs**
 ```bash
-# In Generate container files step
-dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests artifacts/container-generated/symlinks.sh
-dotnet run --project src/cai -- manifest generate init-dirs src/manifests artifacts/container-generated/init-dirs.sh
+# In Generate/apply manifest-derived files step
 dotnet run --project src/cai -- manifest generate container-link-spec src/manifests artifacts/container-generated/link-spec.json
-dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests artifacts/container-generated/agent-wrappers.sh
+dotnet run --project src/cai -- manifest apply init-dirs src/manifests --data-dir /mnt/agent-data
+dotnet run --project src/cai -- manifest apply agent-shims src/manifests --shim-dir /opt/containai/agent-shims --cai-binary /usr/local/bin/cai
 ```
 
 **Step 2: Commit**
@@ -101,10 +100,9 @@ mkdir -p /tmp/containai-ci
 
 **Step 2: Run generators locally**
 ```bash
-dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests /tmp/containai-ci/symlinks.sh
-dotnet run --project src/cai -- manifest generate init-dirs src/manifests /tmp/containai-ci/init-dirs.sh
 dotnet run --project src/cai -- manifest generate container-link-spec src/manifests /tmp/containai-ci/link-spec.json
-dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests /tmp/containai-ci/agent-wrappers.sh
+dotnet run --project src/cai -- manifest apply init-dirs src/manifests --data-dir /tmp/containai-ci/data
+dotnet run --project src/cai -- manifest apply agent-shims src/manifests --shim-dir /tmp/containai-ci/shims --cai-binary /usr/local/bin/cai
 ```
 
 **Expected:** all commands succeed and output files are created.
