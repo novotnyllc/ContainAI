@@ -48,7 +48,7 @@ dotnet build ContainAI.slnx -c Release -warnaserror
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
 
 # strict NativeAOT+trim publish
-dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true -warnaserror -p:WarningsNotAsErrors= -p:TrimmerSingleWarn=false
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true -warnaserror -p:TrimmerSingleWarn=false
 ```
 
 ## Command Surface

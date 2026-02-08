@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using AgentClientProtocol.Proxy.Protocol;
 using Xunit;
 
@@ -205,12 +204,10 @@ public sealed class JsonRpcDataAndIdTests
     }
 
     [Fact]
-    public void JsonRpcData_FromJsonNode_ConvertsNodePayload()
+    public void JsonRpcData_FromJsonElement_ConvertsPayload()
     {
-        var node = JsonNode.Parse("""{"name":"value"}""");
-        Assert.NotNull(node);
-
-        var payload = JsonRpcData.FromJsonNode(node);
+        using var document = JsonDocument.Parse("""{"name":"value"}""");
+        var payload = JsonRpcData.FromJsonElement(document.RootElement);
         Assert.Equal("value", payload["name"]?.GetValue<string>());
     }
 }

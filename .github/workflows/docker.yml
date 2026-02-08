@@ -321,7 +321,6 @@ jobs:
             -p:ContainAIVersion="$NBGV_SemVer2" \
             -p:ContainAIOutputDir=./artifacts \
             -warnaserror \
-            -p:WarningsNotAsErrors= \
             -p:TrimmerSingleWarn=false
 
           ls -la ./artifacts/
