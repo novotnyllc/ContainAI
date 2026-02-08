@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Security;
 using System.Text;
 using System.Text.Json;
 
@@ -1314,7 +1315,15 @@ Host {containerName}
         {
             return TimeZoneInfo.Local.Id;
         }
-        catch
+        catch (TimeZoneNotFoundException)
+        {
+            return "UTC";
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return "UTC";
+        }
+        catch (SecurityException)
         {
             return "UTC";
         }
@@ -2122,7 +2131,7 @@ Host {containerName}
     {
         cancellationToken.ThrowIfCancellationRequested();
         var result = TomlCommandProcessor.Execute(args);
-        return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
+        return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
     private static async Task<int> RunProcessInteractiveAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
@@ -2149,7 +2158,7 @@ Host {containerName}
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"Failed to start '{fileName}': {ex.Message}");
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
 

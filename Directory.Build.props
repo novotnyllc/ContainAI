@@ -14,14 +14,18 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);CA*;IDE*;SYSLIB*</WarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <RunAnalyzers>true</RunAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
-    <AnalysisLevel>latest</AnalysisLevel>
-    <AnalysisMode>Recommended</AnalysisMode>
-    <AnalysisModeSecurity>Recommended</AnalysisModeSecurity>
-    <AnalysisModePerformance>Recommended</AnalysisModePerformance>
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <AnalysisLevelStyle>latest-all</AnalysisLevelStyle>
+    <AnalysisMode>All</AnalysisMode>
+    <AnalysisModeStyle>All</AnalysisModeStyle>
+    <AnalysisModeSecurity>All</AnalysisModeSecurity>
+    <AnalysisModePerformance>All</AnalysisModePerformance>
   </PropertyGroup>
 
   <PropertyGroup>

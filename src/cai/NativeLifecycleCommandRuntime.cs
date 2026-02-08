@@ -350,10 +350,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
         };
     }
 
-    private Task<int> WriteUsageAsync(string usage)
+    private async Task<int> WriteUsageAsync(string usage)
     {
-        _stdout.WriteLine(usage);
-        return Task.FromResult(0);
+        await _stdout.WriteLineAsync(usage).ConfigureAwait(false);
+        return 0;
     }
 
     private async Task<int> RunVersionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -812,7 +812,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 .Where(static entry => !entry.Flags.Contains('G', StringComparison.Ordinal))
                 .ToArray();
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -1810,7 +1820,19 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 entries = Directory.EnumerateFileSystemEntries(currentDirectory);
             }
-            catch
+            catch (IOException)
+            {
+                continue;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                continue;
+            }
+            catch (NotSupportedException)
+            {
+                continue;
+            }
+            catch (ArgumentException)
             {
                 continue;
             }
@@ -1849,7 +1871,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 return fileInfo.LinkTarget;
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"Failed to read file symlink target for '{path}': {ex.Message}");
+        }
+        catch (NotSupportedException ex)
+        {
+            Debug.WriteLine($"Failed to read file symlink target for '{path}': {ex.Message}");
+        }
+        catch (ArgumentException ex)
         {
             Debug.WriteLine($"Failed to read file symlink target for '{path}': {ex.Message}");
         }
@@ -1862,7 +1892,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 return directoryInfo.LinkTarget;
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"Failed to read directory symlink target for '{path}': {ex.Message}");
+        }
+        catch (NotSupportedException ex)
+        {
+            Debug.WriteLine($"Failed to read directory symlink target for '{path}': {ex.Message}");
+        }
+        catch (ArgumentException ex)
         {
             Debug.WriteLine($"Failed to read directory symlink target for '{path}': {ex.Message}");
         }
@@ -2916,7 +2954,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -2960,7 +3008,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             await _stdout.WriteAsync(generated.Content).ConfigureAwait(false);
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -3081,7 +3139,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             await _stderr.WriteLineAsync($"Applied {kind}: {applied}").ConfigureAwait(false);
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
         {
             await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
@@ -4485,7 +4553,19 @@ Examples:
         {
             return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
         }
-        catch
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
         {
             return false;
         }
@@ -4731,8 +4811,8 @@ Examples:
         {
             cancellationToken.ThrowIfCancellationRequested();
             var destinationFile = Path.Combine(destinationDirectory, Path.GetFileName(sourceFile));
-            await using var sourceStream = File.OpenRead(sourceFile);
-            await using var destinationStream = File.Create(destinationFile);
+            using var sourceStream = File.OpenRead(sourceFile);
+            using var destinationStream = File.Create(destinationFile);
             await sourceStream.CopyToAsync(destinationStream, cancellationToken).ConfigureAwait(false);
         }
 
@@ -4773,7 +4853,11 @@ Examples:
                 return new ProcessResult(1, string.Empty, $"Failed to start {fileName}");
             }
         }
-        catch (Exception ex)
+        catch (Win32Exception ex)
+        {
+            return new ProcessResult(1, string.Empty, ex.Message);
+        }
+        catch (InvalidOperationException ex)
         {
             return new ProcessResult(1, string.Empty, ex.Message);
         }
@@ -4787,9 +4871,13 @@ Examples:
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch (Exception killEx)
+            catch (InvalidOperationException killEx)
             {
-                Console.Error.WriteLine($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
+                _ = Console.Error.WriteLineAsync($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
+            }
+            catch (Win32Exception killEx)
+            {
+                _ = Console.Error.WriteLineAsync($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
             }
         });
 
@@ -4838,7 +4926,7 @@ Examples:
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"Failed to start '{fileName}': {ex.Message}");
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
 
@@ -4851,7 +4939,11 @@ Examples:
                     process.Kill(entireProcessTree: true);
                 }
             }
-            catch (Exception ex)
+            catch (InvalidOperationException ex)
+            {
+                Debug.WriteLine($"Failed to kill process '{fileName}' during cancellation: {ex.Message}");
+            }
+            catch (Win32Exception ex)
             {
                 Debug.WriteLine($"Failed to kill process '{fileName}' during cancellation: {ex.Message}");
             }

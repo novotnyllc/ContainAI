@@ -294,7 +294,19 @@ internal static partial class TomlCommandProcessor
                 }
             }
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException ex)
+        {
+            return new TomlCommandResult(1, string.Empty, $"Error: Cannot write file: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            return new TomlCommandResult(1, string.Empty, $"Error: Cannot write file: {ex.Message}");
+        }
+        catch (ArgumentException ex)
+        {
+            return new TomlCommandResult(1, string.Empty, $"Error: Cannot write file: {ex.Message}");
+        }
+        catch (NotSupportedException ex)
         {
             return new TomlCommandResult(1, string.Empty, $"Error: Cannot write file: {ex.Message}");
         }
@@ -330,7 +342,15 @@ internal static partial class TomlCommandProcessor
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Cannot read file: {ex.Message}"), null);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
+        }
+        catch (FormatException ex)
+        {
+            return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
+        }
+        catch (ArgumentException ex)
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
         }
@@ -351,7 +371,17 @@ internal static partial class TomlCommandProcessor
             content = File.ReadAllText(filePath);
             return true;
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException ex)
+        {
+            error = $"Error: Cannot read file: {ex.Message}";
+            return false;
+        }
+        catch (IOException ex)
+        {
+            error = $"Error: Cannot read file: {ex.Message}";
+            return false;
+        }
+        catch (ArgumentException ex)
         {
             error = $"Error: Cannot read file: {ex.Message}";
             return false;
@@ -364,7 +394,11 @@ internal static partial class TomlCommandProcessor
         {
             return new TomlCommandResult(0, SerializeJsonValue(table), string.Empty);
         }
-        catch (Exception ex)
+        catch (ArgumentException ex)
+        {
+            return new TomlCommandResult(1, string.Empty, $"Error: Cannot serialize config: {ex.Message}");
+        }
+        catch (InvalidOperationException ex)
         {
             return new TomlCommandResult(1, string.Empty, $"Error: Cannot serialize config: {ex.Message}");
         }
