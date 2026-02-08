@@ -673,7 +673,12 @@ public sealed class CaiCliRoutingTests
             Assert.Empty(runtime.NativeCalls);
             Assert.Empty(runtime.AcpCalls);
 
-            using var payload = JsonDocument.Parse(writer.ToString());
+            var output = writer.ToString();
+            var jsonLine = output
+                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Last(static line => line.StartsWith('{'));
+
+            using var payload = JsonDocument.Parse(jsonLine);
             Assert.True(payload.RootElement.TryGetProperty("version", out var versionElement));
             Assert.False(string.IsNullOrWhiteSpace(versionElement.GetString()));
             Assert.True(payload.RootElement.TryGetProperty("install_type", out _));

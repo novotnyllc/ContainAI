@@ -314,12 +314,9 @@ jobs:
           echo "============================================="
           echo "Creating tarball for ${{ matrix.tarball_target }}"
           echo "============================================="
-          dotnet build ./src/cai/cai.csproj \
-            -t:BuildContainAITarballs \
-            -p:Configuration=Release \
-            -p:ContainAIRuntimeIdentifiers="${{ matrix.rid }}" \
-            -p:ContainAIVersion="$NBGV_SemVer2" \
-            -p:ContainAIOutputDir=./artifacts \
+          dotnet publish ./src/cai/cai.csproj \
+            -c Release \
+            -r "${{ matrix.rid }}" \
             -warnaserror \
             -p:TrimmerSingleWarn=false
 

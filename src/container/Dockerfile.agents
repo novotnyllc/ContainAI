@@ -7,12 +7,9 @@
 #   dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest --layer full
 #
 # Manual docker build requires a prebuilt cai tarball:
-#   dotnet build ./src/cai/cai.csproj \
-#     -t:BuildContainAITarballs \
+#   dotnet publish ./src/cai/cai.csproj \
 #     -p:Configuration=Release \
-#     -p:ContainAIRuntimeIdentifiers=linux-x64 \
-#     -p:ContainAIVersion=<version> \
-#     -p:ContainAIOutputDir=./artifacts/cai-tarballs
+#     -p:RuntimeIdentifier=linux-x64
 #   docker build -t containai/full -f src/container/Dockerfile.agents .
 #
 # Requires containai/sdks:latest to be built first (or use dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest for all layers)

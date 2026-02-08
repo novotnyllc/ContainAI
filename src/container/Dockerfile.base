@@ -199,7 +199,7 @@ RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
     esac; \
     if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
         echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
-        echo "Run dotnet build src/cai/cai.csproj -t:BuildContainAITarballs before building this image." >&2; \
+        echo "Run dotnet publish src/cai/cai.csproj -c Release -r <rid> before building this image." >&2; \
         exit 1; \
     fi; \
     rm -rf /opt/containai; \

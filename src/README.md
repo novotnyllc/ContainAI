@@ -95,7 +95,7 @@ Feature runtime logic is implemented in C# (`src/cai/DevcontainerFeatureRuntime.
 
 ## Packaging
 
-Release tarballs are produced from `src/cai/build/ContainAI.Build.targets` through `PackageContainAIRelease` and include:
+Release tarballs are produced automatically after `dotnet publish` (`AfterTargets=Publish` in `src/cai/build/ContainAI.Build.targets`) and include:
 
 - `cai` binary
 - `manifests/`
@@ -107,7 +107,8 @@ Release tarballs are produced from `src/cai/build/ContainAI.Build.targets` throu
 Tarball target:
 
 ```bash
-dotnet build src/cai/cai.csproj -t:BuildContainAITarballs -p:ContainAIRuntimeIdentifiers=linux-x64;linux-arm64 -p:Configuration=Release
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64
+dotnet publish src/cai/cai.csproj -c Release -r linux-arm64
 ```
 
 ## Notes for Contributors

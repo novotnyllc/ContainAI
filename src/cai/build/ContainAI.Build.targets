@@ -2,37 +2,17 @@
 
   <PropertyGroup>
     <ContainAIRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../..'))</ContainAIRepositoryRoot>
-    <ContainAIOutputDir Condition="'$(ContainAIOutputDir)'==''">$([System.IO.Path]::GetFullPath('$(ContainAIRepositoryRoot)/artifacts/cai-tarballs'))</ContainAIOutputDir>
-    <ContainAIVersion Condition="'$(ContainAIVersion)'==''">$(Version)</ContainAIVersion>
-    <ContainAIRuntimeIdentifiers Condition="'$(ContainAIRuntimeIdentifiers)'=='' and '$(RuntimeIdentifier)'!=''">$(RuntimeIdentifier)</ContainAIRuntimeIdentifiers>
+    <ContainAIOutputDir Condition="'$(ContainAIOutputDir)'=='' and '$(ArtifactsPath)'!=''">$([System.IO.Path]::GetFullPath('$(ArtifactsPath)'))</ContainAIOutputDir>
+    <ContainAIOutputDir Condition="'$(ContainAIOutputDir)'==''">$([System.IO.Path]::GetFullPath('$(ContainAIRepositoryRoot)/artifacts'))</ContainAIOutputDir>
   </PropertyGroup>
 
-  <Target Name="BuildContainAITarballs" DependsOnTargets="_ResolveContainAIVersion;_ValidateTarballInputs">
-    <ItemGroup>
-      <_ContainAIRids Include="$(ContainAIRuntimeIdentifiers)" />
-    </ItemGroup>
-
-    <MSBuild
-      Projects="$(MSBuildProjectFullPath)"
-      Targets="PackageContainAIRelease"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=%(_ContainAIRids.Identity);ContainAIVersion=$(ContainAIVersion);ContainAIOutputDir=$(ContainAIOutputDir);SelfContained=true;PublishAot=true;PublishTrimmed=true" />
-  </Target>
-
-  <Target Name="_ValidateTarballInputs">
-    <Error Condition="'$(ContainAIRuntimeIdentifiers)'==''" Text="ContainAIRuntimeIdentifiers must be set (for example: linux-x64;linux-arm64)." />
-    <Error Condition="'$(ContainAIVersion)'==''" Text="ContainAIVersion must be set." />
-  </Target>
-
-  <Target Name="_ResolveContainAIVersion" Condition="'$(ContainAIVersion)'==''">
-    <Exec Command="dotnet nbgv get-version -v SemVer2" ConsoleToMSBuild="true" StandardOutputImportance="Low">
-      <Output TaskParameter="ConsoleOutput" ItemName="_ContainAIVersionLines" />
-    </Exec>
-
+  <Target Name="_EnsureContainAIVersion">
     <PropertyGroup>
-      <ContainAIVersion>@(_ContainAIVersionLines)</ContainAIVersion>
+      <ContainAIVersion Condition="'$(ContainAIVersion)'=='' and '$(NBGV_SemVer2)'!=''">$(NBGV_SemVer2)</ContainAIVersion>
+      <ContainAIVersion Condition="'$(ContainAIVersion)'=='' and '$(Version)'!=''">$(Version)</ContainAIVersion>
+      <ContainAIVersion Condition="'$(ContainAIVersion)'=='' and '$(PackageVersion)'!=''">$(PackageVersion)</ContainAIVersion>
+      <ContainAIVersion Condition="'$(ContainAIVersion)'==''">0.0.0</ContainAIVersion>
     </PropertyGroup>
-
-    <Error Condition="'$(ContainAIVersion)'==''" Text="ContainAIVersion could not be resolved from Nerdbank.GitVersioning." />
   </Target>
 
   <PropertyGroup>
@@ -47,7 +27,7 @@
     <ContainAISkipDockerBuild Condition="'$(ContainAISkipDockerBuild)'==''">false</ContainAISkipDockerBuild>
   </PropertyGroup>
 
-  <Target Name="BuildContainAIImages" DependsOnTargets="_ResolveContainAIVersion;_PrepareContainAIImageBuild">
+  <Target Name="BuildContainAIImages" DependsOnTargets="_EnsureContainAIVersion;_PrepareContainAIImageBuild">
     <Error
       Condition="'$(ContainAILayer)'!='all' and '$(ContainAILayer)'!='base' and '$(ContainAILayer)'!='sdks' and '$(ContainAILayer)'!='agents' and '$(ContainAILayer)'!='final'"
       Text="ContainAILayer must be one of: all, base, sdks, agents, final." />
@@ -129,19 +109,7 @@
     <Error Condition="'$(ContainAIPackageArch)'==''" Text="Unsupported RuntimeIdentifier '$(RuntimeIdentifier)'. Supported: linux-x64, linux-arm64, osx-x64, osx-arm64." />
   </Target>
 
-  <Target Name="_PublishContainAIReleaseBinary" DependsOnTargets="_ResolvePackageArch">
-    <MSBuild
-      Projects="$(MSBuildProjectFullPath)"
-      Targets="Restore"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishAot=true;PublishTrimmed=true;NoRestore=false" />
-
-    <MSBuild
-      Projects="$(MSBuildProjectFullPath)"
-      Targets="Publish"
-      Properties="Configuration=$(Configuration);RuntimeIdentifier=$(RuntimeIdentifier);SelfContained=true;PublishAot=true;PublishTrimmed=true;NoRestore=true" />
-  </Target>
-
-  <Target Name="PackageContainAIRelease" DependsOnTargets="_ResolvePackageArch;_PublishContainAIReleaseBinary">
+  <Target Name="PackageContainAIRelease" DependsOnTargets="_EnsureContainAIVersion;_ResolvePackageArch" AfterTargets="Publish">
     <PropertyGroup>
       <ContainAIPackageName>containai-$(ContainAIVersion)-$(ContainAIPackageArch)</ContainAIPackageName>
       <ContainAIStagingRoot>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)/package-staging'))</ContainAIStagingRoot>

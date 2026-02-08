@@ -9,6 +9,8 @@
 
   <PropertyGroup>
     <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+    <SelfContained Condition="'$(RuntimeIdentifier)'!=''">true</SelfContained>
     <OptimizationPreference>Speed</OptimizationPreference>
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>

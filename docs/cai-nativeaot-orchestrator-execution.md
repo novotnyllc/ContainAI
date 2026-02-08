@@ -59,7 +59,7 @@
   - `dotnet run --project src/cai -- setup --dry-run --skip-templates` (pass)
   - `dotnet run --project src/cai -- doctor --reset-lima` on non-macOS (expected failure path)
 - Release packaging smoke:
-  - `dotnet build src/cai/cai.csproj -t:BuildContainAITarballs -p:ContainAIRuntimeIdentifiers=linux-x64 -p:ContainAIOutputDir=artifacts/cai-tarballs-test` (pass)
+  - `dotnet publish src/cai/cai.csproj -c Release -r linux-x64` (pass)
 - Slopwatch (dirty-file hook mode):
   - `slopwatch analyze -d . --hook --no-baseline --fail-on warning` (passed)
 - CRAP/coverage hotspot analysis:
