@@ -29,11 +29,15 @@ internal static class AgentShimDispatcher
         commandArgs.AddRange(definition.Value.DefaultArgs);
         commandArgs.AddRange(args);
 
+        using var standardInput = Console.OpenStandardInput();
+        using var standardOutput = Console.OpenStandardOutput();
+        using var standardError = Console.OpenStandardError();
+
         var command = global::CliWrap.Cli.Wrap(binaryPath)
             .WithArguments(commandArgs)
-            .WithStandardInputPipe(PipeSource.FromStream(Console.OpenStandardInput()))
-            .WithStandardOutputPipe(PipeTarget.ToStream(Console.OpenStandardOutput()))
-            .WithStandardErrorPipe(PipeTarget.ToStream(Console.OpenStandardError()))
+            .WithStandardInputPipe(PipeSource.FromStream(standardInput))
+            .WithStandardOutputPipe(PipeTarget.ToStream(standardOutput))
+            .WithStandardErrorPipe(PipeTarget.ToStream(standardError))
             .WithValidation(CommandResultValidation.None);
 
         var result = await command.ExecuteAsync(cancellationToken).ConfigureAwait(false);

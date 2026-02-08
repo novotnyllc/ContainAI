@@ -62,7 +62,7 @@ internal sealed class CommandRuntimeService : ICommandRuntimeService
         }
         catch (Win32Exception ex)
         {
-            Console.Error.WriteLine($"Failed to start '{spec.FileName}': {ex.Message}");
+            await Console.Error.WriteLineAsync($"Failed to start '{spec.FileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
 

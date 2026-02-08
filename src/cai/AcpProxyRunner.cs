@@ -108,7 +108,22 @@ internal sealed class AcpProxyRunner
         {
             return 0;
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
+        {
+            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            return 1;
+        }
+        catch (NotSupportedException ex)
         {
             await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;

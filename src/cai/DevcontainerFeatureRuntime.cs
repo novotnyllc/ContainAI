@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Text.Json;
@@ -554,7 +555,19 @@ internal sealed partial class DevcontainerFeatureRuntime
             var attributes = File.GetAttributes(path);
             return (attributes & FileAttributes.ReparsePoint) != 0;
         }
-        catch
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
         {
             return false;
         }
@@ -567,7 +580,19 @@ internal sealed partial class DevcontainerFeatureRuntime
             _ = Process.GetProcessById(processId);
             return true;
         }
-        catch
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (NotSupportedException)
         {
             return false;
         }
@@ -586,7 +611,11 @@ internal sealed partial class DevcontainerFeatureRuntime
                 .GetActiveTcpListeners()
                 .Any(endpoint => endpoint.Port == port);
         }
-        catch
+        catch (NetworkInformationException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
         {
             return false;
         }
@@ -681,7 +710,19 @@ internal sealed partial class DevcontainerFeatureRuntime
             var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
             return JsonSerializer.Deserialize(json, JsonContext.Default.FeatureConfig);
         }
-        catch
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
         {
             return null;
         }
@@ -827,18 +868,18 @@ internal sealed partial class DevcontainerFeatureRuntime
     [JsonSerializable(typeof(LinkSpecDocument))]
     private partial class JsonContext : JsonSerializerContext;
 
-    public sealed record FeatureConfig(
+    internal sealed record FeatureConfig(
         [property: JsonPropertyName("data_volume")] string DataVolume,
         [property: JsonPropertyName("enable_credentials")] bool EnableCredentials,
         [property: JsonPropertyName("enable_ssh")] bool EnableSsh,
         [property: JsonPropertyName("install_docker")] bool InstallDocker,
         [property: JsonPropertyName("remote_user")] string RemoteUser);
 
-    public sealed record LinkSpecDocument(
+    internal sealed record LinkSpecDocument(
         [property: JsonPropertyName("home_dir")] string? HomeDirectory,
         [property: JsonPropertyName("links")] IReadOnlyList<LinkEntry>? Links);
 
-    public sealed record LinkEntry(
+    internal sealed record LinkEntry(
         [property: JsonPropertyName("link")] string Link,
         [property: JsonPropertyName("target")] string Target,
         [property: JsonPropertyName("remove_first")] bool? RemoveFirst);
