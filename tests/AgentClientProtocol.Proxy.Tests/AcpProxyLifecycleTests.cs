@@ -667,6 +667,7 @@ public sealed class AcpProxyLifecycleTests
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
+                return;
             }
             finally
             {

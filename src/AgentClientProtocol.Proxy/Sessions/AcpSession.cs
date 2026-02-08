@@ -78,7 +78,11 @@ public sealed class AcpSession : IDisposable
         }
         catch (ChannelClosedException)
         {
-            // Agent transport already closed.
+            if (!cts.IsCancellationRequested)
+            {
+                // Agent transport closed unexpectedly; cancel pending operations.
+                await cts.CancelAsync().ConfigureAwait(false);
+            }
         }
         finally
         {

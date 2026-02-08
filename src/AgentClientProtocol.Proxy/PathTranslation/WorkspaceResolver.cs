@@ -1,4 +1,5 @@
 // Workspace root resolution
+using System.Diagnostics;
 using CliWrap;
 using CliWrap.Buffered;
 
@@ -37,17 +38,20 @@ public static class WorkspaceResolver
                 return result.StandardOutput.Trim();
             }
         }
-        catch (InvalidOperationException) when (!cancellationToken.IsCancellationRequested)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Git invocation failed; fall back to workspace marker walk.
+            Trace.TraceInformation("WorkspaceResolver git lookup failed: {0}", ex.Message);
         }
-        catch (IOException) when (!cancellationToken.IsCancellationRequested)
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Git output capture failed; fall back to workspace marker walk.
+            Trace.TraceInformation("WorkspaceResolver git output read failed: {0}", ex.Message);
         }
-        catch (System.ComponentModel.Win32Exception) when (!cancellationToken.IsCancellationRequested)
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             // Git executable not available; fall back to workspace marker walk.
+            Trace.TraceInformation("WorkspaceResolver git executable unavailable: {0}", ex.Message);
         }
 
         // Walk up looking for .containai/config.toml
