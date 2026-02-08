@@ -687,7 +687,7 @@ cai setup
 ```
 
 **macOS:**
-Sysbox is not natively supported on macOS. Use Docker Desktop with ECI instead, or configure a Lima VM with Sysbox.
+Sysbox is not natively supported on macOS host Docker. Use `cai setup` to provision the `containai-docker` Lima VM with Sysbox and run ContainAI through that context.
 
 ### "Docker daemon for 'containai-docker' not running"
 

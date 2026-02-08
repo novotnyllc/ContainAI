@@ -142,7 +142,7 @@ mode = "none"
 
 ### `[secure_engine]` Section
 
-Secure container engine configuration (Sysbox/ECI).
+Secure container engine configuration (Sysbox runtime).
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
