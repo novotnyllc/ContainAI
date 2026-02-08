@@ -230,51 +230,6 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task CompletionCommand_Bash_EmitsNativeSystemCommandLineScript()
-    {
-        var runtime = new FakeRuntime();
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
-
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(["completion", "bash"], runtime, cancellationToken);
-            Assert.Equal(0, exitCode);
-            Assert.Contains("cai completion suggest", writer.ToString(), StringComparison.Ordinal);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    [Fact]
-    public async Task CompletionCommand_Zsh_EmitsNativeSystemCommandLineScript()
-    {
-        var runtime = new FakeRuntime();
-        var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
-
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(["completion", "zsh"], runtime, cancellationToken);
-            Assert.Equal(0, exitCode);
-            Assert.Contains("#compdef cai", writer.ToString(), StringComparison.Ordinal);
-            Assert.Contains("cai completion suggest", writer.ToString(), StringComparison.Ordinal);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
-    }
-
-    [Fact]
     public async Task CompletionCommand_Suggest_ReturnsContextualSuggestions()
     {
         var runtime = new FakeRuntime();

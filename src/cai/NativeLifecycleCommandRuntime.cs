@@ -390,7 +390,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             "config" => await WriteUsageAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false),
             "template" => await WriteUsageAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false),
             "ssh" => await WriteUsageAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false),
-            "completion" => await WriteUsageAsync("Usage: cai completion <bash|zsh>").ConfigureAwait(false),
+            "completion" => await WriteUsageAsync("Usage: cai completion suggest --line \"<command line>\" [--position <cursor>]").ConfigureAwait(false),
             "links" => await WriteUsageAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run]").ConfigureAwait(false),
             _ => await WriteUsageAsync(GetRootHelpText()).ConfigureAwait(false),
         };

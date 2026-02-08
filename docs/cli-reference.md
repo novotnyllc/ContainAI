@@ -1160,39 +1160,26 @@ cai acp proxy gemini
 
 ### cai completion
 
-Generate shell completion scripts and completion suggestions.
+Resolve completion suggestions for shell integration.
 
 **Synopsis:**
 ```bash
-cai completion <bash|zsh>
 cai completion suggest --line "<command line>" [--position <cursor>]
 ```
 
-**Shells:**
-- `bash` - Bash completion script
-- `zsh` - Zsh completion script
+**Arguments/Options:**
+- `--line` - Full current command line text
+- `--position` - Cursor position in `--line` (defaults to end of line)
 
-**Installation:**
-
-**Bash (add to ~/.bashrc):**
+**Example:**
 ```bash
-source <(cai completion bash)
-# Or save to a file:
-cai completion bash > ~/.local/share/bash-completion/completions/cai
-```
-
-**Zsh (add to ~/.zshrc):**
-```bash
-source <(cai completion zsh)
-# Or save to a file (ensure fpath includes the directory):
-cai completion zsh > ~/.zfunc/_cai
+cai completion suggest --line "cai man" --position 7
 ```
 
 **Notes:**
-- Completion scripts call the built-in `cai completion suggest` path for suggestions.
 - `cai completion suggest` is provided by the CLI itself; `dotnet-suggest` is not required.
-- `suggest` expects the full command line via `--line` and an optional cursor position via `--position` (defaults to the end of the line).
-- The script layout follows the .NET tab-completion guidance: <https://learn.microsoft.com/en-us/dotnet/standard/commandline/how-to-enable-tab-completion>.
+- Shell integrations should call `cai completion suggest` directly from shell completion functions.
+- The completion protocol follows the .NET tab-completion guidance: <https://learn.microsoft.com/en-us/dotnet/standard/commandline/how-to-enable-tab-completion>.
 
 ---
 

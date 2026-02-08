@@ -537,23 +537,7 @@ internal static partial class RootCommandBuilder
 
     private static Command CreateCompletionCommand(RootCommand root)
     {
-        var completionCommand = new Command("completion", "Generate shell completion scripts.");
-
-        var bashCommand = new Command("bash", "Emit Bash completion script.");
-        bashCommand.SetAction(async (_, cancellationToken) =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Console.Out.WriteLineAsync(BuildBashCompletionScript()).ConfigureAwait(false);
-            return 0;
-        });
-
-        var zshCommand = new Command("zsh", "Emit Zsh completion script.");
-        zshCommand.SetAction(async (_, cancellationToken) =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await Console.Out.WriteLineAsync(BuildZshCompletionScript()).ConfigureAwait(false);
-            return 0;
-        });
+        var completionCommand = new Command("completion", "Resolve completions for shell integration.");
 
         var suggestCommand = new Command("suggest", "Resolve completions for shell integration.")
         {
@@ -595,8 +579,6 @@ internal static partial class RootCommandBuilder
             return 0;
         });
 
-        completionCommand.Subcommands.Add(bashCommand);
-        completionCommand.Subcommands.Add(zshCommand);
         completionCommand.Subcommands.Add(suggestCommand);
 
         return completionCommand;
@@ -690,38 +672,6 @@ internal static partial class RootCommandBuilder
 
         return !CommandCatalog.RoutedCommands.Contains(firstToken);
     }
-
-    private static string BuildBashCompletionScript()
-        => """
-           # shellcheck shell=bash
-           _cai_completion() {
-             local line suggestions
-             line="${COMP_LINE:-cai}"
-             suggestions="$({ cai completion suggest --line "$line" --position "${COMP_POINT:-${#line}}"; } 2>/dev/null)"
-             COMPREPLY=()
-
-             while IFS= read -r candidate; do
-               if [[ -n "$candidate" ]]; then
-                 COMPREPLY+=("$candidate")
-               fi
-             done <<< "$suggestions"
-           }
-
-           complete -o default -o bashdefault -F _cai_completion cai
-           """;
-
-    private static string BuildZshCompletionScript()
-        => """
-           #compdef cai
-           _cai_completion() {
-             local line suggestions
-             line="${BUFFER:-cai}"
-             suggestions="$({ cai completion suggest --line "$line" --position "${CURSOR:-${#line}}"; } 2>/dev/null)"
-             compadd -- ${(f)suggestions}
-           }
-
-           compdef _cai_completion cai
-           """;
 
     private static string ExpandHome(string path)
     {
