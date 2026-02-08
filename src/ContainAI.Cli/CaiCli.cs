@@ -13,17 +13,6 @@ public static class CaiCli
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(runtime);
 
-        if (args.Length > 0 && args[0] == "--acp")
-        {
-            var translated = new List<string>(capacity: args.Length + 1)
-            {
-                "acp",
-                "proxy",
-            };
-            translated.AddRange(args.Skip(1));
-            args = translated.ToArray();
-        }
-
         var normalizedArgs = NormalizeRootAliases(args);
         var root = CreateRootCommand(runtime);
         if (normalizedArgs.Length > 0 && ShouldImplicitRun(normalizedArgs))

@@ -173,7 +173,6 @@ containai [subcommand] [options]
 - Requires Bash 4.0+
 
 **Root aliases:**
-- `cai --acp [agent]` is translated to `cai acp proxy [agent]`
 - `cai -v` and `cai --version` are translated to `cai version`
 
 ---

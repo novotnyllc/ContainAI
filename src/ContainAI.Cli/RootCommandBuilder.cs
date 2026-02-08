@@ -41,7 +41,7 @@ internal static partial class RootCommandBuilder
                 CommandArgs: Array.Empty<string>()),
             cancellationToken));
 
-        foreach (var name in CommandCatalog.RoutedCommandOrder.Where(static command => command != "acp"))
+        foreach (var name in CommandCatalog.RoutedCommandOrder)
         {
             var command = name switch
             {
@@ -70,13 +70,12 @@ internal static partial class RootCommandBuilder
                 "system" => CreateSystemCommand(runtime),
                 "completion" => CreateCompletionCommand(root),
                 "version" => CreateVersionCommand(runtime),
+                "acp" => AcpCommandBuilder.Build(runtime),
                 _ => throw new InvalidOperationException($"Unsupported routed command '{name}'."),
             };
 
             root.Subcommands.Add(command);
         }
-
-        root.Subcommands.Add(AcpCommandBuilder.Build(runtime));
 
         return root;
     }

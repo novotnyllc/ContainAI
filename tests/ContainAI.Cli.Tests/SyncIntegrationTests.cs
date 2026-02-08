@@ -123,6 +123,142 @@ public sealed class SyncIntegrationTests
 
     [Fact]
     [Trait("Category", "SyncIntegration")]
+    public async Task Import_AdditionalPaths_SyncsFiles_AndFiltersPrivEntries()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var volume = $"containai-test-additional-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-additional-src-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(Path.GetTempPath(), $"cai-additional-work-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".claude"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".claude", "settings.json"), "{}", TestContext.Current.CancellationToken);
+
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".bashrc.d"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".bashrc.d", "10-public.sh"), "export PUBLIC=1\n", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".bashrc.d", "20-secret.priv.sh"), "export SECRET=1\n", TestContext.Current.CancellationToken);
+
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".config", "mytool"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".config", "mytool", "config.json"), """{"enabled":true}""", TestContext.Current.CancellationToken);
+
+            var configPath = Path.Combine(workspace, "containai.toml");
+            await File.WriteAllTextAsync(
+                configPath,
+                """
+                [agent]
+                data_volume = "__VOLUME__"
+
+                [import]
+                additional_paths = ["~/.bashrc.d", "~/.config/mytool/config.json"]
+                """.Replace("__VOLUME__", volume, StringComparison.Ordinal),
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var exitCode = await runtime.RunAsync(
+                ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+
+            var verify = await RunDockerAsync(
+                [
+                    "run", "--rm", "-v", $"{volume}:/data", AlpineImage, "sh", "-lc",
+                    "set -eu; test -f /data/bashrc.d/10-public.sh; test ! -f /data/bashrc.d/20-secret.priv.sh; test -f /data/config/mytool/config.json"
+                ],
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, verify.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+            Directory.Delete(workspace, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", volume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SyncIntegration")]
+    public async Task Import_EnvFileAndHostMerge_WritesAllowlistedValues()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var volume = $"containai-test-env-merge-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-env-merge-src-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(Path.GetTempPath(), $"cai-env-merge-work-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(workspace);
+
+        var previousHostValue = Environment.GetEnvironmentVariable("SYNC_TEST_FROM_HOST");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".claude"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".claude", "settings.json"), "{}", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(workspace, "test.env"),
+                "SYNC_TEST_FROM_FILE=file_value\nSYNC_TEST_FROM_HOST=file_host_value\nUNUSED_KEY=ignored\n",
+                TestContext.Current.CancellationToken);
+
+            Environment.SetEnvironmentVariable("SYNC_TEST_FROM_HOST", "host_value");
+
+            var configPath = Path.Combine(workspace, "containai.toml");
+            await File.WriteAllTextAsync(
+                configPath,
+                """
+                [agent]
+                data_volume = "__VOLUME__"
+
+                [env]
+                import = ["SYNC_TEST_FROM_FILE", "SYNC_TEST_FROM_HOST", "SYNC_TEST_MISSING"]
+                from_host = true
+                env_file = "test.env"
+                """.Replace("__VOLUME__", volume, StringComparison.Ordinal),
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var exitCode = await runtime.RunAsync(
+                ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Missing host env var: SYNC_TEST_MISSING", stderr.ToString(), StringComparison.Ordinal);
+
+            var inspect = await RunDockerAsync(
+                ["run", "--rm", "-v", $"{volume}:/data", AlpineImage, "sh", "-lc", "set -eu; test -f /data/.env; cat /data/.env"],
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(0, inspect.ExitCode);
+            Assert.Contains("SYNC_TEST_FROM_FILE=file_value", inspect.StandardOutput, StringComparison.Ordinal);
+            Assert.Contains("SYNC_TEST_FROM_HOST=host_value", inspect.StandardOutput, StringComparison.Ordinal);
+            Assert.DoesNotContain("UNUSED_KEY=", inspect.StandardOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SYNC_TEST_FROM_HOST", previousHostValue);
+            Directory.Delete(sourceRoot, recursive: true);
+            Directory.Delete(workspace, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", volume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SyncIntegration")]
     public async Task Import_RejectsSymlinkedVolumeEnvTarget()
     {
         if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
@@ -305,10 +441,22 @@ public sealed class SyncIntegrationTests
 
     private static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
+        var explicitContext = Environment.GetEnvironmentVariable("CONTAINAI_DOCKER_CONTEXT");
+        if (!string.IsNullOrWhiteSpace(explicitContext))
+        {
+            return explicitContext;
+        }
+
+        var list = await RunProcessAsync("docker", ["context", "ls", "--format", "{{.Name}}"], cancellationToken).ConfigureAwait(false);
+        if (list.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var availableContexts = SplitNonEmptyLines(list.StandardOutput);
         foreach (var context in new[] { "containai-docker", "containai-secure", "docker-containai" })
         {
-            var probe = await RunProcessAsync("docker", ["context", "inspect", context], cancellationToken).ConfigureAwait(false);
-            if (probe.ExitCode == 0)
+            if (availableContexts.Contains(context, StringComparer.Ordinal))
             {
                 return context;
             }

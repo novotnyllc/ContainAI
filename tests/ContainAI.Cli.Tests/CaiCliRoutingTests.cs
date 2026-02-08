@@ -514,33 +514,37 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_IsMappedToAcpRuntime()
+    public async Task LegacyAcpFlag_IsTreatedAsRunArguments()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["--acp", "claude"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
-        Assert.Equal(["claude"], runtime.AcpCalls);
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.Equal(["--acp", "claude"], runtime.RunCalls[0].CommandArgs);
+        Assert.Empty(runtime.AcpCalls);
         Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_WithoutAgent_DefaultsToClaude()
+    public async Task LegacyAcpFlag_WithoutAgent_IsTreatedAsRunArgument()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["--acp"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
-        Assert.Equal(["claude"], runtime.AcpCalls);
+        Assert.Equal(FakeRuntime.RunExitCode, exitCode);
+        Assert.Single(runtime.RunCalls);
+        Assert.Equal(["--acp"], runtime.RunCalls[0].CommandArgs);
+        Assert.Empty(runtime.AcpCalls);
         Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_WithHelp_IsHandledByParserWithoutRuntimeInvocation()
+    public async Task LegacyAcpFlag_WithHelp_ShowsTopLevelHelpWithoutRuntimeInvocation()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -548,6 +552,7 @@ public sealed class CaiCliRoutingTests
         var exitCode = await CaiCli.RunAsync(["--acp", "--help"], runtime, cancellationToken);
 
         Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.RunCalls);
         Assert.Empty(runtime.AcpCalls);
         Assert.Empty(runtime.NativeCalls);
     }
