@@ -56,12 +56,12 @@ public sealed class AcpSession : IDisposable
         if (AgentProcess?.StandardInput == null)
             return;
 
-        await _writeLock.WaitAsync();
+        await _writeLock.WaitAsync().ConfigureAwait(false);
         try
         {
             var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
-            await AgentProcess.StandardInput.WriteLineAsync(json);
-            await AgentProcess.StandardInput.FlushAsync();
+            await AgentProcess.StandardInput.WriteLineAsync(json).ConfigureAwait(false);
+            await AgentProcess.StandardInput.FlushAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -86,7 +86,7 @@ public sealed class AcpSession : IDisposable
         try
         {
             // Send the request
-            await WriteToAgentAsync(request);
+            await WriteToAgentAsync(request).ConfigureAwait(false);
 
             // Wait for response with timeout
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
@@ -94,7 +94,7 @@ public sealed class AcpSession : IDisposable
 
             try
             {
-                return await tcs.Task.WaitAsync(cts.Token);
+                return await tcs.Task.WaitAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

@@ -64,28 +64,16 @@ flowchart TB
     end
 
     subgraph Components["Generated Components"]
-        Import["cai manifest generate import-map"]
         Dockerfile["Dockerfile.agents<br/>Symlink creation"]
         Init["cai system init<br/>Directory structure"]
-        Wrappers["manifest-generated<br/>Launch wrappers"]
     end
 
     subgraph Artifacts["Container Artifacts"]
-        SymlinksScript["dockerfile-symlinks artifact"]
-        InitDirs["init-dirs artifact"]
         LinkSpec["generated/link-spec.json"]
-        AgentWrappers["generated/containai-agents.sh"]
     end
 
-    Manifests -->|"cai manifest generate import-map"| Import
-    Manifests -->|"cai manifest generate dockerfile-symlinks"| SymlinksScript
-    Manifests -->|"cai manifest generate init-dirs"| InitDirs
     Manifests -->|"cai manifest generate container-link-spec"| LinkSpec
-    Manifests -->|"cai manifest generate agent-wrappers"| AgentWrappers
-
-    SymlinksScript --> Dockerfile
-    InitDirs --> Init
-    AgentWrappers --> Wrappers
+    LinkSpec --> Init
 
     style Source fill:#e94560,stroke:#16213e,color:#fff
     style Components fill:#0f3460,stroke:#16213e,color:#fff
@@ -403,7 +391,6 @@ flowchart LR
 
     subgraph Runtime["Runtime Artifacts"]
         Symlinks["User symlinks in ~/"]
-        WrapperFuncs["~/.bash_env.d/containai-user-agents.sh"]
         LinkSpec["user-link-spec.json"]
     end
 
@@ -413,7 +400,6 @@ flowchart LR
     InitRuntime --> ManifestRuntime
     ManifestRuntime --> Symlinks
     ManifestRuntime --> LinkSpec
-    ManifestRuntime --> WrapperFuncs
 
     style Host fill:#1a1a2e,stroke:#16213e,color:#fff
     style Import fill:#0f3460,stroke:#16213e,color:#fff
@@ -426,7 +412,6 @@ flowchart LR
 2. `cai import` syncs to `/mnt/agent-data/containai/manifests/`
 3. On container start, `cai system init` processes user manifests using managed C# runtime services:
    - Generates `user-link-spec.json` from TOML manifests
-   - Creates user launch wrappers
    - Applies symlinks and init directory policy
 
 ### Security Constraints
@@ -437,7 +422,6 @@ User manifests have security restrictions enforced at runtime:
 |------------|-------------|
 | `target` must resolve under `/mnt/agent-data` | Path validation in `ManifestApplier` |
 | `container_link` must be relative, no `..` | Pattern matching |
-| Binary must exist for wrapper generation | `command -v` check |
 | Invalid TOML files | Logged and skipped |
 | Invalid entries | Logged and skipped (fail-safe) |
 
@@ -454,14 +438,6 @@ User manifests have security restrictions enforced at runtime:
   "links": [
     {"link": "/home/agent/.mytool/config.json", "target": "/mnt/agent-data/mytool/config.json", "remove_first": 0}
   ]
-}
-```
-
-**User wrappers** (`~/.bash_env.d/containai-user-agents.sh`):
-```bash
-# Generated user agent launch wrappers
-mytool() {
-    command mytool '--auto' "$@"
 }
 ```
 

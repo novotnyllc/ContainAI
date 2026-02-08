@@ -199,7 +199,7 @@ RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
     esac; \
     if [[ -z "$tarball" || ! -f "$tarball" ]]; then \
         echo "ERROR: ContainAI CLI tarball not found: $tarball" >&2; \
-        echo "Run dotnet msbuild src/cai/cai.csproj -t:BuildContainAITarballs before building this image." >&2; \
+        echo "Run dotnet build src/cai/cai.csproj -t:BuildContainAITarballs before building this image." >&2; \
         exit 1; \
     fi; \
     rm -rf /opt/containai; \
@@ -302,7 +302,7 @@ RUN curl -fsSL https://astral.sh/uv/install.sh | sh && \
     # Verify uv installed correctly
     /home/agent/.local/bin/uv --version
 
-ENV PATH="/home/agent/.local/bin:${PATH}"
+ENV PATH="/opt/containai/user-agent-shims:/opt/containai/agent-shims:/home/agent/.local/bin:${PATH}"
 
 # Switch back to root for final setup
 USER root
@@ -337,7 +337,7 @@ RUN printf '%s\n' \
     '# ContainAI PATH configuration for agent user tools' \
     '# Sourced by /etc/profile for all login shells (including SSH sessions)' \
     'if [ "$(id -u)" = "1000" ] || [ "$(id -un)" = "agent" ]; then' \
-    '    export PATH="/home/agent/.local/bin:/home/agent/.bun/bin:${PATH}"' \
+    '    export PATH="/opt/containai/user-agent-shims:/opt/containai/agent-shims:/home/agent/.local/bin:/home/agent/.bun/bin:${PATH}"' \
     'fi' \
     > /etc/profile.d/containai-agent-path.sh && \
     chmod 644 /etc/profile.d/containai-agent-path.sh

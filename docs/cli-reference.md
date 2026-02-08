@@ -1056,7 +1056,7 @@ Parse manifests and generate/apply derived artifacts.
 **Synopsis:**
 ```bash
 cai manifest parse [options] <manifest-path>
-cai manifest generate <import-map|dockerfile-symlinks|init-dirs|container-link-spec|agent-wrappers> <manifest-path> [output-path]
+cai manifest generate <container-link-spec> <manifest-path> [output-path]
 cai manifest apply <container-links|init-dirs> <manifest-path> [--data-dir <path>] [--home-dir <path>]
 cai manifest check [--manifest-dir <path> | <manifest-dir>]
 ```
@@ -1066,7 +1066,7 @@ cai manifest check [--manifest-dir <path> | <manifest-dir>]
 | Subcommand | Options/Arguments | Purpose |
 |------------|-------------------|---------|
 | `parse` | `--include-disabled`, `--emit-source-file`, `<manifest-path>` | Parse manifests and emit normalized JSON |
-| `generate` | `<kind>`, `<manifest-path>`, `[output-path]` | Generate derived artifacts from manifests |
+| `generate` | `container-link-spec`, `<manifest-path>`, `[output-path]` | Generate JSON link specification from manifests |
 | `apply` | `<kind>`, `<manifest-path>`, `--data-dir`, `--home-dir` | Apply generated artifacts to runtime paths |
 | `check` | `--manifest-dir` or positional `<manifest-dir>` | Validate manifest consistency |
 
@@ -1075,8 +1075,8 @@ cai manifest check [--manifest-dir <path> | <manifest-dir>]
 # Parse manifests
 cai manifest parse --include-disabled src/manifests
 
-# Generate import map
-cai manifest generate import-map src/manifests artifacts/import-map.sh
+# Generate link spec
+cai manifest generate container-link-spec src/manifests artifacts/link-spec.json
 
 # Check consistency
 cai manifest check src/manifests

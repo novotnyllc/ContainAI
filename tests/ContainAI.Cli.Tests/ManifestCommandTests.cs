@@ -172,7 +172,7 @@ public sealed class ManifestCommandTests
     }
 
     [Fact]
-    public async Task ManifestGenerate_ImportMap_PrintsMapToStdout()
+    public async Task ManifestGenerate_ContainerLinkSpec_PrintsJsonToStdout()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -186,7 +186,7 @@ public sealed class ManifestCommandTests
                 source = ".test/config.json"
                 target = "test/config.json"
                 container_link = ".test/config.json"
-                flags = "fj"
+                flags = "fR"
                 """,
                 TestContext.Current.CancellationToken);
 
@@ -194,12 +194,14 @@ public sealed class ManifestCommandTests
             using var stderr = new StringWriter();
             var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
-                ["manifest", "generate", "import-map", manifestPath],
+                ["manifest", "generate", "container-link-spec", manifestPath],
                 TestContext.Current.CancellationToken);
 
             Assert.Equal(0, exitCode);
-            Assert.Contains("_IMPORT_SYNC_MAP=(", stdout.ToString(), StringComparison.Ordinal);
-            Assert.Contains("/source/.test/config.json:/target/test/config.json:fj", stdout.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\"links\": [", stdout.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\"link\": \"/home/agent/.test/config.json\"", stdout.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\"target\": \"/mnt/agent-data/test/config.json\"", stdout.ToString(), StringComparison.Ordinal);
+            Assert.Contains("\"remove_first\": true", stdout.ToString(), StringComparison.Ordinal);
             Assert.Equal(string.Empty, stderr.ToString());
         }
         finally
@@ -296,6 +298,85 @@ public sealed class ManifestCommandTests
             var linkInfo = new FileInfo(linkPath);
             Assert.NotNull(linkInfo.LinkTarget);
             Assert.Equal(Path.Combine(dataDir, "git", "gitconfig"), Path.GetFullPath(Path.Combine(Path.GetDirectoryName(linkPath)!, linkInfo.LinkTarget!)));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ManifestApply_AgentShims_CreatesSymlinkToCai()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var manifestPath = Path.Combine(tempDir, "test.toml");
+            var shimDir = Path.Combine(tempDir, "shims");
+            var binaryDir = Path.Combine(tempDir, "bin");
+            Directory.CreateDirectory(binaryDir);
+            var caiPath = Path.Combine(binaryDir, "cai");
+            var agentBinaryPath = Path.Combine(binaryDir, "myagent");
+
+            await File.WriteAllTextAsync(
+                caiPath,
+                "#!/usr/bin/env bash\nexit 0\n",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                agentBinaryPath,
+                "#!/usr/bin/env bash\nexit 0\n",
+                TestContext.Current.CancellationToken);
+
+            File.SetUnixFileMode(
+                caiPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(
+                agentBinaryPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+            var existingPath = Environment.GetEnvironmentVariable("PATH");
+            Environment.SetEnvironmentVariable("PATH", $"{binaryDir}:{existingPath}");
+            try
+            {
+                await File.WriteAllTextAsync(
+                    manifestPath,
+                    """
+                    [agent]
+                    name = "myagent"
+                    binary = "myagent"
+                    default_args = ["--auto"]
+                    aliases = ["myagent-cli"]
+                    """,
+                    TestContext.Current.CancellationToken);
+
+                using var stdout = new StringWriter();
+                using var stderr = new StringWriter();
+                var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+                var exitCode = await runtime.RunAsync(
+                    ["manifest", "apply", "agent-shims", manifestPath, "--shim-dir", shimDir, "--cai-binary", caiPath],
+                    TestContext.Current.CancellationToken);
+
+                Assert.Equal(0, exitCode);
+                var shimPath = Path.Combine(shimDir, "myagent");
+                var aliasPath = Path.Combine(shimDir, "myagent-cli");
+                Assert.True(File.Exists(shimPath));
+                Assert.True(File.Exists(aliasPath));
+
+                var shimInfo = new FileInfo(shimPath);
+                var aliasInfo = new FileInfo(aliasPath);
+                Assert.NotNull(shimInfo.LinkTarget);
+                Assert.NotNull(aliasInfo.LinkTarget);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", existingPath);
+            }
         }
         finally
         {

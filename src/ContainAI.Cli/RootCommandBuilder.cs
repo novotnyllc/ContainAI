@@ -6,7 +6,7 @@ using ContainAI.Cli.Host;
 
 namespace ContainAI.Cli;
 
-internal sealed partial class RootCommandBuilder
+internal static partial class RootCommandBuilder
 {
     public static RootCommand Build(ICaiCommandRuntime runtime)
     {
@@ -540,19 +540,19 @@ internal sealed partial class RootCommandBuilder
         var completionCommand = new Command("completion", "Generate shell completion scripts.");
 
         var bashCommand = new Command("bash", "Emit Bash completion script.");
-        bashCommand.SetAction((_, cancellationToken) =>
+        bashCommand.SetAction(async (_, cancellationToken) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Console.Out.WriteLine(BuildBashCompletionScript());
-            return Task.FromResult(0);
+            await Console.Out.WriteLineAsync(BuildBashCompletionScript()).ConfigureAwait(false);
+            return 0;
         });
 
         var zshCommand = new Command("zsh", "Emit Zsh completion script.");
-        zshCommand.SetAction((_, cancellationToken) =>
+        zshCommand.SetAction(async (_, cancellationToken) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Console.Out.WriteLine(BuildZshCompletionScript());
-            return Task.FromResult(0);
+            await Console.Out.WriteLineAsync(BuildZshCompletionScript()).ConfigureAwait(false);
+            return 0;
         });
 
         var suggestCommand = new Command("suggest", "Resolve completions for shell integration.")
@@ -571,7 +571,7 @@ internal sealed partial class RootCommandBuilder
 
         suggestCommand.Options.Add(lineOption);
         suggestCommand.Options.Add(positionOption);
-        suggestCommand.SetAction((parseResult, cancellationToken) =>
+        suggestCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -589,10 +589,10 @@ internal sealed partial class RootCommandBuilder
                     continue;
                 }
 
-                Console.Out.WriteLine(value);
+                await Console.Out.WriteLineAsync(value).ConfigureAwait(false);
             }
 
-            return Task.FromResult(0);
+            return 0;
         });
 
         completionCommand.Subcommands.Add(bashCommand);
@@ -751,16 +751,16 @@ internal sealed partial class RootCommandBuilder
         };
         versionCommand.Options.Add(jsonOption);
 
-        versionCommand.SetAction((parseResult, cancellationToken) =>
+        versionCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             if (parseResult.GetValue(jsonOption))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Console.Out.WriteLine(GetVersionJson());
-                return Task.FromResult(0);
+                await Console.Out.WriteLineAsync(GetVersionJson()).ConfigureAwait(false);
+                return 0;
             }
 
-            return runtime.RunNativeAsync(["version"], cancellationToken);
+            return await runtime.RunNativeAsync(["version"], cancellationToken).ConfigureAwait(false);
         });
 
         return versionCommand;

@@ -4,10 +4,10 @@
 # Includes: Claude Code, Gemini CLI, Copilot, Codex, OpenCode, agent-browser, gh CLI
 #
 # Usage (from repo root, requires BuildKit):
-#   dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest --layer full
+#   dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest --layer full
 #
 # Manual docker build requires a prebuilt cai tarball:
-#   dotnet msbuild ./src/cai/cai.csproj \
+#   dotnet build ./src/cai/cai.csproj \
 #     -t:BuildContainAITarballs \
 #     -p:Configuration=Release \
 #     -p:ContainAIRuntimeIdentifiers=linux-x64 \
@@ -15,7 +15,7 @@
 #     -p:ContainAIOutputDir=./artifacts/cai-tarballs
 #   docker build -t containai/full -f src/container/Dockerfile.agents .
 #
-# Requires containai/sdks:latest to be built first (or use dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest for all layers)
+# Requires containai/sdks:latest to be built first (or use dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest for all layers)
 #
 # Note: Requires Docker BuildKit (Docker 23.0+ or DOCKER_BUILDKIT=1)
 
@@ -66,7 +66,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash && \
 # Add Claude/local binaries to PATH via .bashrc.d (for interactive non-login shells)
 # SSH login shells get PATH from /etc/profile.d/containai-agent-path.sh (set in base image)
 RUN printf '%s\n' \
-    'export PATH="/home/agent/.local/bin:${PATH}"' \
+    'export PATH="/opt/containai/user-agent-shims:/opt/containai/agent-shims:/home/agent/.local/bin:${PATH}"' \
     > /home/agent/.bashrc.d/01-oai-env-vars.sh
 
 # Configure bash history to persist in data volume (survives --fresh)
@@ -78,7 +78,7 @@ RUN printf '%s\n' \
     'export HISTFILESIZE=20000' \
     > /home/agent/.bashrc.d/02-shell-history.sh
 
-ENV PATH="/home/agent/.local/bin:${PATH}"
+ENV PATH="/opt/containai/user-agent-shims:/opt/containai/agent-shims:/home/agent/.local/bin:${PATH}"
 
 # Install Gemini CLI, Codex, and agent-browser via bun
 # Using --trust to allow postinstall scripts
@@ -131,13 +131,18 @@ RUN mkdir -p /mnt/agent-data && chown agent:agent /mnt/agent-data
 
 USER agent
 RUN cai manifest apply container-links /opt/containai/manifests --home-dir /home/agent --data-dir /mnt/agent-data
+USER root
+RUN mkdir -p /opt/containai/agent-shims /opt/containai/user-agent-shims && \
+    cai manifest apply agent-shims /opt/containai/manifests --shim-dir /opt/containai/agent-shims --cai-binary /usr/local/bin/cai && \
+    chown -R agent:agent /opt/containai/agent-shims /opt/containai/user-agent-shims
+USER agent
 
 # =============================================================================
 # POST-SYMLINK SETUP
 # Special configuration that must happen after symlinks are created
 # =============================================================================
 
-# SSH directory permissions (symlinks created by generated script)
+# SSH directory permissions
 RUN chmod 700 /home/agent/.ssh
 
 # Add bashrc hooks for imported aliases and volume bashrc.d scripts
@@ -149,40 +154,6 @@ RUN { grep -qxF '[ -f ~/.bash_aliases_imported ] && . ~/.bash_aliases_imported' 
       || { echo '# Source user scripts from data volume'; echo 'if [ -d /mnt/agent-data/shell/bashrc.d ]; then for f in /mnt/agent-data/shell/bashrc.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi'; } >> /home/agent/.bashrc; } && \
     { grep -qxF '[ -f /mnt/agent-data/shell/zsh-imported.sh ] && . /mnt/agent-data/shell/zsh-imported.sh' /home/agent/.bashrc \
       || { echo '# Source POSIX-compatible settings extracted from zsh config (Mac users)'; echo '[ -f /mnt/agent-data/shell/zsh-imported.sh ] && . /mnt/agent-data/shell/zsh-imported.sh'; } >> /home/agent/.bashrc; }
-
-# =============================================================================
-# AGENT WRAPPER FUNCTIONS
-# Generated functions for running agents in autonomous mode
-# Functions (not aliases) work in both interactive and non-interactive SSH
-# =============================================================================
-
-# Create .bash_env.d directory for modular BASH_ENV sourcing
-RUN mkdir -p /home/agent/.bash_env.d
-
-# Generate agent wrappers from manifests to .bash_env.d (for BASH_ENV non-interactive sourcing)
-RUN cai manifest generate agent-wrappers /opt/containai/manifests /home/agent/.bash_env.d/containai-agents.sh
-
-# Update .bash_env to source all .bash_env.d/*.sh files and set guard variable
-# The base image creates .bash_env with just nvm setup; we extend it
-RUN grep -qxF 'export _BASH_ENV_SOURCED=1' /home/agent/.bash_env || \
-    printf '\n%s\n%s\n%s\n' \
-    '# Guard to prevent double-sourcing' \
-    'export _BASH_ENV_SOURCED=1' \
-    '# Source all scripts in .bash_env.d/' \
-    >> /home/agent/.bash_env && \
-    grep -qxF 'if [ -d "$HOME/.bash_env.d" ]; then for f in "$HOME"/.bash_env.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' /home/agent/.bash_env || \
-    printf '%s\n' \
-    'if [ -d "$HOME/.bash_env.d" ]; then for f in "$HOME"/.bash_env.d/*.sh; do [ -r "$f" ] && . "$f"; done; fi' \
-    >> /home/agent/.bash_env
-
-# Source .bash_env from .bashrc for interactive shells (with guard to prevent double-sourcing)
-# This ensures wrappers work in both: `ssh container 'claude --help'` (non-interactive via BASH_ENV)
-# and `ssh container` + `claude --help` (interactive via .bashrc -> .bash_env)
-RUN grep -qxF '[ -z "$_BASH_ENV_SOURCED" ] && [ -f ~/.bash_env ] && . ~/.bash_env' /home/agent/.bashrc || \
-    printf '\n%s\n%s\n' \
-    '# Source .bash_env for wrapper functions (if not already sourced via BASH_ENV)' \
-    '[ -z "$_BASH_ENV_SOURCED" ] && [ -f ~/.bash_env ] && . ~/.bash_env' \
-    >> /home/agent/.bashrc
 
 # =============================================================================
 # LINK SPEC AND REPAIR TOOLS

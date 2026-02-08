@@ -83,7 +83,7 @@ internal static partial class TemplateUtilities
 
             lines[index] = string.Join("\n", replacement);
             updated = string.Join("\n", lines);
-            if (content.EndsWith("\n", StringComparison.Ordinal) && !updated.EndsWith("\n", StringComparison.Ordinal))
+            if (content.EndsWith('\n') && !updated.EndsWith('\n'))
             {
                 updated += "\n";
             }

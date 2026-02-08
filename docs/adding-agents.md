@@ -285,14 +285,14 @@ Each agent has its own TOML file with optional `[agent]` section and `[[entries]
 # Docs: https://agent.example.com
 # =============================================================================
 
-# [agent] section is ONLY needed if the agent needs a launch wrapper
+# [agent] section is ONLY needed if the agent needs native command shim defaults
 # (for autonomous mode flags like --dangerously-skip-permissions or --yolo)
 [agent]
 name = "myagent"
 binary = "myagent"                     # Command name in PATH
-default_args = ["--auto-mode"]         # Wrapper only generated if non-empty
+default_args = ["--auto-mode"]         # Shim is only created if non-empty
 aliases = []                           # Additional command aliases (optional)
-optional = true                        # If true, wrapper guarded by command -v check
+optional = true                        # If true, shim is skipped when binary is missing
 
 [[entries]]
 source = ".agent/config.json"         # Path on host (relative to $HOME)
@@ -303,15 +303,15 @@ flags = "fjos"                        # Flags (see reference below)
 
 ### The `[agent]` Section
 
-The `[agent]` section defines launch wrapper generation for agents that need default arguments (typically autonomous mode flags).
+The `[agent]` section defines native command shim generation for agents that need default arguments (typically autonomous mode flags).
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Agent name (used for function name) |
+| `name` | string | Yes | Agent name (used for shim command name) |
 | `binary` | string | Yes | Binary name in PATH |
 | `default_args` | array | Yes | Arguments prepended to all invocations (use `[]` if none) |
-| `aliases` | array | No | Additional command names to wrap |
-| `optional` | boolean | No | If true, wrapper guarded by `command -v` check |
+| `aliases` | array | No | Additional command names for shim aliases |
+| `optional` | boolean | No | If true, shim is skipped when binary is not found |
 
 **When to include `[agent]` section:**
 - Agent has an autonomous/yolo mode flag you want as default
@@ -320,7 +320,7 @@ The `[agent]` section defines launch wrapper generation for agents that need def
 **When to omit `[agent]` section:**
 - Config-only tools (editors, shell configs, VS Code)
 - Agents without autonomous mode flags (OpenCode)
-- Tools that don't need a launch wrapper
+- Tools that don't need shimmed default args
 
 ### Entry Format
 
@@ -423,30 +423,21 @@ Disabled entries:
 
 SSH is a common example - disabled by default for security, but users can opt-in.
 
-## Step 4: Run Generators
+## Step 4: Validate Manifest-Derived Artifacts
 
-The generators create container artifacts from the per-agent manifest files.
+ContainAI now applies manifest behavior directly in native `.NET` code (`manifest apply ...`) and emits only JSON data artifacts when generation is needed.
 
-### Generator Commands
+### Validation and JSON Artifact Commands
 
 ```bash
-# Generate import map metadata
-dotnet run --project src/cai -- manifest generate import-map src/manifests artifacts/container-generated/import-sync-map.sh
+# Validate that manifests can be parsed and applied consistently
+dotnet run --project src/cai -- manifest check src/manifests
 
-# Generate Dockerfile symlink script
-dotnet run --project src/cai -- manifest generate dockerfile-symlinks src/manifests artifacts/container-generated/symlinks.sh
-
-# Generate init directory script
-dotnet run --project src/cai -- manifest generate init-dirs src/manifests artifacts/container-generated/init-dirs.sh
-
-# Generate link spec JSON for runtime repair
+# Generate link spec JSON for runtime repair/inspection
 dotnet run --project src/cai -- manifest generate container-link-spec src/manifests artifacts/container-generated/link-spec.json
-
-# Generate agent wrapper functions
-dotnet run --project src/cai -- manifest generate agent-wrappers src/manifests artifacts/container-generated/containai-agents.sh
 ```
 
-**Note**: The build flow invokes manifest generation via `cai`/MSBuild. Manual execution is only needed for development/testing.
+**Note**: Shell script artifact generation was removed. Build/runtime flows consume native `cai manifest apply ...` behavior directly.
 
 ### Consistency Check
 
@@ -458,18 +449,14 @@ dotnet run --project src/cai -- manifest check src/manifests
 
 This command:
 - Parses all entries from `src/manifests/*.toml`
-- Validates generated manifest-derived artifacts and mappings
+- Validates native manifest apply behavior and generated JSON link spec
 - Reports any mismatches
 
 CI enforces this check - builds will fail if manifests and generated code diverge.
 
-### What the Generators Create
+### Generated Artifact
 
-- **import-sync-map.sh**: Generated import map metadata from manifest entries
-- **symlinks.sh**: Shell script run during Docker build to create symlinks from container home to data volume paths
-- **init-dirs.sh**: Shell script run on container first boot to create directory structure with correct permissions
 - **link-spec.json**: JSON specification for runtime link verification and repair
-- **containai-agents.sh**: Shell functions for agent launch wrappers (prepend autonomous flags)
 
 ## Step 5: Test
 
@@ -500,7 +487,7 @@ These tests require a Linux host with sysbox installed.
 
 ```bash
 # Build image with new agent
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Create and start container
 cai run --container test-agent
@@ -552,7 +539,7 @@ ssh test-agent 'ls -la ~/.newagent/'
 
 ### Always-Sync Agents (no `o` flag)
 
-**Claude Code** (`src/manifests/10-claude.toml`) - Primary supported agent with launch wrapper:
+**Claude Code** (`src/manifests/10-claude.toml`) - Primary supported agent with native shim:
 
 ```toml
 # src/manifests/10-claude.toml
@@ -619,7 +606,7 @@ flags = "dxR"  # directory, exclude .system/, remove existing first
 
 ### Optional-Sync Agents (with `o` flag)
 
-**Gemini** (`src/manifests/12-gemini.toml`) - Optional sync with launch wrapper:
+**Gemini** (`src/manifests/12-gemini.toml`) - Optional sync with native shim:
 
 ```toml
 # src/manifests/12-gemini.toml
@@ -652,7 +639,7 @@ flags = "fjo"  # file, json-init, OPTIONAL
 
 ### Config-Only Manifests (no `[agent]` section)
 
-**OpenCode** (`src/manifests/14-opencode.toml`) - No launch wrapper needed:
+**OpenCode** (`src/manifests/14-opencode.toml`) - No shim defaults needed:
 
 ```toml
 # src/manifests/14-opencode.toml
@@ -704,11 +691,11 @@ dotnet run --project src/cai -- manifest check src/manifests
 | File | Purpose |
 |------|---------|
 | `src/manifests/*.toml` | Per-agent manifest files (authoritative source) |
-| `artifacts/container-generated/import-sync-map.sh` | Generated import map metadata |
+| `artifacts/container-generated/link-spec.json` | Generated link specification JSON |
 | `src/cai/NativeLifecycleCommandRuntime.cs` | Import implementation |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
 | `cai manifest generate ...` | Generator commands for container artifacts |
-| `cai manifest check src/manifests` | Manifest/import map consistency check |
+| `cai manifest check src/manifests` | Manifest consistency check |
 | `docs/testing.md` | Testing tier documentation |
 | `docs/custom-tools.md` | User guide for adding custom tools |
 

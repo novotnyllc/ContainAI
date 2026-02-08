@@ -13,15 +13,15 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <RunAnalyzersDuringLiveAnalysis>true</RunAnalyzersDuringLiveAnalysis>
     <AnalysisLevel>latest</AnalysisLevel>
-    <AnalysisMode>All</AnalysisMode>
-    <AnalysisModeSecurity>All</AnalysisModeSecurity>
-    <AnalysisModePerformance>All</AnalysisModePerformance>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <AnalysisModeSecurity>Recommended</AnalysisModeSecurity>
+    <AnalysisModePerformance>Recommended</AnalysisModePerformance>
   </PropertyGroup>
 
   <PropertyGroup>

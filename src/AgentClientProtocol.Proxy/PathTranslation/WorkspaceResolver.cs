@@ -35,7 +35,7 @@ public static class WorkspaceResolver
                 return result.StandardOutput.Trim();
             }
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             if (cancellationToken.IsCancellationRequested)
             {
@@ -43,6 +43,26 @@ public static class WorkspaceResolver
             }
 
             // Git not available or failed; fall back to workspace marker walk.
+            _ = ex;
+        }
+        catch (IOException ex)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            // Git output capture failed; fall back to workspace marker walk.
+            _ = ex;
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+
+            // Git executable not available; fall back to workspace marker walk.
             _ = ex;
         }
 

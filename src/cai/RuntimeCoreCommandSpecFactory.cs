@@ -181,7 +181,7 @@ internal static class RuntimeCoreCommandSpecFactory
         }
     }
 
-    private static IReadOnlyDictionary<string, string?> CreateRuntimeEnvironment(
+    private static Dictionary<string, string?> CreateRuntimeEnvironment(
         string? workspace,
         bool quiet,
         bool verbose,

@@ -5,12 +5,12 @@ using Xunit;
 namespace ContainAI.Cli.Tests;
 
 [CollectionDefinition(Name, DisableParallelization = true)]
-public sealed class SyncIntegrationCollection
+public sealed class SyncIntegrationGroup
 {
     public const string Name = "SyncIntegration";
 }
 
-[Collection(SyncIntegrationCollection.Name)]
+[Collection(SyncIntegrationGroup.Name)]
 public sealed class SyncIntegrationTests
 {
     private const string AlpineImage = "alpine:3.20";

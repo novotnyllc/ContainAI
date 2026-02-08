@@ -83,7 +83,7 @@ Numeric prefixes ensure deterministic processing order. See [docs/adding-agents.
 
 ```bash
 # Build the image (first time only)
-dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Start sandbox in your project directory
 cd /path/to/your/project
@@ -237,7 +237,7 @@ The `cai import` command syncs credentials and configuration from your host to t
 
 Inside the sandbox container, the volume mounts at `/mnt/agent-data` (e.g., `/mnt/agent-data/claude/credentials.json`).
 
-Additional configuration (plugins, settings, shell aliases, tmux, copilot) is also synced. For the complete list of synced paths, see `src/manifests/*.toml` and generate derived mappings with `cai manifest generate import-map src/manifests`.
+Additional configuration (plugins, settings, shell aliases, tmux, copilot) is also synced. For the complete list of synced paths, see `src/manifests/*.toml` and validate with `cai manifest check src/manifests`.
 
 **To remove synced credentials and reset the data volume:**
 ```bash
@@ -324,9 +324,10 @@ docker --context containai-docker run --rm -u agent containai:latest bash -lc "n
 ## Build Options
 
 ```bash
-dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
-dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
-dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+dotnet build ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+dotnet publish ./cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
 ```
 
 The MSBuild image target supports layer-specific builds (`ContainAILayer`), multi-arch (`ContainAIPlatforms`), and optional buildx setup (`ContainAIBuildSetup=true`).
@@ -436,7 +437,7 @@ Ensure you have:
 
 Build the image first:
 ```bash
-dotnet msbuild ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build ./cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 ```
 
 ### Node.js commands not found

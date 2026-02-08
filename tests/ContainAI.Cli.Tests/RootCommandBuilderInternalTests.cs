@@ -6,6 +6,7 @@ namespace ContainAI.Cli.Tests;
 
 public sealed class RootCommandBuilderInternalTests
 {
+    private static readonly string[] PsArgs = ["ps"];
     private static readonly Type RootCommandBuilderType =
         typeof(CaiCli).Assembly.GetType("ContainAI.Cli.RootCommandBuilder")
         ?? throw new InvalidOperationException("RootCommandBuilder type not found.");
@@ -15,7 +16,7 @@ public sealed class RootCommandBuilderInternalTests
     {
         var result = (IReadOnlyList<string>)InvokeStatic(
             "BuildArgumentList",
-            [new[] { "ps" }, new List<string> { "--all" }]);
+            [PsArgs, new List<string> { "--all" }]);
 
         Assert.Equal(["ps", "--all"], result);
     }

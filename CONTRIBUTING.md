@@ -52,16 +52,19 @@ Use `ContainAIBuildSetup=true` to configure buildx builder/binfmt when needed.
 
 ```bash
 # Build all layers for host architecture
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build single layer
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build and tag for a registry (all layers)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+
+# Publish native AOT CLI (single RID)
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
 
 # Multi-arch release tarballs
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAITarballs -p:Configuration=Release -p:ContainAIRuntimeIdentifiers=linux-x64;linux-arm64
+dotnet build src/cai/cai.csproj -t:BuildContainAITarballs -p:Configuration=Release "-p:ContainAIRuntimeIdentifiers=linux-x64;linux-arm64"
 ```
 
 ### Project Structure

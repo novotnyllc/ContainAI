@@ -4,9 +4,8 @@
 # of truth for config sync. Files are processed in sorted order by filename.
 # ==============================================================================
 #
-# If you modify manifests, regenerate _IMPORT_SYNC_MAP via `cai manifest generate import-map`.
-# Run `cai manifest check src/manifests` to verify alignment.
-# CI enforces consistency between manifests and the import map.
+# If you modify manifests, run `cai manifest check src/manifests` to verify alignment.
+# CI enforces manifest consistency checks.
 #
 # This manifest defines:
 # - What gets synced from host $HOME to the data volume
@@ -22,12 +21,12 @@
 #   x = exclude .system/ subdirectory
 #   g = git-filter (strip credential.helper and signing config from .gitconfig)
 #   R = remove existing path first (rm -rf before ln -sfn)
-#   G = glob/dynamic pattern (not synced directly; discovered at runtime by import.sh)
+#   G = glob/dynamic pattern (not synced directly; discovered at runtime by cai import)
 #   o = optional (skip if source doesn't exist; don't pre-create in Dockerfile/init)
 #
 # Optional fields:
-#   disabled = true  # Entry excluded from _IMPORT_SYNC_MAP (not synced by default)
-#                    # but still generates symlinks/init (for use with additional_paths)
+#   disabled = true  # Entry excluded from default sync
+#                    # but still participates in symlink/init behavior (for additional_paths)
 #
 # Fields:
 #   source = path relative to $HOME (includes leading dot, e.g., ".claude.json")

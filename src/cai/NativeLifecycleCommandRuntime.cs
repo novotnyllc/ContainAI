@@ -119,7 +119,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     verbose = true;
                     break;
                 case "--workspace":
-                    if (index + 1 >= args.Count || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
                     {
                         await _stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
                         return 1;
@@ -128,7 +128,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     workspace = args[++index];
                     break;
                 case "--container":
-                    if (index + 1 >= args.Count || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
                     {
                         await _stderr.WriteLineAsync("--container requires a value").ConfigureAwait(false);
                         return 1;
@@ -582,10 +582,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
         var fixAll = args.Contains("--all", StringComparer.Ordinal);
 
-        var target = args.FirstOrDefault(static token => !token.StartsWith("-", StringComparison.Ordinal));
-        var targetArg = args.SkipWhile(static token => token.StartsWith("-", StringComparison.Ordinal))
+        var target = args.FirstOrDefault(static token => !token.StartsWith('-'));
+        var targetArg = args.SkipWhile(static token => token.StartsWith('-'))
             .Skip(1)
-            .FirstOrDefault(static token => !token.StartsWith("-", StringComparison.Ordinal));
+            .FirstOrDefault(static token => !token.StartsWith('-'));
 
         if (target is null && !fixAll)
         {
@@ -642,7 +642,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task EnsureSshIncludeDirectiveAsync(CancellationToken cancellationToken)
+    private static async Task EnsureSshIncludeDirectiveAsync(CancellationToken cancellationToken)
     {
         var userSshConfig = Path.Combine(ResolveHomeDirectory(), ".ssh", "config");
         var includeLine = $"Include {Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d")}/*.conf";
@@ -667,7 +667,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         await File.WriteAllTextAsync(userSshConfig, merged, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<bool> ValidateTemplatesAsync(CancellationToken cancellationToken)
+    private static async Task<bool> ValidateTemplatesAsync(CancellationToken cancellationToken)
     {
         var templatesRoot = ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
@@ -1115,7 +1115,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     {
                         configPath = token[9..];
                     }
-                    else if (token.StartsWith("-", StringComparison.Ordinal))
+                    else if (token.StartsWith('-'))
                     {
                         return ParsedImportOptions.WithError($"Unknown import option: {token}");
                     }
@@ -1131,7 +1131,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return new ParsedImportOptions(sourcePath, explicitVolume, workspace, configPath, dryRun, noExcludes, noSecrets, verbose, null);
     }
 
-    private async Task<bool> ResolveImportExcludePrivAsync(string workspace, string? explicitConfigPath, CancellationToken cancellationToken)
+    private static async Task<bool> ResolveImportExcludePrivAsync(string workspace, string? explicitConfigPath, CancellationToken cancellationToken)
     {
         var configPath = !string.IsNullOrWhiteSpace(explicitConfigPath)
             ? explicitConfigPath
@@ -1260,7 +1260,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         var effectiveHome = Path.GetFullPath(sourceRoot);
         var expandedPath = rawPath;
-        if (rawPath.StartsWith("~", StringComparison.Ordinal))
+        if (rawPath.StartsWith('~'))
         {
             expandedPath = rawPath.Length == 1
                 ? effectiveHome
@@ -1371,7 +1371,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         var first = segments[0];
-        if (first.StartsWith(".", StringComparison.Ordinal))
+        if (first.StartsWith('.'))
         {
             first = first.TrimStart('.');
         }
@@ -2037,7 +2037,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
 
             var relative = Path.GetRelativePath(overridesDirectory, file).Replace("\\", "/", StringComparison.Ordinal);
-            if (!relative.StartsWith(".", StringComparison.Ordinal))
+            if (!relative.StartsWith('.'))
             {
                 relative = "." + relative;
             }
@@ -2302,8 +2302,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
                            "tmp='/mnt/agent-data/.env.tmp'; cat > \"$tmp\"; chmod 600 \"$tmp\"; chown 1000:1000 \"$tmp\" || true; mv -f \"$tmp\" \"$target\"";
         var write = await DockerCaptureAsync(
             ["run", "--rm", "-i", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", writeCommand],
-            cancellationToken,
-            builder.ToString()).ConfigureAwait(false);
+            builder.ToString(),
+            cancellationToken).ConfigureAwait(false);
         if (write.ExitCode != 0)
         {
             await _stderr.WriteLineAsync(write.StandardError.Trim()).ConfigureAwait(false);
@@ -2446,7 +2446,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     await _stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
                     return 0;
                 default:
-                    if (!token.StartsWith("-", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(workspace))
+                    if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(workspace))
                     {
                         workspace = token;
                     }
@@ -2882,7 +2882,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     emitSourceFile = true;
                     break;
                 default:
-                    if (token.StartsWith("-", StringComparison.Ordinal))
+                    if (token.StartsWith('-'))
                     {
                         await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
                         return 1;
@@ -2927,7 +2927,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Length < 2)
         {
-            await _stderr.WriteLineAsync("ERROR: usage: cai manifest generate <kind> <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
+            await _stderr.WriteLineAsync("ERROR: usage: cai manifest generate container-link-spec <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
             return 1;
         }
 
@@ -2939,11 +2939,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             var generated = kind switch
             {
-                "import-map" => ManifestGenerators.GenerateImportMap(manifestPath),
-                "dockerfile-symlinks" => ManifestGenerators.GenerateDockerfileSymlinks(manifestPath),
-                "init-dirs" => ManifestGenerators.GenerateInitDirs(manifestPath),
                 "container-link-spec" => ManifestGenerators.GenerateContainerLinkSpec(manifestPath),
-                "agent-wrappers" => ManifestGenerators.GenerateAgentWrappers(manifestPath),
                 _ => throw new InvalidOperationException($"unknown generator kind: {kind}"),
             };
 
@@ -2956,22 +2952,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 }
 
                 await File.WriteAllTextAsync(outputPath, generated.Content, cancellationToken).ConfigureAwait(false);
-
-                if (kind is "dockerfile-symlinks" or "init-dirs" or "agent-wrappers")
-                {
-                    await _stderr.WriteLineAsync($"Generated: {outputPath}").ConfigureAwait(false);
-                }
-                else
-                {
-                    var label = kind switch
-                    {
-                        "import-map" => "entries",
-                        "container-link-spec" => "links",
-                        _ => "items",
-                    };
-
-                    await _stderr.WriteLineAsync($"Generated: {outputPath} ({generated.Count} {label})").ConfigureAwait(false);
-                }
+                await _stderr.WriteLineAsync($"Generated: {outputPath} ({generated.Count} links)").ConfigureAwait(false);
 
                 return 0;
             }
@@ -2990,7 +2971,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Length < 2)
         {
-            await _stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs> <manifest_path_or_dir> [options]").ConfigureAwait(false);
+            await _stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [options]").ConfigureAwait(false);
             return 1;
         }
 
@@ -2998,19 +2979,21 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var manifestPath = args[1];
         var dataDir = "/mnt/agent-data";
         var homeDir = "/home/agent";
+        var shimDir = "/opt/containai/user-agent-shims";
+        var caiBinaryPath = "/usr/local/bin/cai";
 
         for (var index = 2; index < args.Length; index++)
         {
             var token = args[index];
             if (token is "-h" or "--help")
             {
-                await _stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>]").ConfigureAwait(false);
+                await _stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>] [--shim-dir <path>] [--cai-binary <path>]").ConfigureAwait(false);
                 return 0;
             }
 
             if (token == "--data-dir")
             {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
                     await _stderr.WriteLineAsync("ERROR: --data-dir requires a value").ConfigureAwait(false);
                     return 1;
@@ -3028,7 +3011,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             if (token == "--home-dir")
             {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
                     await _stderr.WriteLineAsync("ERROR: --home-dir requires a value").ConfigureAwait(false);
                     return 1;
@@ -3044,6 +3027,42 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 continue;
             }
 
+            if (token == "--shim-dir")
+            {
+                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
+                {
+                    await _stderr.WriteLineAsync("ERROR: --shim-dir requires a value").ConfigureAwait(false);
+                    return 1;
+                }
+
+                shimDir = args[++index];
+                continue;
+            }
+
+            if (token.StartsWith("--shim-dir=", StringComparison.Ordinal))
+            {
+                shimDir = token[11..];
+                continue;
+            }
+
+            if (token == "--cai-binary")
+            {
+                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
+                {
+                    await _stderr.WriteLineAsync("ERROR: --cai-binary requires a value").ConfigureAwait(false);
+                    return 1;
+                }
+
+                caiBinaryPath = args[++index];
+                continue;
+            }
+
+            if (token.StartsWith("--cai-binary=", StringComparison.Ordinal))
+            {
+                caiBinaryPath = token[13..];
+                continue;
+            }
+
             await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
             return 1;
         }
@@ -3055,6 +3074,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 "container-links" => ManifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir),
                 "init-dirs" => ManifestApplier.ApplyInitDirs(manifestPath, dataDir),
+                "agent-shims" => ManifestApplier.ApplyAgentShims(manifestPath, shimDir, caiBinaryPath),
                 _ => throw new InvalidOperationException($"unknown apply kind: {kind}"),
             };
 
@@ -3082,7 +3102,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     await _stdout.WriteLineAsync("Usage: cai manifest check [--manifest-dir <path>]").ConfigureAwait(false);
                     return 0;
                 case "--manifest-dir":
-                    if (index + 1 >= args.Length || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                     {
                         await _stderr.WriteLineAsync("ERROR: --manifest-dir requires a value").ConfigureAwait(false);
                         return 1;
@@ -3097,7 +3117,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                         break;
                     }
 
-                    if (token.StartsWith("-", StringComparison.Ordinal))
+                    if (token.StartsWith('-'))
                     {
                         await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
                         return 1;
@@ -3137,7 +3157,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
             ManifestTomlParser.Parse(file, includeDisabled: true, includeSourceFile: false);
         }
 
-        var importMap = ManifestGenerators.GenerateImportMap(manifestDirectory);
         var linkSpec = ManifestGenerators.GenerateContainerLinkSpec(manifestDirectory);
         var initProbeDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-check-{Guid.NewGuid():N}");
         var initApplied = 0;
@@ -3151,12 +3170,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 Directory.Delete(initProbeDir, recursive: true);
             }
-        }
-
-        if (!importMap.Content.Contains("_IMPORT_SYNC_MAP=(", StringComparison.Ordinal))
-        {
-            await _stderr.WriteLineAsync("ERROR: generated import map missing _IMPORT_SYNC_MAP header").ConfigureAwait(false);
-            return 1;
         }
 
         if (initApplied <= 0)
@@ -3428,7 +3441,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var templateName = args.Skip(2).FirstOrDefault(static token => !token.StartsWith("-", StringComparison.Ordinal));
+        var templateName = args.Skip(2).FirstOrDefault(static token => !token.StartsWith('-'));
 
         var templatesRoot = ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
@@ -3816,19 +3829,19 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return failures == 0 ? 0 : 1;
     }
 
-    private async Task<bool> DockerContainerExistsAsync(string containerName, CancellationToken cancellationToken)
+    private static async Task<bool> DockerContainerExistsAsync(string containerName, CancellationToken cancellationToken)
     {
         var result = await DockerRunAsync(["inspect", "--type", "container", containerName], cancellationToken).ConfigureAwait(false);
         return result == 0;
     }
 
-    private async Task<int> DockerRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<int> DockerRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var result = await DockerCaptureAsync(args, cancellationToken).ConfigureAwait(false);
         return result.ExitCode;
     }
 
-    private async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = new List<string>();
@@ -3842,7 +3855,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken, string standardInput)
+    private static async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, string standardInput, CancellationToken cancellationToken)
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = new List<string>();
@@ -3856,7 +3869,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
     }
 
-    private async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
+    private static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
         foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
         {
@@ -3873,7 +3886,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return null;
     }
 
-    private async Task<List<string>> FindContainerContextsAsync(string containerName, CancellationToken cancellationToken)
+    private static async Task<List<string>> FindContainerContextsAsync(string containerName, CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         foreach (var contextName in await GetAvailableContextsAsync(cancellationToken).ConfigureAwait(false))
@@ -3896,7 +3909,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return contexts;
     }
 
-    private async Task<List<string>> GetAvailableContextsAsync(CancellationToken cancellationToken)
+    private static async Task<List<string>> GetAvailableContextsAsync(CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
@@ -3912,7 +3925,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return contexts;
     }
 
-    private async Task<ProcessResult> DockerCaptureForContextAsync(string context, IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> DockerCaptureForContextAsync(string context, IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var dockerArgs = new List<string>();
         if (!string.Equals(context, "default", StringComparison.Ordinal))
@@ -3976,7 +3989,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return path;
         }
 
-        if (!path.StartsWith("~", StringComparison.Ordinal))
+        if (!path.StartsWith('~'))
         {
             return path;
         }
@@ -4093,7 +4106,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return Path.Combine(configRoot, "containai", "templates");
     }
 
-    private async Task<string> ResolveChannelAsync(CancellationToken cancellationToken)
+    private static async Task<string> ResolveChannelAsync(CancellationToken cancellationToken)
     {
         var envChannel = Environment.GetEnvironmentVariable("CAI_CHANNEL")
                          ?? Environment.GetEnvironmentVariable("CONTAINAI_CHANNEL");
@@ -4125,7 +4138,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             : "stable";
     }
 
-    private async Task<string?> ResolveDataVolumeAsync(string workspace, string? explicitVolume, CancellationToken cancellationToken)
+    private static async Task<string?> ResolveDataVolumeAsync(string workspace, string? explicitVolume, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {
@@ -4179,7 +4192,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return "containai-data";
     }
 
-    private async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
+    private static async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {
@@ -4199,7 +4212,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return string.IsNullOrWhiteSpace(volumeName) ? null : volumeName;
     }
 
-    private async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var result = TomlCommandProcessor.Execute(args);
@@ -4300,7 +4313,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             if (token == "--container")
             {
-                if (index + 1 >= args.Count || args[index + 1].StartsWith("-", StringComparison.Ordinal))
+                if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
                 {
                     error = "--container requires a value";
                     return false;
@@ -4394,7 +4407,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         for (var index = startIndex; index < args.Count; index++)
         {
             var token = args[index];
-            if (!token.StartsWith("-", StringComparison.Ordinal))
+            if (!token.StartsWith('-'))
             {
                 continue;
             }
@@ -4638,7 +4651,7 @@ Examples:
     [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant)]
     private static partial Regex EnvVarNameRegex();
 
-    private async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private static async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
@@ -4709,7 +4722,7 @@ Examples:
         return nameResult.StandardOutput.Trim().TrimStart('/');
     }
 
-    private async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
+    private static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destinationDirectory);

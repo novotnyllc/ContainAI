@@ -20,7 +20,7 @@ This guide explains how to sync your own tools and configurations to ContainAI c
 flowchart TD
     Start["I installed a tool<br/>and want it in ContainAI"]
     Q1{"Just syncing<br/>config files?"}
-    Q2{"Need launch wrapper<br/>with default args?"}
+    Q2{"Need default args<br/>on command launch?"}
 
     Start --> Q1
     Q1 -->|Yes| UseAdditional["Use additional_paths<br/>in containai.toml"]
@@ -37,10 +37,10 @@ flowchart TD
 
 **Use `additional_paths`** (simpler) when you:
 - Just want to sync config files from host to container
-- Don't need a launch wrapper with default arguments
+- Don't need default args on command launch
 
 **Create a manifest** when you:
-- Want a launch wrapper that prepends arguments (like `--auto` or `--yolo`)
+- Want native command shims that prepend arguments (like `--auto` or `--yolo`)
 - Need precise control over symlink creation and volume paths
 
 ## Option 1: Using additional_paths (Simple)
@@ -75,7 +75,7 @@ See [Configuration](configuration.md#import-section) for details.
 
 ## Option 2: Creating a User Manifest
 
-For tools that need launch wrappers or precise symlink control, create a manifest file.
+For tools that need native command shims or precise symlink control, create a manifest file.
 
 ### Quick Start
 
@@ -123,7 +123,7 @@ User manifests go in:
 ```toml
 # ~/.config/containai/manifests/mytool.toml
 
-# Optional: [agent] section for launch wrapper
+# Optional: [agent] section for native command shim defaults
 [agent]
 name = "mytool"                        # Function name in shell
 binary = "mytool"                      # Actual binary name
@@ -151,7 +151,7 @@ flags = "fjo"                          # f=file, j=json-init, o=optional
 | `aliases` | array | Additional command names to wrap |
 | `optional` | boolean | If true, skip wrapper if binary not installed |
 
-**Note:** A wrapper function is generated if the `[agent]` section is present and the binary exists, even if `default_args` is empty. Use an empty array `[]` if you want a wrapper without default arguments.
+**Note:** A native command shim is created when the `[agent]` section is present and `default_args` is non-empty.
 
 #### `[[entries]]` Section
 
@@ -239,7 +239,7 @@ container_link = ".myagent/config.toml"
 flags = "f"
 ```
 
-This generates a wrapper function so running `myagent` in the container automatically includes `--auto-approve`.
+This generates a native command shim so running `myagent` in the container automatically includes `--auto-approve`.
 
 ### Tool with Multiple Command Names
 
@@ -248,7 +248,7 @@ This generates a wrapper function so running `myagent` in the container automati
 name = "kimi"
 binary = "kimi"
 default_args = ["--auto"]
-aliases = ["kimi-cli"]  # Also wrap kimi-cli command
+aliases = ["kimi-cli"]  # Also create a shim alias for kimi-cli
 optional = true
 ```
 
@@ -261,11 +261,9 @@ optional = true
 2. **Container startup** (`cai system init` via `containai-init.service`):
    - Reads user manifests from `/mnt/agent-data/containai/manifests/`
    - Creates symlinks for each `[[entries]]` with `container_link`
-   - Generates launch wrappers for `[agent]` sections with `default_args`
 
 3. **Runtime**:
    - Symlinks connect container paths to volume paths
-   - Launch wrappers prepend default arguments to commands
 
 ## Troubleshooting
 
@@ -278,16 +276,6 @@ optional = true
 2. Check container logs: `journalctl -u containai-init`
 3. Verify flags include `f` (file) or `d` (directory)
 4. Ensure `container_link` is a relative path (no leading `/`)
-
-### Wrapper Not Working
-
-**Symptoms:** Running `mytool` gives "command not found" or doesn't include default args
-
-**Check:**
-1. Binary must exist in PATH: `which mytool`
-2. Source the env file: `source ~/.bash_env.d/containai-user-agents.sh`
-3. Check for errors in: `~/.bash_env.d/containai-user-agents.sh`
-4. Restart shell or container after manifest changes
 
 ### Config Not Persisting
 
@@ -313,7 +301,7 @@ User manifests have security restrictions:
 
 - **target** paths must resolve under `/mnt/agent-data` (no `..` traversal)
 - **container_link** must be relative (no leading `/`) and under `~`
-- **binary** must exist in PATH for wrapper generation
+- **binary** must exist in PATH for optional shim generation
 - Invalid entries are logged and skipped (fail-safe)
 
 These constraints prevent manifests from creating symlinks outside the data volume or home directory.

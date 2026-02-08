@@ -31,6 +31,8 @@ public sealed class PathTranslator
     /// <returns>The container path, or the original path if not under the workspace.</returns>
     public string TranslateToContainer(string hostPath)
     {
+        ArgumentNullException.ThrowIfNull(hostPath);
+
         // Only translate absolute paths
         if (!Path.IsPathRooted(hostPath))
             return hostPath;
@@ -41,7 +43,15 @@ public sealed class PathTranslator
         {
             normalizedPath = Path.GetFullPath(hostPath).TrimEnd(Path.DirectorySeparatorChar);
         }
-        catch
+        catch (ArgumentException)
+        {
+            return hostPath; // Invalid path format
+        }
+        catch (NotSupportedException)
+        {
+            return hostPath; // Invalid path format
+        }
+        catch (PathTooLongException)
         {
             return hostPath; // Invalid path format
         }
@@ -69,6 +79,8 @@ public sealed class PathTranslator
     /// <returns>The host path, or the original path if not under the workspace.</returns>
     public string TranslateToHost(string containerPath)
     {
+        ArgumentNullException.ThrowIfNull(containerPath);
+
         // Only translate absolute paths
         if (!containerPath.StartsWith('/'))
             return containerPath;
@@ -99,6 +111,8 @@ public sealed class PathTranslator
     /// </summary>
     public JsonNode TranslateMcpServers(JsonNode mcpServersNode)
     {
+        ArgumentNullException.ThrowIfNull(mcpServersNode);
+
         if (mcpServersNode is JsonObject mcpObj)
         {
             return TranslateMcpServersObject(mcpObj);

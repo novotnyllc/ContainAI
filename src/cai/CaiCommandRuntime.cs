@@ -84,7 +84,7 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
     public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         => _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
 
-    private static IReadOnlyList<string> BuildRunArgs(RunCommandOptions options)
+    private static List<string> BuildRunArgs(RunCommandOptions options)
     {
         var args = new List<string>
         {
@@ -145,7 +145,7 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         return args;
     }
 
-    private static IReadOnlyList<string> BuildShellArgs(ShellCommandOptions options)
+    private static List<string> BuildShellArgs(ShellCommandOptions options)
     {
         var args = new List<string>
         {
@@ -185,7 +185,7 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         return args;
     }
 
-    private static IReadOnlyList<string> BuildExecArgs(ExecCommandOptions options)
+    private static List<string> BuildExecArgs(ExecCommandOptions options)
     {
         var args = new List<string>
         {

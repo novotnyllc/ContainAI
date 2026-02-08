@@ -129,7 +129,7 @@ internal sealed class NativeSessionCommandRuntime
         };
     }
 
-    private async Task<ResolvedTarget> ResolveTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+    private static async Task<ResolvedTarget> ResolveTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(options.Container))
         {
@@ -407,7 +407,7 @@ internal sealed class NativeSessionCommandRuntime
         return interactiveExit;
     }
 
-    private async Task<int> RunRemoteShellAsync(SessionCommandOptions options, EnsuredSession session, CancellationToken cancellationToken)
+    private static async Task<int> RunRemoteShellAsync(SessionCommandOptions options, EnsuredSession session, CancellationToken cancellationToken)
     {
         const string remoteCommand = "cd /home/agent/workspace && exec $SHELL -l";
         return await RunSshInteractiveAsync(options, session.SshPort, remoteCommand, forceTty: true, cancellationToken).ConfigureAwait(false);
@@ -449,7 +449,7 @@ internal sealed class NativeSessionCommandRuntime
         }
     }
 
-    private async Task PersistWorkspaceStateAsync(EnsuredSession session, CancellationToken cancellationToken)
+    private static async Task PersistWorkspaceStateAsync(EnsuredSession session, CancellationToken cancellationToken)
     {
         var configPath = ResolveUserConfigPath();
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
@@ -535,7 +535,7 @@ internal sealed class NativeSessionCommandRuntime
         return ResolutionResult<CreateContainerResult>.SuccessResult(new CreateContainerResult(sshPort));
     }
 
-    private async Task<ResolutionResult<bool>> EnsureSshBootstrapAsync(ResolvedTarget resolved, string sshPort, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<bool>> EnsureSshBootstrapAsync(ResolvedTarget resolved, string sshPort, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(sshPort))
         {
@@ -593,7 +593,7 @@ internal sealed class NativeSessionCommandRuntime
         return ResolutionResult<bool>.SuccessResult(true);
     }
 
-    private async Task<ResolutionResult<bool>> EnsureSshHostConfigAsync(string containerName, string sshPort, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<bool>> EnsureSshHostConfigAsync(string containerName, string sshPort, CancellationToken cancellationToken)
     {
         var configDir = ResolveSshConfigDir();
         Directory.CreateDirectory(configDir);
@@ -640,7 +640,7 @@ Host {containerName}
         return ResolutionResult<bool>.SuccessResult(true);
     }
 
-    private async Task<ResolutionResult<bool>> UpdateKnownHostsAsync(string containerName, string sshPort, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<bool>> UpdateKnownHostsAsync(string containerName, string sshPort, CancellationToken cancellationToken)
     {
         var knownHostsFile = ResolveKnownHostsFilePath();
         Directory.CreateDirectory(Path.GetDirectoryName(knownHostsFile)!);
@@ -657,7 +657,7 @@ Host {containerName}
 
         var lines = scan.StandardOutput
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(static line => !line.StartsWith("#", StringComparison.Ordinal))
+            .Where(static line => !line.StartsWith('#'))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
 
@@ -694,7 +694,7 @@ Host {containerName}
         return ResolutionResult<bool>.SuccessResult(true);
     }
 
-    private async Task<ResolutionResult<bool>> EnsureSshKeyPairAsync(CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<bool>> EnsureSshKeyPairAsync(CancellationToken cancellationToken)
     {
         var configDir = ResolveConfigDirectory();
         Directory.CreateDirectory(configDir);
@@ -718,7 +718,7 @@ Host {containerName}
         return ResolutionResult<bool>.SuccessResult(true);
     }
 
-    private async Task<bool> WaitForSshPortAsync(string sshPort, CancellationToken cancellationToken)
+    private static async Task<bool> WaitForSshPortAsync(string sshPort, CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < 30; attempt++)
         {
@@ -736,7 +736,7 @@ Host {containerName}
         return false;
     }
 
-    private async Task<bool> WaitForContainerStateAsync(string context, string containerName, string desiredState, TimeSpan timeout, CancellationToken cancellationToken)
+    private static async Task<bool> WaitForContainerStateAsync(string context, string containerName, string desiredState, TimeSpan timeout, CancellationToken cancellationToken)
     {
         var start = DateTimeOffset.UtcNow;
         while (DateTimeOffset.UtcNow - start < timeout)
@@ -754,13 +754,13 @@ Host {containerName}
         return false;
     }
 
-    private async Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken)
+    private static async Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken)
     {
         await DockerCaptureAsync(context, ["stop", containerName], cancellationToken).ConfigureAwait(false);
         await DockerCaptureAsync(context, ["rm", "-f", containerName], cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken)
     {
         var reservedPorts = new HashSet<int>();
 
@@ -795,7 +795,7 @@ Host {containerName}
         return ResolutionResult<string>.ErrorResult($"No SSH ports available in range {SshPortRangeStart}-{SshPortRangeEnd}.");
     }
 
-    private async Task<HashSet<int>> GetHostUsedPortsAsync(CancellationToken cancellationToken)
+    private static async Task<HashSet<int>> GetHostUsedPortsAsync(CancellationToken cancellationToken)
     {
         var ports = new HashSet<int>();
 
@@ -839,7 +839,7 @@ Host {containerName}
         }
     }
 
-    private async Task<FindContainerByNameResult> FindContainerByNameAcrossContextsAsync(
+    private static async Task<FindContainerByNameResult> FindContainerByNameAcrossContextsAsync(
         string containerName,
         string? explicitConfig,
         string? workspace,
@@ -869,7 +869,7 @@ Host {containerName}
         return new FindContainerByNameResult(true, found[0], null, 1);
     }
 
-    private async Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken)
+    private static async Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken)
     {
         var configPath = ResolveUserConfigPath();
         if (File.Exists(configPath))
@@ -931,7 +931,7 @@ Host {containerName}
         return legacyExists.ExitCode == 0 ? ContainerLookupResult.Success(legacy) : ContainerLookupResult.Empty();
     }
 
-    private async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)
     {
         var baseName = await GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
         var candidate = baseName;
@@ -958,7 +958,7 @@ Host {containerName}
         return ResolutionResult<string>.ErrorResult("Too many container name collisions (max 99)");
     }
 
-    private async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
+    private static async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
         var repoName = Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace));
         if (string.IsNullOrWhiteSpace(repoName))
@@ -985,7 +985,7 @@ Host {containerName}
         return ContainerNameGenerator.Compose(repoName, branchName);
     }
 
-    private async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
+    private static async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
     {
         var inspect = await DockerCaptureAsync(
             context,
@@ -1039,7 +1039,7 @@ Host {containerName}
         return false;
     }
 
-    private async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
+    private static async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
     {
         var configContext = await ResolveConfiguredContextAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(configContext))
@@ -1067,7 +1067,7 @@ Host {containerName}
         return ContextSelectionResult.FromError("No isolation context available. Run 'cai setup' or use --force.");
     }
 
-    private async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
+    private static async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         var configured = await ResolveConfiguredContextAsync(workspace ?? Directory.GetCurrentDirectory(), explicitConfig, cancellationToken).ConfigureAwait(false);
@@ -1092,7 +1092,7 @@ Host {containerName}
         return contexts;
     }
 
-    private async Task<string?> ResolveConfiguredContextAsync(string workspace, string? explicitConfig, CancellationToken cancellationToken)
+    private static async Task<string?> ResolveConfiguredContextAsync(string workspace, string? explicitConfig, CancellationToken cancellationToken)
     {
         var configPath = FindConfigFile(workspace, explicitConfig);
         if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
@@ -1110,7 +1110,7 @@ Host {containerName}
         return string.IsNullOrWhiteSpace(context) ? null : context;
     }
 
-    private async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
+    private static async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {
@@ -1226,7 +1226,7 @@ Host {containerName}
 
     private static string ExpandHome(string value)
     {
-        if (string.IsNullOrWhiteSpace(value) || !value.StartsWith("~", StringComparison.Ordinal))
+        if (string.IsNullOrWhiteSpace(value) || !value.StartsWith('~'))
         {
             return value;
         }
@@ -1320,7 +1320,7 @@ Host {containerName}
         }
     }
 
-    private async Task<bool> DockerContextExistsAsync(string context, CancellationToken cancellationToken)
+    private static async Task<bool> DockerContextExistsAsync(string context, CancellationToken cancellationToken)
     {
         if (string.Equals(context, "default", StringComparison.Ordinal))
         {
@@ -1331,7 +1331,7 @@ Host {containerName}
         return inspect.ExitCode == 0;
     }
 
-    private async Task<ProcessResult> DockerCaptureAsync(string context, IReadOnlyList<string> dockerArgs, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> DockerCaptureAsync(string context, IReadOnlyList<string> dockerArgs, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         if (!string.IsNullOrWhiteSpace(context) && !string.Equals(context, "default", StringComparison.Ordinal))
@@ -1344,7 +1344,7 @@ Host {containerName}
         return await RunProcessCaptureAsync("docker", args, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<int> RunSshInteractiveAsync(
+    private static async Task<int> RunSshInteractiveAsync(
         SessionCommandOptions options,
         string sshPort,
         string remoteCommand,
@@ -1355,7 +1355,7 @@ Host {containerName}
         return await RunProcessInteractiveAsync("ssh", args, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<ProcessResult> RunSshCaptureAsync(
+    private static async Task<ProcessResult> RunSshCaptureAsync(
         SessionCommandOptions options,
         string sshPort,
         string remoteCommand,
@@ -1366,7 +1366,7 @@ Host {containerName}
         return await RunProcessCaptureAsync("ssh", args, cancellationToken).ConfigureAwait(false);
     }
 
-    private List<string> BuildSshArguments(SessionCommandOptions options, string sshPort, string remoteCommand, bool forceTty)
+    private static List<string> BuildSshArguments(SessionCommandOptions options, string sshPort, string remoteCommand, bool forceTty)
     {
         var args = new List<string>
         {
@@ -1751,7 +1751,7 @@ Host {containerName}
                     {
                         options.EnvVars.Add(token[2..]);
                     }
-                    else if (!token.StartsWith("-", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
+                    else if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
                     {
                         options = options with { Workspace = token };
                     }
@@ -1934,7 +1934,7 @@ Host {containerName}
                     {
                         return ParseResult.ErrorResult("--volume is not supported in cai shell (SSH mode)");
                     }
-                    else if (!token.StartsWith("-", StringComparison.Ordinal) && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
+                    else if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
                     {
                         options = options with { Workspace = token };
                     }
@@ -2077,7 +2077,7 @@ Host {containerName}
                     {
                         options = options with { ExplicitConfig = token[("--config=".Length)..] };
                     }
-                    else if (token.StartsWith("-", StringComparison.Ordinal))
+                    else if (token.StartsWith('-'))
                     {
                         command.AddRange(args.Skip(index));
                         index = args.Count;
@@ -2118,7 +2118,7 @@ Host {containerName}
         return true;
     }
 
-    private async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var result = TomlCommandProcessor.Execute(args);

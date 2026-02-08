@@ -149,7 +149,7 @@ internal sealed class CommandRuntimeService : ICommandRuntimeService
         return false;
     }
 
-    private static IReadOnlyList<string> GetCandidateExtensions()
+    private static string[] GetCandidateExtensions()
     {
         if (!OperatingSystem.IsWindows())
         {

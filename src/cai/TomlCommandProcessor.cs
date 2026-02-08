@@ -126,17 +126,17 @@ internal static partial class TomlCommandProcessor
             return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
         }
 
-        if (!wsPath.StartsWith("/", StringComparison.Ordinal))
+        if (!wsPath.StartsWith('/'))
         {
             return new TomlCommandResult(1, string.Empty, $"Error: Workspace path must be absolute: {wsPath}");
         }
 
-        if (wsPath.IndexOf('\0') >= 0)
+        if (wsPath.Contains('\0'))
         {
             return new TomlCommandResult(1, string.Empty, "Error: Workspace path contains null byte");
         }
 
-        if (wsPath.IndexOf('\n') >= 0 || wsPath.IndexOf('\r') >= 0)
+        if (wsPath.Contains('\n') || wsPath.Contains('\r'))
         {
             return new TomlCommandResult(1, string.Empty, "Error: Workspace path contains newline");
         }
@@ -161,7 +161,7 @@ internal static partial class TomlCommandProcessor
             return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
         }
 
-        if (!wsPath.StartsWith("/", StringComparison.Ordinal))
+        if (!wsPath.StartsWith('/'))
         {
             return new TomlCommandResult(1, string.Empty, $"Error: Workspace path must be absolute: {wsPath}");
         }
@@ -924,7 +924,7 @@ internal static partial class TomlCommandProcessor
             .Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("\"", "\\\"", StringComparison.Ordinal);
 
-    private static bool IsAnyTableHeader(string trimmed) => trimmed.StartsWith("[", StringComparison.Ordinal);
+    private static bool IsAnyTableHeader(string trimmed) => trimmed.StartsWith('[');
 
     private static bool IsTargetHeader(string trimmed, string header)
     {
@@ -936,7 +936,7 @@ internal static partial class TomlCommandProcessor
         if (trimmed.StartsWith(header, StringComparison.Ordinal) && trimmed.Length > header.Length)
         {
             var remainder = trimmed[header.Length..].TrimStart();
-            return remainder.StartsWith("#", StringComparison.Ordinal);
+            return remainder.StartsWith('#');
         }
 
         return false;
@@ -965,12 +965,12 @@ internal static partial class TomlCommandProcessor
         return position < line.Length && line[position] == '=';
     }
 
-    private static bool SectionHasContent(IReadOnlyList<string> lines, int start, int end)
+    private static bool SectionHasContent(List<string> lines, int start, int end)
     {
         for (var index = start; index < end && index < lines.Count; index++)
         {
             var trimmed = lines[index].Trim();
-            if (trimmed.Length > 0 && !trimmed.StartsWith("#", StringComparison.Ordinal))
+            if (trimmed.Length > 0 && !trimmed.StartsWith('#'))
             {
                 return true;
             }
@@ -987,7 +987,7 @@ internal static partial class TomlCommandProcessor
         }
 
         var normalized = content.Replace("\r\n", "\n", StringComparison.Ordinal);
-        if (normalized.EndsWith("\n", StringComparison.Ordinal))
+        if (normalized.EndsWith('\n'))
         {
             normalized = normalized[..^1];
         }
@@ -997,7 +997,7 @@ internal static partial class TomlCommandProcessor
             : normalized.Split('\n').ToList();
     }
 
-    private static string NormalizeOutputContent(IReadOnlyList<string> lines)
+    private static string NormalizeOutputContent(List<string> lines)
     {
         if (lines.Count == 0)
         {

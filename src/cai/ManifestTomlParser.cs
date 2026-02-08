@@ -31,7 +31,50 @@ internal static class ManifestTomlParser
         return entries;
     }
 
-    private static IReadOnlyList<string> ResolveManifestFiles(string manifestPath)
+    public static IReadOnlyList<ManifestAgentEntry> ParseAgents(string manifestPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+
+        var manifestFiles = ResolveManifestFiles(manifestPath);
+        var entries = new List<ManifestAgentEntry>();
+        foreach (var manifestFile in manifestFiles)
+        {
+            var content = File.ReadAllText(manifestFile);
+            var model = Toml.ToModel(content);
+            if (model is not TomlTable root)
+            {
+                continue;
+            }
+
+            if (!root.TryGetValue("agent", out var sectionValue) || sectionValue is not TomlTable section)
+            {
+                continue;
+            }
+
+            var name = ReadString(section, "name");
+            var binary = ReadString(section, "binary");
+            var defaultArgs = ReadStringArray(section, "default_args");
+            var aliases = ReadStringArray(section, "aliases");
+            var optional = ReadBool(section, "optional");
+
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(binary) || defaultArgs.Count == 0)
+            {
+                continue;
+            }
+
+            entries.Add(new ManifestAgentEntry(
+                Name: name,
+                Binary: binary,
+                DefaultArgs: defaultArgs,
+                Aliases: aliases,
+                Optional: optional,
+                SourceFile: manifestFile));
+        }
+
+        return entries;
+    }
+
+    private static string[] ResolveManifestFiles(string manifestPath)
     {
         if (Directory.Exists(manifestPath))
         {
@@ -139,6 +182,25 @@ internal static class ManifestTomlParser
 
         return false;
     }
+
+    private static List<string> ReadStringArray(TomlTable table, string key)
+    {
+        if (!table.TryGetValue(key, out var value) || value is not TomlArray array)
+        {
+            return [];
+        }
+
+        var values = new List<string>(array.Count);
+        foreach (var item in array)
+        {
+            if (item is string text && !string.IsNullOrWhiteSpace(text))
+            {
+                values.Add(text);
+            }
+        }
+
+        return values;
+    }
 }
 
 internal readonly record struct ManifestEntry(
@@ -161,3 +223,11 @@ internal readonly record struct ManifestEntry(
             : $"{Source}|{Target}|{ContainerLink}|{Flags}|{disabled}|{Type}|{optional}|{SourceFile}";
     }
 }
+
+internal readonly record struct ManifestAgentEntry(
+    string Name,
+    string Binary,
+    IReadOnlyList<string> DefaultArgs,
+    IReadOnlyList<string> Aliases,
+    bool Optional,
+    string SourceFile);

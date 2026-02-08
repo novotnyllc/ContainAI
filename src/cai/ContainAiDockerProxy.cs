@@ -224,7 +224,7 @@ internal static partial class ContainAiDockerProxy
 
         foreach (var arg in args)
         {
-            if (arg.StartsWith("-", StringComparison.Ordinal))
+            if (arg.StartsWith('-'))
             {
                 continue;
             }
@@ -586,7 +586,7 @@ internal static partial class ContainAiDockerProxy
     {
         foreach (var arg in args)
         {
-            if (!arg.StartsWith("-", StringComparison.Ordinal))
+            if (!arg.StartsWith('-'))
             {
                 return arg;
             }
@@ -610,7 +610,7 @@ internal static partial class ContainAiDockerProxy
                 continue;
             }
 
-            if (!arg.StartsWith("-", StringComparison.Ordinal))
+            if (!arg.StartsWith('-'))
             {
                 return arg;
             }
@@ -633,7 +633,7 @@ internal static partial class ContainAiDockerProxy
         }
     }
 
-    private static IReadOnlyList<string> PrependContext(string contextName, IReadOnlyList<string> args)
+    private static List<string> PrependContext(string contextName, IReadOnlyList<string> args)
     {
         var dockerArgs = new List<string>(args.Count + 2)
         {

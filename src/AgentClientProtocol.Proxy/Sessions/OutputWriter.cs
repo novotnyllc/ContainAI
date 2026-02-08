@@ -26,7 +26,7 @@ public sealed class OutputWriter
     /// Enqueues a message to be written to stdout.
     /// </summary>
     public async Task EnqueueAsync(JsonRpcMessage message, CancellationToken cancellationToken = default)
-        => await _channel.Writer.WriteAsync(message, cancellationToken);
+        => await _channel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Signals that no more messages will be enqueued.
@@ -40,12 +40,12 @@ public sealed class OutputWriter
     {
         try
         {
-            await foreach (var message in _channel.Reader.ReadAllAsync(ct))
+            await foreach (var message in _channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(message, AcpJsonContext.Default.JsonRpcMessage);
-                await _stdout.WriteAsync(bytes, ct);
-                await _stdout.WriteAsync(NewLine, ct);
-                await _stdout.FlushAsync(ct);
+                await _stdout.WriteAsync(bytes, ct).ConfigureAwait(false);
+                await _stdout.WriteAsync(NewLine, ct).ConfigureAwait(false);
+                await _stdout.FlushAsync(ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

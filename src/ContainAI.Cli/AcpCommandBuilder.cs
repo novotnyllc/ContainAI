@@ -3,7 +3,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli;
 
-internal sealed class AcpCommandBuilder
+internal static class AcpCommandBuilder
 {
     public static Command Build(ICaiCommandRuntime runtime)
     {

@@ -64,7 +64,7 @@ public sealed partial class DocumentationLinkTests
             foreach (Match match in MarkdownLinkRegex().Matches(line))
             {
                 var target = match.Groups[1].Value.Trim();
-                if (string.IsNullOrWhiteSpace(target) || target.StartsWith("!", StringComparison.Ordinal))
+                if (string.IsNullOrWhiteSpace(target) || target.StartsWith('!'))
                 {
                     continue;
                 }
@@ -113,7 +113,7 @@ public sealed partial class DocumentationLinkTests
         var relativePath = anchorIndex >= 0 ? target[..anchorIndex] : target;
         var anchor = anchorIndex >= 0 ? target[(anchorIndex + 1)..] : string.Empty;
 
-        if (relativePath.StartsWith("/", StringComparison.Ordinal))
+        if (relativePath.StartsWith('/'))
         {
             errors.Add($"{Relative(sourceFile)}:{lineNumber}: absolute link path is not allowed: {target}");
             return;
@@ -144,7 +144,7 @@ public sealed partial class DocumentationLinkTests
         return headingAnchors.Contains(anchor, StringComparer.Ordinal);
     }
 
-    private static IReadOnlySet<string> ExtractAnchors(string markdownFile)
+    private static HashSet<string> ExtractAnchors(string markdownFile)
     {
         var anchors = new HashSet<string>(StringComparer.Ordinal);
         var duplicateCounts = new Dictionary<string, int>(StringComparer.Ordinal);

@@ -36,8 +36,8 @@ public sealed class ContainerNamingTests
 
         Assert.True(name.Length <= 24, $"expected <= 24 chars but got '{name}' ({name.Length})");
         Assert.Contains("-", name, StringComparison.Ordinal);
-        Assert.False(name.StartsWith("-", StringComparison.Ordinal));
-        Assert.False(name.EndsWith("-", StringComparison.Ordinal));
+        Assert.False(name.StartsWith('-'));
+        Assert.False(name.EndsWith('-'));
     }
 
     [Fact]

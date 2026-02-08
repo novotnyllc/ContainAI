@@ -40,6 +40,10 @@ public sealed class AcpProxy : IDisposable
         bool directSpawn = false,
         IAgentSpawner? agentSpawner = null)
     {
+        ArgumentNullException.ThrowIfNull(agent);
+        ArgumentNullException.ThrowIfNull(stdout);
+        ArgumentNullException.ThrowIfNull(stderr);
+
         _agent = agent;
         _output = new OutputWriter(stdout);
         _errorSink = new ErrorSink(stderr);
@@ -71,7 +75,7 @@ public sealed class AcpProxy : IDisposable
                 string? line;
                 try
                 {
-                    line = await reader.ReadLineAsync(ct);
+                    line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -86,24 +90,38 @@ public sealed class AcpProxy : IDisposable
 
                 try
                 {
-                    await ProcessMessageAsync(line);
+                    await ProcessMessageAsync(line).ConfigureAwait(false);
                 }
                 catch (JsonException ex)
                 {
-                    await _errorSink.WriteLineAsync($"JSON parse error: {ex.Message}");
+                    await _errorSink.WriteLineAsync($"JSON parse error: {ex.Message}").ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (InvalidOperationException ex)
                 {
-                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}");
+                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
+                }
+                catch (IOException ex)
+                {
+                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
                 }
             }
 
             // stdin EOF or cancellation - graceful shutdown
-            await ShutdownAsync();
+            await ShutdownAsync().ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
-            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}");
+            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (IOException ex)
+        {
+            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         finally
@@ -115,7 +133,7 @@ public sealed class AcpProxy : IDisposable
             }
             catch (OperationCanceledException ex)
             {
-                await _errorSink.WriteLineAsync($"Output flush canceled: {ex.Message}");
+                await _errorSink.WriteLineAsync($"Output flush canceled: {ex.Message}").ConfigureAwait(false);
             }
 
             await _cts.CancelAsync().ConfigureAwait(false);
@@ -144,16 +162,16 @@ public sealed class AcpProxy : IDisposable
         switch (message.Method)
         {
             case "initialize":
-                await HandleInitializeAsync(message);
+                await HandleInitializeAsync(message).ConfigureAwait(false);
                 break;
 
             case "session/new":
-                await HandleSessionNewAsync(message);
+                await HandleSessionNewAsync(message).ConfigureAwait(false);
                 break;
 
             case "session/prompt":
             case "session/end":
-                await RouteToSessionAsync(message);
+                await RouteToSessionAsync(message).ConfigureAwait(false);
                 break;
 
             default:
@@ -164,7 +182,7 @@ public sealed class AcpProxy : IDisposable
                     await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                         message.Id,
                         JsonRpcErrorCodes.MethodNotFound,
-                        $"Method not found: {message.Method}"));
+                        $"Method not found: {message.Method}")).ConfigureAwait(false);
                 }
                 // Notifications are silently ignored (per JSON-RPC spec)
                 break;
@@ -205,7 +223,7 @@ public sealed class AcpProxy : IDisposable
 
         if (message.Id != null)
         {
-            await _output.EnqueueAsync(response);
+            await _output.EnqueueAsync(response).ConfigureAwait(false);
         }
     }
 
@@ -228,7 +246,7 @@ public sealed class AcpProxy : IDisposable
         var originalCwd = cwd ?? Directory.GetCurrentDirectory();
 
         // Resolve workspace root
-        var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, _cts.Token);
+            var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, _cts.Token).ConfigureAwait(false);
 
         // Create session
         var session = new AcpSession(workspace);
@@ -284,7 +302,7 @@ public sealed class AcpProxy : IDisposable
 
             // Wait for initialize response (with timeout)
             // IMPORTANT: Register pending request BEFORE writing to avoid race condition
-            var initResponse = await session.SendAndWaitForResponseAsync(initRequest, initRequestId, TimeSpan.FromSeconds(30));
+            var initResponse = await session.SendAndWaitForResponseAsync(initRequest, initRequestId, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             if (initResponse == null)
             {
                 throw new TimeoutException("Agent did not respond to initialize");
@@ -323,7 +341,7 @@ public sealed class AcpProxy : IDisposable
 
             // Wait for session/new response
             // IMPORTANT: Register pending request BEFORE writing to avoid race condition
-            var sessionNewResponse = await session.SendAndWaitForResponseAsync(sessionNewRequest, sessionNewRequestId, TimeSpan.FromSeconds(30));
+            var sessionNewResponse = await session.SendAndWaitForResponseAsync(sessionNewRequest, sessionNewRequestId, TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             if (sessionNewResponse == null)
             {
                 throw new TimeoutException("Agent did not respond to session/new");
@@ -363,10 +381,10 @@ public sealed class AcpProxy : IDisposable
             };
             if (message.Id != null)
             {
-                await _output.EnqueueAsync(response);
+                await _output.EnqueueAsync(response).ConfigureAwait(false);
             }
         }
-        catch (Exception ex)
+        catch (InvalidOperationException ex)
         {
             // Clean up on failure
             session.Dispose();
@@ -377,7 +395,45 @@ public sealed class AcpProxy : IDisposable
                 await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                     message.Id,
                     JsonRpcErrorCodes.SessionCreationFailed,
-                    $"Failed to create session: {ex.Message}"));
+                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
+            }
+        }
+        catch (TimeoutException ex)
+        {
+            // Clean up on failure
+            session.Dispose();
+
+            // Only respond if this was a request (has id)
+            if (message.Id != null)
+            {
+                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                    message.Id,
+                    JsonRpcErrorCodes.SessionCreationFailed,
+                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
+            }
+        }
+        catch (JsonException ex)
+        {
+            session.Dispose();
+
+            if (message.Id != null)
+            {
+                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                    message.Id,
+                    JsonRpcErrorCodes.SessionCreationFailed,
+                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
+            }
+        }
+        catch (IOException ex)
+        {
+            session.Dispose();
+
+            if (message.Id != null)
+            {
+                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                    message.Id,
+                    JsonRpcErrorCodes.SessionCreationFailed,
+                    $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
             }
         }
     }
@@ -400,7 +456,7 @@ public sealed class AcpProxy : IDisposable
                 await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                     message.Id,
                     JsonRpcErrorCodes.SessionNotFound,
-                    $"Session not found: {sessionId}"));
+                    $"Session not found: {sessionId}")).ConfigureAwait(false);
             }
             return;
         }
@@ -408,7 +464,7 @@ public sealed class AcpProxy : IDisposable
         // Handle session/end specially
         if (message.Method == "session/end")
         {
-            await HandleSessionEndAsync(sessionId, message);
+            await HandleSessionEndAsync(sessionId, message).ConfigureAwait(false);
             return;
         }
 
@@ -419,7 +475,7 @@ public sealed class AcpProxy : IDisposable
         }
 
         // Forward to agent
-        await session.WriteToAgentAsync(message);
+        await session.WriteToAgentAsync(message).ConfigureAwait(false);
     }
 
     private async Task HandleSessionEndAsync(string sessionId, JsonRpcMessage message)
@@ -440,18 +496,18 @@ public sealed class AcpProxy : IDisposable
                     ["sessionId"] = session.AgentSessionId
                 }
             };
-            await session.WriteToAgentAsync(endNotification);
+            await session.WriteToAgentAsync(endNotification).ConfigureAwait(false);
 
             // Wait for reader to complete (agent may send final messages)
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             try
             {
                 if (session.ReaderTask != null)
-                    await session.ReaderTask.WaitAsync(cts.Token);
+                    await session.ReaderTask.WaitAsync(cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException ex)
             {
-                await _errorSink.WriteLineAsync($"Session end timeout for {session.ProxySessionId}: {ex.Message}");
+                await _errorSink.WriteLineAsync($"Session end timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
             }
         }
         finally
@@ -466,7 +522,7 @@ public sealed class AcpProxy : IDisposable
             {
                 Id = message.Id,
                 Result = new JsonObject { }
-            });
+            }).ConfigureAwait(false);
         }
     }
 
@@ -479,14 +535,22 @@ public sealed class AcpProxy : IDisposable
                 return;
 
             string? line;
-            while ((line = await reader.ReadLineAsync()) != null)
+            while ((line = await reader.ReadLineAsync().ConfigureAwait(false)) != null)
             {
-                await ReadAgentOutputAsync(session, line);
+                await ReadAgentOutputAsync(session, line).ConfigureAwait(false);
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
-            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}");
+            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
         }
     }
 
@@ -524,11 +588,11 @@ public sealed class AcpProxy : IDisposable
             }
 
             // Forward to editor
-            await _output.EnqueueAsync(message);
+            await _output.EnqueueAsync(message).ConfigureAwait(false);
         }
         catch (JsonException ex)
         {
-            await _errorSink.WriteLineAsync($"Malformed agent output skipped for session {session.ProxySessionId}: {ex.Message}");
+            await _errorSink.WriteLineAsync($"Malformed agent output skipped for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
         }
     }
 
@@ -550,18 +614,18 @@ public sealed class AcpProxy : IDisposable
                             ["sessionId"] = session.AgentSessionId
                         }
                     };
-                    await session.WriteToAgentAsync(endRequest);
+                    await session.WriteToAgentAsync(endRequest).ConfigureAwait(false);
 
                     // Wait briefly for graceful shutdown
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
                     try
                     {
                         if (session.ReaderTask != null)
-                            await session.ReaderTask.WaitAsync(cts.Token);
+                            await session.ReaderTask.WaitAsync(cts.Token).ConfigureAwait(false);
                     }
                     catch (OperationCanceledException ex)
                     {
-                        await _errorSink.WriteLineAsync($"Session shutdown timeout for {session.ProxySessionId}: {ex.Message}");
+                        await _errorSink.WriteLineAsync($"Session shutdown timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
                     }
                 }
                 finally

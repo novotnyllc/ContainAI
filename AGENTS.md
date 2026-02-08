@@ -9,19 +9,22 @@ Sandboxed container environment for AI coding agents. Native .NET 10 CLI with co
 cai doctor
 
 # Build Docker images (all layers)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build single layer (faster iteration)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
 # Build with buildx setup (installs binfmt + builder if needed)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
 
 # Build and tag for a registry (prefix applies to all layers)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
 
 # CI-style multi-arch build (amd64 + arm64)
-dotnet msbuild src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+
+# Publish native AOT CLI binary
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
 
 # Run tests
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
@@ -64,9 +67,9 @@ docs/                   # Architecture, config, quickstart
 
 - **`src/manifests/*.toml` are the authoritative source** for what gets synced between host and container
 - Per-agent files with numeric prefixes ensure deterministic processing order
-- `cai manifest generate import-map` generates the import mapping from manifests
+- `cai manifest generate container-link-spec` emits JSON link metadata from manifests
 - Run `dotnet run --project src/cai -- manifest check src/manifests` to verify alignment (CI enforces this)
-- `cai manifest generate ...` reads manifests to produce derived artifacts
+- `cai manifest apply agent-shims` applies native shim links for agent launch defaults
 - User manifests go in `~/.config/containai/manifests/` (processed at runtime)
 
 # Agent Guidance: dotnet-skills

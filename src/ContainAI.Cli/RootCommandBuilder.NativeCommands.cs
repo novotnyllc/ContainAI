@@ -3,7 +3,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli;
 
-internal sealed partial class RootCommandBuilder
+internal static partial class RootCommandBuilder
 {
     private static Command CreateDoctorCommand(ICaiCommandRuntime runtime)
     {
@@ -428,7 +428,7 @@ internal sealed partial class RootCommandBuilder
 
         var generate = new Command("generate");
         var kindArgument = new Argument<string>("kind");
-        kindArgument.AcceptOnlyFromAmong("import-map", "dockerfile-symlinks", "init-dirs", "container-link-spec", "agent-wrappers");
+        kindArgument.AcceptOnlyFromAmong("container-link-spec");
         var generateManifestPathArgument = new Argument<string>("manifest-path");
         var outputPathArgument = new Argument<string?>("output-path")
         {
@@ -452,14 +452,18 @@ internal sealed partial class RootCommandBuilder
 
         var apply = new Command("apply");
         var applyKindArgument = new Argument<string>("kind");
-        applyKindArgument.AcceptOnlyFromAmong("container-links", "init-dirs");
+        applyKindArgument.AcceptOnlyFromAmong("container-links", "init-dirs", "agent-shims");
         var applyManifestPathArgument = new Argument<string>("manifest-path");
         var dataDirOption = new Option<string?>("--data-dir");
         var homeDirOption = new Option<string?>("--home-dir");
+        var shimDirOption = new Option<string?>("--shim-dir");
+        var caiBinaryOption = new Option<string?>("--cai-binary");
         apply.Arguments.Add(applyKindArgument);
         apply.Arguments.Add(applyManifestPathArgument);
         apply.Options.Add(dataDirOption);
         apply.Options.Add(homeDirOption);
+        apply.Options.Add(shimDirOption);
+        apply.Options.Add(caiBinaryOption);
         apply.SetAction((parseResult, cancellationToken) =>
         {
             var args = new List<string>
@@ -471,6 +475,8 @@ internal sealed partial class RootCommandBuilder
             };
             AppendOption(args, "--data-dir", parseResult.GetValue(dataDirOption));
             AppendOption(args, "--home-dir", parseResult.GetValue(homeDirOption));
+            AppendOption(args, "--shim-dir", parseResult.GetValue(shimDirOption));
+            AppendOption(args, "--cai-binary", parseResult.GetValue(caiBinaryOption));
             return runtime.RunNativeAsync(args, cancellationToken);
         });
 

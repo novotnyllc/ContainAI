@@ -73,6 +73,8 @@ public static class InstallMetadata
 
     public static InstallType ResolveInstallType(string installDir)
     {
+        ArgumentNullException.ThrowIfNull(installDir);
+
         if (Directory.Exists(Path.Combine(installDir, ".git")))
         {
             return InstallType.Git;

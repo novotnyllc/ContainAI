@@ -537,14 +537,29 @@ done
             return await File.ReadAllLinesAsync(_transcriptPath, cancellationToken);
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
-            if (Directory.Exists(_tempRoot))
+            for (var attempt = 0; attempt < 5; attempt++)
             {
-                Directory.Delete(_tempRoot, recursive: true);
-            }
+                if (!Directory.Exists(_tempRoot))
+                {
+                    return;
+                }
 
-            return ValueTask.CompletedTask;
+                try
+                {
+                    Directory.Delete(_tempRoot, recursive: true);
+                    return;
+                }
+                catch (IOException) when (attempt < 4)
+                {
+                    await Task.Delay(50);
+                }
+                catch (UnauthorizedAccessException) when (attempt < 4)
+                {
+                    await Task.Delay(50);
+                }
+            }
         }
 
         private static void EnsureExecutable(string path)

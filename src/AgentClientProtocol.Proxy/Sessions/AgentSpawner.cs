@@ -40,6 +40,7 @@ public sealed class AgentSpawner : IAgentSpawner
     /// </exception>
     public Process SpawnAgent(AcpSession session, string agent)
     {
+        ArgumentNullException.ThrowIfNull(session);
         Process? process;
         if (_directSpawn)
         {
@@ -125,12 +126,20 @@ public sealed class AgentSpawner : IAgentSpawner
             {
                 var errReader = process.StandardError;
                 string? line;
-                while ((line = await errReader.ReadLineAsync()) != null)
+                while ((line = await errReader.ReadLineAsync().ConfigureAwait(false)) != null)
                 {
-                    await _stderr.WriteLineAsync(line);
+                    await _stderr.WriteLineAsync(line).ConfigureAwait(false);
                 }
             }
-            catch (Exception ex)
+            catch (ObjectDisposedException ex)
+            {
+                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
+            }
+            catch (IOException ex)
             {
                 _ = _stderr.WriteLineAsync($"Failed to forward agent stderr: {ex.Message}");
             }

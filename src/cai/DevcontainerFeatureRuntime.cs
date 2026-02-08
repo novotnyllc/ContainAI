@@ -62,10 +62,10 @@ internal sealed partial class DevcontainerFeatureRuntime
         return 1;
     }
 
-    private async Task<int> RunInstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunInstallAsync(string[] args, CancellationToken cancellationToken)
     {
         string? featureDirectory = null;
-        for (var index = 0; index < args.Count; index++)
+        for (var index = 0; index < args.Length; index++)
         {
             var token = args[index];
             switch (token)
@@ -592,7 +592,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         }
     }
 
-    private async Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken)
+    private static async Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(pidFilePath))
         {
@@ -620,7 +620,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         return IsProcessAlive(pid);
     }
 
-    private async Task<string> DetectUserHomeAsync(string remoteUser, CancellationToken cancellationToken)
+    private static async Task<string> DetectUserHomeAsync(string remoteUser, CancellationToken cancellationToken)
     {
         var candidate = remoteUser;
         if (string.Equals(candidate, "auto", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(candidate))
@@ -657,7 +657,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         return Environment.GetEnvironmentVariable("HOME") ?? conventionalPath;
     }
 
-    private async Task<bool> UserExistsAsync(string user, CancellationToken cancellationToken)
+    private static async Task<bool> UserExistsAsync(string user, CancellationToken cancellationToken)
     {
         var result = await RunProcessCaptureAsync("id", ["-u", user], cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
@@ -729,10 +729,10 @@ internal sealed partial class DevcontainerFeatureRuntime
         return false;
     }
 
-    private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)
+    private static bool TryReadValue(string[] args, ref int index, out string value)
     {
         value = string.Empty;
-        if (index + 1 >= args.Count)
+        if (index + 1 >= args.Length)
         {
             return false;
         }
@@ -742,19 +742,19 @@ internal sealed partial class DevcontainerFeatureRuntime
         return true;
     }
 
-    private async Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
+    private static async Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
     {
         var result = await RunProcessCaptureAsync("sh", ["-c", $"command -v {command} >/dev/null 2>&1"], cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
     }
 
-    private async Task<bool> CommandSucceedsAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private static async Task<bool> CommandSucceedsAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var result = await RunProcessCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
     }
 
-    private async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    private static async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         if (IsRunningAsRoot())
         {

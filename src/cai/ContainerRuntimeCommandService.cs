@@ -52,7 +52,7 @@ internal sealed class ContainerRuntimeCommandService
         return 1;
     }
 
-    private async Task<int> RunInitAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunInitAsync(string[] args, CancellationToken cancellationToken)
     {
         var quiet = false;
         var dataDir = DefaultDataDir;
@@ -61,7 +61,7 @@ internal sealed class ContainerRuntimeCommandService
         var templateHooksDir = DefaultTemplateHooksDir;
         var workspaceHooksDir = DefaultWorkspaceHooksDir;
         var workspaceDir = DefaultWorkspaceDir;
-        for (var index = 0; index < args.Count; index++)
+        for (var index = 0; index < args.Length; index++)
         {
             var token = args[index];
             switch (token)
@@ -153,14 +153,14 @@ internal sealed class ContainerRuntimeCommandService
         }
     }
 
-    private async Task<int> RunLinkRepairAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunLinkRepairAsync(string[] args, CancellationToken cancellationToken)
     {
         var mode = LinkRepairMode.Check;
         var quiet = false;
         var builtinSpecPath = DefaultBuiltinLinkSpec;
         var userSpecPath = DefaultUserLinkSpec;
         var checkedAtFilePath = DefaultCheckedAtFile;
-        for (var index = 0; index < args.Count; index++)
+        for (var index = 0; index < args.Length; index++)
         {
             var token = args[index];
             switch (token)
@@ -261,13 +261,13 @@ internal sealed class ContainerRuntimeCommandService
         }
     }
 
-    private async Task<int> RunLinkWatcherAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunLinkWatcherAsync(string[] args, CancellationToken cancellationToken)
     {
         var pollIntervalSeconds = 60;
         var importedAtPath = DefaultImportedAtFile;
         var checkedAtPath = DefaultCheckedAtFile;
         var quiet = false;
-        for (var index = 0; index < args.Count; index++)
+        for (var index = 0; index < args.Length; index++)
         {
             var token = args[index];
             switch (token)
@@ -604,7 +604,7 @@ internal sealed class ContainerRuntimeCommandService
                 continue;
             }
 
-            if (line.TrimStart().StartsWith("#", StringComparison.Ordinal))
+            if (line.TrimStart().StartsWith('#'))
             {
                 continue;
             }
@@ -812,17 +812,12 @@ internal sealed class ContainerRuntimeCommandService
         {
             _ = ManifestApplier.ApplyInitDirs(userManifestDirectory, dataDir);
             _ = ManifestApplier.ApplyContainerLinks(userManifestDirectory, homeDir, dataDir);
+            _ = ManifestApplier.ApplyAgentShims(userManifestDirectory, "/opt/containai/user-agent-shims", "/usr/local/bin/cai");
 
             var userSpec = ManifestGenerators.GenerateContainerLinkSpec(userManifestDirectory);
             var userSpecPath = Path.Combine(dataDir, "containai", "user-link-spec.json");
             Directory.CreateDirectory(Path.GetDirectoryName(userSpecPath)!);
             await File.WriteAllTextAsync(userSpecPath, userSpec.Content).ConfigureAwait(false);
-
-            var userWrappers = ManifestGenerators.GenerateAgentWrappers(userManifestDirectory);
-            var bashEnvDirectory = Path.Combine(homeDir, ".bash_env.d");
-            Directory.CreateDirectory(bashEnvDirectory);
-            var userWrapperPath = Path.Combine(bashEnvDirectory, "containai-user-agents.sh");
-            await File.WriteAllTextAsync(userWrapperPath, userWrappers.Content).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -913,13 +908,13 @@ internal sealed class ContainerRuntimeCommandService
         }
     }
 
-    private async Task<bool> IsSymlinkAsync(string path)
+    private static async Task<bool> IsSymlinkAsync(string path)
     {
         var result = await RunProcessCaptureAsync("test", ["-L", path], null, CancellationToken.None).ConfigureAwait(false);
         return result.ExitCode == 0;
     }
 
-    private async Task<string?> ReadLinkTargetAsync(string path)
+    private static async Task<string?> ReadLinkTargetAsync(string path)
     {
         var result = await RunProcessCaptureAsync("readlink", [path], null, CancellationToken.None).ConfigureAwait(false);
         if (result.ExitCode != 0)
@@ -930,7 +925,7 @@ internal sealed class ContainerRuntimeCommandService
         return result.StandardOutput.Trim();
     }
 
-    private async Task<string?> TryReadTrimmedTextAsync(string path)
+    private static async Task<string?> TryReadTrimmedTextAsync(string path)
     {
         try
         {
@@ -963,9 +958,9 @@ internal sealed class ContainerRuntimeCommandService
         }
     }
 
-    private async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments) => _ = await RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None).ConfigureAwait(false);
+    private static async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments) => _ = await RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None).ConfigureAwait(false);
 
-    private async Task<ProcessCaptureResult> RunAsRootCaptureAsync(
+    private static async Task<ProcessCaptureResult> RunAsRootCaptureAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? standardInput,
@@ -1023,10 +1018,10 @@ internal sealed class ContainerRuntimeCommandService
         await _stdout.WriteLineAsync($"[INFO] {message}").ConfigureAwait(false);
     }
 
-    private static bool TryReadOptionValue(IReadOnlyList<string> args, ref int index, out string value)
+    private static bool TryReadOptionValue(string[] args, ref int index, out string value)
     {
         value = string.Empty;
-        if (index + 1 >= args.Count)
+        if (index + 1 >= args.Length)
         {
             return false;
         }

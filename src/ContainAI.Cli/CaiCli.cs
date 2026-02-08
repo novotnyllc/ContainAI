@@ -33,11 +33,11 @@ public static class CaiCli
             Array.Copy(normalizedArgs, 0, redirected, 1, normalizedArgs.Length);
 
             cancellationToken.ThrowIfCancellationRequested();
-            return await root.Parse(redirected).InvokeAsync(new InvocationConfiguration(), cancellationToken);
+            return await root.Parse(redirected).InvokeAsync(new InvocationConfiguration(), cancellationToken).ConfigureAwait(false);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        return await root.Parse(normalizedArgs).InvokeAsync(new InvocationConfiguration(), cancellationToken);
+        return await root.Parse(normalizedArgs).InvokeAsync(new InvocationConfiguration(), cancellationToken).ConfigureAwait(false);
     }
 
     public static RootCommand CreateRootCommand(ICaiCommandRuntime runtime)
