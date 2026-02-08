@@ -1,9 +1,12 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using ContainAI.Cli.Host;
 using Xunit;
 
 namespace ContainAI.Cli.Tests;
 
+[SuppressMessage("Performance", "CA1515:Consider making public types internal", Justification = "xUnit collection definition types must be public for test discovery.")]
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class SyncIntegrationGroup
 {
@@ -278,19 +281,19 @@ public sealed class SyncIntegrationTests
 
     private static async Task<bool> DockerAvailableAsync(CancellationToken cancellationToken)
     {
-        var version = await RunProcessAsync("docker", ["--version"], cancellationToken);
+        var version = await RunProcessAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
         if (version.ExitCode != 0)
         {
             return false;
         }
 
-        var info = await RunDockerAsync(["info"], cancellationToken);
+        var info = await RunDockerAsync(["info"], cancellationToken).ConfigureAwait(false);
         return info.ExitCode == 0;
     }
 
     private static async Task<ProcessResult> RunDockerAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        var context = await ResolveDockerContextAsync(cancellationToken);
+        var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = new List<string>();
         if (!string.IsNullOrWhiteSpace(context))
         {
@@ -299,14 +302,14 @@ public sealed class SyncIntegrationTests
         }
 
         dockerArgs.AddRange(args);
-        return await RunProcessAsync("docker", dockerArgs, cancellationToken);
+        return await RunProcessAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
         foreach (var context in new[] { "containai-docker", "containai-secure", "docker-containai" })
         {
-            var probe = await RunProcessAsync("docker", ["context", "inspect", context], cancellationToken);
+            var probe = await RunProcessAsync("docker", ["context", "inspect", context], cancellationToken).ConfigureAwait(false);
             if (probe.ExitCode == 0)
             {
                 return context;
@@ -340,11 +343,22 @@ public sealed class SyncIntegrationTests
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
             var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
 
-            return new ProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
+            return new ProcessResult(
+                process.ExitCode,
+                await stdoutTask.ConfigureAwait(false),
+                await stderrTask.ConfigureAwait(false));
         }
-        catch (Exception ex)
+        catch (Win32Exception ex)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (IOException ex)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }

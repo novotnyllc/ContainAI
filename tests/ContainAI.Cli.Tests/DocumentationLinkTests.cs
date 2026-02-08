@@ -109,7 +109,7 @@ public sealed partial class DocumentationLinkTests
         IReadOnlyCollection<string> allMarkdownFiles,
         ICollection<string> errors)
     {
-        var anchorIndex = target.IndexOf('#');
+        var anchorIndex = target.IndexOf('#', StringComparison.Ordinal);
         var relativePath = anchorIndex >= 0 ? target[..anchorIndex] : target;
         var anchor = anchorIndex >= 0 ? target[(anchorIndex + 1)..] : string.Empty;
 
@@ -191,12 +191,24 @@ public sealed partial class DocumentationLinkTests
 
     private static string ToGitHubAnchor(string heading)
     {
-        var slug = heading.Trim().ToLowerInvariant();
+        var slug = ToLowerInvariant(heading.Trim());
         slug = NonAnchorCharacterRegex().Replace(slug, string.Empty);
         slug = slug.Replace(' ', '-');
         slug = slug.Trim('-');
         return slug;
     }
+
+    private static string ToLowerInvariant(string value)
+        => string.Create(
+            value.Length,
+            value,
+            static (chars, source) =>
+            {
+                for (var i = 0; i < source.Length; i++)
+                {
+                    chars[i] = char.ToLowerInvariant(source[i]);
+                }
+            });
 
     private static string Relative(string path)
     {

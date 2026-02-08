@@ -180,7 +180,7 @@ public sealed class AcpProxyTests
 
         Assert.Equal(0, exitCode);
         Assert.Empty(responses);
-        Assert.Contains("Error processing message", stderr, StringComparison.Ordinal);
+        Assert.Contains("JSON parse error", stderr, StringComparison.Ordinal);
     }
 
     [Fact]

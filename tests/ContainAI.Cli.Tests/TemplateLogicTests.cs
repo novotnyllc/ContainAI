@@ -78,9 +78,21 @@ public sealed class TemplateLogicTests
 
         var actual = TemplateUtilities.ComputeTemplateFingerprint(dockerfile);
 
-        var expected = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dockerfile))).ToLowerInvariant();
+        var expected = ToLowerHex(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(dockerfile))));
         Assert.Equal(expected, actual);
     }
+
+    private static string ToLowerHex(string value)
+        => string.Create(
+            value.Length,
+            value,
+            static (chars, source) =>
+            {
+                for (var i = 0; i < source.Length; i++)
+                {
+                    chars[i] = char.ToLowerInvariant(source[i]);
+                }
+            });
 
     [Fact]
     public void TryUpgradeDockerfile_InjectsBaseImageArg()
