@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -1205,43 +1204,11 @@ internal sealed class ContainerRuntimeCommandService
         CancellationToken cancellationToken,
         string? standardInput = null)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(executable)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = standardInput is not null,
-                UseShellExecute = false,
-            },
-        };
+        var result = await CliWrapProcessRunner
+            .RunCaptureAsync(executable, arguments, cancellationToken, workingDirectory, standardInput)
+            .ConfigureAwait(false);
 
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
-        {
-            process.StartInfo.WorkingDirectory = workingDirectory;
-        }
-
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        process.Start();
-        if (standardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(standardInput).ConfigureAwait(false);
-            await process.StandardInput.FlushAsync().ConfigureAwait(false);
-            process.StandardInput.Close();
-        }
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        return new ProcessCaptureResult(
-            process.ExitCode,
-            await stdoutTask.ConfigureAwait(false),
-            await stderrTask.ConfigureAwait(false));
+        return new ProcessCaptureResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
     private sealed class LinkRepairStats

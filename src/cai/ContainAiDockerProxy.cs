@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Text;
 using System.Text.Json;
@@ -718,79 +716,50 @@ internal static partial class ContainAiDockerProxy
 
     private static async Task<int> RunDockerInteractiveAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo =
-            {
-                FileName = "docker",
-                UseShellExecute = false,
-            },
-        };
-
-        foreach (var arg in args)
-        {
-            process.StartInfo.ArgumentList.Add(arg);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return 127;
-            }
+            return await CliWrapProcessRunner.RunInteractiveAsync("docker", args, cancellationToken).ConfigureAwait(false);
         }
-        catch (Win32Exception ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             await Console.Error.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode;
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await Console.Error.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await Console.Error.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
     }
 
     private static async Task<ProcessResult> RunDockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo =
-            {
-                FileName = "docker",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            },
-        };
-
-        foreach (var arg in args)
-        {
-            process.StartInfo.ArgumentList.Add(arg);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return new ProcessResult(127, string.Empty, "docker process failed to start");
-            }
+            var result = await CliWrapProcessRunner.RunCaptureAsync("docker", args, cancellationToken).ConfigureAwait(false);
+            return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
         }
-        catch (Win32Exception ex)
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }
-        catch (NotSupportedException ex)
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }
-
-        var stdout = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        var stderr = await process.StandardError.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return new ProcessResult(process.ExitCode, stdout, stderr);
+        catch (NotSupportedException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
     }
 
     private static IEnumerable<string> SplitLines(string text) => text

@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Security;
 using System.Text;
 using System.Text.Json;
@@ -1508,46 +1506,35 @@ Host {containerName}
 
         try
         {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo("git")
-                {
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                },
-            };
+            var result = CliWrapProcessRunner
+                .RunCaptureAsync(
+                    "git",
+                    ["-C", workspace, "rev-parse", "--abbrev-ref", "HEAD"],
+                    CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(2))
+                .GetAwaiter()
+                .GetResult();
 
-            process.StartInfo.ArgumentList.Add("-C");
-            process.StartInfo.ArgumentList.Add(workspace);
-            process.StartInfo.ArgumentList.Add("rev-parse");
-            process.StartInfo.ArgumentList.Add("--abbrev-ref");
-            process.StartInfo.ArgumentList.Add("HEAD");
-
-            if (process.Start())
+            if (result.ExitCode == 0)
             {
-                process.WaitForExit(2000);
-                if (process.ExitCode == 0)
+                var branchValue = result.StandardOutput.Trim();
+                if (!string.IsNullOrWhiteSpace(branchValue))
                 {
-                    var branchValue = process.StandardOutput.ReadToEnd().Trim();
-                    if (!string.IsNullOrWhiteSpace(branchValue))
-                    {
-                        branch = SanitizeNameComponent(branchValue.Split('/').LastOrDefault() ?? branchValue, "nogit");
-                    }
+                    branch = SanitizeNameComponent(branchValue.Split('/').LastOrDefault() ?? branchValue, "nogit");
                 }
             }
         }
         catch (InvalidOperationException ex)
         {
-            // Process startup/read failed; keep default branch token.
+            // Git invocation failed; keep default branch token.
             _ = ex;
         }
-        catch (Win32Exception ex)
+        catch (IOException ex)
         {
             // Git not available; keep default branch token.
             _ = ex;
         }
-        catch (IOException ex)
+        catch (TimeoutException ex)
         {
             // Keep default branch token for reset volume generation.
             _ = ex;
@@ -2136,115 +2123,46 @@ Host {containerName}
 
     private static async Task<int> RunProcessInteractiveAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(fileName)
-            {
-                UseShellExecute = false,
-            },
-        };
-
-        foreach (var arg in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(arg);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return 127;
-            }
+            return await CliWrapProcessRunner.RunInteractiveAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
         }
-        catch (Win32Exception ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                // Process exited between HasExited check and Kill.
-                _ = ex;
-            }
-            catch (Win32Exception ex)
-            {
-                // Ignore cleanup failures.
-                _ = ex;
-            }
-        });
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode;
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
     }
 
     private static async Task<ProcessResult> RunProcessCaptureAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(fileName)
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            },
-        };
-
-        foreach (var arg in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(arg);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return new ProcessResult(127, string.Empty, $"Failed to launch process '{fileName}'.");
-            }
+            var result = await CliWrapProcessRunner.RunCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
+            return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
         }
-        catch (Win32Exception ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(127, string.Empty, ex.Message);
         }
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                // Process exited between HasExited check and Kill.
-                _ = ex;
-            }
-            catch (Win32Exception ex)
-            {
-                // Ignore cleanup failures.
-                _ = ex;
-            }
-        });
-
-        var stdOutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        return new ProcessResult(
-            process.ExitCode,
-            await stdOutTask.ConfigureAwait(false),
-            await stdErrTask.ConfigureAwait(false));
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new ProcessResult(127, string.Empty, ex.Message);
+        }
     }
 
     private enum SessionMode

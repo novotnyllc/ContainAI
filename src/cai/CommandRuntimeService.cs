@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
@@ -48,76 +46,30 @@ internal sealed class CommandRuntimeService : ICommandRuntimeService
 
     private static async Task<int> RunProcessCoreAsync(ProcessExecutionSpec spec, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = CreateStartInfo(spec),
-        };
-
         try
         {
-            if (!process.Start())
-            {
-                throw new InvalidOperationException($"Failed to launch process '{spec.FileName}'.");
-            }
+            var result = await CliWrapProcessRunner.RunInteractiveAsync(
+                spec.FileName,
+                spec.Arguments,
+                cancellationToken,
+                spec.EnvironmentOverrides).ConfigureAwait(false);
+            return result;
         }
-        catch (Win32Exception ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             await Console.Error.WriteLineAsync($"Failed to start '{spec.FileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                // Process exited between HasExited check and Kill.
-                _ = ex;
-            }
-            catch (Win32Exception ex)
-            {
-                // Non-fatal process termination failure during cancellation.
-                _ = ex;
-            }
-        });
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode;
-    }
-
-    private static ProcessStartInfo CreateStartInfo(ProcessExecutionSpec spec)
-    {
-        var startInfo = new ProcessStartInfo(spec.FileName)
-        {
-            UseShellExecute = false,
-        };
-
-        foreach (var argument in spec.Arguments)
-        {
-            startInfo.ArgumentList.Add(argument);
+            await Console.Error.WriteLineAsync($"Failed to start '{spec.FileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
         }
-
-        if (spec.EnvironmentOverrides is not null)
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            foreach (var (key, value) in spec.EnvironmentOverrides)
-            {
-                if (string.IsNullOrEmpty(value))
-                {
-                    startInfo.Environment.Remove(key);
-                    continue;
-                }
-
-                startInfo.Environment[key] = value;
-            }
+            await Console.Error.WriteLineAsync($"Failed to start '{spec.FileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
         }
-
-        return startInfo;
     }
 
     private static bool IsExecutableOnPath(string fileName)

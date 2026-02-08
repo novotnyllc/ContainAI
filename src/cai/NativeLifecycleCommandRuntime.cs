@@ -4830,73 +4830,26 @@ Examples:
         CancellationToken cancellationToken,
         string? standardInput = null)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(fileName)
-            {
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = standardInput is not null,
-            },
-        };
-
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return new ProcessResult(1, string.Empty, $"Failed to start {fileName}");
-            }
+            var result = await CliWrapProcessRunner
+                .RunCaptureAsync(fileName, arguments, cancellationToken, standardInput: standardInput)
+                .ConfigureAwait(false);
+
+            return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
         }
-        catch (Win32Exception ex)
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(1, string.Empty, ex.Message);
         }
-        catch (InvalidOperationException ex)
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new ProcessResult(1, string.Empty, ex.Message);
         }
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException killEx)
-            {
-                _ = Console.Error.WriteLineAsync($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
-            }
-            catch (Win32Exception killEx)
-            {
-                _ = Console.Error.WriteLineAsync($"Failed to terminate process '{fileName}' during cancellation: {killEx.Message}");
-            }
-        });
-
-        if (standardInput is not null)
-        {
-            await process.StandardInput.WriteAsync(standardInput.AsMemory(), cancellationToken).ConfigureAwait(false);
-            await process.StandardInput.FlushAsync().ConfigureAwait(false);
-            process.StandardInput.Close();
+            return new ProcessResult(1, string.Empty, ex.Message);
         }
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        return new ProcessResult(
-            process.ExitCode,
-            await stdoutTask.ConfigureAwait(false),
-            await stderrTask.ConfigureAwait(false));
     }
 
     private static async Task<int> RunProcessInteractiveAsync(
@@ -4904,53 +4857,25 @@ Examples:
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(fileName)
-            {
-                UseShellExecute = false,
-            },
-        };
-
-        foreach (var arg in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(arg);
-        }
-
         try
         {
-            if (!process.Start())
-            {
-                return 127;
-            }
+            return await CliWrapProcessRunner.RunInteractiveAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
         }
-        catch (Win32Exception ex)
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
-
-        using var cancellationRegistration = cancellationToken.Register(() =>
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (InvalidOperationException ex)
-            {
-                Debug.WriteLine($"Failed to kill process '{fileName}' during cancellation: {ex.Message}");
-            }
-            catch (Win32Exception ex)
-            {
-                Debug.WriteLine($"Failed to kill process '{fileName}' during cancellation: {ex.Message}");
-            }
-        });
-
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-        return process.ExitCode;
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
     }
 
     private readonly record struct ProcessResult(int ExitCode, string StandardOutput, string StandardError);

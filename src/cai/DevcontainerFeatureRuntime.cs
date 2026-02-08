@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -571,24 +569,37 @@ internal sealed partial class DevcontainerFeatureRuntime
         {
             return false;
         }
+
     }
 
     private static bool IsProcessAlive(int processId)
     {
-        try
-        {
-            _ = Process.GetProcessById(processId);
-            return true;
-        }
-        catch (ArgumentException)
+        if (processId <= 0)
         {
             return false;
+        }
+
+        try
+        {
+            if (OperatingSystem.IsLinux() && Directory.Exists($"/proc/{processId}"))
+            {
+                return true;
+            }
+
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+            {
+                var result = CliWrapProcessRunner
+                    .RunCaptureAsync("kill", ["-0", processId.ToString(System.Globalization.CultureInfo.InvariantCulture)], CancellationToken.None)
+                    .GetAwaiter()
+                    .GetResult();
+                return result.ExitCode == 0;
+            }
         }
         catch (InvalidOperationException)
         {
             return false;
         }
-        catch (Win32Exception)
+        catch (IOException)
         {
             return false;
         }
@@ -596,6 +607,8 @@ internal sealed partial class DevcontainerFeatureRuntime
         {
             return false;
         }
+
+        return false;
     }
 
     private static bool IsPortInUse(string portValue)
@@ -830,30 +843,8 @@ internal sealed partial class DevcontainerFeatureRuntime
 
     private static async Task<ProcessResult> RunProcessCaptureAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
-        using var process = new Process
-        {
-            StartInfo = new ProcessStartInfo(executable)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            },
-        };
-
-        foreach (var argument in arguments)
-        {
-            process.StartInfo.ArgumentList.Add(argument);
-        }
-
-        process.Start();
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-
-        return new ProcessResult(
-            process.ExitCode,
-            await stdoutTask.ConfigureAwait(false),
-            await stderrTask.ConfigureAwait(false));
+        var result = await CliWrapProcessRunner.RunCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
+        return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
     private readonly record struct ProcessResult(int ExitCode, string StandardOutput, string StandardError);
