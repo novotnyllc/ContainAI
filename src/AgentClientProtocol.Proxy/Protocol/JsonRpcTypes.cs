@@ -55,6 +55,78 @@ public sealed class JsonRpcError
     public JsonNode? Data { get; set; }
 }
 
+public sealed class InitializeRequestParams
+{
+    [JsonPropertyName("protocolVersion")]
+    public string? ProtocolVersion { get; set; }
+
+    [JsonPropertyName("clientInfo")]
+    public JsonNode? ClientInfo { get; set; }
+
+    [JsonPropertyName("capabilities")]
+    public JsonNode? Capabilities { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+}
+
+public sealed class InitializeResultPayload
+{
+    [JsonPropertyName("protocolVersion")]
+    public string ProtocolVersion { get; set; } = "2025-01-01";
+
+    [JsonPropertyName("capabilities")]
+    public ProxyCapabilities Capabilities { get; set; } = new();
+
+    [JsonPropertyName("serverInfo")]
+    public ProxyServerInfo ServerInfo { get; set; } = new();
+}
+
+public sealed class ProxyCapabilities
+{
+    [JsonPropertyName("multiSession")]
+    public bool MultiSession { get; set; } = true;
+}
+
+public sealed class ProxyServerInfo
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = "containai-acp-proxy";
+
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = "0.1.0";
+}
+
+public sealed class SessionNewRequestParams
+{
+    [JsonPropertyName("cwd")]
+    public string? Cwd { get; set; }
+
+    [JsonPropertyName("mcpServers")]
+    public JsonNode? McpServers { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+}
+
+public sealed class SessionNewResponsePayload
+{
+    [JsonPropertyName("sessionId")]
+    public string? SessionId { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+}
+
+public sealed class SessionScopedParams
+{
+    [JsonPropertyName("sessionId")]
+    public string? SessionId { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+}
+
 /// <summary>
 /// JSON source generator context for AOT compatibility.
 /// Annotated with [JsonSerializable] for all message types used in ACP protocol.
@@ -64,6 +136,13 @@ public sealed class JsonRpcError
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(JsonRpcMessage))]
 [JsonSerializable(typeof(JsonRpcError))]
+[JsonSerializable(typeof(InitializeRequestParams))]
+[JsonSerializable(typeof(InitializeResultPayload))]
+[JsonSerializable(typeof(ProxyCapabilities))]
+[JsonSerializable(typeof(ProxyServerInfo))]
+[JsonSerializable(typeof(SessionNewRequestParams))]
+[JsonSerializable(typeof(SessionNewResponsePayload))]
+[JsonSerializable(typeof(SessionScopedParams))]
 [ExcludeFromCodeCoverage]
 public sealed partial class AcpJsonContext : JsonSerializerContext
 {

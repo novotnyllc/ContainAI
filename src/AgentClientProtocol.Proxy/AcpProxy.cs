@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using AgentClientProtocol.Proxy.PathTranslation;
 using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
@@ -23,7 +24,7 @@ public sealed class AcpProxy : IDisposable
     private readonly ErrorSink _errorSink;
 
     // Cached initialize params from editor (for forwarding to agents)
-    private JsonNode? _cachedInitializeParams;
+    private InitializeRequestParams? _cachedInitializeParams;
 
     /// <summary>
     /// Creates a new ACP proxy.
@@ -191,34 +192,26 @@ public sealed class AcpProxy : IDisposable
 
     private async Task HandleInitializeAsync(JsonRpcMessage message)
     {
-        // Cache editor's initialize params for forwarding to agents
-        _cachedInitializeParams = message.Params?.DeepClone();
-
-        // Extract requested protocol version (or use default)
-        var requestedVersion = "2025-01-01";
-        if (message.Params is JsonObject paramsObj &&
-            paramsObj.TryGetPropertyValue("protocolVersion", out var versionNode))
-        {
-            requestedVersion = versionNode?.GetValue<string>() ?? "2025-01-01";
-        }
+        var initializeParams = DeserializeNode(message.Params, AcpJsonContext.Default.InitializeRequestParams) ?? new InitializeRequestParams();
+        _cachedInitializeParams = initializeParams;
+        var requestedVersion = initializeParams.ProtocolVersion ?? "2025-01-01";
 
         // Respond with proxy capabilities using negotiated version
         var response = new JsonRpcMessage
         {
             Id = message.Id,
-            Result = new JsonObject
-            {
-                ["protocolVersion"] = requestedVersion,
-                ["capabilities"] = new JsonObject
+            Result = SerializeNode(
+                new InitializeResultPayload
                 {
-                    ["multiSession"] = true
+                    ProtocolVersion = requestedVersion,
+                    Capabilities = new ProxyCapabilities { MultiSession = true },
+                    ServerInfo = new ProxyServerInfo
+                    {
+                        Name = "containai-acp-proxy",
+                        Version = "0.1.0",
+                    },
                 },
-                ["serverInfo"] = new JsonObject
-                {
-                    ["name"] = "containai-acp-proxy",
-                    ["version"] = "0.1.0"
-                }
-            }
+                AcpJsonContext.Default.InitializeResultPayload)
         };
 
         if (message.Id != null)
@@ -229,24 +222,13 @@ public sealed class AcpProxy : IDisposable
 
     private async Task HandleSessionNewAsync(JsonRpcMessage message)
     {
-        // Parse session/new parameters
-        string? cwd = null;
-        JsonNode? mcpServersNode = null;
-
-        if (message.Params is JsonObject paramsObj)
-        {
-            if (paramsObj.TryGetPropertyValue("cwd", out var cwdNode))
-                cwd = cwdNode?.GetValue<string>();
-            if (paramsObj.TryGetPropertyValue("mcpServers", out mcpServersNode))
-            {
-                // mcpServersNode captured
-            }
-        }
-
+        var sessionNewInput = DeserializeNode(message.Params, AcpJsonContext.Default.SessionNewRequestParams) ?? new SessionNewRequestParams();
+        var cwd = sessionNewInput.Cwd;
+        var mcpServersNode = sessionNewInput.McpServers;
         var originalCwd = cwd ?? Directory.GetCurrentDirectory();
 
         // Resolve workspace root
-            var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, _cts.Token).ConfigureAwait(false);
+        var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, _cts.Token).ConfigureAwait(false);
 
         // Create session
         var session = new AcpSession(workspace);
@@ -264,40 +246,20 @@ public sealed class AcpProxy : IDisposable
             session.ReaderTask = Task.Run(() => ReadAgentOutputLoopAsync(session));
 
             // Build initialize request for agent (forward editor's params)
-            var initParams = new JsonObject();
-            if (_cachedInitializeParams is JsonObject cachedParams)
+            var initParams = new InitializeRequestParams
             {
-                // Forward protocolVersion from editor (or default)
-                if (cachedParams.TryGetPropertyValue("protocolVersion", out var pv))
-                {
-                    initParams["protocolVersion"] = pv?.DeepClone();
-                }
-                else
-                {
-                    initParams["protocolVersion"] = "2025-01-01";
-                }
-                // Forward clientInfo if present
-                if (cachedParams.TryGetPropertyValue("clientInfo", out var clientInfo))
-                {
-                    initParams["clientInfo"] = clientInfo?.DeepClone();
-                }
-                // Forward capabilities if present
-                if (cachedParams.TryGetPropertyValue("capabilities", out var caps))
-                {
-                    initParams["capabilities"] = caps?.DeepClone();
-                }
-            }
-            else
-            {
-                initParams["protocolVersion"] = "2025-01-01";
-            }
+                ProtocolVersion = _cachedInitializeParams?.ProtocolVersion ?? "2025-01-01",
+                ClientInfo = _cachedInitializeParams?.ClientInfo?.DeepClone(),
+                Capabilities = _cachedInitializeParams?.Capabilities?.DeepClone(),
+            };
+            MergeExtensionData(initParams.ExtensionData, _cachedInitializeParams?.ExtensionData);
 
             var initRequestId = "init-" + session.ProxySessionId;
             var initRequest = new JsonRpcMessage
             {
                 Id = initRequestId,
                 Method = "initialize",
-                Params = initParams
+                Params = SerializeNode(initParams, AcpJsonContext.Default.InitializeRequestParams),
             };
 
             // Wait for initialize response (with timeout)
@@ -319,16 +281,17 @@ public sealed class AcpProxy : IDisposable
             var containerCwd = pathTranslator.TranslateToContainer(originalCwd);
 
             // Create session/new request for agent
-            var sessionNewParams = new JsonObject
+            var sessionNewParams = new SessionNewRequestParams
             {
-                ["cwd"] = containerCwd
+                Cwd = containerCwd,
             };
+            MergeExtensionData(sessionNewParams.ExtensionData, sessionNewInput.ExtensionData);
 
             // Translate MCP server args if provided
             if (mcpServersNode != null)
             {
                 var translatedMcp = pathTranslator.TranslateMcpServers(mcpServersNode);
-                sessionNewParams["mcpServers"] = translatedMcp;
+                sessionNewParams.McpServers = translatedMcp;
             }
 
             var sessionNewRequestId = "session-new-" + session.ProxySessionId;
@@ -336,7 +299,7 @@ public sealed class AcpProxy : IDisposable
             {
                 Id = sessionNewRequestId,
                 Method = "session/new",
-                Params = sessionNewParams
+                Params = SerializeNode(sessionNewParams, AcpJsonContext.Default.SessionNewRequestParams),
             };
 
             // Wait for session/new response
@@ -354,12 +317,8 @@ public sealed class AcpProxy : IDisposable
                 throw new InvalidOperationException($"Agent session/new failed: {errMsg}");
             }
 
-            // Extract agent's session ID - required for routing
-            if (sessionNewResponse.Result is JsonObject resultObj &&
-                resultObj.TryGetPropertyValue("sessionId", out var sessionIdNode))
-            {
-                session.AgentSessionId = sessionIdNode?.GetValue<string>() ?? "";
-            }
+            var sessionNewResult = DeserializeNode(sessionNewResponse.Result, AcpJsonContext.Default.SessionNewResponsePayload);
+            session.AgentSessionId = sessionNewResult?.SessionId ?? string.Empty;
 
             // Validate we got a session ID
             if (string.IsNullOrEmpty(session.AgentSessionId))
@@ -374,10 +333,9 @@ public sealed class AcpProxy : IDisposable
             var response = new JsonRpcMessage
             {
                 Id = message.Id,
-                Result = new JsonObject
-                {
-                    ["sessionId"] = session.ProxySessionId
-                }
+                Result = SerializeNode(
+                    new SessionNewResponsePayload { SessionId = session.ProxySessionId },
+                    AcpJsonContext.Default.SessionNewResponsePayload),
             };
             if (message.Id != null)
             {
@@ -441,12 +399,8 @@ public sealed class AcpProxy : IDisposable
     private async Task RouteToSessionAsync(JsonRpcMessage message)
     {
         // Extract sessionId from params
-        string? sessionId = null;
-        if (message.Params is JsonObject paramsObj &&
-            paramsObj.TryGetPropertyValue("sessionId", out var sessionIdNode))
-        {
-            sessionId = sessionIdNode?.GetValue<string>();
-        }
+        var scopedParams = DeserializeNode(message.Params, AcpJsonContext.Default.SessionScopedParams);
+        var sessionId = scopedParams?.SessionId;
 
         if (string.IsNullOrEmpty(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
         {
@@ -469,9 +423,10 @@ public sealed class AcpProxy : IDisposable
         }
 
         // Replace sessionId with agent's sessionId
-        if (message.Params is JsonObject paramsToModify)
+        if (scopedParams != null)
         {
-            paramsToModify["sessionId"] = session.AgentSessionId;
+            scopedParams.SessionId = session.AgentSessionId;
+            message.Params = SerializeNode(scopedParams, AcpJsonContext.Default.SessionScopedParams);
         }
 
         // Forward to agent
@@ -491,10 +446,9 @@ public sealed class AcpProxy : IDisposable
             {
                 // No Id - this is a notification, not a request
                 Method = "session/end",
-                Params = new JsonObject
-                {
-                    ["sessionId"] = session.AgentSessionId
-                }
+                Params = SerializeNode(
+                    new SessionScopedParams { SessionId = session.AgentSessionId },
+                    AcpJsonContext.Default.SessionScopedParams),
             };
             await session.WriteToAgentAsync(endNotification).ConfigureAwait(false);
 
@@ -521,7 +475,9 @@ public sealed class AcpProxy : IDisposable
             await _output.EnqueueAsync(new JsonRpcMessage
             {
                 Id = message.Id,
-                Result = new JsonObject { }
+                Result = SerializeNode(
+                    new SessionNewResponsePayload(),
+                    AcpJsonContext.Default.SessionNewResponsePayload),
             }).ConfigureAwait(false);
         }
     }
@@ -578,13 +534,11 @@ public sealed class AcpProxy : IDisposable
             }
 
             // Replace agent's sessionId with proxy's sessionId in responses/notifications
-            if (message.Params is JsonObject paramsObj)
+            var scopedParams = DeserializeNode(message.Params, AcpJsonContext.Default.SessionScopedParams);
+            if (scopedParams is not null && scopedParams.SessionId == session.AgentSessionId)
             {
-                if (paramsObj.TryGetPropertyValue("sessionId", out var sidNode) &&
-                    sidNode?.GetValue<string>() == session.AgentSessionId)
-                {
-                    paramsObj["sessionId"] = session.ProxySessionId;
-                }
+                scopedParams.SessionId = session.ProxySessionId;
+                message.Params = SerializeNode(scopedParams, AcpJsonContext.Default.SessionScopedParams);
             }
 
             // Forward to editor
@@ -609,10 +563,9 @@ public sealed class AcpProxy : IDisposable
                     var endRequest = new JsonRpcMessage
                     {
                         Method = "session/end",
-                        Params = new JsonObject
-                        {
-                            ["sessionId"] = session.AgentSessionId
-                        }
+                        Params = SerializeNode(
+                            new SessionScopedParams { SessionId = session.AgentSessionId },
+                            AcpJsonContext.Default.SessionScopedParams),
                     };
                     await session.WriteToAgentAsync(endRequest).ConfigureAwait(false);
 
@@ -642,5 +595,31 @@ public sealed class AcpProxy : IDisposable
     {
         public ValueTask WriteLineAsync(string message)
             => new(writer.WriteLineAsync(message));
+    }
+
+    private static T? DeserializeNode<T>(JsonNode? node, JsonTypeInfo<T> typeInfo)
+    {
+        if (node == null)
+        {
+            return default;
+        }
+
+        return JsonSerializer.Deserialize(node.ToJsonString(), typeInfo);
+    }
+
+    private static JsonNode? SerializeNode<T>(T value, JsonTypeInfo<T> typeInfo)
+        => JsonSerializer.SerializeToNode(value, typeInfo);
+
+    private static void MergeExtensionData(Dictionary<string, JsonElement> destination, Dictionary<string, JsonElement>? source)
+    {
+        if (source is null || source.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in source)
+        {
+            destination[key] = value.Clone();
+        }
     }
 }
