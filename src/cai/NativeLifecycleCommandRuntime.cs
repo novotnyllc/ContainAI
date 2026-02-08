@@ -4564,7 +4564,7 @@ Subcommands:
   update        Update ContainAI installation
   refresh       Pull latest base image and optionally rebuild template
   uninstall     Remove ContainAI system components
-  completion    Generate shell completion scripts
+  completion    Resolve completion suggestions
   version       Show version
   help          Show this help message
   system        Internal container runtime commands

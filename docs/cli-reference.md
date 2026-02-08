@@ -8,7 +8,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 **Command surface**: Commands and options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and `src/ContainAI.Cli/CommandCatalog.cs`. There is no runtime discovery or plugin-based command loading.
 
-**Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell completion scripts also support these advanced flags.
+**Scope**: This document covers ALL implemented commands and flags, including those intentionally omitted from help for brevity (e.g., `template`). Shell integrations can call `cai completion suggest` for advanced completion contexts.
 
 **When to update this document:**
 - After adding or removing CLI commands or subcommands
@@ -42,7 +42,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 | [`cai template`](#cai-template) | Manage templates | `upgrade` |
 | [`cai system`](#cai-system) | Container-internal runtime commands | `init`, `link-repair`, `watch-links`, `devcontainer` |
 | [`cai acp`](#cai-acp) | ACP proxy for editors | `proxy` |
-| [`cai completion`](#cai-completion) | Generate completions | - |
+| [`cai completion`](#cai-completion) | Resolve completions | - |
 | [`cai version`](#cai-version) | Show version | - |
 | [`cai update`](#cai-update) | Update installation | - |
 | [`cai refresh`](#cai-refresh) | Pull latest base image | - |
