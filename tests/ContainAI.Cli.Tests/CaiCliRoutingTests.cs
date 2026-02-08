@@ -234,28 +234,20 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(
-                ["completion", "suggest", "--line", "cai st", "--position", "6"],
-                runtime,
-                cancellationToken);
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "cai st", "--position", "6"],
+            runtime,
+            console,
+            cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            var output = writer.ToString();
-            Assert.Contains("status", output, StringComparison.Ordinal);
-            Assert.Contains("stop", output, StringComparison.Ordinal);
-            Assert.DoesNotContain("completion", output, StringComparison.Ordinal);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        Assert.Equal(0, exitCode);
+        var output = console.Output.ToString();
+        Assert.Contains("status", output, StringComparison.Ordinal);
+        Assert.Contains("stop", output, StringComparison.Ordinal);
+        Assert.DoesNotContain("completion", output, StringComparison.Ordinal);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -263,24 +255,16 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(
-                ["completion", "suggest", "--line", string.Empty, "--position", "5"],
-                runtime,
-                cancellationToken);
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", string.Empty, "--position", "5"],
+            runtime,
+            console,
+            cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -288,24 +272,16 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(
-                ["completion", "suggest", "--line", "docker ru", "--position", "42"],
-                runtime,
-                cancellationToken);
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "docker ru", "--position", "42"],
+            runtime,
+            console,
+            cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -313,25 +289,17 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(
-                ["completion", "suggest", "--line", "cai --fr", "--position", "8"],
-                runtime,
-                cancellationToken);
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "cai --fr", "--position", "8"],
+            runtime,
+            console,
+            cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Contains("--fresh", writer.ToString(), StringComparison.Ordinal);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.Contains("--fresh", console.Output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -339,25 +307,17 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(
-                ["completion", "suggest", "--line", "/usr/local/bin/cai st", "--position", "21"],
-                runtime,
-                cancellationToken);
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "/usr/local/bin/cai st", "--position", "21"],
+            runtime,
+            console,
+            cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Contains("status", writer.ToString(), StringComparison.Ordinal);
-            Assert.Empty(runtime.NativeCalls);
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        Assert.Equal(0, exitCode);
+        Assert.Contains("status", console.Output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runtime.NativeCalls);
     }
 
     [Fact]
@@ -661,33 +621,24 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync(["version", "--json"], runtime, cancellationToken);
+        var exitCode = await CaiCli.RunAsync(["version", "--json"], runtime, console, cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.NativeCalls);
-            Assert.Empty(runtime.AcpCalls);
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.AcpCalls);
 
-            var output = writer.ToString();
-            var jsonLine = output
-                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Last(static line => line.StartsWith('{'));
+        var output = console.Output.ToString();
+        var jsonLine = output
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Last(static line => line.StartsWith('{'));
 
-            using var payload = JsonDocument.Parse(jsonLine);
-            Assert.True(payload.RootElement.TryGetProperty("version", out var versionElement));
-            Assert.False(string.IsNullOrWhiteSpace(versionElement.GetString()));
-            Assert.True(payload.RootElement.TryGetProperty("install_type", out _));
-            Assert.True(payload.RootElement.TryGetProperty("install_dir", out _));
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        using var payload = JsonDocument.Parse(jsonLine);
+        Assert.True(payload.RootElement.TryGetProperty("version", out var versionElement));
+        Assert.False(string.IsNullOrWhiteSpace(versionElement.GetString()));
+        Assert.True(payload.RootElement.TryGetProperty("install_type", out _));
+        Assert.True(payload.RootElement.TryGetProperty("install_dir", out _));
     }
 
     [Fact]
@@ -741,27 +692,27 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var originalOut = Console.Out;
-        using var writer = new StringWriter();
-        Console.SetOut(writer);
+        var console = new TestCaiConsole();
 
-        try
-        {
-            var exitCode = await CaiCli.RunAsync([token, "--json"], runtime, cancellationToken);
+        var exitCode = await CaiCli.RunAsync([token, "--json"], runtime, console, cancellationToken);
 
-            Assert.Equal(0, exitCode);
-            Assert.Empty(runtime.NativeCalls);
-            Assert.Empty(runtime.AcpCalls);
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.AcpCalls);
 
-            using var payload = JsonDocument.Parse(writer.ToString());
-            Assert.True(payload.RootElement.TryGetProperty("version", out _));
-            Assert.True(payload.RootElement.TryGetProperty("install_type", out _));
-            Assert.True(payload.RootElement.TryGetProperty("install_dir", out _));
-        }
-        finally
-        {
-            Console.SetOut(originalOut);
-        }
+        using var payload = JsonDocument.Parse(console.Output.ToString());
+        Assert.True(payload.RootElement.TryGetProperty("version", out _));
+        Assert.True(payload.RootElement.TryGetProperty("install_type", out _));
+        Assert.True(payload.RootElement.TryGetProperty("install_dir", out _));
+    }
+
+    private sealed class TestCaiConsole : ICaiConsole
+    {
+        public StringWriter Output { get; } = new();
+
+        public TextWriter StdOut => Output;
+
+        public TextWriter StdErr { get; } = TextWriter.Null;
     }
 
     private sealed class FakeRuntime : ICaiCommandRuntime

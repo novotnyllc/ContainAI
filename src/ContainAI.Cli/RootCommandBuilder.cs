@@ -9,9 +9,10 @@ namespace ContainAI.Cli;
 
 internal static partial class RootCommandBuilder
 {
-    public static RootCommand Build(ICaiCommandRuntime runtime)
+    public static RootCommand Build(ICaiCommandRuntime runtime, ICaiConsole console)
     {
         ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(console);
 
         var root = new RootCommand("ContainAI native CLI")
         {
@@ -63,8 +64,8 @@ internal static partial class RootCommandBuilder
         root.Subcommands.Add(CreateUpdateCommand(runtime));
         root.Subcommands.Add(CreateRefreshCommand(runtime));
         root.Subcommands.Add(CreateUninstallCommand(runtime));
-        root.Subcommands.Add(CreateCompletionCommand(root));
-        root.Subcommands.Add(CreateVersionCommand(runtime));
+        root.Subcommands.Add(CreateCompletionCommand(root, console));
+        root.Subcommands.Add(CreateVersionCommand(runtime, console));
         root.Subcommands.Add(CreateHelpCommand(runtime));
         root.Subcommands.Add(CreateSystemCommand(runtime));
         root.Subcommands.Add(AcpCommandBuilder.Build(runtime));
@@ -526,7 +527,7 @@ internal static partial class RootCommandBuilder
             _ => Array.Empty<string>(),
         };
 
-    private static Command CreateCompletionCommand(RootCommand root)
+    private static Command CreateCompletionCommand(RootCommand root, ICaiConsole console)
     {
         var completionCommand = new Command("completion", "Resolve completions for shell integration.");
 
@@ -567,7 +568,7 @@ internal static partial class RootCommandBuilder
                     continue;
                 }
 
-                await Console.Out.WriteLineAsync(value).ConfigureAwait(false);
+                await console.StdOut.WriteLineAsync(value).ConfigureAwait(false);
             }
 
             return 0;
@@ -685,7 +686,7 @@ internal static partial class RootCommandBuilder
             : Path.Combine(home!, path[2..]);
     }
 
-    private static Command CreateVersionCommand(ICaiCommandRuntime runtime)
+    private static Command CreateVersionCommand(ICaiCommandRuntime runtime, ICaiConsole console)
     {
         var versionCommand = new Command("version");
 
@@ -700,7 +701,7 @@ internal static partial class RootCommandBuilder
             if (parseResult.GetValue(jsonOption))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await Console.Out.WriteLineAsync(GetVersionJson()).ConfigureAwait(false);
+                await console.StdOut.WriteLineAsync(GetVersionJson()).ConfigureAwait(false);
                 return 0;
             }
 
