@@ -1,8 +1,9 @@
+using System.Collections;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
-using Tomlyn;
-using Tomlyn.Model;
+using CsToml;
+using CsToml.Error;
 
 namespace ContainAI.Cli.Host;
 
@@ -312,7 +313,7 @@ internal static partial class TomlCommandProcessor
         }
     }
 
-    private static (bool Success, TomlCommandResult Result, TomlTable? Table) LoadToml(string filePath, int missingFileExitCode, string? missingFileMessage)
+    private static (bool Success, TomlCommandResult Result, IReadOnlyDictionary<string, object?>? Table) LoadToml(string filePath, int missingFileExitCode, string? missingFileMessage)
     {
         if (!File.Exists(filePath))
         {
@@ -327,11 +328,7 @@ internal static partial class TomlCommandProcessor
         try
         {
             var content = File.ReadAllText(filePath);
-            if (Toml.ToModel(content) is not TomlTable model)
-            {
-                return (false, new TomlCommandResult(1, string.Empty, "Error: Failed to parse TOML model."), null);
-            }
-
+            var model = ParseTomlContent(content);
             return (true, new TomlCommandResult(0, string.Empty, string.Empty), model);
         }
         catch (UnauthorizedAccessException)
@@ -342,15 +339,19 @@ internal static partial class TomlCommandProcessor
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Cannot read file: {ex.Message}"), null);
         }
+        catch (CsTomlException ex)
+        {
+            return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
+        }
         catch (InvalidOperationException ex)
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
         }
-        catch (FormatException ex)
+        catch (ArgumentException ex)
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
         }
-        catch (ArgumentException ex)
+        catch (FormatException ex)
         {
             return (false, new TomlCommandResult(1, string.Empty, $"Error: Invalid TOML: {ex.Message}"), null);
         }
@@ -388,7 +389,52 @@ internal static partial class TomlCommandProcessor
         }
     }
 
-    private static TomlCommandResult SerializeAsJson(TomlTable table)
+    private static Dictionary<string, object?> ParseTomlContent(string content)
+    {
+        var parsed = CsTomlSerializer.Deserialize<IDictionary<object, object>>(Encoding.UTF8.GetBytes(content));
+        return ConvertTable(parsed);
+    }
+
+    private static Dictionary<string, object?> ConvertTable(IDictionary<object, object> table)
+    {
+        var normalized = new Dictionary<string, object?>(table.Count, StringComparer.Ordinal);
+        foreach (var pair in table)
+        {
+            var key = pair.Key switch
+            {
+                string text => text,
+                null => string.Empty,
+                _ => Convert.ToString(pair.Key, CultureInfo.InvariantCulture) ?? string.Empty,
+            };
+
+            normalized[key] = NormalizeParsedTomlValue(pair.Value);
+        }
+
+        return normalized;
+    }
+
+    private static object? NormalizeParsedTomlValue(object? value)
+        => value switch
+        {
+            null => null,
+            IDictionary<object, object> table => ConvertTable(table),
+            object?[] array => array.Select(NormalizeParsedTomlValue).ToList(),
+            IList list when value is not string => NormalizeParsedList(list),
+            _ => value,
+        };
+
+    private static List<object?> NormalizeParsedList(IList values)
+    {
+        var result = new List<object?>(values.Count);
+        foreach (var value in values)
+        {
+            result.Add(NormalizeParsedTomlValue(value));
+        }
+
+        return result;
+    }
+
+    private static TomlCommandResult SerializeAsJson(IReadOnlyDictionary<string, object?> table)
     {
         try
         {
@@ -415,11 +461,14 @@ internal static partial class TomlCommandProcessor
     private static object? NormalizeTomlValue(object? value) => value switch
     {
         null => null,
-        TomlTable table => table.ToDictionary(static pair => pair.Key, static pair => NormalizeTomlValue(pair.Value), StringComparer.Ordinal),
-        TomlTableArray tableArray => tableArray.Select(NormalizeTomlValue).ToList(),
-        IList<object?> list => list.Select(NormalizeTomlValue).ToList(),
+        IReadOnlyDictionary<string, object?> table => table.ToDictionary(static pair => pair.Key, static pair => NormalizeTomlValue(pair.Value), StringComparer.Ordinal),
+        IDictionary<string, object?> dictionary => dictionary.ToDictionary(static pair => pair.Key, static pair => NormalizeTomlValue(pair.Value), StringComparer.Ordinal),
+        IReadOnlyList<object?> list => list.Select(NormalizeTomlValue).ToList(),
+        IList list when value is not string => NormalizeParsedList(list).Select(NormalizeTomlValue).ToList(),
         DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
         DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
+        DateOnly dateOnly => dateOnly.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        TimeOnly timeOnly => timeOnly.ToString("HH:mm:ss.fffffff", CultureInfo.InvariantCulture),
         _ => value,
     };
 
@@ -439,7 +488,7 @@ internal static partial class TomlCommandProcessor
             case string stringValue:
                 WriteJsonString(builder, stringValue);
                 return;
-            case IDictionary<string, object?> dictionary:
+            case IReadOnlyDictionary<string, object?> dictionary:
                 builder.Append('{');
                 var firstProperty = true;
                 foreach (var pair in dictionary)
@@ -456,6 +505,38 @@ internal static partial class TomlCommandProcessor
                 }
 
                 builder.Append('}');
+                return;
+            case IDictionary<string, object?> dictionary:
+                builder.Append('{');
+                var firstPropertyInDictionary = true;
+                foreach (var pair in dictionary)
+                {
+                    if (!firstPropertyInDictionary)
+                    {
+                        builder.Append(',');
+                    }
+
+                    firstPropertyInDictionary = false;
+                    WriteJsonString(builder, pair.Key);
+                    builder.Append(':');
+                    WriteJsonValue(builder, pair.Value);
+                }
+
+                builder.Append('}');
+                return;
+            case IReadOnlyList<object?> list:
+                builder.Append('[');
+                for (var index = 0; index < list.Count; index++)
+                {
+                    if (index > 0)
+                    {
+                        builder.Append(',');
+                    }
+
+                    WriteJsonValue(builder, list[index]);
+                }
+
+                builder.Append(']');
                 return;
             case IList<object?> list:
                 builder.Append('[');
@@ -533,7 +614,7 @@ internal static partial class TomlCommandProcessor
         _ => SerializeJsonValue(value),
     };
 
-    private static bool TryGetNestedValue(TomlTable table, string key, out object? value)
+    private static bool TryGetNestedValue(IReadOnlyDictionary<string, object?> table, string key, out object? value)
     {
         var parts = key.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (parts.Length == 0)
@@ -545,7 +626,7 @@ internal static partial class TomlCommandProcessor
         object? current = table;
         foreach (var part in parts)
         {
-            if (current is not TomlTable currentTable || !currentTable.TryGetValue(part, out current))
+            if (!TryGetTable(current, out var currentTable) || !currentTable.TryGetValue(part, out current))
             {
                 value = null;
                 return false;
@@ -556,20 +637,57 @@ internal static partial class TomlCommandProcessor
         return true;
     }
 
-    private static object GetWorkspaceState(TomlTable table, string workspacePath)
+    private static object GetWorkspaceState(IReadOnlyDictionary<string, object?> table, string workspacePath)
     {
-        if (!table.TryGetValue("workspace", out var workspaceObj) || workspaceObj is not TomlTable workspaceTable)
+        if (!table.TryGetValue("workspace", out var workspaceObj) || !TryGetTable(workspaceObj, out var workspaceTable))
         {
             return new Dictionary<string, object?>(StringComparer.Ordinal);
         }
 
-        if (!workspaceTable.TryGetValue(workspacePath, out var entry) || entry is not TomlTable workspaceState)
+        if (!workspaceTable.TryGetValue(workspacePath, out var entry) || !TryGetTable(entry, out var workspaceState))
         {
             return new Dictionary<string, object?>(StringComparer.Ordinal);
         }
 
         return workspaceState;
     }
+
+    private static bool TryGetTable(object? value, out IReadOnlyDictionary<string, object?> table)
+    {
+        switch (value)
+        {
+            case IReadOnlyDictionary<string, object?> readonlyTable:
+                table = readonlyTable;
+                return true;
+            case IDictionary<string, object?> dictionary:
+                table = dictionary.ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+                return true;
+            case IDictionary<object, object> dictionary:
+                table = ConvertTable(dictionary);
+                return true;
+            default:
+                table = default!;
+                return false;
+        }
+    }
+
+    private static bool TryGetList(object? value, out IReadOnlyList<object?> list)
+    {
+        switch (value)
+        {
+            case IReadOnlyList<object?> readonlyList:
+                list = readonlyList;
+                return true;
+            case IList values when value is not string:
+                list = NormalizeParsedList(values);
+                return true;
+            default:
+                list = default!;
+                return false;
+        }
+    }
+
+    private static string GetValueTypeName(object? value) => value?.GetType().Name ?? "null";
 
     private static string UpsertWorkspaceKey(string content, string workspacePath, string key, string value)
     {
@@ -1044,14 +1162,14 @@ internal static partial class TomlCommandProcessor
             : content + "\n";
     }
 
-    private static (bool Success, object? Value, string? Warning, string? Error) ValidateEnvSection(TomlTable table)
+    private static (bool Success, object? Value, string? Warning, string? Error) ValidateEnvSection(IReadOnlyDictionary<string, object?> table)
     {
         if (!table.TryGetValue("env", out var envObj) || envObj is null)
         {
             return (true, null, null, null);
         }
 
-        if (envObj is not TomlTable envTable)
+        if (!TryGetTable(envObj, out var envTable))
         {
             return (false, null, null, "Error: [env] section must be a table/dict");
         }
@@ -1063,7 +1181,7 @@ internal static partial class TomlCommandProcessor
         {
             if (envFileObj is not string envFile)
             {
-                return (false, null, null, $"Error: [env].env_file must be a string, got {envFileObj.GetType().Name}");
+                return (false, null, null, $"Error: [env].env_file must be a string, got {GetValueTypeName(envFileObj)}");
             }
 
             result["env_file"] = envFile;
@@ -1073,7 +1191,7 @@ internal static partial class TomlCommandProcessor
         {
             if (fromHostObj is not bool fromHost)
             {
-                return (false, null, null, $"Error: [env].from_host must be a boolean, got {fromHostObj.GetType().Name}");
+                return (false, null, null, $"Error: [env].from_host must be a boolean, got {GetValueTypeName(fromHostObj)}");
             }
 
             result["from_host"] = fromHost;
@@ -1090,9 +1208,9 @@ internal static partial class TomlCommandProcessor
             return (true, result, warning, null);
         }
 
-        if (importsObj is not TomlArray importsArray)
+        if (!TryGetList(importsObj, out var importsArray))
         {
-            warning = $"[WARN] [env].import must be a list, got {importsObj.GetType().Name}; treating as empty list";
+            warning = $"[WARN] [env].import must be a list, got {GetValueTypeName(importsObj)}; treating as empty list";
             result["import"] = Array.Empty<string>();
             return (true, result, warning, null);
         }
@@ -1103,7 +1221,7 @@ internal static partial class TomlCommandProcessor
         {
             if (importsArray[index] is not string key)
             {
-                warnings.Add($"[WARN] [env].import[{index}] must be a string, got {importsArray[index]?.GetType().Name ?? "null"}; skipping");
+                warnings.Add($"[WARN] [env].import[{index}] must be a string, got {GetValueTypeName(importsArray[index])}; skipping");
                 continue;
             }
 
@@ -1119,14 +1237,14 @@ internal static partial class TomlCommandProcessor
         return (true, result, warning, null);
     }
 
-    private static (bool Success, object? Value, string? Error) ValidateAgentSection(TomlTable table, string sourceFile)
+    private static (bool Success, object? Value, string? Error) ValidateAgentSection(IReadOnlyDictionary<string, object?> table, string sourceFile)
     {
         if (!table.TryGetValue("agent", out var agentObj) || agentObj is null)
         {
             return (true, null, null);
         }
 
-        if (agentObj is not TomlTable agentTable)
+        if (!TryGetTable(agentObj, out var agentTable))
         {
             return (false, null, $"Error: [agent] section must be a table/dict in {sourceFile}");
         }
@@ -1144,16 +1262,16 @@ internal static partial class TomlCommandProcessor
         var defaultArgs = new List<string>();
         if (agentTable.TryGetValue("default_args", out var defaultArgsObj) && defaultArgsObj is not null)
         {
-            if (defaultArgsObj is not TomlArray defaultArgsArray)
+            if (!TryGetList(defaultArgsObj, out var defaultArgsArray))
             {
-                return (false, null, $"Error: [agent].default_args must be a list, got {defaultArgsObj.GetType().Name} in {sourceFile}");
+                return (false, null, $"Error: [agent].default_args must be a list, got {GetValueTypeName(defaultArgsObj)} in {sourceFile}");
             }
 
             for (var index = 0; index < defaultArgsArray.Count; index++)
             {
                 if (defaultArgsArray[index] is not string arg)
                 {
-                    return (false, null, $"Error: [agent].default_args[{index}] must be a string, got {defaultArgsArray[index]?.GetType().Name ?? "null"} in {sourceFile}");
+                    return (false, null, $"Error: [agent].default_args[{index}] must be a string, got {GetValueTypeName(defaultArgsArray[index])} in {sourceFile}");
                 }
 
                 defaultArgs.Add(arg);
@@ -1163,9 +1281,9 @@ internal static partial class TomlCommandProcessor
         var aliases = new List<string>();
         if (agentTable.TryGetValue("aliases", out var aliasesObj) && aliasesObj is not null)
         {
-            if (aliasesObj is not TomlArray aliasesArray)
+            if (!TryGetList(aliasesObj, out var aliasesArray))
             {
-                return (false, null, $"Error: [agent].aliases must be a list, got {aliasesObj.GetType().Name} in {sourceFile}");
+                return (false, null, $"Error: [agent].aliases must be a list, got {GetValueTypeName(aliasesObj)} in {sourceFile}");
             }
 
             for (var index = 0; index < aliasesArray.Count; index++)
@@ -1184,7 +1302,7 @@ internal static partial class TomlCommandProcessor
         {
             if (optionalObj is not bool optionalBool)
             {
-                return (false, null, $"Error: [agent].optional must be a boolean, got {optionalObj.GetType().Name} in {sourceFile}");
+                return (false, null, $"Error: [agent].optional must be a boolean, got {GetValueTypeName(optionalObj)} in {sourceFile}");
             }
 
             optional = optionalBool;

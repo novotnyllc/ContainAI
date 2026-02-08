@@ -12,7 +12,6 @@
     <OptimizationPreference>Speed</OptimizationPreference>
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104</WarningsNotAsErrors>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -27,7 +26,11 @@
 
   <ItemGroup>
     <PackageReference Include="CliWrap" />
-    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="CsToml" />
+    <PackageReference Include="CsToml.Generator">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <Import Project="build/ContainAI.Build.targets" />

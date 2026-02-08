@@ -10,12 +10,16 @@
   <!-- Explicitly versioned packages -->
   <ItemGroup>
     <!-- CLI parsing (AOT-compatible, used by .NET CLI itself) -->
+    <PackageVersion Include="CsToml" Version="1.8.1" />
+    <PackageVersion Include="CsToml.Generator" Version="1.8.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageVersion>
     <PackageVersion Include="System.CommandLine" Version="2.0.2" />
     <!-- JSON-RPC implementation (AOT-compatible with SystemTextJsonFormatter) -->
     <PackageVersion Include="StreamJsonRpc" Version="2.24.84" />
     <!-- Process execution (AOT-compatible) -->
     <PackageVersion Include="CliWrap" Version="3.10.0" />
-    <PackageVersion Include="Tomlyn" Version="0.20.0" />
     <!-- xUnit v3 testing framework on Microsoft Testing Platform v2 -->
     <PackageVersion Include="xunit.v3.mtp-v2" Version="3.2.2" />
     <!-- Microsoft Testing Platform extensions (coverage/trx) -->

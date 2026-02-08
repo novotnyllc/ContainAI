@@ -95,7 +95,7 @@ ContainAI uses a .NET 10 native CLI with strong typing and deterministic behavio
 | Pattern | Why |
 |---------|-----|
 | `System.CommandLine` entrypoint | Structured command/subcommand parsing |
-| `System.Text.Json` + `Tomlyn` + YAML parser | Native JSON/TOML/YAML parsing without external parsers |
+| `System.Text.Json` + `CsToml` + YAML parser | Native JSON/TOML/YAML parsing without external parser executables |
 | `xunit.v3.mtp-v2` + Microsoft Testing Platform v2 | Consistent local/CI test execution and coverage |
 | NBGV (`dotnet nbgv`) | Versioning from Git metadata |
 

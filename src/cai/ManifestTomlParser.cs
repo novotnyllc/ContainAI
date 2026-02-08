@@ -1,6 +1,4 @@
-using System.Globalization;
-using Tomlyn;
-using Tomlyn.Model;
+using CsToml;
 
 namespace ContainAI.Cli.Host;
 
@@ -17,15 +15,14 @@ internal static class ManifestTomlParser
         var entries = new List<ManifestEntry>();
         foreach (var manifestFile in manifestFiles)
         {
-            var content = File.ReadAllText(manifestFile);
-            var model = Toml.ToModel(content);
-            if (model is not TomlTable root)
+            var document = ParseManifestFile(manifestFile);
+            if (document is null)
             {
                 continue;
             }
 
-            AddSectionEntries(root, "entries", "entry", manifestFile, includeDisabled, includeSourceFile, entries);
-            AddSectionEntries(root, "container_symlinks", "symlink", manifestFile, includeDisabled, includeSourceFile, entries);
+            AddSectionEntries(document.E, "entry", manifestFile, includeDisabled, includeSourceFile, entries);
+            AddSectionEntries(document.S, "symlink", manifestFile, includeDisabled, includeSourceFile, entries);
         }
 
         return entries;
@@ -39,23 +36,17 @@ internal static class ManifestTomlParser
         var entries = new List<ManifestAgentEntry>();
         foreach (var manifestFile in manifestFiles)
         {
-            var content = File.ReadAllText(manifestFile);
-            var model = Toml.ToModel(content);
-            if (model is not TomlTable root)
+            var document = ParseManifestFile(manifestFile);
+            if (document?.A is null)
             {
                 continue;
             }
 
-            if (!root.TryGetValue("agent", out var sectionValue) || sectionValue is not TomlTable section)
-            {
-                continue;
-            }
-
-            var name = ReadString(section, "name");
-            var binary = ReadString(section, "binary");
-            var defaultArgs = ReadStringArray(section, "default_args");
-            var aliases = ReadStringArray(section, "aliases");
-            var optional = ReadBool(section, "optional");
+            var name = ReadString(document.A.N);
+            var binary = ReadString(document.A.B);
+            var defaultArgs = ReadStringArray(document.A.D);
+            var aliases = ReadStringArray(document.A.L);
+            var optional = document.A.O;
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(binary) || defaultArgs.Count == 0)
             {
@@ -99,32 +90,32 @@ internal static class ManifestTomlParser
         throw new InvalidOperationException($"manifest file or directory not found: {manifestPath}");
     }
 
+    private static ManifestTomlDocument? ParseManifestFile(string manifestFile)
+    {
+        var bytes = File.ReadAllBytes(manifestFile);
+        return CsTomlSerializer.Deserialize<ManifestTomlDocument?>(bytes);
+    }
+
     private static void AddSectionEntries(
-        TomlTable root,
-        string sectionName,
+        ManifestTomlEntry[]? sectionEntries,
         string entryType,
         string manifestFile,
         bool includeDisabled,
         bool includeSourceFile,
         List<ManifestEntry> entries)
     {
-        if (!root.TryGetValue(sectionName, out var sectionValue) || sectionValue is not TomlTableArray sectionArray)
+        if (sectionEntries is null)
         {
             return;
         }
 
-        foreach (var item in sectionArray)
+        foreach (var item in sectionEntries)
         {
-            if (item is not TomlTable table)
-            {
-                continue;
-            }
-
-            var source = ReadString(table, "source");
-            var target = ReadString(table, "target");
-            var containerLink = ReadString(table, "container_link");
-            var flags = ReadString(table, "flags");
-            var disabled = ReadBool(table, "disabled");
+            var source = ReadString(item.S);
+            var target = ReadString(item.T);
+            var containerLink = ReadString(item.C);
+            var flags = ReadString(item.F);
+            var disabled = item.D;
 
             if (string.IsNullOrEmpty(target))
             {
@@ -149,58 +140,64 @@ internal static class ManifestTomlParser
         }
     }
 
-    private static string ReadString(TomlTable table, string key)
-    {
-        if (!table.TryGetValue(key, out var value) || value is null)
-        {
-            return string.Empty;
-        }
+    private static string ReadString(string? value) => value ?? string.Empty;
 
-        return value switch
-        {
-            string text => text,
-            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
-        };
-    }
+    private static List<string> ReadStringArray(string[]? values)
+        => values?
+            .Where(static value => !string.IsNullOrWhiteSpace(value))
+            .ToList()
+        ?? [];
+}
 
-    private static bool ReadBool(TomlTable table, string key)
-    {
-        if (!table.TryGetValue(key, out var value) || value is null)
-        {
-            return false;
-        }
+[TomlSerializedObject]
+internal sealed partial class ManifestTomlDocument
+{
+    [TomlValueOnSerialized(AliasName = "entries")]
+    public ManifestTomlEntry[]? E { get; set; }
 
-        if (value is bool booleanValue)
-        {
-            return booleanValue;
-        }
+    [TomlValueOnSerialized(AliasName = "container_symlinks")]
+    public ManifestTomlEntry[]? S { get; set; }
 
-        if (value is string text && bool.TryParse(text, out var parsed))
-        {
-            return parsed;
-        }
+    [TomlValueOnSerialized(AliasName = "agent")]
+    public ManifestTomlAgent? A { get; set; }
+}
 
-        return false;
-    }
+[TomlSerializedObject]
+internal sealed partial class ManifestTomlEntry
+{
+    [TomlValueOnSerialized(AliasName = "source")]
+    public string? S { get; set; }
 
-    private static List<string> ReadStringArray(TomlTable table, string key)
-    {
-        if (!table.TryGetValue(key, out var value) || value is not TomlArray array)
-        {
-            return [];
-        }
+    [TomlValueOnSerialized(AliasName = "target")]
+    public string? T { get; set; }
 
-        var values = new List<string>(array.Count);
-        foreach (var item in array)
-        {
-            if (item is string text && !string.IsNullOrWhiteSpace(text))
-            {
-                values.Add(text);
-            }
-        }
+    [TomlValueOnSerialized(AliasName = "container_link")]
+    public string? C { get; set; }
 
-        return values;
-    }
+    [TomlValueOnSerialized(AliasName = "flags")]
+    public string? F { get; set; }
+
+    [TomlValueOnSerialized(AliasName = "disabled")]
+    public bool D { get; set; }
+}
+
+[TomlSerializedObject]
+internal sealed partial class ManifestTomlAgent
+{
+    [TomlValueOnSerialized(AliasName = "name")]
+    public string? N { get; set; }
+
+    [TomlValueOnSerialized(AliasName = "binary")]
+    public string? B { get; set; }
+
+    [TomlValueOnSerialized(AliasName = "default_args")]
+    public string[]? D { get; set; }
+
+    [TomlValueOnSerialized(AliasName = "aliases")]
+    public string[]? L { get; set; }
+
+    [TomlValueOnSerialized(AliasName = "optional")]
+    public bool O { get; set; }
 }
 
 internal readonly record struct ManifestEntry(
