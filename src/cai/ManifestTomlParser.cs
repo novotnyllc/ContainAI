@@ -21,8 +21,8 @@ internal static class ManifestTomlParser
                 continue;
             }
 
-            AddSectionEntries(document.E, "entry", manifestFile, includeDisabled, includeSourceFile, entries);
-            AddSectionEntries(document.S, "symlink", manifestFile, includeDisabled, includeSourceFile, entries);
+            AddSectionEntries(document.Entries, "entry", manifestFile, includeDisabled, includeSourceFile, entries);
+            AddSectionEntries(document.ContainerSymlinks, "symlink", manifestFile, includeDisabled, includeSourceFile, entries);
         }
 
         return entries;
@@ -37,16 +37,16 @@ internal static class ManifestTomlParser
         foreach (var manifestFile in manifestFiles)
         {
             var document = ParseManifestFile(manifestFile);
-            if (document?.A is null)
+            if (document?.Agent is null)
             {
                 continue;
             }
 
-            var name = ReadString(document.A.N);
-            var binary = ReadString(document.A.B);
-            var defaultArgs = ReadStringArray(document.A.D);
-            var aliases = ReadStringArray(document.A.L);
-            var optional = document.A.O;
+            var name = ReadString(document.Agent.Name);
+            var binary = ReadString(document.Agent.Binary);
+            var defaultArgs = ReadStringArray(document.Agent.DefaultArgs);
+            var aliases = ReadStringArray(document.Agent.Aliases);
+            var optional = document.Agent.Optional;
 
             if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(binary) || defaultArgs.Count == 0)
             {
@@ -111,11 +111,11 @@ internal static class ManifestTomlParser
 
         foreach (var item in sectionEntries)
         {
-            var source = ReadString(item.S);
-            var target = ReadString(item.T);
-            var containerLink = ReadString(item.C);
-            var flags = ReadString(item.F);
-            var disabled = item.D;
+            var source = ReadString(item.Source);
+            var target = ReadString(item.Target);
+            var containerLink = ReadString(item.ContainerLink);
+            var flags = ReadString(item.Flags);
+            var disabled = item.Disabled;
 
             if (string.IsNullOrEmpty(target))
             {
@@ -149,55 +149,55 @@ internal static class ManifestTomlParser
         ?? [];
 }
 
-[TomlSerializedObject]
+[TomlSerializedObject(NamingConvention = TomlNamingConvention.SnakeCase)]
 internal sealed partial class ManifestTomlDocument
 {
-    [TomlValueOnSerialized(AliasName = "entries")]
-    public ManifestTomlEntry[]? E { get; set; }
+    [TomlValueOnSerialized]
+    public ManifestTomlEntry[]? Entries { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "container_symlinks")]
-    public ManifestTomlEntry[]? S { get; set; }
+    [TomlValueOnSerialized]
+    public ManifestTomlEntry[]? ContainerSymlinks { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "agent")]
-    public ManifestTomlAgent? A { get; set; }
+    [TomlValueOnSerialized]
+    public ManifestTomlAgent? Agent { get; set; }
 }
 
-[TomlSerializedObject]
+[TomlSerializedObject(NamingConvention = TomlNamingConvention.SnakeCase)]
 internal sealed partial class ManifestTomlEntry
 {
-    [TomlValueOnSerialized(AliasName = "source")]
-    public string? S { get; set; }
+    [TomlValueOnSerialized]
+    public string? Source { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "target")]
-    public string? T { get; set; }
+    [TomlValueOnSerialized]
+    public string? Target { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "container_link")]
-    public string? C { get; set; }
+    [TomlValueOnSerialized]
+    public string? ContainerLink { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "flags")]
-    public string? F { get; set; }
+    [TomlValueOnSerialized]
+    public string? Flags { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "disabled")]
-    public bool D { get; set; }
+    [TomlValueOnSerialized]
+    public bool Disabled { get; set; }
 }
 
-[TomlSerializedObject]
+[TomlSerializedObject(NamingConvention = TomlNamingConvention.SnakeCase)]
 internal sealed partial class ManifestTomlAgent
 {
-    [TomlValueOnSerialized(AliasName = "name")]
-    public string? N { get; set; }
+    [TomlValueOnSerialized]
+    public string? Name { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "binary")]
-    public string? B { get; set; }
+    [TomlValueOnSerialized]
+    public string? Binary { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "default_args")]
-    public string[]? D { get; set; }
+    [TomlValueOnSerialized]
+    public string[]? DefaultArgs { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "aliases")]
-    public string[]? L { get; set; }
+    [TomlValueOnSerialized]
+    public string[]? Aliases { get; set; }
 
-    [TomlValueOnSerialized(AliasName = "optional")]
-    public bool O { get; set; }
+    [TomlValueOnSerialized]
+    public bool Optional { get; set; }
 }
 
 internal readonly record struct ManifestEntry(
