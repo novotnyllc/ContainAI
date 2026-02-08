@@ -1,5 +1,5 @@
 // Path translation between host and container paths
-using System.Text.Json.Nodes;
+using System.Text.Json;
 
 namespace AgentClientProtocol.Proxy.PathTranslation;
 
@@ -8,20 +8,20 @@ namespace AgentClientProtocol.Proxy.PathTranslation;
 /// </summary>
 public sealed class PathTranslator
 {
-    private readonly string _hostWorkspace;
-    private readonly string _containerWorkspace;
-    private readonly string _normalizedHostWorkspace;
+    private readonly string hostWorkspace;
+    private readonly string containerWorkspace;
+    private readonly string normalizedHostWorkspace;
 
     /// <summary>
     /// Creates a new path translator.
     /// </summary>
-    /// <param name="hostWorkspace">The host workspace path.</param>
-    /// <param name="containerWorkspace">The container workspace path (default: /home/agent/workspace).</param>
-    public PathTranslator(string hostWorkspace, string containerWorkspace = "/home/agent/workspace")
+    /// <param name="hostWorkspacePath">The host workspace path.</param>
+    /// <param name="containerWorkspacePath">The container workspace path (default: /home/agent/workspace).</param>
+    public PathTranslator(string hostWorkspacePath, string containerWorkspacePath = "/home/agent/workspace")
     {
-        _hostWorkspace = hostWorkspace;
-        _containerWorkspace = containerWorkspace;
-        _normalizedHostWorkspace = Path.GetFullPath(hostWorkspace).TrimEnd(Path.DirectorySeparatorChar);
+        hostWorkspace = hostWorkspacePath;
+        containerWorkspace = containerWorkspacePath;
+        normalizedHostWorkspace = Path.GetFullPath(hostWorkspacePath).TrimEnd(Path.DirectorySeparatorChar);
     }
 
     /// <summary>
@@ -54,15 +54,15 @@ public sealed class PathTranslator
         }
 
         // Exact match
-        if (normalizedPath == _normalizedHostWorkspace)
-            return _containerWorkspace;
+        if (normalizedPath == normalizedHostWorkspace)
+            return containerWorkspace;
 
         // Descendant match
-        var prefix = _normalizedHostWorkspace + Path.DirectorySeparatorChar;
+        var prefix = normalizedHostWorkspace + Path.DirectorySeparatorChar;
         if (normalizedPath.StartsWith(prefix, StringComparison.Ordinal))
         {
             var relative = normalizedPath.Substring(prefix.Length);
-            return _containerWorkspace + "/" + relative.Replace(Path.DirectorySeparatorChar, '/');
+            return containerWorkspace + "/" + relative.Replace(Path.DirectorySeparatorChar, '/');
         }
 
         // Not a workspace path
@@ -86,15 +86,15 @@ public sealed class PathTranslator
         var normalizedContainer = containerPath.TrimEnd('/');
 
         // Exact match
-        if (normalizedContainer == _containerWorkspace)
-            return _hostWorkspace;
+        if (normalizedContainer == containerWorkspace)
+            return hostWorkspace;
 
         // Descendant match
-        var prefix = _containerWorkspace + "/";
+        var prefix = containerWorkspace + "/";
         if (normalizedContainer.StartsWith(prefix, StringComparison.Ordinal))
         {
             var relative = normalizedContainer.Substring(prefix.Length);
-            return Path.Combine(_hostWorkspace, relative.Replace('/', Path.DirectorySeparatorChar));
+            return Path.Combine(hostWorkspace, relative.Replace('/', Path.DirectorySeparatorChar));
         }
 
         // Not a workspace path
@@ -106,102 +106,100 @@ public sealed class PathTranslator
     /// Object format: { "server-name": { "command": "...", "args": [...] } }
     /// Array format: [ { "name": "...", "command": "...", "args": [...] } ]
     /// </summary>
-    public JsonNode TranslateMcpServers(JsonNode mcpServersNode)
+    public JsonElement TranslateMcpServers(JsonElement mcpServersElement)
     {
-        ArgumentNullException.ThrowIfNull(mcpServersNode);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            switch (mcpServersElement.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    WriteTranslatedObjectFormat(writer, mcpServersElement);
+                    break;
+                case JsonValueKind.Array:
+                    WriteTranslatedArrayFormat(writer, mcpServersElement);
+                    break;
+                default:
+                    mcpServersElement.WriteTo(writer);
+                    break;
+            }
+        }
 
-        if (mcpServersNode is JsonObject mcpObj)
-        {
-            return TranslateMcpServersObject(mcpObj);
-        }
-        else if (mcpServersNode is JsonArray mcpArray)
-        {
-            return TranslateMcpServersArray(mcpArray);
-        }
-        // Unknown format - pass through unchanged
-        return mcpServersNode.DeepClone();
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
     }
 
-    private JsonArray TranslateMcpServersArray(JsonArray mcpServers)
+    private void WriteTranslatedObjectFormat(Utf8JsonWriter writer, JsonElement mcpServersElement)
     {
-        var result = new JsonArray();
+        writer.WriteStartObject();
 
-        foreach (var serverConfig in mcpServers)
+        foreach (var property in mcpServersElement.EnumerateObject())
         {
-            if (serverConfig is not JsonObject serverObj)
+            writer.WritePropertyName(property.Name);
+            if (property.Value.ValueKind == JsonValueKind.Object)
             {
-                result.Add(serverConfig?.DeepClone());
+                WriteTranslatedServerObject(writer, property.Value);
                 continue;
             }
 
-            var translatedServer = new JsonObject();
-
-            foreach (var (key, value) in serverObj)
-            {
-                if (key == "args" && value is JsonArray argsArray)
-                {
-                    translatedServer[key] = TranslateArgsArray(argsArray);
-                }
-                else
-                {
-                    translatedServer[key] = value?.DeepClone();
-                }
-            }
-
-            // Cast to JsonNode to avoid generic Add<T> warnings with AOT
-            result.Add((JsonNode)translatedServer);
+            property.Value.WriteTo(writer);
         }
 
-        return result;
+        writer.WriteEndObject();
     }
 
-    private JsonObject TranslateMcpServersObject(JsonObject mcpServers)
+    private void WriteTranslatedArrayFormat(Utf8JsonWriter writer, JsonElement mcpServersElement)
     {
-        var result = new JsonObject();
+        writer.WriteStartArray();
 
-        foreach (var (serverName, serverConfig) in mcpServers)
+        foreach (var serverConfig in mcpServersElement.EnumerateArray())
         {
-            if (serverConfig is not JsonObject serverObj)
+            if (serverConfig.ValueKind == JsonValueKind.Object)
             {
-                result[serverName] = serverConfig?.DeepClone();
+                WriteTranslatedServerObject(writer, serverConfig);
                 continue;
             }
 
-            var translatedServer = new JsonObject();
-
-            foreach (var (key, value) in serverObj)
-            {
-                if (key == "args" && value is JsonArray argsArray)
-                {
-                    translatedServer[key] = TranslateArgsArray(argsArray);
-                }
-                else
-                {
-                    translatedServer[key] = value?.DeepClone();
-                }
-            }
-
-            result[serverName] = translatedServer;
+            serverConfig.WriteTo(writer);
         }
 
-        return result;
+        writer.WriteEndArray();
     }
 
-    private JsonArray TranslateArgsArray(JsonArray argsArray)
+    private void WriteTranslatedServerObject(Utf8JsonWriter writer, JsonElement serverObject)
     {
-        var translatedArgs = new JsonArray();
-        foreach (var arg in argsArray)
+        writer.WriteStartObject();
+
+        foreach (var property in serverObject.EnumerateObject())
         {
-            if (arg is JsonValue argValue && argValue.TryGetValue<string>(out var argStr))
+            if (property.NameEquals("args") && property.Value.ValueKind == JsonValueKind.Array)
             {
-                // Cast to JsonNode to avoid generic Add<T> warnings with AOT
-                translatedArgs.Add((JsonNode)JsonValue.Create(TranslateToContainer(argStr))!);
+                writer.WritePropertyName(property.Name);
+                WriteTranslatedArgsArray(writer, property.Value);
+                continue;
             }
-            else
-            {
-                translatedArgs.Add(arg?.DeepClone());
-            }
+
+            property.WriteTo(writer);
         }
-        return translatedArgs;
+
+        writer.WriteEndObject();
+    }
+
+    private void WriteTranslatedArgsArray(Utf8JsonWriter writer, JsonElement argsArray)
+    {
+        writer.WriteStartArray();
+
+        foreach (var arg in argsArray.EnumerateArray())
+        {
+            if (arg.ValueKind == JsonValueKind.String)
+            {
+                writer.WriteStringValue(TranslateToContainer(arg.GetString() ?? string.Empty));
+                continue;
+            }
+
+            arg.WriteTo(writer);
+        }
+
+        writer.WriteEndArray();
     }
 }

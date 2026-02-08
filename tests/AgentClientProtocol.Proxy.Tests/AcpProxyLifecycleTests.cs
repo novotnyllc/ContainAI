@@ -19,9 +19,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("editor-init"),
+            Id = "editor-init",
             Method = "initialize",
             Params = new JsonObject
             {
@@ -45,9 +45,9 @@ public sealed class AcpProxyLifecycleTests
             "workspace = \"default\"",
             TestContext.Current.CancellationToken);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("editor-session-new"),
+            Id = "editor-session-new",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -72,9 +72,9 @@ public sealed class AcpProxyLifecycleTests
         var proxySessionId = sessionNewResponse.Result?["sessionId"]?.GetValue<string>();
         Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("editor-prompt"),
+            Id = "editor-prompt",
             Method = "session/prompt",
             Params = new JsonObject
             {
@@ -83,8 +83,8 @@ public sealed class AcpProxyLifecycleTests
             },
         });
 
-        JsonRpcMessage? promptNotification = null;
-        JsonRpcMessage? promptResponse = null;
+        JsonRpcEnvelope? promptNotification = null;
+        JsonRpcEnvelope? promptResponse = null;
         for (var index = 0; index < 4 && (promptNotification is null || promptResponse is null); index++)
         {
             var message = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
@@ -103,9 +103,9 @@ public sealed class AcpProxyLifecycleTests
         Assert.NotNull(promptResponse);
         Assert.Equal(proxySessionId, promptNotification.Params?["sessionId"]?.GetValue<string>());
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("editor-end"),
+            Id = "editor-end",
             Method = "session/end",
             Params = new JsonObject
             {
@@ -146,9 +146,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-fail"),
+            Id = "new-fail",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -170,9 +170,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-missing"),
+            Id = "new-missing",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -194,9 +194,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-init-timeout"),
+            Id = "new-init-timeout",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -218,9 +218,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-session-timeout"),
+            Id = "new-session-timeout",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -242,9 +242,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("shutdown-new"),
+            Id = "shutdown-new",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -272,9 +272,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-malformed"),
+            Id = "new-malformed",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -286,9 +286,9 @@ public sealed class AcpProxyLifecycleTests
         var proxySessionId = sessionResponse.Result?["sessionId"]?.GetValue<string>();
         Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("prompt-malformed"),
+            Id = "prompt-malformed",
             Method = "session/prompt",
             Params = new JsonObject
             {
@@ -297,7 +297,7 @@ public sealed class AcpProxyLifecycleTests
             },
         });
 
-        JsonRpcMessage? promptResponse = null;
+        JsonRpcEnvelope? promptResponse = null;
         for (var index = 0; index < 4 && promptResponse is null; index++)
         {
             var message = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
@@ -319,17 +319,17 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("init-default-version"),
+            Id = "init-default-version",
             Method = "initialize",
             Params = new JsonObject(),
         });
         _ = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-default-version"),
+            Id = "new-default-version",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -357,9 +357,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-error"),
+            Id = "new-error",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -381,9 +381,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-blank-null"),
+            Id = "new-blank-null",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -395,9 +395,9 @@ public sealed class AcpProxyLifecycleTests
         var proxySessionId = sessionResponse.Result?["sessionId"]?.GetValue<string>();
         Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("prompt-blank-null"),
+            Id = "prompt-blank-null",
             Method = "session/prompt",
             Params = new JsonObject
             {
@@ -406,7 +406,7 @@ public sealed class AcpProxyLifecycleTests
             },
         });
 
-        JsonRpcMessage? promptResponse = null;
+        JsonRpcEnvelope? promptResponse = null;
         for (var index = 0; index < 4 && promptResponse is null; index++)
         {
             var message = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
@@ -428,9 +428,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-slow-end"),
+            Id = "new-slow-end",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -442,9 +442,9 @@ public sealed class AcpProxyLifecycleTests
         var proxySessionId = sessionResponse.Result?["sessionId"]?.GetValue<string>();
         Assert.False(string.IsNullOrWhiteSpace(proxySessionId));
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("end-slow"),
+            Id = "end-slow",
             Method = "session/end",
             Params = new JsonObject
             {
@@ -465,9 +465,9 @@ public sealed class AcpProxyLifecycleTests
         var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
         await using var harnessScope = harness.ConfigureAwait(false);
 
-        await harness.WriteAsync(new JsonRpcMessage
+        await harness.WriteAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("new-shutdown-slow"),
+            Id = "new-shutdown-slow",
             Method = "session/new",
             Params = new JsonObject
             {
@@ -498,13 +498,13 @@ public sealed class AcpProxyLifecycleTests
 
     private sealed class ScriptedAgentSpawner : IAgentSpawner, IAsyncDisposable
     {
-        private readonly Lock _gate = new();
-        private readonly List<string> _transcript = [];
-        private readonly ScriptedAgentMode _mode;
+        private readonly Lock gate = new();
+        private readonly List<string> transcript = [];
+        private readonly ScriptedAgentMode mode;
 
-        public ScriptedAgentSpawner(ScriptedAgentMode mode)
+        public ScriptedAgentSpawner(ScriptedAgentMode scriptedMode)
         {
-            _mode = mode;
+            mode = scriptedMode;
             AgentSessionId = $"agent-{Guid.NewGuid():N}";
         }
 
@@ -536,12 +536,12 @@ public sealed class AcpProxyLifecycleTests
             {
                 await foreach (var line in input.ReadAllAsync(cancellationToken).ConfigureAwait(false))
                 {
-                    lock (_gate)
+                    lock (gate)
                     {
-                        _transcript.Add(line);
+                        transcript.Add(line);
                     }
 
-                    var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+                    var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcEnvelope);
                     if (message == null || string.IsNullOrWhiteSpace(message.Method))
                     {
                         continue;
@@ -551,11 +551,11 @@ public sealed class AcpProxyLifecycleTests
                     switch (message.Method)
                     {
                         case "initialize":
-                            if (_mode == ScriptedAgentMode.InitializeError)
+                            if (mode == ScriptedAgentMode.InitializeError)
                             {
-                                await WriteMessageAsync(output, new JsonRpcMessage
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
                                 {
-                                    Id = JsonValue.Create(requestId),
+                                    Id = requestId ?? string.Empty,
                                     Error = new JsonRpcError
                                     {
                                         Code = JsonRpcErrorCodes.InternalError,
@@ -563,15 +563,15 @@ public sealed class AcpProxyLifecycleTests
                                     },
                                 }, cancellationToken).ConfigureAwait(false);
                             }
-                            else if (_mode == ScriptedAgentMode.NoInitializeResponse)
+                            else if (mode == ScriptedAgentMode.NoInitializeResponse)
                             {
                                 return;
                             }
                             else
                             {
-                                await WriteMessageAsync(output, new JsonRpcMessage
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
                                 {
-                                    Id = JsonValue.Create(requestId),
+                                    Id = requestId ?? string.Empty,
                                     Result = new JsonObject
                                     {
                                         ["capabilities"] = new JsonObject
@@ -584,29 +584,29 @@ public sealed class AcpProxyLifecycleTests
                             break;
 
                         case "session/new":
-                            if (_mode == ScriptedAgentMode.MissingSessionId)
+                            if (mode == ScriptedAgentMode.MissingSessionId)
                             {
-                                await WriteMessageAsync(output, new JsonRpcMessage
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
                                 {
-                                    Id = JsonValue.Create(requestId),
+                                    Id = requestId ?? string.Empty,
                                     Result = new JsonObject(),
                                 }, cancellationToken).ConfigureAwait(false);
                             }
-                            else if (_mode == ScriptedAgentMode.SessionNewErrorWithoutMessage)
+                            else if (mode == ScriptedAgentMode.SessionNewErrorWithoutMessage)
                             {
                                 await output.WriteAsync(
                                     $"{{\"jsonrpc\":\"2.0\",\"id\":\"{requestId}\",\"error\":{{\"code\":-32603,\"message\":null}}}}",
                                     cancellationToken).ConfigureAwait(false);
                             }
-                            else if (_mode == ScriptedAgentMode.NoSessionNewResponse)
+                            else if (mode == ScriptedAgentMode.NoSessionNewResponse)
                             {
                                 return;
                             }
                             else
                             {
-                                await WriteMessageAsync(output, new JsonRpcMessage
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
                                 {
-                                    Id = JsonValue.Create(requestId),
+                                    Id = requestId ?? string.Empty,
                                     Result = new JsonObject
                                     {
                                         ["sessionId"] = AgentSessionId,
@@ -616,17 +616,17 @@ public sealed class AcpProxyLifecycleTests
                             break;
 
                         case "session/prompt":
-                            if (_mode == ScriptedAgentMode.MalformedPromptOutput)
+                            if (mode == ScriptedAgentMode.MalformedPromptOutput)
                             {
                                 await output.WriteAsync("{ this is not json }", cancellationToken).ConfigureAwait(false);
                             }
-                            else if (_mode == ScriptedAgentMode.PromptOutputIncludesBlankAndNull)
+                            else if (mode == ScriptedAgentMode.PromptOutputIncludesBlankAndNull)
                             {
                                 await output.WriteAsync(string.Empty, cancellationToken).ConfigureAwait(false);
                                 await output.WriteAsync("null", cancellationToken).ConfigureAwait(false);
                             }
 
-                            await WriteMessageAsync(output, new JsonRpcMessage
+                            await WriteMessageAsync(output, new JsonRpcEnvelope
                             {
                                 Method = "session/progress",
                                 Params = new JsonObject
@@ -636,9 +636,9 @@ public sealed class AcpProxyLifecycleTests
                                 },
                             }, cancellationToken).ConfigureAwait(false);
 
-                            await WriteMessageAsync(output, new JsonRpcMessage
+                            await WriteMessageAsync(output, new JsonRpcEnvelope
                             {
-                                Id = JsonValue.Create(requestId),
+                                Id = requestId ?? string.Empty,
                                 Result = new JsonObject
                                 {
                                     ["ok"] = true,
@@ -647,16 +647,16 @@ public sealed class AcpProxyLifecycleTests
                             break;
 
                         case "session/end":
-                            if (_mode == ScriptedAgentMode.SlowSessionEnd)
+                            if (mode == ScriptedAgentMode.SlowSessionEnd)
                             {
                                 await Task.Delay(TimeSpan.FromSeconds(8), cancellationToken).ConfigureAwait(false);
                             }
 
                             if (!string.IsNullOrWhiteSpace(requestId))
                             {
-                                await WriteMessageAsync(output, new JsonRpcMessage
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
                                 {
-                                    Id = JsonValue.Create(requestId),
+                                    Id = requestId,
                                     Result = new JsonObject(),
                                 }, cancellationToken).ConfigureAwait(false);
                             }
@@ -677,48 +677,48 @@ public sealed class AcpProxyLifecycleTests
         public Task<IReadOnlyList<string>> ReadTranscriptLinesAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
+            lock (gate)
             {
-                return Task.FromResult<IReadOnlyList<string>>(_transcript.ToArray());
+                return Task.FromResult<IReadOnlyList<string>>(transcript.ToArray());
             }
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
-        private static Task WriteMessageAsync(ChannelWriter<string> output, JsonRpcMessage message, CancellationToken cancellationToken)
+        private static Task WriteMessageAsync(ChannelWriter<string> output, JsonRpcEnvelope message, CancellationToken cancellationToken)
         {
-            var payload = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+            var payload = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
             return output.WriteAsync(payload, cancellationToken).AsTask();
         }
     }
 
     private sealed class ProxyHarness : IAsyncDisposable
     {
-        private readonly Pipe _stdinPipe;
-        private readonly Pipe _stdoutPipe;
-        private readonly Stream _stdinReaderStream;
-        private readonly Stream _stdoutWriterStream;
-        private readonly StreamWriter _stdinWriter;
-        private readonly StreamReader _stdoutReader;
-        private readonly AcpProxy _proxy;
-        private readonly Task<int> _runTask;
-        private bool _inputCompleted;
+        private readonly Pipe stdinPipe;
+        private readonly Pipe stdoutPipe;
+        private readonly Stream stdinReaderStream;
+        private readonly Stream stdoutWriterStream;
+        private readonly StreamWriter stdinWriter;
+        private readonly StreamReader stdoutReader;
+        private readonly AcpProxy proxy;
+        private readonly Task<int> runTask;
+        private bool inputCompleted;
 
         private ProxyHarness(IAgentSpawner spawner)
         {
-            _stdinPipe = new Pipe();
-            _stdoutPipe = new Pipe();
-            _stdinReaderStream = _stdinPipe.Reader.AsStream();
-            _stdoutWriterStream = _stdoutPipe.Writer.AsStream();
+            stdinPipe = new Pipe();
+            stdoutPipe = new Pipe();
+            stdinReaderStream = stdinPipe.Reader.AsStream();
+            stdoutWriterStream = stdoutPipe.Writer.AsStream();
 
-            _stdinWriter = new StreamWriter(_stdinPipe.Writer.AsStream(), new UTF8Encoding(false))
+            stdinWriter = new StreamWriter(stdinPipe.Writer.AsStream(), new UTF8Encoding(false))
             {
                 AutoFlush = true,
             };
-            _stdoutReader = new StreamReader(_stdoutPipe.Reader.AsStream(), Encoding.UTF8);
+            stdoutReader = new StreamReader(stdoutPipe.Reader.AsStream(), Encoding.UTF8);
 
-            _proxy = new AcpProxy("claude", _stdoutWriterStream, TextWriter.Null, agentSpawner: spawner);
-            _runTask = _proxy.RunAsync(_stdinReaderStream, CancellationToken.None);
+            proxy = new AcpProxy("claude", stdoutWriterStream, TextWriter.Null, customAgentSpawner: spawner);
+            runTask = proxy.RunAsync(stdinReaderStream, CancellationToken.None);
         }
 
         public static Task<ProxyHarness> StartAsync(IAgentSpawner spawner, CancellationToken cancellationToken)
@@ -727,38 +727,38 @@ public sealed class AcpProxyLifecycleTests
             return Task.FromResult(new ProxyHarness(spawner));
         }
 
-        public async Task WriteAsync(JsonRpcMessage message)
+        public async Task WriteAsync(JsonRpcEnvelope message)
         {
-            var line = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
-            await _stdinWriter.WriteLineAsync(line).ConfigureAwait(false);
+            var line = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
+            await stdinWriter.WriteLineAsync(line).ConfigureAwait(false);
         }
 
-        public async Task<JsonRpcMessage> ReadMessageAsync(CancellationToken cancellationToken)
+        public async Task<JsonRpcEnvelope> ReadMessageAsync(CancellationToken cancellationToken)
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var line = await _stdoutReader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
+            var line = await stdoutReader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
             Assert.False(string.IsNullOrWhiteSpace(line));
 
-            var message = JsonSerializer.Deserialize(line!, AcpJsonContext.Default.JsonRpcMessage);
-            return Assert.IsType<JsonRpcMessage>(message);
+            var message = JsonSerializer.Deserialize(line!, AcpJsonContext.Default.JsonRpcEnvelope);
+            return Assert.IsType<JsonRpcEnvelope>(message);
         }
 
         public async Task CompleteInputAsync()
         {
-            if (_inputCompleted)
+            if (inputCompleted)
             {
                 return;
             }
 
-            _inputCompleted = true;
-            await _stdinWriter.DisposeAsync().ConfigureAwait(false);
-            await _stdinPipe.Writer.CompleteAsync().ConfigureAwait(false);
+            inputCompleted = true;
+            await stdinWriter.DisposeAsync().ConfigureAwait(false);
+            await stdinPipe.Writer.CompleteAsync().ConfigureAwait(false);
         }
 
         public Task<int> WaitForExitAsync(CancellationToken cancellationToken)
-            => _runTask.WaitAsync(cancellationToken);
+            => runTask.WaitAsync(cancellationToken);
 
         public async ValueTask DisposeAsync()
         {
@@ -779,14 +779,14 @@ public sealed class AcpProxyLifecycleTests
                 System.Diagnostics.Debug.WriteLine(ex);
             }
 
-            _proxy.Cancel();
-            _proxy.Dispose();
-            _stdinReaderStream.Dispose();
-            _stdoutReader.Dispose();
-            _stdoutWriterStream.Dispose();
-            await _stdinPipe.Reader.CompleteAsync().ConfigureAwait(false);
-            await _stdoutPipe.Reader.CompleteAsync().ConfigureAwait(false);
-            await _stdoutPipe.Writer.CompleteAsync().ConfigureAwait(false);
+            proxy.Cancel();
+            proxy.Dispose();
+            stdinReaderStream.Dispose();
+            stdoutReader.Dispose();
+            stdoutWriterStream.Dispose();
+            await stdinPipe.Reader.CompleteAsync().ConfigureAwait(false);
+            await stdoutPipe.Reader.CompleteAsync().ConfigureAwait(false);
+            await stdoutPipe.Writer.CompleteAsync().ConfigureAwait(false);
         }
     }
 

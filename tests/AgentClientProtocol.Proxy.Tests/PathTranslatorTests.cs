@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentClientProtocol.Proxy.PathTranslation;
 using Xunit;
@@ -97,7 +98,7 @@ public class PathTranslatorTests
             }
         };
 
-        var result = translator.TranslateMcpServers(mcpServers);
+        var result = ToNode(translator.TranslateMcpServers(ToElement(mcpServers)));
 
         var resultObj = Assert.IsType<JsonObject>(result);
         var filesystem = Assert.IsType<JsonObject>(resultObj["filesystem"]);
@@ -126,7 +127,7 @@ public class PathTranslatorTests
             }
         };
 
-        var result = translator.TranslateMcpServers(mcpServers);
+        var result = ToNode(translator.TranslateMcpServers(ToElement(mcpServers)));
 
         var resultArray = Assert.IsType<JsonArray>(result);
         Assert.Single(resultArray);
@@ -154,7 +155,7 @@ public class PathTranslatorTests
             }
         };
 
-        var result = translator.TranslateMcpServers(mcpServers);
+        var result = ToNode(translator.TranslateMcpServers(ToElement(mcpServers)));
 
         var resultObj = Assert.IsType<JsonObject>(result);
         var tool = Assert.IsType<JsonObject>(resultObj["tool"]);
@@ -206,10 +207,10 @@ public class PathTranslatorTests
         var translator = new PathTranslator(HostWorkspace);
         var input = JsonValue.Create("raw-value")!;
 
-        var result = translator.TranslateMcpServers(input);
+        var result = ToNode(translator.TranslateMcpServers(ToElement(input)));
 
         Assert.Equal("raw-value", result.GetValue<string>());
-        Assert.NotSame(input, result);
+        Assert.Equal(input.ToJsonString(), result.ToJsonString());
     }
 
     [Fact]
@@ -226,7 +227,7 @@ public class PathTranslatorTests
             },
         };
 
-        var result = Assert.IsType<JsonArray>(translator.TranslateMcpServers(mcpServers));
+        var result = Assert.IsType<JsonArray>(ToNode(translator.TranslateMcpServers(ToElement(mcpServers))));
         Assert.Equal("literal-entry", result[0]?.GetValue<string>());
         Assert.Equal("/home/agent/workspace/docs", result[1]?["args"]?[0]?.GetValue<string>());
     }
@@ -240,7 +241,7 @@ public class PathTranslatorTests
             ["server-name"] = JsonValue.Create("inline-config"),
         };
 
-        var result = Assert.IsType<JsonObject>(translator.TranslateMcpServers(mcpServers));
+        var result = Assert.IsType<JsonObject>(ToNode(translator.TranslateMcpServers(ToElement(mcpServers))));
         Assert.Equal("inline-config", result["server-name"]?.GetValue<string>());
     }
 
@@ -259,10 +260,19 @@ public class PathTranslatorTests
             },
         };
 
-        var result = Assert.IsType<JsonObject>(translator.TranslateMcpServers(mcpServers));
+        var result = Assert.IsType<JsonObject>(ToNode(translator.TranslateMcpServers(ToElement(mcpServers))));
         var args = Assert.IsType<JsonArray>(result["filesystem"]?["args"]);
         Assert.Equal(42, args[0]?.GetValue<int>());
         Assert.True(args[1]?.GetValue<bool>());
         Assert.Equal("/home/agent/workspace/src", args[2]?.GetValue<string>());
     }
+
+    private static JsonElement ToElement(JsonNode node)
+    {
+        using var document = JsonDocument.Parse(node.ToJsonString());
+        return document.RootElement.Clone();
+    }
+
+    private static JsonNode ToNode(JsonElement element)
+        => JsonNode.Parse(element.GetRawText())!;
 }

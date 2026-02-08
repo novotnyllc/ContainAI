@@ -11,7 +11,7 @@ public sealed class AgentSpawnerTests
     public async Task SpawnAgent_DirectSpawn_WithMissingBinary_ThrowsWithClearMessage()
     {
         using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(directSpawn: true, TextWriter.Null);
+        var spawner = new AgentSpawner(useDirectSpawn: true, TextWriter.Null);
         var missingAgent = $"containai-missing-{Guid.NewGuid():N}";
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -24,7 +24,7 @@ public sealed class AgentSpawnerTests
     public async Task SpawnAgent_DirectSpawn_StartsTransport()
     {
         using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(directSpawn: true, TextWriter.Null);
+        var spawner = new AgentSpawner(useDirectSpawn: true, TextWriter.Null);
 
         await spawner.SpawnAgentAsync(session, "sh", TestContext.Current.CancellationToken);
         Assert.NotNull(session.AgentOutput);
@@ -53,11 +53,11 @@ done
         EnsureExecutable(fakeCaiPath);
 
         using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(directSpawn: false, TextWriter.Null, fakeCaiPath);
+        var spawner = new AgentSpawner(useDirectSpawn: false, TextWriter.Null, fakeCaiPath);
         await spawner.SpawnAgentAsync(session, "claude", TestContext.Current.CancellationToken);
-        await session.WriteToAgentAsync(new JsonRpcMessage
+        await session.WriteToAgentAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("probe"),
+            Id = "probe",
             Method = "session/prompt",
             Params = new JsonObject
             {
@@ -107,7 +107,7 @@ done
         using var session = new AcpSession("/tmp/workspace");
         var stderrLineReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var stderr = new MatchNotifyingStringWriter("forwarded-error", stderrLineReceived);
-        var spawner = new AgentSpawner(directSpawn: true, stderr);
+        var spawner = new AgentSpawner(useDirectSpawn: true, stderr);
 
         await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
         await stderrLineReceived.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
@@ -136,7 +136,7 @@ done
 
         using var session = new AcpSession("/tmp/workspace");
         using var stderr = new StringWriter();
-        var spawner = new AgentSpawner(directSpawn: true, stderr);
+        var spawner = new AgentSpawner(useDirectSpawn: true, stderr);
         await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
 
         if (session.AgentExecutionTask != null)

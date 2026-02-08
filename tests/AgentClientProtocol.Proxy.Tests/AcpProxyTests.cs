@@ -15,9 +15,9 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("req-1"),
+                    Id = "req-1",
                     Method = "unknown/method",
                 }),
             ],
@@ -34,7 +34,7 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
                     Method = "unknown/notification",
                 }),
@@ -51,9 +51,9 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("init-1"),
+                    Id = "init-1",
                     Method = "initialize",
                     Params = new JsonObject
                     {
@@ -66,10 +66,9 @@ public sealed class AcpProxyTests
         Assert.Equal(0, exitCode);
         Assert.Empty(stderr);
         var response = Assert.Single(responses);
-        var result = Assert.IsType<JsonObject>(response.Result);
-        Assert.Equal("2025-01-01", result["protocolVersion"]?.GetValue<string>());
-        Assert.Equal("containai-acp-proxy", result["serverInfo"]?["name"]?.GetValue<string>());
-        Assert.Equal(true, result["capabilities"]?["multiSession"]?.GetValue<bool>());
+        Assert.Equal("2025-01-01", response.Result?["protocolVersion"]?.GetValue<string>());
+        Assert.Equal("containai-acp-proxy", response.Result?["serverInfo"]?["name"]?.GetValue<string>());
+        Assert.Equal(true, response.Result?["capabilities"]?["multiSession"]?.GetValue<bool>());
     }
 
     [Fact]
@@ -77,7 +76,7 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
                     Method = "initialize",
                     Params = new JsonObject
@@ -98,9 +97,9 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, _) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("req-2"),
+                    Id = "req-2",
                     Method = "session/prompt",
                     Params = new JsonObject
                     {
@@ -134,18 +133,18 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, _) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("init-2"),
+                    Id = "init-2",
                     Method = "initialize",
                     Params = new JsonObject
                     {
                         ["protocolVersion"] = "2025-01-01",
                     },
                 }),
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("session-new-1"),
+                    Id = "session-new-1",
                     Method = "session/new",
                     Params = new JsonObject
                     {
@@ -167,9 +166,9 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("req-throw"),
+                    Id = "req-throw",
                     Method = "session/prompt",
                     Params = new JsonObject
                     {
@@ -203,9 +202,9 @@ public sealed class AcpProxyTests
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
-                ToLine(new JsonRpcMessage
+                ToLine(new JsonRpcEnvelope
                 {
-                    Id = JsonValue.Create("editor-response"),
+                    Id = "editor-response",
                     Result = new JsonObject
                     {
                         ["ok"] = true,
@@ -225,7 +224,7 @@ public sealed class AcpProxyTests
         using var stdin = new ThrowingReadStream();
         using var stdout = new MemoryStream();
         using var stderrWriter = new StringWriter();
-        using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: new ThrowingSpawner("not used"));
+        using var proxy = new AcpProxy("claude", stdout, stderrWriter, customAgentSpawner: new ThrowingSpawner("not used"));
 
         var exitCode = await proxy.RunAsync(stdin, CancellationToken.None);
 
@@ -239,7 +238,7 @@ public sealed class AcpProxyTests
         using var stdin = new MemoryStream();
         using var stdout = new MemoryStream();
         using var stderrWriter = new StringWriter();
-        using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: new ThrowingSpawner("not used"));
+        using var proxy = new AcpProxy("claude", stdout, stderrWriter, customAgentSpawner: new ThrowingSpawner("not used"));
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync().ConfigureAwait(true);
 
@@ -270,7 +269,7 @@ public sealed class AcpProxyTests
         Assert.Equal("value", destination["custom"].GetString());
     }
 
-    private static async Task<(int ExitCode, List<JsonRpcMessage> Responses, string Stderr)> RunProxyAsync(
+    private static async Task<(int ExitCode, List<JsonRpcEnvelope> Responses, string Stderr)> RunProxyAsync(
         IReadOnlyList<string> lines,
         IAgentSpawner spawner)
     {
@@ -278,7 +277,7 @@ public sealed class AcpProxyTests
         using var stdin = new MemoryStream(Encoding.UTF8.GetBytes(stdinPayload));
         using var stdout = new MemoryStream();
         using var stderrWriter = new StringWriter();
-        using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: spawner);
+        using var proxy = new AcpProxy("claude", stdout, stderrWriter, customAgentSpawner: spawner);
 
         var exitCode = await proxy.RunAsync(stdin, CancellationToken.None).ConfigureAwait(true);
 
@@ -286,10 +285,10 @@ public sealed class AcpProxyTests
             .GetString(stdout.ToArray())
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var responses = new List<JsonRpcMessage>(outputLines.Length);
+        var responses = new List<JsonRpcEnvelope>(outputLines.Length);
         foreach (var line in outputLines)
         {
-            var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+            var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcEnvelope);
             Assert.NotNull(message);
             responses.Add(message);
         }
@@ -297,8 +296,8 @@ public sealed class AcpProxyTests
         return (exitCode, responses, stderrWriter.ToString());
     }
 
-    private static string ToLine(JsonRpcMessage message)
-        => JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+    private static string ToLine(JsonRpcEnvelope message)
+        => JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
 
     private sealed class ThrowingSpawner(string message) : IAgentSpawner
     {

@@ -11,11 +11,11 @@ namespace AgentClientProtocol.Proxy.Sessions;
 /// </summary>
 public sealed class AcpSession : IDisposable
 {
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpcMessage>> _pendingRequests = new();
-    private readonly CancellationTokenSource _cts = new();
-    private ChannelWriter<string>? _agentInput;
-    private bool _disposed;
+    private readonly SemaphoreSlim writeLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<JsonRpcEnvelope>> pendingRequests = new();
+    private readonly CancellationTokenSource cts = new();
+    private ChannelWriter<string>? agentInput;
+    private bool disposed;
 
     /// <summary>
     /// The proxy-assigned session ID (exposed to editors).
@@ -44,7 +44,7 @@ public sealed class AcpSession : IDisposable
     /// <summary>
     /// Cancellation token for this session.
     /// </summary>
-    public CancellationToken CancellationToken => _cts.Token;
+    public CancellationToken CancellationToken => cts.Token;
 
     public AcpSession(string workspace) => Workspace = workspace;
 
@@ -57,7 +57,7 @@ public sealed class AcpSession : IDisposable
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(executionTask);
 
-        _agentInput = input;
+        agentInput = input;
         AgentOutput = output;
         AgentExecutionTask = executionTask;
     }
@@ -65,16 +65,16 @@ public sealed class AcpSession : IDisposable
     /// <summary>
     /// Writes a JSON-RPC message to the agent.
     /// </summary>
-    public async Task WriteToAgentAsync(JsonRpcMessage message)
+    public async Task WriteToAgentAsync(JsonRpcEnvelope message)
     {
-        if (_agentInput == null)
+        if (agentInput == null)
             return;
 
-        await _writeLock.WaitAsync().ConfigureAwait(false);
+        await writeLock.WaitAsync().ConfigureAwait(false);
         try
         {
-            var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
-            await _agentInput.WriteAsync(json, _cts.Token).ConfigureAwait(false);
+            var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
+            await agentInput.WriteAsync(json, cts.Token).ConfigureAwait(false);
         }
         catch (ChannelClosedException)
         {
@@ -82,7 +82,7 @@ public sealed class AcpSession : IDisposable
         }
         finally
         {
-            _writeLock.Release();
+            writeLock.Release();
         }
     }
 
@@ -90,15 +90,15 @@ public sealed class AcpSession : IDisposable
     /// Registers a pending request, sends it, then waits for the response.
     /// This avoids race conditions where the response arrives before WaitForResponseAsync is called.
     /// </summary>
-    public async Task<JsonRpcMessage?> SendAndWaitForResponseAsync(
-        JsonRpcMessage request,
+    public async Task<JsonRpcEnvelope?> SendAndWaitForResponseAsync(
+        JsonRpcEnvelope request,
         string requestId,
         TimeSpan timeout)
     {
-        var tcs = new TaskCompletionSource<JsonRpcMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<JsonRpcEnvelope>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Register BEFORE sending to avoid race condition
-        _pendingRequests[requestId] = tcs;
+        pendingRequests[requestId] = tcs;
 
         try
         {
@@ -106,17 +106,17 @@ public sealed class AcpSession : IDisposable
             await WriteToAgentAsync(request).ConfigureAwait(false);
 
             // Wait for response with timeout
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-            cts.CancelAfter(timeout);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            timeoutCts.CancelAfter(timeout);
 
             try
             {
                 if (AgentExecutionTask == null)
                 {
-                    return await tcs.Task.WaitAsync(cts.Token).ConfigureAwait(false);
+                    return await tcs.Task.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
                 }
 
-                var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, cts.Token);
+                var cancellationTask = Task.Delay(Timeout.InfiniteTimeSpan, timeoutCts.Token);
                 var completed = await Task
                     .WhenAny(tcs.Task, AgentExecutionTask, cancellationTask)
                     .ConfigureAwait(false);
@@ -134,7 +134,7 @@ public sealed class AcpSession : IDisposable
         }
         finally
         {
-            _pendingRequests.TryRemove(requestId, out _);
+            pendingRequests.TryRemove(requestId, out _);
         }
     }
 
@@ -142,9 +142,9 @@ public sealed class AcpSession : IDisposable
     /// Attempts to complete a pending request with a response.
     /// Returns true if the response was matched to a pending request.
     /// </summary>
-    public bool TryCompleteResponse(string requestId, JsonRpcMessage response)
+    public bool TryCompleteResponse(string requestId, JsonRpcEnvelope response)
     {
-        if (_pendingRequests.TryRemove(requestId, out var tcs))
+        if (pendingRequests.TryRemove(requestId, out var tcs))
         {
             tcs.TrySetResult(response);
             return true;
@@ -157,31 +157,31 @@ public sealed class AcpSession : IDisposable
     /// </summary>
     public void Cancel()
     {
-        if (!_disposed)
+        if (!disposed)
         {
-            _cts.Cancel();
+            cts.Cancel();
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        if (disposed)
             return;
-        _disposed = true;
+        disposed = true;
 
         // Cancel any pending requests
-        foreach (var tcs in _pendingRequests.Values)
+        foreach (var tcs in pendingRequests.Values)
         {
             tcs.TrySetCanceled();
         }
-        _pendingRequests.Clear();
+        pendingRequests.Clear();
 
         // Cancel the session
-        _cts.Cancel();
-        _cts.Dispose();
+        cts.Cancel();
+        cts.Dispose();
 
-        _agentInput?.TryComplete();
+        agentInput?.TryComplete();
 
-        _writeLock.Dispose();
+        writeLock.Dispose();
     }
 }

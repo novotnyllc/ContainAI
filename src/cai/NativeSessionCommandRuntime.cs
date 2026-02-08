@@ -34,13 +34,13 @@ internal sealed class NativeSessionCommandRuntime
         "ghcr.io/novotnyllc/containai",
     ];
 
-    private readonly TextWriter _stdout;
-    private readonly TextWriter _stderr;
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
 
-    public NativeSessionCommandRuntime(TextWriter stdout, TextWriter stderr)
+    public NativeSessionCommandRuntime(TextWriter standardOutput, TextWriter standardError)
     {
-        _stdout = stdout;
-        _stderr = stderr;
+        stdout = standardOutput;
+        stderr = standardError;
     }
 
     public async Task<int> RunRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -48,13 +48,13 @@ internal sealed class NativeSessionCommandRuntime
         var parse = ParseRunOptions(args);
         if (!parse.Success)
         {
-            await _stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
             return 1;
         }
 
         if (parse.ShowHelp)
         {
-            await _stdout.WriteLineAsync(GetRunUsageText()).ConfigureAwait(false);
+            await stdout.WriteLineAsync(GetRunUsageText()).ConfigureAwait(false);
             return 0;
         }
 
@@ -66,13 +66,13 @@ internal sealed class NativeSessionCommandRuntime
         var parse = ParseShellOptions(args);
         if (!parse.Success)
         {
-            await _stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
             return 1;
         }
 
         if (parse.ShowHelp)
         {
-            await _stdout.WriteLineAsync(GetShellUsageText()).ConfigureAwait(false);
+            await stdout.WriteLineAsync(GetShellUsageText()).ConfigureAwait(false);
             return 0;
         }
 
@@ -84,13 +84,13 @@ internal sealed class NativeSessionCommandRuntime
         var parse = ParseExecOptions(args);
         if (!parse.Success)
         {
-            await _stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
             return parse.ErrorCode;
         }
 
         if (parse.ShowHelp)
         {
-            await _stdout.WriteLineAsync(GetExecUsageText()).ConfigureAwait(false);
+            await stdout.WriteLineAsync(GetExecUsageText()).ConfigureAwait(false);
             return 0;
         }
 
@@ -102,7 +102,7 @@ internal sealed class NativeSessionCommandRuntime
         var resolved = await ResolveTargetAsync(options, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(resolved.Error))
         {
-            await _stderr.WriteLineAsync(resolved.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(resolved.Error).ConfigureAwait(false);
             return resolved.ErrorCode;
         }
 
@@ -115,7 +115,7 @@ internal sealed class NativeSessionCommandRuntime
         var ensured = await EnsureContainerAsync(options, resolved, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(ensured.Error))
         {
-            await _stderr.WriteLineAsync(ensured.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ensured.Error).ConfigureAwait(false);
             return ensured.ErrorCode;
         }
 
@@ -386,7 +386,7 @@ internal sealed class NativeSessionCommandRuntime
             {
                 if (!string.IsNullOrWhiteSpace(sshResult.StandardError))
                 {
-                    await _stderr.WriteLineAsync(sshResult.StandardError.Trim()).ConfigureAwait(false);
+                    await stderr.WriteLineAsync(sshResult.StandardError.Trim()).ConfigureAwait(false);
                 }
 
                 return sshResult.ExitCode;
@@ -395,11 +395,11 @@ internal sealed class NativeSessionCommandRuntime
             var pid = sshResult.StandardOutput.Trim();
             if (!int.TryParse(pid, out _))
             {
-                await _stderr.WriteLineAsync("Background command failed: could not determine remote PID.").ConfigureAwait(false);
+                await stderr.WriteLineAsync("Background command failed: could not determine remote PID.").ConfigureAwait(false);
                 return 1;
             }
 
-            await _stdout.WriteLineAsync($"Command running in background (PID: {pid})").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Command running in background (PID: {pid})").ConfigureAwait(false);
             return 0;
         }
 
@@ -418,7 +418,7 @@ internal sealed class NativeSessionCommandRuntime
     {
         if (options.CommandArgs.Count == 0)
         {
-            await _stderr.WriteLineAsync("No command specified. Usage: cai exec [options] [--] <command> [args...]").ConfigureAwait(false);
+            await stderr.WriteLineAsync("No command specified. Usage: cai exec [options] [--] <command> [args...]").ConfigureAwait(false);
             return 1;
         }
 
@@ -429,24 +429,24 @@ internal sealed class NativeSessionCommandRuntime
     private async Task WriteDryRunAsync(SessionCommandOptions options, ResolvedTarget resolved, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await _stdout.WriteLineAsync("DRY_RUN=true").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"MODE={options.Mode.ToString().ToLowerInvariant()}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"CONTAINER={resolved.ContainerName}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"WORKSPACE={resolved.Workspace}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"DATA_VOLUME={resolved.DataVolume}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"DOCKER_CONTEXT={resolved.Context}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"FRESH={options.Fresh.ToString().ToLowerInvariant()}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"RESET={options.Reset.ToString().ToLowerInvariant()}").ConfigureAwait(false);
+        await stdout.WriteLineAsync("DRY_RUN=true").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"MODE={options.Mode.ToString().ToLowerInvariant()}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"CONTAINER={resolved.ContainerName}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"WORKSPACE={resolved.Workspace}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"DATA_VOLUME={resolved.DataVolume}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"DOCKER_CONTEXT={resolved.Context}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"FRESH={options.Fresh.ToString().ToLowerInvariant()}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"RESET={options.Reset.ToString().ToLowerInvariant()}").ConfigureAwait(false);
 
         if (options.Mode == SessionMode.Run)
         {
             var command = options.CommandArgs.Count == 0 ? "claude" : string.Join(" ", options.CommandArgs);
-            await _stdout.WriteLineAsync($"COMMAND={command}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"DETACHED={options.Detached.ToString().ToLowerInvariant()}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"COMMAND={command}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"DETACHED={options.Detached.ToString().ToLowerInvariant()}").ConfigureAwait(false);
         }
         else if (options.Mode == SessionMode.Exec)
         {
-            await _stdout.WriteLineAsync($"COMMAND={string.Join(" ", options.CommandArgs)}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"COMMAND={string.Join(" ", options.CommandArgs)}").ConfigureAwait(false);
         }
     }
 
@@ -516,7 +516,7 @@ internal sealed class NativeSessionCommandRuntime
         {
             dockerArgs.Add("--label");
             dockerArgs.Add($"ai.containai.template={options.Template}");
-            await _stderr.WriteLineAsync($"Template '{options.Template}' requested; using image '{image}' in native mode.").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Template '{options.Template}' requested; using image '{image}' in native mode.").ConfigureAwait(false);
         }
 
         dockerArgs.Add(image);

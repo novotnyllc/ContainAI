@@ -224,6 +224,10 @@ dotnet_diagnostic.CA2200.severity = error
 dotnet_diagnostic.CA1707.severity = none
 # Test assemblies do not need CLS compliance.
 dotnet_diagnostic.CA1014.severity = none
+# Async test methods run without synchronization-context concerns.
+dotnet_diagnostic.CA2007.severity = none
+# Test fixture classes are intentionally externally visible for discovery tooling compatibility.
+dotnet_diagnostic.CA1515.severity = none
 dotnet_diagnostic.CA2202.severity = error
 dotnet_diagnostic.CA2207.severity = error
 dotnet_diagnostic.CA2212.severity = error

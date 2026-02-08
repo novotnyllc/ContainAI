@@ -12,9 +12,9 @@ namespace AgentClientProtocol.Proxy.Sessions;
 public sealed class AgentSpawner : IAgentSpawner
 {
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
-    private readonly bool _directSpawn;
-    private readonly TextWriter _stderr;
-    private readonly string _caiExecutable;
+    private readonly bool directSpawn;
+    private readonly TextWriter stderr;
+    private readonly string caiExecutable;
 
     /// <summary>
     /// Creates a new agent spawner.
@@ -22,11 +22,11 @@ public sealed class AgentSpawner : IAgentSpawner
     /// <param name="directSpawn">If true, spawns the agent directly; otherwise wraps with cai exec.</param>
     /// <param name="stderr">Stream to forward agent stderr to.</param>
     /// <param name="caiExecutable">ContainAI executable path used for container-side execution.</param>
-    public AgentSpawner(bool directSpawn, TextWriter stderr, string caiExecutable = "cai")
+    public AgentSpawner(bool useDirectSpawn, TextWriter errorWriter, string caiExecutablePath = "cai")
     {
-        _directSpawn = directSpawn;
-        _stderr = stderr;
-        _caiExecutable = caiExecutable;
+        directSpawn = useDirectSpawn;
+        stderr = errorWriter;
+        caiExecutable = caiExecutablePath;
     }
 
     /// <inheritdoc />
@@ -53,7 +53,7 @@ public sealed class AgentSpawner : IAgentSpawner
             .WithValidation(CommandResultValidation.None)
             .WithStandardInputPipe(PipeSource.Create((stream, token) => PumpInputAsync(input.Reader, stream, token)))
             .WithStandardOutputPipe(PipeTarget.ToDelegate((line, token) => output.Writer.WriteAsync(line, token).AsTask(), Utf8NoBom))
-            .WithStandardErrorPipe(PipeTarget.ToDelegate((line, _) => _stderr.WriteLineAsync(line), Utf8NoBom));
+            .WithStandardErrorPipe(PipeTarget.ToDelegate((line, _) => stderr.WriteLineAsync(line), Utf8NoBom));
 
         var executionTask = RunCommandAsync(command, output.Writer, started, session.CancellationToken);
         session.AttachAgentTransport(input.Writer, output.Reader, executionTask);
@@ -76,13 +76,13 @@ public sealed class AgentSpawner : IAgentSpawner
 
     private Command BuildCommand(AcpSession session, string agent)
     {
-        if (_directSpawn)
+        if (directSpawn)
         {
             return Cli.Wrap(agent)
                 .WithArguments(args => args.Add("--acp"));
         }
 
-        return Cli.Wrap(_caiExecutable)
+        return Cli.Wrap(caiExecutable)
             .WithEnvironmentVariables(env => env.Set("CAI_NO_UPDATE_CHECK", "1"))
             .WithArguments(args => args
                 .Add("exec")
@@ -116,7 +116,7 @@ public sealed class AgentSpawner : IAgentSpawner
             started.TrySetResult();
             if (result.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync($"Agent process exited with code {result.ExitCode}.").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Agent process exited with code {result.ExitCode}.").ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

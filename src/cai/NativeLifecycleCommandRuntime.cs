@@ -15,17 +15,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
         "ghcr.io/novotnyllc/containai",
     ];
 
-    private readonly TextWriter _stdout;
-    private readonly TextWriter _stderr;
-    private readonly NativeSessionCommandRuntime _sessionRuntime;
-    private readonly ContainerRuntimeCommandService _containerRuntimeCommandService;
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+    private readonly NativeSessionCommandRuntime sessionRuntime;
+    private readonly ContainerRuntimeCommandService containerRuntimeCommandService;
 
-    public NativeLifecycleCommandRuntime(TextWriter? stdout = null, TextWriter? stderr = null)
+    public NativeLifecycleCommandRuntime(TextWriter? standardOutput = null, TextWriter? standardError = null)
     {
-        _stdout = stdout ?? Console.Out;
-        _stderr = stderr ?? Console.Error;
-        _sessionRuntime = new NativeSessionCommandRuntime(_stdout, _stderr);
-        _containerRuntimeCommandService = new ContainerRuntimeCommandService(_stdout, _stderr);
+        stdout = standardOutput ?? Console.Out;
+        stderr = standardError ?? Console.Error;
+        sessionRuntime = new NativeSessionCommandRuntime(stdout, stderr);
+        containerRuntimeCommandService = new ContainerRuntimeCommandService(stdout, stderr);
     }
 
     public Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -37,9 +37,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         return args[0] switch
         {
-            "run" => _sessionRuntime.RunRunAsync(args, cancellationToken),
-            "shell" => _sessionRuntime.RunShellAsync(args, cancellationToken),
-            "exec" => _sessionRuntime.RunExecAsync(args, cancellationToken),
+            "run" => sessionRuntime.RunRunAsync(args, cancellationToken),
+            "shell" => sessionRuntime.RunShellAsync(args, cancellationToken),
+            "exec" => sessionRuntime.RunExecAsync(args, cancellationToken),
             "docker" => RunDockerAsync(args, cancellationToken),
             "status" => RunStatusAsync(args, cancellationToken),
             "help" => RunHelpAsync(args, cancellationToken),
@@ -60,7 +60,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             "ssh" => RunSshAsync(args, cancellationToken),
             "stop" => RunStopAsync(args, cancellationToken),
             "gc" => RunGcAsync(args, cancellationToken),
-            "system" => _containerRuntimeCommandService.RunAsync(args, cancellationToken),
+            "system" => containerRuntimeCommandService.RunAsync(args, cancellationToken),
             _ => Task.FromResult(1),
         };
     }
@@ -69,7 +69,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count > 1 && (args[1] is "-h" or "--help"))
         {
-            await _stdout.WriteLineAsync("Usage: cai docker [docker-args...]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai docker [docker-args...]").ConfigureAwait(false);
             return 0;
         }
 
@@ -110,7 +110,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 case "--help":
                 case "-h":
-                    await _stdout.WriteLineAsync("Usage: cai status [--workspace <path> | --container <name>] [--json] [--verbose]").ConfigureAwait(false);
+                    await stdout.WriteLineAsync("Usage: cai status [--workspace <path> | --container <name>] [--json] [--verbose]").ConfigureAwait(false);
                     return 0;
                 case "--json":
                     outputJson = true;
@@ -121,7 +121,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 case "--workspace":
                     if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
                     {
-                        await _stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -130,7 +130,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 case "--container":
                     if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
                     {
-                        await _stderr.WriteLineAsync("--container requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--container requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -147,7 +147,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     }
                     else
                     {
-                        await _stderr.WriteLineAsync($"Unknown status option: {token}").ConfigureAwait(false);
+                        await stderr.WriteLineAsync($"Unknown status option: {token}").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -157,7 +157,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(container))
         {
-            await _stderr.WriteLineAsync("--workspace and --container are mutually exclusive").ConfigureAwait(false);
+            await stderr.WriteLineAsync("--workspace and --container are mutually exclusive").ConfigureAwait(false);
             return 1;
         }
 
@@ -167,7 +167,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             container = await ResolveWorkspaceContainerNameAsync(effectiveWorkspace, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(container))
             {
-                await _stderr.WriteLineAsync($"No container found for workspace: {effectiveWorkspace}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"No container found for workspace: {effectiveWorkspace}").ConfigureAwait(false);
                 return 1;
             }
         }
@@ -175,13 +175,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var discoveredContexts = await FindContainerContextsAsync(container, cancellationToken).ConfigureAwait(false);
         if (discoveredContexts.Count == 0)
         {
-            await _stderr.WriteLineAsync($"Container not found: {container}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Container not found: {container}").ConfigureAwait(false);
             return 1;
         }
 
         if (discoveredContexts.Count > 1)
         {
-            await _stderr.WriteLineAsync($"Container '{container}' exists in multiple contexts: {string.Join(", ", discoveredContexts)}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Container '{container}' exists in multiple contexts: {string.Join(", ", discoveredContexts)}").ConfigureAwait(false);
             return 1;
         }
 
@@ -193,13 +193,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken).ConfigureAwait(false);
         if (managedResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync($"Failed to inspect container: {container}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Failed to inspect container: {container}").ConfigureAwait(false);
             return 1;
         }
 
         if (!string.Equals(managedResult.StandardOutput.Trim(), "true", StringComparison.Ordinal))
         {
-            await _stderr.WriteLineAsync($"Container {container} exists but is not managed by ContainAI").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Container {container} exists but is not managed by ContainAI").ConfigureAwait(false);
             return 1;
         }
 
@@ -209,14 +209,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken).ConfigureAwait(false);
         if (inspect.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync($"Failed to inspect container: {container}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Failed to inspect container: {container}").ConfigureAwait(false);
             return 1;
         }
 
         var parts = inspect.StandardOutput.Trim().Split('|');
         if (parts.Length < 3)
         {
-            await _stderr.WriteLineAsync("Unable to parse container status").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unable to parse container status").ConfigureAwait(false);
             return 1;
         }
 
@@ -298,31 +298,31 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 jsonFields.Add($"\"cpu_percent\":\"{EscapeJson(cpuPercent)}\"");
             }
 
-            await _stdout.WriteLineAsync("{" + string.Join(",", jsonFields) + "}").ConfigureAwait(false);
+            await stdout.WriteLineAsync("{" + string.Join(",", jsonFields) + "}").ConfigureAwait(false);
             return 0;
         }
 
-        await _stdout.WriteLineAsync($"Container: {container}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"  Status: {status}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"  Image: {image}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"Container: {container}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  Status: {status}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  Image: {image}").ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(uptime))
         {
-            await _stdout.WriteLineAsync($"  Uptime: {uptime}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  Uptime: {uptime}").ConfigureAwait(false);
         }
 
         if (verbose)
         {
-            await _stdout.WriteLineAsync($"  Context: {context}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  Context: {context}").ConfigureAwait(false);
         }
 
         if (!string.IsNullOrWhiteSpace(memUsage) && !string.IsNullOrWhiteSpace(memLimit))
         {
-            await _stdout.WriteLineAsync($"  Memory: {memUsage} / {memLimit}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  Memory: {memUsage} / {memLimit}").ConfigureAwait(false);
         }
 
         if (!string.IsNullOrWhiteSpace(cpuPercent))
         {
-            await _stdout.WriteLineAsync($"  CPU: {cpuPercent}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  CPU: {cpuPercent}").ConfigureAwait(false);
         }
 
         return 0;
@@ -334,7 +334,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (args.Count <= 1)
         {
-            await _stdout.WriteLineAsync(GetRootHelpText()).ConfigureAwait(false);
+            await stdout.WriteLineAsync(GetRootHelpText()).ConfigureAwait(false);
             return 0;
         }
 
@@ -352,7 +352,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
     private async Task<int> WriteUsageAsync(string usage)
     {
-        await _stdout.WriteLineAsync(usage).ConfigureAwait(false);
+        await stdout.WriteLineAsync(usage).ConfigureAwait(false);
         return 0;
     }
 
@@ -365,11 +365,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (json)
         {
-            await _stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
             return 0;
         }
 
-        await _stdout.WriteLineAsync(versionInfo.Version).ConfigureAwait(false);
+        await stdout.WriteLineAsync(versionInfo.Version).ConfigureAwait(false);
         return 0;
     }
 
@@ -382,14 +382,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!ValidateOptions(args, 1, "--json", "--build-templates", "--reset-lima", "--help", "-h"))
         {
-            await _stderr.WriteLineAsync("Unknown doctor option. Use 'cai doctor --help'.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unknown doctor option. Use 'cai doctor --help'.").ConfigureAwait(false);
             return 1;
         }
 
         if (args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal))
         {
-            await _stdout.WriteLineAsync("Usage: cai doctor [--json] [--build-templates] [--reset-lima]").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("       cai doctor fix [--all | container [--all|<name>] | template [--all|<name>] ]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai doctor [--json] [--build-templates] [--reset-lima]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("       cai doctor fix [--all | container [--all|<name>] | template [--all|<name>] ]").ConfigureAwait(false);
             return 0;
         }
 
@@ -401,11 +401,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!OperatingSystem.IsMacOS())
             {
-                await _stderr.WriteLineAsync("--reset-lima is only available on macOS").ConfigureAwait(false);
+                await stderr.WriteLineAsync("--reset-lima is only available on macOS").ConfigureAwait(false);
                 return 1;
             }
 
-            await _stdout.WriteLineAsync("Resetting Lima VM containai...").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Resetting Lima VM containai...").ConfigureAwait(false);
             await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
             await RunProcessCaptureAsync("docker", ["context", "rm", "-f", "containai-docker"], cancellationToken).ConfigureAwait(false);
         }
@@ -438,17 +438,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (outputJson)
         {
-            await _stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()},\"templates\":{templateStatus.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()},\"templates\":{templateStatus.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
         }
         else
         {
-            await _stdout.WriteLineAsync($"Docker CLI: {(dockerCli ? "ok" : "missing")}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Context: {(contextExists ? contextName : "missing")}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Docker daemon: {(dockerInfo ? "ok" : "unreachable")}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"sysbox-runc runtime: {(sysboxRuntime ? "ok" : "missing")}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Docker CLI: {(dockerCli ? "ok" : "missing")}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Context: {(contextExists ? contextName : "missing")}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Docker daemon: {(dockerInfo ? "ok" : "unreachable")}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"sysbox-runc runtime: {(sysboxRuntime ? "ok" : "missing")}").ConfigureAwait(false);
             if (buildTemplates)
             {
-                await _stdout.WriteLineAsync($"Templates: {(templateStatus ? "ok" : "failed")}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Templates: {(templateStatus ? "ok" : "failed")}").ConfigureAwait(false);
             }
         }
 
@@ -471,13 +471,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
         if (showHelp)
         {
-            await _stdout.WriteLineAsync("Usage: cai setup [--dry-run] [--verbose] [--skip-templates]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai setup [--dry-run] [--verbose] [--skip-templates]").ConfigureAwait(false);
             return 0;
         }
 
         if (!ValidateOptions(args, 1, "--dry-run", "--verbose", "--skip-templates", "--help", "-h"))
         {
-            await _stderr.WriteLineAsync("Unknown setup option. Use 'cai setup --help'.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unknown setup option. Use 'cai setup --help'.").ConfigureAwait(false);
             return 1;
         }
 
@@ -489,14 +489,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (dryRun)
         {
-            await _stdout.WriteLineAsync($"Would create {containAiDir}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Would create {sshDir}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Would generate SSH key {sshKeyPath}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Would verify runtime socket {socketPath}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("Would create Docker context containai-docker").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would create {containAiDir}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would create {sshDir}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would generate SSH key {sshKeyPath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would verify runtime socket {socketPath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Would create Docker context containai-docker").ConfigureAwait(false);
             if (!skipTemplates)
             {
-                await _stdout.WriteLineAsync($"Would install templates to {ResolveTemplatesDirectory()}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would install templates to {ResolveTemplatesDirectory()}").ConfigureAwait(false);
             }
 
             return 0;
@@ -504,7 +504,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false))
         {
-            await _stderr.WriteLineAsync("Docker CLI is required for setup.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Docker CLI is required for setup.").ConfigureAwait(false);
             return 1;
         }
 
@@ -519,7 +519,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 cancellationToken).ConfigureAwait(false);
             if (keygen.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(keygen.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(keygen.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
@@ -548,13 +548,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 var error = createContext.StandardError.Trim();
                 if (!string.IsNullOrWhiteSpace(error))
                 {
-                    await _stderr.WriteLineAsync(error).ConfigureAwait(false);
+                    await stderr.WriteLineAsync(error).ConfigureAwait(false);
                 }
             }
         }
         else
         {
-            await _stderr.WriteLineAsync($"Setup warning: runtime socket not found at {socketPath}.").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Setup warning: runtime socket not found at {socketPath}.").ConfigureAwait(false);
         }
 
         if (!skipTemplates)
@@ -562,18 +562,18 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var templateResult = await RestoreTemplatesAsync(templateName: null, includeAll: true, cancellationToken).ConfigureAwait(false);
             if (templateResult != 0 && verbose)
             {
-                await _stderr.WriteLineAsync("Template installation completed with warnings.").ConfigureAwait(false);
+                await stderr.WriteLineAsync("Template installation completed with warnings.").ConfigureAwait(false);
             }
         }
 
         var doctorExitCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
         if (doctorExitCode != 0)
         {
-            await _stderr.WriteLineAsync("Setup completed with warnings. Run `cai doctor` for details.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Setup completed with warnings. Run `cai doctor` for details.").ConfigureAwait(false);
             return 1;
         }
 
-        await _stdout.WriteLineAsync("Setup complete.").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Setup complete.").ConfigureAwait(false);
         return doctorExitCode;
     }
 
@@ -589,10 +589,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (target is null && !fixAll)
         {
-            await _stdout.WriteLineAsync("Available doctor fix targets:").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("  --all").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("  container [--all|<name>]").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("  template [--all|<name>]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Available doctor fix targets:").ConfigureAwait(false);
+            await stdout.WriteLineAsync("  --all").ConfigureAwait(false);
+            await stdout.WriteLineAsync("  container [--all|<name>]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("  template [--all|<name>]").ConfigureAwait(false);
             return 0;
         }
 
@@ -600,8 +600,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var sshDir = Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d");
         if (dryRun)
         {
-            await _stdout.WriteLineAsync($"Would create {containAiDir} and {sshDir}").ConfigureAwait(false);
-            await _stdout.WriteLineAsync("Would ensure SSH include directive and cleanup stale SSH configs").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would create {containAiDir} and {sshDir}").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Would ensure SSH include directive and cleanup stale SSH configs").ConfigureAwait(false);
         }
         else
         {
@@ -624,18 +624,18 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (string.IsNullOrWhiteSpace(targetArg) || string.Equals(targetArg, "--all", StringComparison.Ordinal))
             {
-                await _stdout.WriteLineAsync("Container fix completed (SSH cleanup applied).").ConfigureAwait(false);
+                await stdout.WriteLineAsync("Container fix completed (SSH cleanup applied).").ConfigureAwait(false);
             }
             else
             {
                 var exists = await DockerContainerExistsAsync(targetArg, cancellationToken).ConfigureAwait(false);
                 if (!exists)
                 {
-                    await _stderr.WriteLineAsync($"Container not found: {targetArg}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Container not found: {targetArg}").ConfigureAwait(false);
                     return 1;
                 }
 
-                await _stdout.WriteLineAsync($"Container fix completed for {targetArg}.").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Container fix completed for {targetArg}.").ConfigureAwait(false);
             }
         }
 
@@ -695,7 +695,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var sourceRoot = ResolveBundledTemplatesDirectory();
         if (string.IsNullOrWhiteSpace(sourceRoot) || !Directory.Exists(sourceRoot))
         {
-            await _stderr.WriteLineAsync("Bundled templates not found; skipping template restore.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Bundled templates not found; skipping template restore.").ConfigureAwait(false);
             return 0;
         }
 
@@ -721,7 +721,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
 
             await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Restored template '{template}'").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Restored template '{template}'").ConfigureAwait(false);
         }
 
         return 0;
@@ -750,7 +750,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var options = ParseImportOptions(args);
         if (options.Error is not null)
         {
-            await _stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
             return 1;
         }
 
@@ -763,14 +763,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!string.IsNullOrWhiteSpace(explicitConfigPath) && !File.Exists(explicitConfigPath))
         {
-            await _stderr.WriteLineAsync($"Config file not found: {explicitConfigPath}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Config file not found: {explicitConfigPath}").ConfigureAwait(false);
             return 1;
         }
 
         var volume = await ResolveDataVolumeAsync(workspace, options.ExplicitVolume, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(volume))
         {
-            await _stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
             return 1;
         }
 
@@ -779,17 +779,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             : Path.GetFullPath(ExpandHomePath(options.SourcePath));
         if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
         {
-            await _stderr.WriteLineAsync($"Import source not found: {sourcePath}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Import source not found: {sourcePath}").ConfigureAwait(false);
             return 1;
         }
 
         var excludePriv = await ResolveImportExcludePrivAsync(workspace, explicitConfigPath, cancellationToken).ConfigureAwait(false);
         var context = ResolveDockerContextName();
 
-        await _stdout.WriteLineAsync($"Using data volume: {volume}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"Using data volume: {volume}").ConfigureAwait(false);
         if (options.DryRun)
         {
-            await _stdout.WriteLineAsync($"Dry-run context: {context}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Dry-run context: {context}").ConfigureAwait(false);
         }
 
         if (!options.DryRun)
@@ -797,7 +797,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var ensureVolume = await DockerCaptureAsync(["volume", "create", volume], cancellationToken).ConfigureAwait(false);
             if (ensureVolume.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(ensureVolume.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(ensureVolume.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
@@ -814,17 +814,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
 
@@ -832,7 +832,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!sourcePath.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
             {
-                await _stderr.WriteLineAsync($"Unsupported import source file type: {sourcePath}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Unsupported import source file type: {sourcePath}").ConfigureAwait(false);
                 return 1;
             }
 
@@ -857,7 +857,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 }
             }
 
-            await _stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
             return 0;
         }
 
@@ -884,7 +884,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (options.Verbose)
                 {
-                    await _stderr.WriteLineAsync($"Skipping secret entry: {entry.Source}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Skipping secret entry: {entry.Source}").ConfigureAwait(false);
                 }
 
                 continue;
@@ -958,7 +958,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return overrideCode;
         }
 
-        await _stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
         return 0;
     }
 
@@ -1034,7 +1034,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.IsNullOrWhiteSpace(result.StandardError))
             {
-                await _stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return 1;
@@ -1042,7 +1042,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (verbose)
         {
-            await _stdout.WriteLineAsync("[INFO] Enforced secret path permissions").ConfigureAwait(false);
+            await stdout.WriteLineAsync("[INFO] Enforced secret path permissions").ConfigureAwait(false);
         }
 
         return 0;
@@ -1181,7 +1181,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (verbose && !string.IsNullOrWhiteSpace(result.StandardError))
             {
-                await _stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return [];
@@ -1200,7 +1200,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             if (pathsElement.ValueKind != JsonValueKind.Array)
             {
-                await _stderr.WriteLineAsync("[WARN] [import].additional_paths must be a list; ignoring").ConfigureAwait(false);
+                await stderr.WriteLineAsync("[WARN] [import].additional_paths must be a list; ignoring").ConfigureAwait(false);
                 return [];
             }
 
@@ -1210,7 +1210,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (item.ValueKind != JsonValueKind.String)
                 {
-                    await _stderr.WriteLineAsync($"[WARN] [import].additional_paths item must be a string; got {item.ValueKind}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] [import].additional_paths item must be a string; got {item.ValueKind}").ConfigureAwait(false);
                     continue;
                 }
 
@@ -1219,7 +1219,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 {
                     if (!string.IsNullOrWhiteSpace(warning))
                     {
-                        await _stderr.WriteLineAsync(warning).ConfigureAwait(false);
+                        await stderr.WriteLineAsync(warning).ConfigureAwait(false);
                     }
 
                     continue;
@@ -1239,7 +1239,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (verbose)
             {
-                await _stderr.WriteLineAsync($"[WARN] Failed to parse config JSON for additional paths: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Failed to parse config JSON for additional paths: {ex.Message}").ConfigureAwait(false);
             }
 
             return [];
@@ -1412,13 +1412,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (dryRun)
         {
-            await _stdout.WriteLineAsync($"[DRY-RUN] Would sync additional path {additionalPath.SourcePath} -> {additionalPath.TargetPath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"[DRY-RUN] Would sync additional path {additionalPath.SourcePath} -> {additionalPath.TargetPath}").ConfigureAwait(false);
             return 0;
         }
 
         if (verbose && noExcludes)
         {
-            await _stdout.WriteLineAsync("[INFO] --no-excludes does not disable .priv. filtering for additional paths").ConfigureAwait(false);
+            await stdout.WriteLineAsync("[INFO] --no-excludes does not disable .priv. filtering for additional paths").ConfigureAwait(false);
         }
 
         var ensureCommand = additionalPath.IsDirectory
@@ -1431,7 +1431,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.IsNullOrWhiteSpace(ensureResult.StandardError))
             {
-                await _stderr.WriteLineAsync(ensureResult.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(ensureResult.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return 1;
@@ -1478,7 +1478,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 normalizedError += $"{Environment.NewLine}cannot delete non-empty directory";
             }
 
-            await _stderr.WriteLineAsync(normalizedError).ConfigureAwait(false);
+            await stderr.WriteLineAsync(normalizedError).ConfigureAwait(false);
             return 1;
         }
 
@@ -1509,7 +1509,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken).ConfigureAwait(false);
         if (clear.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(clear.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(clear.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -1540,7 +1540,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var extract = await DockerCaptureAsync(extractArgs, cancellationToken).ConfigureAwait(false);
         if (extract.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(extract.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(extract.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -1583,7 +1583,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     cancellationToken).ConfigureAwait(false);
                 if (ensureDir.ExitCode != 0)
                 {
-                    await _stderr.WriteLineAsync(ensureDir.StandardError.Trim()).ConfigureAwait(false);
+                    await stderr.WriteLineAsync(ensureDir.StandardError.Trim()).ConfigureAwait(false);
                     return 1;
                 }
 
@@ -1620,7 +1620,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 cancellationToken).ConfigureAwait(false);
             if (ensureFile.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(ensureFile.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(ensureFile.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
@@ -1644,7 +1644,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (verbose && !entry.Optional)
             {
-                await _stderr.WriteLineAsync($"Source not found: {entry.Source}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Source not found: {entry.Source}").ConfigureAwait(false);
             }
 
             return 0;
@@ -1652,7 +1652,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (dryRun)
         {
-            await _stdout.WriteLineAsync($"[DRY-RUN] Would sync {entry.Source} -> {entry.Target}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"[DRY-RUN] Would sync {entry.Source} -> {entry.Target}").ConfigureAwait(false);
             return 0;
         }
 
@@ -1704,7 +1704,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         if (result.ExitCode != 0)
         {
             var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
-            await _stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -1758,7 +1758,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var absoluteTarget = Path.GetFullPath(symlink.Target);
             if (!IsPathWithinDirectory(absoluteTarget, sourceDirectoryPath))
             {
-                await _stderr.WriteLineAsync($"[WARN] preserving external absolute symlink: {symlink.RelativePath} -> {symlink.Target}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] preserving external absolute symlink: {symlink.RelativePath} -> {symlink.Target}").ConfigureAwait(false);
                 continue;
             }
 
@@ -1800,7 +1800,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         if (result.ExitCode != 0)
         {
             var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
-            await _stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(errorOutput.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -1983,7 +1983,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.IsNullOrWhiteSpace(chmodResult.StandardError))
             {
-                await _stderr.WriteLineAsync(chmodResult.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(chmodResult.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return 1;
@@ -2033,7 +2033,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.IsNullOrWhiteSpace(filterResult.StandardError))
             {
-                await _stderr.WriteLineAsync(filterResult.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(filterResult.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return 1;
@@ -2041,7 +2041,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (verbose)
         {
-            await _stdout.WriteLineAsync($"[INFO] Applied git filter to {targetRelativePath}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"[INFO] Applied git filter to {targetRelativePath}").ConfigureAwait(false);
         }
 
         return 0;
@@ -2070,7 +2070,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             if (IsSymbolicLinkPath(file))
             {
-                await _stderr.WriteLineAsync($"Skipping override symlink: {file}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Skipping override symlink: {file}").ConfigureAwait(false);
                 continue;
             }
 
@@ -2084,7 +2084,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (verbose)
                 {
-                    await _stderr.WriteLineAsync($"Skipping unmapped override path: {relative}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Skipping unmapped override path: {relative}").ConfigureAwait(false);
                 }
 
                 continue;
@@ -2094,7 +2094,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (verbose)
                 {
-                    await _stderr.WriteLineAsync($"Skipping secret override due to --no-secrets: {relative}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Skipping secret override due to --no-secrets: {relative}").ConfigureAwait(false);
                 }
 
                 continue;
@@ -2102,7 +2102,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"[DRY-RUN] Would apply override {relative} -> {mappedTarget}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"[DRY-RUN] Would apply override {relative} -> {mappedTarget}").ConfigureAwait(false);
                 continue;
             }
 
@@ -2114,7 +2114,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 cancellationToken).ConfigureAwait(false);
             if (copy.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(copy.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(copy.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
@@ -2143,7 +2143,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.IsNullOrWhiteSpace(configResult.StandardError))
             {
-                await _stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
             }
 
             return 1;
@@ -2151,7 +2151,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!string.IsNullOrWhiteSpace(configResult.StandardError))
         {
-            await _stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
         }
 
         using var configDocument = JsonDocument.Parse(configResult.StandardOutput);
@@ -2163,18 +2163,18 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (envSection.ValueKind != JsonValueKind.Object)
         {
-            await _stderr.WriteLineAsync("[WARN] [env] section must be a table; skipping env import").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] [env] section must be a table; skipping env import").ConfigureAwait(false);
             return 0;
         }
 
         var importKeys = new List<string>();
         if (!envSection.TryGetProperty("import", out var importArray))
         {
-            await _stderr.WriteLineAsync("[WARN] [env].import missing, treating as empty list").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] [env].import missing, treating as empty list").ConfigureAwait(false);
         }
         else if (importArray.ValueKind != JsonValueKind.Array)
         {
-            await _stderr.WriteLineAsync($"[WARN] [env].import must be a list, got {importArray.ValueKind}; treating as empty list").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] [env].import must be a list, got {importArray.ValueKind}; treating as empty list").ConfigureAwait(false);
         }
         else
         {
@@ -2191,7 +2191,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 }
                 else
                 {
-                    await _stderr.WriteLineAsync($"[WARN] [env].import[{itemIndex}] must be a string, got {value.ValueKind}; skipping").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] [env].import[{itemIndex}] must be a string, got {value.ValueKind}; skipping").ConfigureAwait(false);
                 }
 
                 itemIndex++;
@@ -2212,7 +2212,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (verbose)
             {
-                await _stdout.WriteLineAsync("[INFO] Empty env allowlist, skipping env import").ConfigureAwait(false);
+                await stdout.WriteLineAsync("[INFO] Empty env allowlist, skipping env import").ConfigureAwait(false);
             }
 
             return 0;
@@ -2223,7 +2223,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!EnvVarNameRegex().IsMatch(key))
             {
-                await _stderr.WriteLineAsync($"[WARN] Invalid env var name in allowlist: {key}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Invalid env var name in allowlist: {key}").ConfigureAwait(false);
                 continue;
             }
 
@@ -2245,7 +2245,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 var envFileResolution = ResolveEnvFilePath(workspaceRoot, envFile);
                 if (envFileResolution.Error is not null)
                 {
-                    await _stderr.WriteLineAsync(envFileResolution.Error).ConfigureAwait(false);
+                    await stderr.WriteLineAsync(envFileResolution.Error).ConfigureAwait(false);
                     return 1;
                 }
 
@@ -2254,7 +2254,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     var parsed = ParseEnvFile(envFileResolution.Path);
                     foreach (var warning in parsed.Warnings)
                     {
-                        await _stderr.WriteLineAsync(warning).ConfigureAwait(false);
+                        await stderr.WriteLineAsync(warning).ConfigureAwait(false);
                     }
 
                     foreach (var (key, value) in parsed.Values)
@@ -2277,7 +2277,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
             else if (fromHostElement.ValueKind != JsonValueKind.False)
             {
-                await _stderr.WriteLineAsync("[WARN] [env].from_host must be a boolean; using false").ConfigureAwait(false);
+                await stderr.WriteLineAsync("[WARN] [env].from_host must be a boolean; using false").ConfigureAwait(false);
             }
         }
         var merged = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -2293,13 +2293,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 var envValue = Environment.GetEnvironmentVariable(key);
                 if (envValue is null)
                 {
-                    await _stderr.WriteLineAsync($"[WARN] Missing host env var: {key}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Missing host env var: {key}").ConfigureAwait(false);
                     continue;
                 }
 
                 if (envValue.Contains('\n', StringComparison.Ordinal))
                 {
-                    await _stderr.WriteLineAsync($"[WARN] source=host: key '{key}' skipped (multiline value)").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] source=host: key '{key}' skipped (multiline value)").ConfigureAwait(false);
                     continue;
                 }
 
@@ -2316,7 +2316,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             foreach (var key in merged.Keys.OrderBy(static value => value, StringComparer.Ordinal))
             {
-                await _stdout.WriteLineAsync($"[DRY-RUN] env key: {key}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"[DRY-RUN] env key: {key}").ConfigureAwait(false);
             }
 
             return 0;
@@ -2344,7 +2344,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken).ConfigureAwait(false);
         if (write.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(write.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(write.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -2362,7 +2362,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             : await ResolveDataVolumeFromContainerAsync(container, explicitVolume, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(volume))
         {
-            await _stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
             return 1;
         }
 
@@ -2384,11 +2384,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken).ConfigureAwait(false);
         if (exportResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(exportResult.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(exportResult.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
-        await _stdout.WriteLineAsync(outputPath).ConfigureAwait(false);
+        await stdout.WriteLineAsync(outputPath).ConfigureAwait(false);
         return 0;
     }
 
@@ -2399,7 +2399,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var destinationRoot = "/mnt/agent-data";
         if (!Directory.Exists(destinationRoot))
         {
-            await _stderr.WriteLineAsync("sync must run inside a container with /mnt/agent-data").ConfigureAwait(false);
+            await stderr.WriteLineAsync("sync must run inside a container with /mnt/agent-data").ConfigureAwait(false);
             return 1;
         }
 
@@ -2416,7 +2416,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
         }
 
-        await _stdout.WriteLineAsync("Sync complete.").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Sync complete.").ConfigureAwait(false);
         return 0;
     }
 
@@ -2424,7 +2424,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
-            await _stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
             return 0;
         }
 
@@ -2432,7 +2432,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         if (!string.Equals(subcommand, "check", StringComparison.Ordinal) &&
             !string.Equals(subcommand, "fix", StringComparison.Ordinal))
         {
-            await _stderr.WriteLineAsync($"Unknown links subcommand: {subcommand}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Unknown links subcommand: {subcommand}").ConfigureAwait(false);
             return 1;
         }
 
@@ -2450,7 +2450,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 case "--container":
                     if (index + 1 >= args.Count)
                     {
-                        await _stderr.WriteLineAsync($"{token} requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync($"{token} requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -2459,7 +2459,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 case "--workspace":
                     if (index + 1 >= args.Count)
                     {
-                        await _stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -2481,7 +2481,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     break;
                 case "-h":
                 case "--help":
-                    await _stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
+                    await stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
                     return 0;
                 default:
                     if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(workspace))
@@ -2490,7 +2490,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                     }
                     else if (!string.Equals(token, "--", StringComparison.Ordinal))
                     {
-                        await _stderr.WriteLineAsync($"Unknown links option: {token}").ConfigureAwait(false);
+                        await stderr.WriteLineAsync($"Unknown links option: {token}").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -2509,7 +2509,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (string.IsNullOrWhiteSpace(containerName))
         {
-            await _stderr.WriteLineAsync($"Unable to resolve container for workspace: {resolvedWorkspace}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Unable to resolve container for workspace: {resolvedWorkspace}").ConfigureAwait(false);
             return 1;
         }
 
@@ -2519,7 +2519,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (stateResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync($"Container not found: {containerName}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Container not found: {containerName}").ConfigureAwait(false);
             return 1;
         }
 
@@ -2528,7 +2528,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!string.Equals(state, "running", StringComparison.Ordinal))
             {
-                await _stderr.WriteLineAsync($"Container '{containerName}' is not running (state: {state}).").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Container '{containerName}' is not running (state: {state}).").ConfigureAwait(false);
                 return 1;
             }
         }
@@ -2537,7 +2537,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var startResult = await DockerCaptureAsync(["start", containerName], cancellationToken).ConfigureAwait(false);
             if (startResult.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync($"Failed to start container '{containerName}': {startResult.StandardError.Trim()}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Failed to start container '{containerName}': {startResult.StandardError.Trim()}").ConfigureAwait(false);
                 return 1;
             }
         }
@@ -2575,7 +2575,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var output = runResult.StandardOutput.Trim();
             if (!string.IsNullOrWhiteSpace(output))
             {
-                await _stdout.WriteLineAsync(output).ConfigureAwait(false);
+                await stdout.WriteLineAsync(output).ConfigureAwait(false);
             }
         }
 
@@ -2584,7 +2584,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var error = runResult.StandardError.Trim();
             if (!string.IsNullOrWhiteSpace(error))
             {
-                await _stderr.WriteLineAsync(error).ConfigureAwait(false);
+                await stderr.WriteLineAsync(error).ConfigureAwait(false);
             }
         }
 
@@ -2599,46 +2599,46 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
         if (showHelp)
         {
-            await _stdout.WriteLineAsync("Usage: cai update [--dry-run] [--stop-containers] [--force] [--lima-recreate]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai update [--dry-run] [--stop-containers] [--force] [--lima-recreate]").ConfigureAwait(false);
             return 0;
         }
 
         if (!ValidateOptions(args, 1, "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose", "--help", "-h"))
         {
-            await _stderr.WriteLineAsync("Unknown update option. Use 'cai update --help'.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unknown update option. Use 'cai update --help'.").ConfigureAwait(false);
             return 1;
         }
 
         if (dryRun)
         {
-            await _stdout.WriteLineAsync("Would pull latest base image for configured channel.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Would pull latest base image for configured channel.").ConfigureAwait(false);
             if (stopContainers)
             {
-                await _stdout.WriteLineAsync("Would stop running ContainAI containers before update.").ConfigureAwait(false);
+                await stdout.WriteLineAsync("Would stop running ContainAI containers before update.").ConfigureAwait(false);
             }
             if (limaRecreate)
             {
-                await _stdout.WriteLineAsync("Would recreate Lima VM 'containai'.").ConfigureAwait(false);
+                await stdout.WriteLineAsync("Would recreate Lima VM 'containai'.").ConfigureAwait(false);
             }
 
-            await _stdout.WriteLineAsync("Would refresh templates and verify installation.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Would refresh templates and verify installation.").ConfigureAwait(false);
             return 0;
         }
 
         if (limaRecreate && !OperatingSystem.IsMacOS())
         {
-            await _stderr.WriteLineAsync("--lima-recreate is only supported on macOS.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("--lima-recreate is only supported on macOS.").ConfigureAwait(false);
             return 1;
         }
 
         if (limaRecreate)
         {
-            await _stdout.WriteLineAsync("Recreating Lima VM 'containai'...").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Recreating Lima VM 'containai'...").ConfigureAwait(false);
             await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
             var start = await RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
             if (start.ExitCode != 0)
             {
-                await _stderr.WriteLineAsync(start.StandardError.Trim()).ConfigureAwait(false);
+                await stderr.WriteLineAsync(start.StandardError.Trim()).ConfigureAwait(false);
                 return 1;
             }
         }
@@ -2667,11 +2667,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var doctorCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
         if (doctorCode != 0)
         {
-            await _stderr.WriteLineAsync("Update completed with validation warnings. Run `cai doctor` for details.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Update completed with validation warnings. Run `cai doctor` for details.").ConfigureAwait(false);
             return 1;
         }
 
-        await _stdout.WriteLineAsync("Update complete.").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Update complete.").ConfigureAwait(false);
         return 0;
     }
 
@@ -2680,13 +2680,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
         if (showHelp)
         {
-            await _stdout.WriteLineAsync("Usage: cai refresh [--rebuild] [--verbose]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai refresh [--rebuild] [--verbose]").ConfigureAwait(false);
             return 0;
         }
 
         if (!ValidateOptions(args, 1, "--rebuild", "--verbose", "--help", "-h"))
         {
-            await _stderr.WriteLineAsync("Unknown refresh option. Use 'cai refresh --help'.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unknown refresh option. Use 'cai refresh --help'.").ConfigureAwait(false);
             return 1;
         }
 
@@ -2695,24 +2695,24 @@ internal sealed partial class NativeLifecycleCommandRuntime
             ? "ghcr.io/novotnyllc/containai:nightly"
             : "ghcr.io/novotnyllc/containai:latest";
 
-        await _stdout.WriteLineAsync($"Pulling {baseImage}...").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"Pulling {baseImage}...").ConfigureAwait(false);
         var pull = await DockerCaptureAsync(["pull", baseImage], cancellationToken).ConfigureAwait(false);
         if (pull.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(pull.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(pull.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
         if (!args.Contains("--rebuild", StringComparer.Ordinal))
         {
-            await _stdout.WriteLineAsync("Refresh complete.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Refresh complete.").ConfigureAwait(false);
             return 0;
         }
 
         var templatesRoot = ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
-            await _stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
             return 1;
         }
 
@@ -2741,11 +2741,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
             if (build.ExitCode != 0)
             {
                 failures++;
-                await _stderr.WriteLineAsync($"Template rebuild failed for '{templateName}': {build.StandardError.Trim()}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Template rebuild failed for '{templateName}': {build.StandardError.Trim()}").ConfigureAwait(false);
                 continue;
             }
 
-            await _stdout.WriteLineAsync($"Rebuilt template '{templateName}' as {imageName}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Rebuilt template '{templateName}' as {imageName}").ConfigureAwait(false);
         }
 
         return failures == 0 ? 0 : 1;
@@ -2756,13 +2756,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
         if (showHelp)
         {
-            await _stdout.WriteLineAsync("Usage: cai uninstall [--dry-run] [--containers] [--volumes] [--force]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai uninstall [--dry-run] [--containers] [--volumes] [--force]").ConfigureAwait(false);
             return 0;
         }
 
         if (!ValidateOptions(args, 1, "--dry-run", "--containers", "--volumes", "--force", "--verbose", "--help", "-h"))
         {
-            await _stderr.WriteLineAsync("Unknown uninstall option. Use 'cai uninstall --help'.").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Unknown uninstall option. Use 'cai uninstall --help'.").ConfigureAwait(false);
             return 1;
         }
 
@@ -2775,7 +2775,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would remove Docker context: {context}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would remove Docker context: {context}").ConfigureAwait(false);
                 continue;
             }
 
@@ -2784,14 +2784,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!removeContainers)
         {
-            await _stdout.WriteLineAsync("Uninstall complete (contexts cleaned). Use --containers/--volumes for full cleanup.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Uninstall complete (contexts cleaned). Use --containers/--volumes for full cleanup.").ConfigureAwait(false);
             return 0;
         }
 
         var list = await DockerCaptureAsync(["ps", "-aq", "--filter", "label=containai.managed=true"], cancellationToken).ConfigureAwait(false);
         if (list.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(list.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(list.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -2801,7 +2801,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
             }
             else
             {
@@ -2830,14 +2830,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would remove volume {volume}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would remove volume {volume}").ConfigureAwait(false);
                 continue;
             }
 
             await DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
         }
 
-        await _stdout.WriteLineAsync("Uninstall complete.").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Uninstall complete.").ConfigureAwait(false);
         return 0;
     }
 
@@ -2845,14 +2845,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2)
         {
-            await _stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
             return 1;
         }
 
         var parsed = ParseConfigOptions(args.Skip(1).ToArray());
         if (parsed.Error is not null)
         {
-            await _stderr.WriteLineAsync(parsed.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(parsed.Error).ConfigureAwait(false);
             return 1;
         }
 
@@ -2882,7 +2882,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
-            await _stdout.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
             return 0;
         }
 
@@ -2898,8 +2898,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
     private async Task<int> WriteManifestSubcommandErrorAsync(string subcommand)
     {
-        await _stderr.WriteLineAsync($"Unknown manifest subcommand: {subcommand}").ConfigureAwait(false);
-        await _stderr.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
+        await stderr.WriteLineAsync($"Unknown manifest subcommand: {subcommand}").ConfigureAwait(false);
+        await stderr.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
         return 1;
     }
 
@@ -2922,13 +2922,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 default:
                     if (token.StartsWith('-'))
                     {
-                        await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+                        await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
                         return 1;
                     }
 
                     if (manifestPath is not null)
                     {
-                        await _stderr.WriteLineAsync("ERROR: only one manifest path is supported").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("ERROR: only one manifest path is supported").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -2939,7 +2939,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (string.IsNullOrWhiteSpace(manifestPath))
         {
-            await _stderr.WriteLineAsync("ERROR: manifest file or directory required").ConfigureAwait(false);
+            await stderr.WriteLineAsync("ERROR: manifest file or directory required").ConfigureAwait(false);
             return 1;
         }
 
@@ -2949,24 +2949,24 @@ internal sealed partial class NativeLifecycleCommandRuntime
             foreach (var entry in parsed)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await _stdout.WriteLineAsync(entry.ToString()).ConfigureAwait(false);
+                await stdout.WriteLineAsync(entry.ToString()).ConfigureAwait(false);
             }
 
             return 0;
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }
@@ -2975,7 +2975,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Length < 2)
         {
-            await _stderr.WriteLineAsync("ERROR: usage: cai manifest generate container-link-spec <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
+            await stderr.WriteLineAsync("ERROR: usage: cai manifest generate container-link-spec <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
             return 1;
         }
 
@@ -3000,27 +3000,27 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 }
 
                 await File.WriteAllTextAsync(outputPath, generated.Content, cancellationToken).ConfigureAwait(false);
-                await _stderr.WriteLineAsync($"Generated: {outputPath} ({generated.Count} links)").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Generated: {outputPath} ({generated.Count} links)").ConfigureAwait(false);
 
                 return 0;
             }
 
-            await _stdout.WriteAsync(generated.Content).ConfigureAwait(false);
+            await stdout.WriteAsync(generated.Content).ConfigureAwait(false);
             return 0;
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }
@@ -3029,7 +3029,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Length < 2)
         {
-            await _stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [options]").ConfigureAwait(false);
+            await stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [options]").ConfigureAwait(false);
             return 1;
         }
 
@@ -3045,7 +3045,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var token = args[index];
             if (token is "-h" or "--help")
             {
-                await _stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>] [--shim-dir <path>] [--cai-binary <path>]").ConfigureAwait(false);
+                await stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>] [--shim-dir <path>] [--cai-binary <path>]").ConfigureAwait(false);
                 return 0;
             }
 
@@ -3053,7 +3053,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
-                    await _stderr.WriteLineAsync("ERROR: --data-dir requires a value").ConfigureAwait(false);
+                    await stderr.WriteLineAsync("ERROR: --data-dir requires a value").ConfigureAwait(false);
                     return 1;
                 }
 
@@ -3071,7 +3071,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
-                    await _stderr.WriteLineAsync("ERROR: --home-dir requires a value").ConfigureAwait(false);
+                    await stderr.WriteLineAsync("ERROR: --home-dir requires a value").ConfigureAwait(false);
                     return 1;
                 }
 
@@ -3089,7 +3089,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
-                    await _stderr.WriteLineAsync("ERROR: --shim-dir requires a value").ConfigureAwait(false);
+                    await stderr.WriteLineAsync("ERROR: --shim-dir requires a value").ConfigureAwait(false);
                     return 1;
                 }
 
@@ -3107,7 +3107,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                 {
-                    await _stderr.WriteLineAsync("ERROR: --cai-binary requires a value").ConfigureAwait(false);
+                    await stderr.WriteLineAsync("ERROR: --cai-binary requires a value").ConfigureAwait(false);
                     return 1;
                 }
 
@@ -3121,7 +3121,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 continue;
             }
 
-            await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3136,22 +3136,22 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 _ => throw new InvalidOperationException($"unknown apply kind: {kind}"),
             };
 
-            await _stderr.WriteLineAsync($"Applied {kind}: {applied}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Applied {kind}: {applied}").ConfigureAwait(false);
             return 0;
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }
@@ -3167,12 +3167,12 @@ internal sealed partial class NativeLifecycleCommandRuntime
             {
                 case "-h":
                 case "--help":
-                    await _stdout.WriteLineAsync("Usage: cai manifest check [--manifest-dir <path>]").ConfigureAwait(false);
+                    await stdout.WriteLineAsync("Usage: cai manifest check [--manifest-dir <path>]").ConfigureAwait(false);
                     return 0;
                 case "--manifest-dir":
                     if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
                     {
-                        await _stderr.WriteLineAsync("ERROR: --manifest-dir requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("ERROR: --manifest-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -3187,13 +3187,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
                     if (token.StartsWith('-'))
                     {
-                        await _stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
+                        await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
                         return 1;
                     }
 
                     if (manifestDirectory is not null)
                     {
-                        await _stderr.WriteLineAsync("ERROR: only one manifest directory can be specified").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("ERROR: only one manifest directory can be specified").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -3205,7 +3205,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         manifestDirectory = ResolveManifestDirectory(manifestDirectory);
         if (!Directory.Exists(manifestDirectory))
         {
-            await _stderr.WriteLineAsync($"ERROR: manifest directory not found: {manifestDirectory}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: manifest directory not found: {manifestDirectory}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3215,7 +3215,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             .ToArray();
         if (manifestFiles.Length == 0)
         {
-            await _stderr.WriteLineAsync($"ERROR: no .toml files found in directory: {manifestDirectory}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: no .toml files found in directory: {manifestDirectory}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3242,7 +3242,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (initApplied <= 0)
         {
-            await _stderr.WriteLineAsync("ERROR: init-dir apply produced no operations").ConfigureAwait(false);
+            await stderr.WriteLineAsync("ERROR: init-dir apply produced no operations").ConfigureAwait(false);
             return 1;
         }
 
@@ -3253,17 +3253,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 !document.RootElement.TryGetProperty("links", out var links) ||
                 links.ValueKind != JsonValueKind.Array)
             {
-                await _stderr.WriteLineAsync("ERROR: generated link spec appears invalid").ConfigureAwait(false);
+                await stderr.WriteLineAsync("ERROR: generated link spec appears invalid").ConfigureAwait(false);
                 return 1;
             }
         }
         catch (JsonException)
         {
-            await _stderr.WriteLineAsync("ERROR: generated link spec is not valid JSON").ConfigureAwait(false);
+            await stderr.WriteLineAsync("ERROR: generated link spec is not valid JSON").ConfigureAwait(false);
             return 1;
         }
 
-        await _stdout.WriteLineAsync("Manifest consistency check passed.").ConfigureAwait(false);
+        await stdout.WriteLineAsync("Manifest consistency check passed.").ConfigureAwait(false);
         return 0;
     }
 
@@ -3342,11 +3342,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var parseResult = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
         if (parseResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(parseResult.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(parseResult.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
-        await _stdout.WriteLineAsync(parseResult.StandardOutput.Trim()).ConfigureAwait(false);
+        await stdout.WriteLineAsync(parseResult.StandardOutput.Trim()).ConfigureAwait(false);
         return 0;
     }
 
@@ -3354,7 +3354,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (string.IsNullOrWhiteSpace(parsed.Key))
         {
-            await _stderr.WriteLineAsync("config get requires <key>").ConfigureAwait(false);
+            await stderr.WriteLineAsync("config get requires <key>").ConfigureAwait(false);
             return 1;
         }
 
@@ -3362,7 +3362,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
         if (workspaceScope.Error is not null)
         {
-            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
             return 1;
         }
 
@@ -3380,7 +3380,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             if (wsJson.RootElement.ValueKind == JsonValueKind.Object &&
                 wsJson.RootElement.TryGetProperty(parsed.Key, out var wsValue))
             {
-                await _stdout.WriteLineAsync(wsValue.ToString()).ConfigureAwait(false);
+                await stdout.WriteLineAsync(wsValue.ToString()).ConfigureAwait(false);
                 return 0;
             }
 
@@ -3396,7 +3396,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        await _stdout.WriteLineAsync(getResult.StandardOutput.Trim()).ConfigureAwait(false);
+        await stdout.WriteLineAsync(getResult.StandardOutput.Trim()).ConfigureAwait(false);
         return 0;
     }
 
@@ -3404,7 +3404,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (string.IsNullOrWhiteSpace(parsed.Key) || parsed.Value is null)
         {
-            await _stderr.WriteLineAsync("config set requires <key> <value>").ConfigureAwait(false);
+            await stderr.WriteLineAsync("config set requires <key> <value>").ConfigureAwait(false);
             return 1;
         }
 
@@ -3412,7 +3412,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
         if (workspaceScope.Error is not null)
         {
-            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
             return 1;
         }
 
@@ -3432,7 +3432,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (setResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(setResult.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(setResult.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -3443,7 +3443,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (string.IsNullOrWhiteSpace(parsed.Key))
         {
-            await _stderr.WriteLineAsync("config unset requires <key>").ConfigureAwait(false);
+            await stderr.WriteLineAsync("config unset requires <key>").ConfigureAwait(false);
             return 1;
         }
 
@@ -3451,7 +3451,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var workspaceScope = ResolveWorkspaceScope(parsed, normalizedKey);
         if (workspaceScope.Error is not null)
         {
-            await _stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
+            await stderr.WriteLineAsync(workspaceScope.Error).ConfigureAwait(false);
             return 1;
         }
 
@@ -3471,7 +3471,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (unsetResult.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(unsetResult.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(unsetResult.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -3490,7 +3490,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        await _stdout.WriteLineAsync(volume).ConfigureAwait(false);
+        await stdout.WriteLineAsync(volume).ConfigureAwait(false);
         return 0;
     }
 
@@ -3498,13 +3498,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
-            await _stdout.WriteLineAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false);
             return 0;
         }
 
         if (!string.Equals(args[1], "upgrade", StringComparison.Ordinal))
         {
-            await _stderr.WriteLineAsync($"Unknown template subcommand: {args[1]}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Unknown template subcommand: {args[1]}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3514,7 +3514,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var templatesRoot = ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
-            await _stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3543,17 +3543,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             changedCount++;
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would upgrade {dockerfile}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would upgrade {dockerfile}").ConfigureAwait(false);
                 continue;
             }
 
             await File.WriteAllTextAsync(dockerfile, updated, cancellationToken).ConfigureAwait(false);
-            await _stdout.WriteLineAsync($"Upgraded {dockerfile}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Upgraded {dockerfile}").ConfigureAwait(false);
         }
 
         if (changedCount == 0)
         {
-            await _stdout.WriteLineAsync("No template changes required.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("No template changes required.").ConfigureAwait(false);
         }
 
         return 0;
@@ -3563,13 +3563,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
-            await _stdout.WriteLineAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false);
+            await stdout.WriteLineAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false);
             return 0;
         }
 
         if (!string.Equals(args[1], "cleanup", StringComparison.Ordinal))
         {
-            await _stderr.WriteLineAsync($"Unknown ssh subcommand: {args[1]}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Unknown ssh subcommand: {args[1]}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3594,17 +3594,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             removed++;
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would remove {file}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would remove {file}").ConfigureAwait(false);
                 continue;
             }
 
             File.Delete(file);
-            await _stdout.WriteLineAsync($"Removed {file}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Removed {file}").ConfigureAwait(false);
         }
 
         if (removed == 0)
         {
-            await _stdout.WriteLineAsync("No stale SSH configs found.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("No stale SSH configs found.").ConfigureAwait(false);
         }
 
         return 0;
@@ -3620,19 +3620,19 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!ValidateStopArgs(args, out var stopValidationError))
         {
-            await _stderr.WriteLineAsync(stopValidationError).ConfigureAwait(false);
+            await stderr.WriteLineAsync(stopValidationError).ConfigureAwait(false);
             return 1;
         }
 
         if (stopAll && !string.IsNullOrWhiteSpace(containerName))
         {
-            await _stderr.WriteLineAsync("--all and --container are mutually exclusive").ConfigureAwait(false);
+            await stderr.WriteLineAsync("--all and --container are mutually exclusive").ConfigureAwait(false);
             return 1;
         }
 
         if (stopAll && exportFirst)
         {
-            await _stderr.WriteLineAsync("--export and --all are mutually exclusive").ConfigureAwait(false);
+            await stderr.WriteLineAsync("--export and --all are mutually exclusive").ConfigureAwait(false);
             return 1;
         }
 
@@ -3642,13 +3642,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var contexts = await FindContainerContextsAsync(containerName, cancellationToken).ConfigureAwait(false);
             if (contexts.Count == 0)
             {
-                await _stderr.WriteLineAsync($"Container not found: {containerName}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Container not found: {containerName}").ConfigureAwait(false);
                 return 1;
             }
 
             if (contexts.Count > 1)
             {
-                await _stderr.WriteLineAsync($"Container '{containerName}' exists in multiple contexts: {string.Join(", ", contexts)}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Container '{containerName}' exists in multiple contexts: {string.Join(", ", contexts)}").ConfigureAwait(false);
                 return 1;
             }
 
@@ -3679,20 +3679,20 @@ internal sealed partial class NativeLifecycleCommandRuntime
             var workspaceContainer = await ResolveWorkspaceContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(workspaceContainer))
             {
-                await _stderr.WriteLineAsync("Usage: cai stop --all | --container <name> [--remove]").ConfigureAwait(false);
+                await stderr.WriteLineAsync("Usage: cai stop --all | --container <name> [--remove]").ConfigureAwait(false);
                 return 1;
             }
 
             var contexts = await FindContainerContextsAsync(workspaceContainer, cancellationToken).ConfigureAwait(false);
             if (contexts.Count == 0)
             {
-                await _stderr.WriteLineAsync($"Container not found: {workspaceContainer}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Container not found: {workspaceContainer}").ConfigureAwait(false);
                 return 1;
             }
 
             if (contexts.Count > 1)
             {
-                await _stderr.WriteLineAsync($"Container '{workspaceContainer}' exists in multiple contexts: {string.Join(", ", contexts)}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Container '{workspaceContainer}' exists in multiple contexts: {string.Join(", ", contexts)}").ConfigureAwait(false);
                 return 1;
             }
 
@@ -3701,7 +3701,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (targets.Count == 0)
         {
-            await _stdout.WriteLineAsync("No ContainAI containers found.").ConfigureAwait(false);
+            await stdout.WriteLineAsync("No ContainAI containers found.").ConfigureAwait(false);
             return 0;
         }
 
@@ -3715,7 +3715,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 if (exportExitCode != 0)
                 {
                     failures++;
-                    await _stderr.WriteLineAsync($"Failed to export data volume for container: {target.Container}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Failed to export data volume for container: {target.Container}").ConfigureAwait(false);
                     if (!force)
                     {
                         continue;
@@ -3727,7 +3727,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             if (stopResult.ExitCode != 0)
             {
                 failures++;
-                await _stderr.WriteLineAsync($"Failed to stop container: {target.Container}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"Failed to stop container: {target.Container}").ConfigureAwait(false);
                 if (!force)
                 {
                     continue;
@@ -3740,7 +3740,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
                 if (removeResult.ExitCode != 0)
                 {
                     failures++;
-                    await _stderr.WriteLineAsync($"Failed to remove container: {target.Container}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Failed to remove container: {target.Container}").ConfigureAwait(false);
                 }
             }
         }
@@ -3756,7 +3756,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var ageValue = GetOptionValue(args, "--age") ?? "30d";
         if (!TryParseAgeDuration(ageValue, out var minimumAge))
         {
-            await _stderr.WriteLineAsync($"Invalid --age value: {ageValue}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Invalid --age value: {ageValue}").ConfigureAwait(false);
             return 1;
         }
 
@@ -3766,7 +3766,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (candidates.ExitCode != 0)
         {
-            await _stderr.WriteLineAsync(candidates.StandardError.Trim()).ConfigureAwait(false);
+            await stderr.WriteLineAsync(candidates.StandardError.Trim()).ConfigureAwait(false);
             return 1;
         }
 
@@ -3822,16 +3822,16 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (Console.IsInputRedirected)
             {
-                await _stderr.WriteLineAsync("gc requires --force in non-interactive mode.").ConfigureAwait(false);
+                await stderr.WriteLineAsync("gc requires --force in non-interactive mode.").ConfigureAwait(false);
                 return 1;
             }
 
-            await _stdout.WriteLineAsync($"About to remove {pruneCandidates.Count} containers. Continue? [y/N]").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"About to remove {pruneCandidates.Count} containers. Continue? [y/N]").ConfigureAwait(false);
             var response = (Console.ReadLine() ?? string.Empty).Trim();
             if (!response.Equals("y", StringComparison.OrdinalIgnoreCase) &&
                 !response.Equals("yes", StringComparison.OrdinalIgnoreCase))
             {
-                await _stdout.WriteLineAsync("Aborted.").ConfigureAwait(false);
+                await stdout.WriteLineAsync("Aborted.").ConfigureAwait(false);
                 return 1;
             }
         }
@@ -3841,7 +3841,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken.ThrowIfCancellationRequested();
             if (dryRun)
             {
-                await _stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
+                await stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
                 continue;
             }
 
@@ -3856,7 +3856,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             if (!dryRun && !force)
             {
-                await _stderr.WriteLineAsync("Use --force with --images to remove images.").ConfigureAwait(false);
+                await stderr.WriteLineAsync("Use --force with --images to remove images.").ConfigureAwait(false);
                 return 1;
             }
 
@@ -3880,7 +3880,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
                     if (dryRun)
                     {
-                        await _stdout.WriteLineAsync($"Would remove image {reference}").ConfigureAwait(false);
+                        await stdout.WriteLineAsync($"Would remove image {reference}").ConfigureAwait(false);
                     }
                     else
                     {
@@ -4786,7 +4786,7 @@ Examples:
 
         if (ids.Length > 1)
         {
-            await _stderr.WriteLineAsync($"Multiple containers found for workspace: {workspace}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"Multiple containers found for workspace: {workspace}").ConfigureAwait(false);
             return null;
         }
 

@@ -47,7 +47,7 @@ public class AcpSessionTests
     {
         using var session = new AcpSession("/workspace");
 
-        var result = session.TryCompleteResponse("unknown-id", new Protocol.JsonRpcMessage());
+        var result = session.TryCompleteResponse("unknown-id", new Protocol.JsonRpcEnvelope());
 
         Assert.False(result);
     }

@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+using System.Text.Json;
 using AgentClientProtocol.Proxy.Protocol;
 using Xunit;
 
@@ -9,7 +9,7 @@ public class JsonRpcHelpersTests
     [Fact]
     public void NormalizeId_StringValue_ReturnsString()
     {
-        var id = JsonValue.Create("request-123");
+        var id = JsonRpcId.FromString("request-123");
 
         var result = JsonRpcHelpers.NormalizeId(id);
 
@@ -19,7 +19,7 @@ public class JsonRpcHelpersTests
     [Fact]
     public void NormalizeId_IntegerValue_ReturnsStringOfNumber()
     {
-        var id = JsonValue.Create(42);
+        var id = JsonRpcId.FromInt32(42);
 
         var result = JsonRpcHelpers.NormalizeId(id);
 
@@ -29,7 +29,7 @@ public class JsonRpcHelpersTests
     [Fact]
     public void NormalizeId_LongValue_ReturnsStringOfNumber()
     {
-        var id = JsonValue.Create(9876543210L);
+        var id = JsonRpcId.FromInt64(9876543210L);
 
         var result = JsonRpcHelpers.NormalizeId(id);
 
@@ -37,9 +37,9 @@ public class JsonRpcHelpersTests
     }
 
     [Fact]
-    public void NormalizeId_DecimalValue_UsesJsonFallback()
+    public void NormalizeId_StringNumericValue_ReturnsExactString()
     {
-        var id = JsonValue.Create(42.5m);
+        var id = JsonRpcId.FromString("42.5");
 
         var result = JsonRpcHelpers.NormalizeId(id);
 
@@ -57,7 +57,7 @@ public class JsonRpcHelpersTests
     [Fact]
     public void CreateErrorResponse_CreatesValidErrorMessage()
     {
-        var id = JsonValue.Create("req-1");
+        var id = JsonRpcId.FromString("req-1");
 
         var result = JsonRpcHelpers.CreateErrorResponse(id, -32601, "Method not found");
 
@@ -72,22 +72,21 @@ public class JsonRpcHelpersTests
     [Fact]
     public void CreateErrorResponse_WithData_IncludesData()
     {
-        var id = JsonValue.Create("req-2");
-        var data = new JsonObject { ["details"] = "Additional info" };
+        var id = JsonRpcId.FromString("req-2");
+        var data = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(new { details = "Additional info" }));
 
         var result = JsonRpcHelpers.CreateErrorResponse(id, -32000, "Server error", data);
 
         Assert.NotNull(result.Error);
         Assert.NotNull(result.Error.Data);
-        var dataObj = Assert.IsType<JsonObject>(result.Error.Data);
-        Assert.Equal("Additional info", dataObj["details"]?.GetValue<string>());
+        Assert.Equal("Additional info", result.Error.Data?["details"]?.GetValue<string>());
     }
 
     [Fact]
     public void CreateSuccessResponse_CreatesValidResponse()
     {
-        var id = JsonValue.Create("req-3");
-        var resultData = new JsonObject { ["sessionId"] = "session-123" };
+        var id = JsonRpcId.FromString("req-3");
+        var resultData = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(new { sessionId = "session-123" }));
 
         var result = JsonRpcHelpers.CreateSuccessResponse(id, resultData);
 
@@ -95,8 +94,7 @@ public class JsonRpcHelpersTests
         Assert.NotNull(result.Result);
         Assert.Null(result.Error);
         Assert.Null(result.Method);
-        var resultObj = Assert.IsType<JsonObject>(result.Result);
-        Assert.Equal("session-123", resultObj["sessionId"]?.GetValue<string>());
+        Assert.Equal("session-123", result.Result?["sessionId"]?.GetValue<string>());
     }
 
     [Theory]

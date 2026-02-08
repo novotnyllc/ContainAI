@@ -20,7 +20,7 @@ public sealed class AcpProxyRunnerTests
             (agent, _, _, _) =>
             {
                 capturedAgent = agent;
-                return new FakeProxy(exitCode: 17);
+                return new FakeProxy(configuredExitCode: 17);
             },
             stdin: Stream.Null,
             stdout: stdout,
@@ -41,7 +41,7 @@ public sealed class AcpProxyRunnerTests
         ConsoleCancelEventHandler? registeredHandler = null;
         var stdout = new MemoryStream();
         var stderr = new StringWriter();
-        using var proxy = new FakeProxy(exitCode: 0, completeOnCancel: true);
+        using var proxy = new FakeProxy(configuredExitCode: 0, shouldCompleteOnCancel: true);
 
         var runner = CreateRunner(
             (_, _, _, _) => proxy,
@@ -88,7 +88,7 @@ public sealed class AcpProxyRunnerTests
 
         var runner = CreateRunner(
             (_, _, _, _) => new FakeProxy(
-                runAsync: (_, ct) =>
+                runAsyncDelegate: (_, ct) =>
                 {
                     ct.ThrowIfCancellationRequested();
                     return Task.FromResult(123);
@@ -175,47 +175,47 @@ public sealed class AcpProxyRunnerTests
 
     private sealed class FakeProxy : IAcpProxyProcess
     {
-        private readonly int _exitCode;
-        private readonly Func<Stream, CancellationToken, Task<int>>? _runAsync;
-        private readonly bool _completeOnCancel;
-        private readonly TaskCompletionSource<int> _completion =
+        private readonly int exitCode;
+        private readonly Func<Stream, CancellationToken, Task<int>>? runAsync;
+        private readonly bool completeOnCancel;
+        private readonly TaskCompletionSource<int> completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool CancelCalled { get; private set; }
 
         public FakeProxy(
-            int exitCode = 0,
-            Func<Stream, CancellationToken, Task<int>>? runAsync = null,
-            bool completeOnCancel = false)
+            int configuredExitCode = 0,
+            Func<Stream, CancellationToken, Task<int>>? runAsyncDelegate = null,
+            bool shouldCompleteOnCancel = false)
         {
-            _exitCode = exitCode;
-            _runAsync = runAsync;
-            _completeOnCancel = completeOnCancel;
+            exitCode = configuredExitCode;
+            runAsync = runAsyncDelegate;
+            completeOnCancel = shouldCompleteOnCancel;
         }
 
         public void Cancel()
         {
             CancelCalled = true;
 
-            if (_completeOnCancel)
+            if (completeOnCancel)
             {
-                _completion.TrySetResult(_exitCode);
+                completion.TrySetResult(exitCode);
             }
         }
 
         public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken)
         {
-            if (_runAsync is not null)
+            if (runAsync is not null)
             {
-                return _runAsync(stdin, cancellationToken);
+                return runAsync(stdin, cancellationToken);
             }
 
-            if (_completeOnCancel)
+            if (completeOnCancel)
             {
-                return _completion.Task;
+                return completion.Task;
             }
 
-            return Task.FromResult(_exitCode);
+            return Task.FromResult(exitCode);
         }
 
         public void Dispose()

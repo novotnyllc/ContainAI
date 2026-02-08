@@ -15,30 +15,30 @@ internal interface IAcpProxyProcess : IDisposable
 
 internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
 {
-    private readonly AcpProxy _proxy;
+    private readonly AcpProxy proxy;
 
     public AcpProxyProcessAdapter(
         string agent,
         Stream stdout,
         TextWriter stderr,
-        bool directSpawn) => _proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
+        bool directSpawn) => proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
 
-    public void Cancel() => _proxy.Cancel();
+    public void Cancel() => proxy.Cancel();
 
-    public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken) => _proxy.RunAsync(stdin, cancellationToken);
+    public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken) => proxy.RunAsync(stdin, cancellationToken);
 
-    public void Dispose() => _proxy.Dispose();
+    public void Dispose() => proxy.Dispose();
 }
 
 internal sealed class AcpProxyRunner
 {
-    private readonly Func<string, Stream, TextWriter, bool, IAcpProxyProcess> _proxyFactory;
-    private readonly Func<Stream> _stdinFactory;
-    private readonly Func<Stream> _stdoutFactory;
-    private readonly TextWriter _stderr;
-    private readonly Func<bool> _directSpawnResolver;
-    private readonly Action<ConsoleCancelEventHandler> _subscribeCancelHandler;
-    private readonly Action<ConsoleCancelEventHandler> _unsubscribeCancelHandler;
+    private readonly Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactory;
+    private readonly Func<Stream> stdinFactory;
+    private readonly Func<Stream> stdoutFactory;
+    private readonly TextWriter stderr;
+    private readonly Func<bool> directSpawnResolver;
+    private readonly Action<ConsoleCancelEventHandler> subscribeCancelHandler;
+    private readonly Action<ConsoleCancelEventHandler> unsubscribeCancelHandler;
 
     public AcpProxyRunner()
         : this(
@@ -53,34 +53,34 @@ internal sealed class AcpProxyRunner
     }
 
     internal AcpProxyRunner(
-        Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactory,
-        Func<Stream> stdinFactory,
-        Func<Stream> stdoutFactory,
-        TextWriter stderr,
-        Func<bool> directSpawnResolver,
-        Action<ConsoleCancelEventHandler> subscribeCancelHandler,
-        Action<ConsoleCancelEventHandler> unsubscribeCancelHandler)
+        Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactoryFactory,
+        Func<Stream> standardInputFactory,
+        Func<Stream> standardOutputFactory,
+        TextWriter errorWriter,
+        Func<bool> directSpawnValueResolver,
+        Action<ConsoleCancelEventHandler> subscribeCancelKeyHandler,
+        Action<ConsoleCancelEventHandler> unsubscribeCancelKeyHandler)
     {
-        _proxyFactory = proxyFactory;
-        _stdinFactory = stdinFactory;
-        _stdoutFactory = stdoutFactory;
-        _stderr = stderr;
-        _directSpawnResolver = directSpawnResolver;
-        _subscribeCancelHandler = subscribeCancelHandler;
-        _unsubscribeCancelHandler = unsubscribeCancelHandler;
+        proxyFactory = proxyFactoryFactory;
+        stdinFactory = standardInputFactory;
+        stdoutFactory = standardOutputFactory;
+        stderr = errorWriter;
+        directSpawnResolver = directSpawnValueResolver;
+        subscribeCancelHandler = subscribeCancelKeyHandler;
+        unsubscribeCancelHandler = unsubscribeCancelKeyHandler;
     }
 
     public async Task<int> RunAsync(string? agent, CancellationToken cancellationToken)
     {
         var resolvedAgent = string.IsNullOrWhiteSpace(agent) ? "claude" : agent;
-        var directSpawn = _directSpawnResolver();
+        var directSpawn = directSpawnResolver();
 
         try
         {
-            using var proxy = _proxyFactory(
+            using var proxy = proxyFactory(
                 resolvedAgent,
-                _stdoutFactory(),
-                _stderr,
+                stdoutFactory(),
+                stderr,
                 directSpawn);
 
             ConsoleCancelEventHandler handler = (_, e) =>
@@ -89,19 +89,19 @@ internal sealed class AcpProxyRunner
                 proxy.Cancel();
             };
 
-            _subscribeCancelHandler(handler);
+            subscribeCancelHandler(handler);
             try
             {
-                return await proxy.RunAsync(_stdinFactory(), cancellationToken).ConfigureAwait(false);
+                return await proxy.RunAsync(stdinFactory(), cancellationToken).ConfigureAwait(false);
             }
             finally
             {
-                _unsubscribeCancelHandler(handler);
+                unsubscribeCancelHandler(handler);
             }
         }
         catch (ArgumentException ex)
         {
-            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -110,22 +110,22 @@ internal sealed class AcpProxyRunner
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
         catch (NotSupportedException ex)
         {
-            await _stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
+            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
             return 1;
         }
     }

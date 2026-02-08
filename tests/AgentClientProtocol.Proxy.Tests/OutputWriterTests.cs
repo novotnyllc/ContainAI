@@ -18,14 +18,14 @@ public sealed class OutputWriterTests
 
         var runTask = writer.RunAsync(cts.Token);
 
-        await writer.EnqueueAsync(new JsonRpcMessage
+        await writer.EnqueueAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("1"),
+            Id = "1",
             Method = "initialize",
         }, TestContext.Current.CancellationToken);
-        await writer.EnqueueAsync(new JsonRpcMessage
+        await writer.EnqueueAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("2"),
+            Id = "2",
             Result = new JsonObject { ["ok"] = true },
         }, TestContext.Current.CancellationToken);
 

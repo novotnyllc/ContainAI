@@ -12,26 +12,26 @@ namespace AgentClientProtocol.Proxy.Sessions;
 public sealed class OutputWriter
 {
     private static readonly byte[] NewLine = [(byte)'\n'];
-    private readonly Channel<JsonRpcMessage> _channel = Channel.CreateBounded<JsonRpcMessage>(new BoundedChannelOptions(capacity: 1024)
+    private readonly Channel<JsonRpcEnvelope> channel = Channel.CreateBounded<JsonRpcEnvelope>(new BoundedChannelOptions(capacity: 1024)
     {
         SingleReader = true,
         SingleWriter = false,
         FullMode = BoundedChannelFullMode.Wait,
     });
-    private readonly Stream _stdout;
+    private readonly Stream stdout;
 
-    public OutputWriter(Stream stdout) => _stdout = stdout;
+    public OutputWriter(Stream outputStream) => stdout = outputStream;
 
     /// <summary>
     /// Enqueues a message to be written to stdout.
     /// </summary>
-    public async Task EnqueueAsync(JsonRpcMessage message, CancellationToken cancellationToken = default)
-        => await _channel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
+    public async Task EnqueueAsync(JsonRpcEnvelope message, CancellationToken cancellationToken = default)
+        => await channel.Writer.WriteAsync(message, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
     /// Signals that no more messages will be enqueued.
     /// </summary>
-    public void Complete() => _channel.Writer.Complete();
+    public void Complete() => channel.Writer.Complete();
 
     /// <summary>
     /// Runs the output writer loop, writing messages to stdout as NDJSON.
@@ -40,12 +40,12 @@ public sealed class OutputWriter
     {
         try
         {
-            await foreach (var message in _channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+            await foreach (var message in channel.Reader.ReadAllAsync(ct).ConfigureAwait(false))
             {
-                var bytes = JsonSerializer.SerializeToUtf8Bytes(message, AcpJsonContext.Default.JsonRpcMessage);
-                await _stdout.WriteAsync(bytes, ct).ConfigureAwait(false);
-                await _stdout.WriteAsync(NewLine, ct).ConfigureAwait(false);
-                await _stdout.FlushAsync(ct).ConfigureAwait(false);
+                var bytes = JsonSerializer.SerializeToUtf8Bytes(message, AcpJsonContext.Default.JsonRpcEnvelope);
+                await stdout.WriteAsync(bytes, ct).ConfigureAwait(false);
+                await stdout.WriteAsync(NewLine, ct).ConfigureAwait(false);
+                await stdout.FlushAsync(ct).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

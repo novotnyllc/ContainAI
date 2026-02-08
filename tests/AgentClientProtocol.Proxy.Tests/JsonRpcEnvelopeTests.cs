@@ -5,19 +5,19 @@ using Xunit;
 
 namespace AgentClientProtocol.Proxy.Tests;
 
-public class JsonRpcMessageTests
+public class JsonRpcEnvelopeTests
 {
     [Fact]
     public void Serialize_Request_IncludesRequiredFields()
     {
-        var message = new JsonRpcMessage
+        var message = new JsonRpcEnvelope
         {
             Id = "req-1",
             Method = "initialize",
             Params = new JsonObject { ["protocolVersion"] = "2025-01-01" }
         };
 
-        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
         var parsed = JsonDocument.Parse(json);
 
         Assert.Equal("2.0", parsed.RootElement.GetProperty("jsonrpc").GetString());
@@ -30,13 +30,13 @@ public class JsonRpcMessageTests
     [Fact]
     public void Serialize_Response_ExcludesNullFields()
     {
-        var message = new JsonRpcMessage
+        var message = new JsonRpcEnvelope
         {
             Id = "req-1",
             Result = new JsonObject { ["sessionId"] = "sess-123" }
         };
 
-        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
         var parsed = JsonDocument.Parse(json);
 
         Assert.Equal("2.0", parsed.RootElement.GetProperty("jsonrpc").GetString());
@@ -50,13 +50,13 @@ public class JsonRpcMessageTests
     [Fact]
     public void Serialize_Notification_ExcludesId()
     {
-        var message = new JsonRpcMessage
+        var message = new JsonRpcEnvelope
         {
             Method = "session/end",
             Params = new JsonObject { ["sessionId"] = "sess-123" }
         };
 
-        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
         var parsed = JsonDocument.Parse(json);
 
         Assert.Equal("2.0", parsed.RootElement.GetProperty("jsonrpc").GetString());
@@ -67,7 +67,7 @@ public class JsonRpcMessageTests
     [Fact]
     public void Serialize_Error_IncludesErrorObject()
     {
-        var message = new JsonRpcMessage
+        var message = new JsonRpcEnvelope
         {
             Id = "req-1",
             Error = new JsonRpcError
@@ -77,7 +77,7 @@ public class JsonRpcMessageTests
             }
         };
 
-        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
+        var json = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcEnvelope);
         var parsed = JsonDocument.Parse(json);
 
         var error = parsed.RootElement.GetProperty("error");
@@ -90,7 +90,7 @@ public class JsonRpcMessageTests
     {
         var json = """{"jsonrpc":"2.0","id":"req-1","method":"initialize","params":{"protocolVersion":"2025-01-01"}}""";
 
-        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcMessage);
+        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
 
         Assert.NotNull(message);
         Assert.Equal("2.0", message.JsonRpc);
@@ -104,15 +104,12 @@ public class JsonRpcMessageTests
     {
         var json = """{"jsonrpc":"2.0","id":123,"method":"test"}""";
 
-        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcMessage);
+        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
 
         Assert.NotNull(message);
         Assert.NotNull(message.Id);
 
-        // Verify we can extract the numeric value
-        var idValue = message.Id as JsonValue;
-        Assert.NotNull(idValue);
-        Assert.True(idValue.TryGetValue<int>(out var intId));
+        var intId = message.Id?.GetValue<int>();
         Assert.Equal(123, intId);
     }
 
@@ -121,7 +118,7 @@ public class JsonRpcMessageTests
     {
         var json = """{"jsonrpc":"2.0","id":"req-1","result":{"sessionId":"sess-abc"}}""";
 
-        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcMessage);
+        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
 
         Assert.NotNull(message);
         Assert.Equal("2.0", message.JsonRpc);
@@ -135,7 +132,7 @@ public class JsonRpcMessageTests
     {
         var json = """{"jsonrpc":"2.0","id":"req-1","error":{"code":-32601,"message":"Method not found"}}""";
 
-        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcMessage);
+        var message = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
 
         Assert.NotNull(message);
         Assert.NotNull(message.Error);
@@ -146,7 +143,7 @@ public class JsonRpcMessageTests
     [Fact]
     public void RoundTrip_PreservesAllFields()
     {
-        var original = new JsonRpcMessage
+        var original = new JsonRpcEnvelope
         {
             Id = "test-id",
             Method = "test/method",
@@ -158,17 +155,16 @@ public class JsonRpcMessageTests
             }
         };
 
-        var json = JsonSerializer.Serialize(original, AcpJsonContext.Default.JsonRpcMessage);
-        var restored = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcMessage);
+        var json = JsonSerializer.Serialize(original, AcpJsonContext.Default.JsonRpcEnvelope);
+        var restored = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
 
         Assert.NotNull(restored);
         Assert.Equal(original.JsonRpc, restored.JsonRpc);
         Assert.Equal(original.Method, restored.Method);
 
-        var originalParams = original.Params as JsonObject;
-        var restoredParams = restored.Params as JsonObject;
+        var restoredParams = restored.Params;
         Assert.NotNull(restoredParams);
-        Assert.Equal(originalParams?["stringVal"]?.GetValue<string>(), restoredParams["stringVal"]?.GetValue<string>());
-        Assert.Equal(originalParams?["numVal"]?.GetValue<int>(), restoredParams["numVal"]?.GetValue<int>());
+        Assert.Equal("hello", restoredParams?["stringVal"]?.GetValue<string>());
+        Assert.Equal(42, restoredParams?["numVal"]?.GetValue<int>());
     }
 }

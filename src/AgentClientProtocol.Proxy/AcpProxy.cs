@@ -2,7 +2,6 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
 using AgentClientProtocol.Proxy.PathTranslation;
 using AgentClientProtocol.Proxy.Protocol;
@@ -16,15 +15,15 @@ namespace AgentClientProtocol.Proxy;
 /// </summary>
 public sealed class AcpProxy : IDisposable
 {
-    private readonly ConcurrentDictionary<string, AcpSession> _sessions = new();
-    private readonly OutputWriter _output;
-    private readonly CancellationTokenSource _cts = new();
-    private readonly string _agent;
-    private readonly IAgentSpawner _agentSpawner;
-    private readonly ErrorSink _errorSink;
+    private readonly ConcurrentDictionary<string, AcpSession> sessions = new();
+    private readonly OutputWriter output;
+    private readonly CancellationTokenSource cts = new();
+    private readonly string agent;
+    private readonly IAgentSpawner agentSpawner;
+    private readonly ErrorSink errorSink;
 
     // Cached initialize params from editor (for forwarding to agents)
-    private InitializeRequestParams? _cachedInitializeParams;
+    private InitializeRequestParams? cachedInitializeParams;
 
     /// <summary>
     /// Creates a new ACP proxy.
@@ -35,20 +34,20 @@ public sealed class AcpProxy : IDisposable
     /// <param name="directSpawn">If true, spawns agent directly without cai exec.</param>
     /// <param name="agentSpawner">Optional custom agent spawner. If null, default spawner is used.</param>
     public AcpProxy(
-        string agent,
-        Stream stdout,
-        TextWriter stderr,
+        string agentName,
+        Stream outputStream,
+        TextWriter errorWriter,
         bool directSpawn = false,
-        IAgentSpawner? agentSpawner = null)
+        IAgentSpawner? customAgentSpawner = null)
     {
-        ArgumentNullException.ThrowIfNull(agent);
-        ArgumentNullException.ThrowIfNull(stdout);
-        ArgumentNullException.ThrowIfNull(stderr);
+        ArgumentNullException.ThrowIfNull(agentName);
+        ArgumentNullException.ThrowIfNull(outputStream);
+        ArgumentNullException.ThrowIfNull(errorWriter);
 
-        _agent = agent;
-        _output = new OutputWriter(stdout);
-        _errorSink = new ErrorSink(stderr);
-        _agentSpawner = agentSpawner ?? new AgentSpawner(directSpawn, stderr);
+        agent = agentName;
+        output = new OutputWriter(outputStream);
+        errorSink = new ErrorSink(errorWriter);
+        agentSpawner = customAgentSpawner ?? new AgentSpawner(directSpawn, errorWriter);
 
         // No static allow-list here; agent validation happens when spawn starts.
     }
@@ -58,11 +57,11 @@ public sealed class AcpProxy : IDisposable
     /// </summary>
     public async Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken = default)
     {
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cts.Token);
         var ct = linkedCts.Token;
 
         // Start output writer task
-        var writerTask = _output.RunAsync(ct);
+        var writerTask = output.RunAsync(ct);
 
         try
         {
@@ -92,15 +91,15 @@ public sealed class AcpProxy : IDisposable
                 }
                 catch (JsonException ex)
                 {
-                    await _errorSink.WriteLineAsync($"JSON parse error: {ex.Message}").ConfigureAwait(false);
+                    await errorSink.WriteLineAsync($"JSON parse error: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (InvalidOperationException ex)
                 {
-                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
+                    await errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (IOException ex)
                 {
-                    await _errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
+                    await errorSink.WriteLineAsync($"Error processing message: {ex.Message}").ConfigureAwait(false);
                 }
             }
 
@@ -109,22 +108,22 @@ public sealed class AcpProxy : IDisposable
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            await _errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
+            await errorSink.WriteLineAsync($"Fatal error: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         finally
         {
-            _output.Complete();
+            output.Complete();
             try
             {
                 await writerTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException ex)
             {
-                await _errorSink.WriteLineAsync($"Output flush canceled: {ex.Message}").ConfigureAwait(false);
+                await errorSink.WriteLineAsync($"Output flush canceled: {ex.Message}").ConfigureAwait(false);
             }
 
-            await _cts.CancelAsync().ConfigureAwait(false);
+            await cts.CancelAsync().ConfigureAwait(false);
         }
 
         return 0;
@@ -133,11 +132,11 @@ public sealed class AcpProxy : IDisposable
     /// <summary>
     /// Signals the proxy to stop.
     /// </summary>
-    public void Cancel() => _cts.Cancel();
+    public void Cancel() => cts.Cancel();
 
     private async Task ProcessMessageAsync(string line)
     {
-        var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+        var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcEnvelope);
         if (message == null)
             return;
 
@@ -167,7 +166,7 @@ public sealed class AcpProxy : IDisposable
                 // JSON-RPC forbids responding to notifications (no id)
                 if (message.Id != null)
                 {
-                    await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                    await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                         message.Id,
                         JsonRpcErrorCodes.MethodNotFound,
                         $"Method not found: {message.Method}")).ConfigureAwait(false);
@@ -177,17 +176,17 @@ public sealed class AcpProxy : IDisposable
         }
     }
 
-    private async Task HandleInitializeAsync(JsonRpcMessage message)
+    private async Task HandleInitializeAsync(JsonRpcEnvelope message)
     {
-        var initializeParams = DeserializeNode(message.Params, AcpJsonContext.Default.InitializeRequestParams) ?? new InitializeRequestParams();
-        _cachedInitializeParams = initializeParams;
+        var initializeParams = DeserializeElement(message.Params, AcpJsonContext.Default.InitializeRequestParams) ?? new InitializeRequestParams();
+        cachedInitializeParams = initializeParams;
         var requestedVersion = initializeParams.ProtocolVersion ?? "2025-01-01";
 
         // Respond with proxy capabilities using negotiated version
-        var response = new JsonRpcMessage
+        var response = new JsonRpcEnvelope
         {
             Id = message.Id,
-            Result = SerializeNode(
+            Result = SerializeElement(
                 new InitializeResultPayload
                 {
                     ProtocolVersion = requestedVersion,
@@ -203,19 +202,19 @@ public sealed class AcpProxy : IDisposable
 
         if (message.Id != null)
         {
-            await _output.EnqueueAsync(response).ConfigureAwait(false);
+            await output.EnqueueAsync(response).ConfigureAwait(false);
         }
     }
 
-    private async Task HandleSessionNewAsync(JsonRpcMessage message)
+    private async Task HandleSessionNewAsync(JsonRpcEnvelope message)
     {
-        var sessionNewInput = DeserializeNode(message.Params, AcpJsonContext.Default.SessionNewRequestParams) ?? new SessionNewRequestParams();
+        var sessionNewInput = DeserializeElement(message.Params, AcpJsonContext.Default.SessionNewRequestParams) ?? new SessionNewRequestParams();
         var cwd = sessionNewInput.Cwd;
         var mcpServersNode = sessionNewInput.McpServers;
         var originalCwd = cwd ?? Directory.GetCurrentDirectory();
 
         // Resolve workspace root
-        var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, _cts.Token).ConfigureAwait(false);
+        var workspace = await WorkspaceResolver.ResolveAsync(originalCwd, cts.Token).ConfigureAwait(false);
 
         // Create session
         var session = new AcpSession(workspace);
@@ -226,7 +225,7 @@ public sealed class AcpProxy : IDisposable
             var pathTranslator = new PathTranslator(workspace);
 
             // Spawn agent process
-            await _agentSpawner.SpawnAgentAsync(session, _agent, _cts.Token).ConfigureAwait(false);
+            await agentSpawner.SpawnAgentAsync(session, agent, cts.Token).ConfigureAwait(false);
 
             // Start reader task to handle out-of-order responses and notifications
             session.ReaderTask = Task.Run(() => ReadAgentOutputLoopAsync(session));
@@ -234,18 +233,18 @@ public sealed class AcpProxy : IDisposable
             // Build initialize request for agent (forward editor's params)
             var initParams = new InitializeRequestParams
             {
-                ProtocolVersion = _cachedInitializeParams?.ProtocolVersion ?? "2025-01-01",
-                ClientInfo = _cachedInitializeParams?.ClientInfo?.DeepClone(),
-                Capabilities = _cachedInitializeParams?.Capabilities?.DeepClone(),
+                ProtocolVersion = cachedInitializeParams?.ProtocolVersion ?? "2025-01-01",
+                ClientInfo = cachedInitializeParams?.ClientInfo is { } clientInfo ? clientInfo.Clone() : null,
+                Capabilities = cachedInitializeParams?.Capabilities is { } capabilities ? capabilities.Clone() : null,
             };
-            MergeExtensionData(initParams.ExtensionData, _cachedInitializeParams?.ExtensionData);
+            MergeExtensionData(initParams.ExtensionData, cachedInitializeParams?.ExtensionData);
 
             var initRequestId = "init-" + session.ProxySessionId;
-            var initRequest = new JsonRpcMessage
+            var initRequest = new JsonRpcEnvelope
             {
-                Id = initRequestId,
+                Id = JsonRpcId.FromString(initRequestId),
                 Method = "initialize",
-                Params = SerializeNode(initParams, AcpJsonContext.Default.InitializeRequestParams),
+                Params = SerializeElement(initParams, AcpJsonContext.Default.InitializeRequestParams),
             };
 
             // Wait for initialize response (with timeout)
@@ -274,18 +273,18 @@ public sealed class AcpProxy : IDisposable
             MergeExtensionData(sessionNewParams.ExtensionData, sessionNewInput.ExtensionData);
 
             // Translate MCP server args if provided
-            if (mcpServersNode != null)
+            if (mcpServersNode is { } mcpServersValue)
             {
-                var translatedMcp = pathTranslator.TranslateMcpServers(mcpServersNode);
+                var translatedMcp = pathTranslator.TranslateMcpServers(mcpServersValue);
                 sessionNewParams.McpServers = translatedMcp;
             }
 
             var sessionNewRequestId = "session-new-" + session.ProxySessionId;
-            var sessionNewRequest = new JsonRpcMessage
+            var sessionNewRequest = new JsonRpcEnvelope
             {
-                Id = sessionNewRequestId,
+                Id = JsonRpcId.FromString(sessionNewRequestId),
                 Method = "session/new",
-                Params = SerializeNode(sessionNewParams, AcpJsonContext.Default.SessionNewRequestParams),
+                Params = SerializeElement(sessionNewParams, AcpJsonContext.Default.SessionNewRequestParams),
             };
 
             // Wait for session/new response
@@ -303,7 +302,7 @@ public sealed class AcpProxy : IDisposable
                 throw new InvalidOperationException($"Agent session/new failed: {errMsg}");
             }
 
-            var sessionNewResult = DeserializeNode(sessionNewResponse.Result, AcpJsonContext.Default.SessionNewResponsePayload);
+            var sessionNewResult = DeserializeElement(sessionNewResponse.Result, AcpJsonContext.Default.SessionNewResponsePayload);
             session.AgentSessionId = sessionNewResult?.SessionId ?? string.Empty;
 
             // Validate we got a session ID
@@ -313,19 +312,19 @@ public sealed class AcpProxy : IDisposable
             }
 
             // Register session
-            _sessions[session.ProxySessionId] = session;
+            sessions[session.ProxySessionId] = session;
 
             // Respond to editor with proxy session ID
-            var response = new JsonRpcMessage
+            var response = new JsonRpcEnvelope
             {
                 Id = message.Id,
-                Result = SerializeNode(
+                Result = SerializeElement(
                     new SessionNewResponsePayload { SessionId = session.ProxySessionId },
                     AcpJsonContext.Default.SessionNewResponsePayload),
             };
             if (message.Id != null)
             {
-                await _output.EnqueueAsync(response).ConfigureAwait(false);
+                await output.EnqueueAsync(response).ConfigureAwait(false);
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or JsonException or IOException)
@@ -334,7 +333,7 @@ public sealed class AcpProxy : IDisposable
 
             if (message.Id != null)
             {
-                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                     message.Id,
                     JsonRpcErrorCodes.SessionCreationFailed,
                     $"Failed to create session: {ex.Message}")).ConfigureAwait(false);
@@ -342,18 +341,18 @@ public sealed class AcpProxy : IDisposable
         }
     }
 
-    private async Task RouteToSessionAsync(JsonRpcMessage message)
+    private async Task RouteToSessionAsync(JsonRpcEnvelope message)
     {
         // Extract sessionId from params
-        var scopedParams = DeserializeNode(message.Params, AcpJsonContext.Default.SessionScopedParams);
+        var scopedParams = DeserializeElement(message.Params, AcpJsonContext.Default.SessionScopedParams);
         var sessionId = scopedParams?.SessionId;
 
-        if (string.IsNullOrEmpty(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
+        if (string.IsNullOrEmpty(sessionId) || !sessions.TryGetValue(sessionId, out var session))
         {
             // Only respond with error if this is a request (has id)
             if (message.Id != null)
             {
-                await _output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
                     message.Id,
                     JsonRpcErrorCodes.SessionNotFound,
                     $"Session not found: {sessionId}")).ConfigureAwait(false);
@@ -372,27 +371,27 @@ public sealed class AcpProxy : IDisposable
         if (scopedParams != null)
         {
             scopedParams.SessionId = session.AgentSessionId;
-            message.Params = SerializeNode(scopedParams, AcpJsonContext.Default.SessionScopedParams);
+            message.Params = SerializeElement(scopedParams, AcpJsonContext.Default.SessionScopedParams);
         }
 
         // Forward to agent
         await session.WriteToAgentAsync(message).ConfigureAwait(false);
     }
 
-    private async Task HandleSessionEndAsync(string sessionId, JsonRpcMessage message)
+    private async Task HandleSessionEndAsync(string sessionId, JsonRpcEnvelope message)
     {
-        if (!_sessions.TryRemove(sessionId, out var session))
+        if (!sessions.TryRemove(sessionId, out var session))
             return;
 
         try
         {
             // Forward session/end to agent as a NOTIFICATION (no id) to avoid duplicate responses
             // The proxy handles the response to the editor, not the agent
-            var endNotification = new JsonRpcMessage
+            var endNotification = new JsonRpcEnvelope
             {
                 // No Id - this is a notification, not a request
                 Method = "session/end",
-                Params = SerializeNode(
+                Params = SerializeElement(
                     new SessionScopedParams { SessionId = session.AgentSessionId },
                     AcpJsonContext.Default.SessionScopedParams),
             };
@@ -407,7 +406,7 @@ public sealed class AcpProxy : IDisposable
             }
             catch (OperationCanceledException ex)
             {
-                await _errorSink.WriteLineAsync($"Session end timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+                await errorSink.WriteLineAsync($"Session end timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
             }
         }
         finally
@@ -418,10 +417,10 @@ public sealed class AcpProxy : IDisposable
         // Acknowledge to editor (only if this was a request)
         if (message.Id != null)
         {
-            await _output.EnqueueAsync(new JsonRpcMessage
+            await output.EnqueueAsync(new JsonRpcEnvelope
             {
                 Id = message.Id,
-                Result = SerializeNode(
+                Result = SerializeElement(
                     new SessionNewResponsePayload(),
                     AcpJsonContext.Default.SessionNewResponsePayload),
             }).ConfigureAwait(false);
@@ -443,7 +442,7 @@ public sealed class AcpProxy : IDisposable
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            await _errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+            await errorSink.WriteLineAsync($"Agent reader error for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
         }
     }
 
@@ -454,12 +453,11 @@ public sealed class AcpProxy : IDisposable
 
         try
         {
-            var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcMessage);
+            var message = JsonSerializer.Deserialize(line, AcpJsonContext.Default.JsonRpcEnvelope);
             if (message == null)
                 return;
 
             // Check if this is a response to a pending request
-            // Note: NormalizeId extracts raw value from JsonNode (avoids quoted strings)
             if (message.Id != null && (message.Result != null || message.Error != null))
             {
                 var idStr = JsonRpcHelpers.NormalizeId(message.Id);
@@ -471,36 +469,36 @@ public sealed class AcpProxy : IDisposable
             }
 
             // Replace agent's sessionId with proxy's sessionId in responses/notifications
-            var scopedParams = DeserializeNode(message.Params, AcpJsonContext.Default.SessionScopedParams);
+            var scopedParams = DeserializeElement(message.Params, AcpJsonContext.Default.SessionScopedParams);
             if (scopedParams is not null && scopedParams.SessionId == session.AgentSessionId)
             {
                 scopedParams.SessionId = session.ProxySessionId;
-                message.Params = SerializeNode(scopedParams, AcpJsonContext.Default.SessionScopedParams);
+                message.Params = SerializeElement(scopedParams, AcpJsonContext.Default.SessionScopedParams);
             }
 
             // Forward to editor
-            await _output.EnqueueAsync(message).ConfigureAwait(false);
+            await output.EnqueueAsync(message).ConfigureAwait(false);
         }
         catch (JsonException ex)
         {
-            await _errorSink.WriteLineAsync($"Malformed agent output skipped for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+            await errorSink.WriteLineAsync($"Malformed agent output skipped for session {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
         }
     }
 
     private async Task ShutdownAsync()
     {
         // End all sessions gracefully
-        foreach (var sessionId in _sessions.Keys.ToList())
+        foreach (var sessionId in sessions.Keys.ToList())
         {
-            if (_sessions.TryRemove(sessionId, out var session))
+            if (sessions.TryRemove(sessionId, out var session))
             {
                 try
                 {
                     // Send session/end to agent
-                    var endRequest = new JsonRpcMessage
+                    var endRequest = new JsonRpcEnvelope
                     {
                         Method = "session/end",
-                        Params = SerializeNode(
+                        Params = SerializeElement(
                             new SessionScopedParams { SessionId = session.AgentSessionId },
                             AcpJsonContext.Default.SessionScopedParams),
                     };
@@ -515,7 +513,7 @@ public sealed class AcpProxy : IDisposable
                     }
                     catch (OperationCanceledException ex)
                     {
-                        await _errorSink.WriteLineAsync($"Session shutdown timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
+                        await errorSink.WriteLineAsync($"Session shutdown timeout for {session.ProxySessionId}: {ex.Message}").ConfigureAwait(false);
                     }
                 }
                 finally
@@ -526,7 +524,7 @@ public sealed class AcpProxy : IDisposable
         }
     }
 
-    public void Dispose() => _cts.Dispose();
+    public void Dispose() => cts.Dispose();
 
     private sealed class ErrorSink(TextWriter writer)
     {
@@ -534,18 +532,18 @@ public sealed class AcpProxy : IDisposable
             => new(writer.WriteLineAsync(message));
     }
 
-    private static T? DeserializeNode<T>(JsonNode? node, JsonTypeInfo<T> typeInfo)
+    private static T? DeserializeElement<T>(JsonRpcData? payload, JsonTypeInfo<T> typeInfo)
     {
-        if (node == null)
+        if (payload is null || payload.Value.Element.ValueKind == JsonValueKind.Null)
         {
             return default;
         }
 
-        return JsonSerializer.Deserialize(node.ToJsonString(), typeInfo);
+        return JsonSerializer.Deserialize(payload.Value.Element.GetRawText(), typeInfo);
     }
 
-    private static JsonNode? SerializeNode<T>(T value, JsonTypeInfo<T> typeInfo)
-        => JsonSerializer.SerializeToNode(value, typeInfo);
+    private static JsonRpcData SerializeElement<T>(T value, JsonTypeInfo<T> typeInfo)
+        => JsonSerializer.SerializeToElement(value, typeInfo);
 
     private static void MergeExtensionData(Dictionary<string, JsonElement> destination, Dictionary<string, JsonElement>? source)
     {

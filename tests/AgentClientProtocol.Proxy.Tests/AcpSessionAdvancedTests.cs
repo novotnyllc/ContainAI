@@ -13,7 +13,7 @@ public sealed class AcpSessionAdvancedTests
     {
         using var session = new AcpSession("/workspace");
 
-        await session.WriteToAgentAsync(new JsonRpcMessage
+        await session.WriteToAgentAsync(new JsonRpcEnvelope
         {
             Method = "session/prompt",
         }).ConfigureAwait(true);
@@ -23,9 +23,9 @@ public sealed class AcpSessionAdvancedTests
     public async Task SendAndWaitForResponseAsync_WhenCompletedByTryCompleteResponse_ReturnsResponse()
     {
         using var session = new AcpSession("/workspace");
-        var request = new JsonRpcMessage
+        var request = new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("req-1"),
+            Id = "req-1",
             Method = "initialize",
         };
 
@@ -33,9 +33,9 @@ public sealed class AcpSessionAdvancedTests
         await Task.Yield();
         var completed = session.TryCompleteResponse(
             "req-1",
-            new JsonRpcMessage
+            new JsonRpcEnvelope
             {
-                Id = JsonValue.Create("req-1"),
+                Id = "req-1",
                 Result = new JsonObject { ["ok"] = true },
             });
 
@@ -49,9 +49,9 @@ public sealed class AcpSessionAdvancedTests
     public async Task SendAndWaitForResponseAsync_WhenTimeoutExpires_ReturnsNull()
     {
         using var session = new AcpSession("/workspace");
-        var request = new JsonRpcMessage
+        var request = new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("req-timeout"),
+            Id = "req-timeout",
             Method = "initialize",
         };
 
@@ -66,9 +66,9 @@ public sealed class AcpSessionAdvancedTests
     public async Task SendAndWaitForResponseAsync_WhenSessionCanceled_ReturnsNull()
     {
         using var session = new AcpSession("/workspace");
-        var request = new JsonRpcMessage
+        var request = new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("req-cancel"),
+            Id = "req-cancel",
             Method = "initialize",
         };
 
@@ -87,9 +87,9 @@ public sealed class AcpSessionAdvancedTests
         using var session = new AcpSession("/workspace");
         session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
 
-        await session.WriteToAgentAsync(new JsonRpcMessage
+        await session.WriteToAgentAsync(new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("capture"),
+            Id = "capture",
             Method = "session/prompt",
             Params = new JsonObject { ["sessionId"] = "proxy-1" },
         }).ConfigureAwait(true);
@@ -108,7 +108,7 @@ public sealed class AcpSessionAdvancedTests
         session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
         input.Writer.TryComplete();
 
-        await session.WriteToAgentAsync(new JsonRpcMessage
+        await session.WriteToAgentAsync(new JsonRpcEnvelope
         {
             Method = "session/prompt",
             Params = new JsonObject
@@ -126,9 +126,9 @@ public sealed class AcpSessionAdvancedTests
         using var session = new AcpSession("/workspace");
         session.AttachAgentTransport(input.Writer, output.Reader, Task.CompletedTask);
 
-        var request = new JsonRpcMessage
+        var request = new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("req-finished"),
+            Id = "req-finished",
             Method = "initialize",
         };
 
@@ -143,9 +143,9 @@ public sealed class AcpSessionAdvancedTests
     public async Task Dispose_WithPendingRequest_CancelsPendingWaiter()
     {
         using var session = new AcpSession("/workspace");
-        var request = new JsonRpcMessage
+        var request = new JsonRpcEnvelope
         {
-            Id = JsonValue.Create("req-dispose"),
+            Id = "req-dispose",
             Method = "initialize",
         };
 

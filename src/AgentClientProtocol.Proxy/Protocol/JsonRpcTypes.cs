@@ -1,26 +1,204 @@
 // JSON-RPC 2.0 message types with System.Text.Json source generation for AOT
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace AgentClientProtocol.Proxy.Protocol;
 
+[JsonConverter(typeof(JsonRpcIdConverter))]
+public readonly record struct JsonRpcId(string RawValue, bool IsNumeric = false)
+{
+    public static JsonRpcId FromString(string value) => new(value, false);
+
+    public static JsonRpcId FromNumber(long value) => new(value.ToString(CultureInfo.InvariantCulture), true);
+
+    public static JsonRpcId FromInt32(int value) => FromNumber(value);
+
+    public static JsonRpcId FromInt64(long value) => FromNumber(value);
+
+    public static implicit operator JsonRpcId(string value) => FromString(value);
+
+    public static implicit operator JsonRpcId(int value) => FromInt32(value);
+
+    public static implicit operator JsonRpcId(long value) => FromInt64(value);
+
+    public T? GetValue<T>()
+    {
+        if (typeof(T) == typeof(string))
+        {
+            return (T?)(object?)RawValue;
+        }
+
+        if (typeof(T) == typeof(int) && int.TryParse(RawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
+        {
+            return (T?)(object)intValue;
+        }
+
+        if (typeof(T) == typeof(long) && long.TryParse(RawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+        {
+            return (T?)(object)longValue;
+        }
+
+        if (typeof(T) == typeof(decimal) && decimal.TryParse(RawValue, NumberStyles.Number, CultureInfo.InvariantCulture, out var decimalValue))
+        {
+            return (T?)(object)decimalValue;
+        }
+
+        if (typeof(T) == typeof(bool) && bool.TryParse(RawValue, out var boolValue))
+        {
+            return (T?)(object)boolValue;
+        }
+
+        throw new NotSupportedException($"JSON-RPC id cannot be converted to {typeof(T).Name}.");
+    }
+
+    public override string ToString() => RawValue;
+}
+
+internal sealed class JsonRpcIdConverter : JsonConverter<JsonRpcId>
+{
+    public override JsonRpcId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.TokenType switch
+    {
+        JsonTokenType.String => JsonRpcId.FromString(reader.GetString() ?? string.Empty),
+        JsonTokenType.Number => JsonRpcId.FromNumber(reader.GetInt64()),
+        _ => throw new JsonException("JSON-RPC id must be a string or integer."),
+    };
+
+    public override void Write(Utf8JsonWriter writer, JsonRpcId value, JsonSerializerOptions options)
+    {
+        if (value.IsNumeric &&
+            long.TryParse(value.RawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericValue))
+        {
+            writer.WriteNumberValue(numericValue);
+            return;
+        }
+
+        writer.WriteStringValue(value.RawValue);
+    }
+}
+
 /// <summary>
-/// JSON-RPC 2.0 message (request, response, or notification).
+/// Strongly typed JSON payload wrapper with object/array traversal helpers.
 /// </summary>
-public sealed class JsonRpcMessage
+[JsonConverter(typeof(JsonRpcDataConverter))]
+public readonly record struct JsonRpcData
+{
+    private readonly JsonElement element;
+
+    public JsonRpcData(JsonElement element) => this.element = element.Clone();
+
+    public JsonElement Element => element;
+
+    public JsonRpcData? this[string propertyName] =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(propertyName, out var propertyValue)
+            ? new JsonRpcData(propertyValue)
+            : (JsonRpcData?)null;
+
+    public JsonRpcData? this[int index] =>
+        element.ValueKind == JsonValueKind.Array &&
+        index >= 0 &&
+        index < element.GetArrayLength()
+            ? new JsonRpcData(element[index])
+            : (JsonRpcData?)null;
+
+    public T? GetValue<T>()
+    {
+        if (typeof(T) == typeof(string) && element.ValueKind == JsonValueKind.String)
+        {
+            return (T?)(object?)element.GetString();
+        }
+
+        if (typeof(T) == typeof(int) && element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var intValue))
+        {
+            return (T?)(object)intValue;
+        }
+
+        if (typeof(T) == typeof(long) && element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out var longValue))
+        {
+            return (T?)(object)longValue;
+        }
+
+        if (typeof(T) == typeof(decimal) && element.ValueKind == JsonValueKind.Number && element.TryGetDecimal(out var decimalValue))
+        {
+            return (T?)(object)decimalValue;
+        }
+
+        if (typeof(T) == typeof(bool) &&
+            (element.ValueKind == JsonValueKind.True || element.ValueKind == JsonValueKind.False))
+        {
+            return (T?)(object)element.GetBoolean();
+        }
+
+        throw new NotSupportedException($"JSON payload cannot be converted to {typeof(T).Name}.");
+    }
+
+    public bool TryGetValue<T>(out T value)
+    {
+        try
+        {
+            var result = GetValue<T>();
+            if (result is null)
+            {
+                value = default!;
+                return false;
+            }
+
+            value = result;
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            value = default!;
+            return false;
+        }
+    }
+
+    public static implicit operator JsonRpcData(JsonElement element) => new(element);
+
+    public static JsonRpcData FromJsonElement(JsonElement element) => new(element);
+
+    public static implicit operator JsonElement(JsonRpcData payload) => payload.element;
+
+    public static JsonElement ToJsonElement(JsonRpcData payload) => payload.element;
+
+    public static JsonRpcData FromJsonNode(JsonNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        using var document = JsonDocument.Parse(node.ToJsonString());
+        return new JsonRpcData(document.RootElement.Clone());
+    }
+
+    public static implicit operator JsonRpcData(JsonNode node) => FromJsonNode(node);
+}
+
+internal sealed class JsonRpcDataConverter : JsonConverter<JsonRpcData>
+{
+    public override JsonRpcData Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        using var document = JsonDocument.ParseValue(ref reader);
+        return new JsonRpcData(document.RootElement.Clone());
+    }
+
+    public override void Write(Utf8JsonWriter writer, JsonRpcData value, JsonSerializerOptions options)
+        => value.Element.WriteTo(writer);
+}
+
+/// <summary>
+/// JSON-RPC 2.0 envelope (request, response, or notification).
+/// </summary>
+public sealed class JsonRpcEnvelope
 {
     [JsonPropertyName("jsonrpc")]
     public string JsonRpc { get; set; } = "2.0";
 
     /// <summary>
-    /// Request/response ID. Can be string or number per JSON-RPC spec.
-    /// Null for notifications.
+    /// Request/response ID. Null for notifications.
     /// </summary>
     [JsonPropertyName("id")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Id { get; set; }
+    public JsonRpcId? Id { get; set; }
 
     [JsonPropertyName("method")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -28,11 +206,11 @@ public sealed class JsonRpcMessage
 
     [JsonPropertyName("params")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Params { get; set; }
+    public JsonRpcData? Params { get; set; }
 
     [JsonPropertyName("result")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Result { get; set; }
+    public JsonRpcData? Result { get; set; }
 
     [JsonPropertyName("error")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -48,11 +226,11 @@ public sealed class JsonRpcError
     public int Code { get; set; }
 
     [JsonPropertyName("message")]
-    public string Message { get; set; } = "";
+    public string Message { get; set; } = string.Empty;
 
     [JsonPropertyName("data")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonNode? Data { get; set; }
+    public JsonRpcData? Data { get; set; }
 }
 
 public sealed class InitializeRequestParams
@@ -61,10 +239,10 @@ public sealed class InitializeRequestParams
     public string? ProtocolVersion { get; set; }
 
     [JsonPropertyName("clientInfo")]
-    public JsonNode? ClientInfo { get; set; }
+    public JsonElement? ClientInfo { get; set; }
 
     [JsonPropertyName("capabilities")]
-    public JsonNode? Capabilities { get; set; }
+    public JsonElement? Capabilities { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> ExtensionData { get; } = [];
@@ -103,7 +281,7 @@ public sealed class SessionNewRequestParams
     public string? Cwd { get; set; }
 
     [JsonPropertyName("mcpServers")]
-    public JsonNode? McpServers { get; set; }
+    public JsonElement? McpServers { get; set; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement> ExtensionData { get; } = [];
@@ -129,12 +307,13 @@ public sealed class SessionScopedParams
 
 /// <summary>
 /// JSON source generator context for AOT compatibility.
-/// Annotated with [JsonSerializable] for all message types used in ACP protocol.
 /// </summary>
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(JsonRpcMessage))]
+[JsonSerializable(typeof(JsonRpcId))]
+[JsonSerializable(typeof(JsonRpcData))]
+[JsonSerializable(typeof(JsonRpcEnvelope))]
 [JsonSerializable(typeof(JsonRpcError))]
 [JsonSerializable(typeof(InitializeRequestParams))]
 [JsonSerializable(typeof(InitializeResultPayload))]
@@ -144,9 +323,7 @@ public sealed class SessionScopedParams
 [JsonSerializable(typeof(SessionNewResponsePayload))]
 [JsonSerializable(typeof(SessionScopedParams))]
 [ExcludeFromCodeCoverage]
-public sealed partial class AcpJsonContext : JsonSerializerContext
-{
-}
+public sealed partial class AcpJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// Standard JSON-RPC 2.0 error codes.

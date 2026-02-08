@@ -4,33 +4,33 @@ namespace ContainAI.Cli.Host;
 
 internal sealed class CaiCommandRuntime : ICaiCommandRuntime
 {
-    private readonly AcpProxyRunner _acpProxyRunner;
-    private readonly NativeLifecycleCommandRuntime _nativeLifecycleRuntime;
+    private readonly AcpProxyRunner acpProxyRunner;
+    private readonly NativeLifecycleCommandRuntime nativeLifecycleRuntime;
 
     public CaiCommandRuntime(
-        AcpProxyRunner acpProxyRunner,
-        NativeLifecycleCommandRuntime? nativeLifecycleRuntime = null)
+        AcpProxyRunner proxyRunner,
+        NativeLifecycleCommandRuntime? lifecycleRuntime = null)
     {
-        _acpProxyRunner = acpProxyRunner;
-        _nativeLifecycleRuntime = nativeLifecycleRuntime ?? new NativeLifecycleCommandRuntime();
+        acpProxyRunner = proxyRunner;
+        nativeLifecycleRuntime = lifecycleRuntime ?? new NativeLifecycleCommandRuntime();
     }
 
     public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return _nativeLifecycleRuntime.RunAsync(BuildRunArgs(options), cancellationToken);
+        return nativeLifecycleRuntime.RunAsync(BuildRunArgs(options), cancellationToken);
     }
 
     public Task<int> RunShellAsync(ShellCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return _nativeLifecycleRuntime.RunAsync(BuildShellArgs(options), cancellationToken);
+        return nativeLifecycleRuntime.RunAsync(BuildShellArgs(options), cancellationToken);
     }
 
     public Task<int> RunExecAsync(ExecCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return _nativeLifecycleRuntime.RunAsync(BuildExecArgs(options), cancellationToken);
+        return nativeLifecycleRuntime.RunAsync(BuildExecArgs(options), cancellationToken);
     }
 
     public Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
@@ -42,7 +42,7 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         };
 
         AppendTokens(args, options.DockerArgs);
-        return _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
+        return nativeLifecycleRuntime.RunAsync(args, cancellationToken);
     }
 
     public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
@@ -75,14 +75,14 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
             args.Add("--verbose");
         }
 
-        return _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
+        return nativeLifecycleRuntime.RunAsync(args, cancellationToken);
     }
 
     public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
-        => _acpProxyRunner.RunAsync(agent, cancellationToken);
+        => acpProxyRunner.RunAsync(agent, cancellationToken);
 
     public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => _nativeLifecycleRuntime.RunAsync(args, cancellationToken);
+        => nativeLifecycleRuntime.RunAsync(args, cancellationToken);
 
     private static List<string> BuildRunArgs(RunCommandOptions options)
     {

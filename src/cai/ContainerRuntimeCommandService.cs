@@ -18,20 +18,20 @@ internal sealed class ContainerRuntimeCommandService
     private const string DefaultImportedAtFile = "/mnt/agent-data/.containai-imported-at";
     private const string DefaultCheckedAtFile = "/mnt/agent-data/.containai-links-checked-at";
 
-    private readonly TextWriter _stdout;
-    private readonly TextWriter _stderr;
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
 
-    public ContainerRuntimeCommandService(TextWriter stdout, TextWriter stderr)
+    public ContainerRuntimeCommandService(TextWriter standardOutput, TextWriter standardError)
     {
-        _stdout = stdout;
-        _stderr = stderr;
+        stdout = standardOutput;
+        stderr = standardError;
     }
 
     public async Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2)
         {
-            await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
+            await stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
             return 1;
         }
 
@@ -40,15 +40,15 @@ internal sealed class ContainerRuntimeCommandService
             "init" => await RunInitAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             "link-repair" => await RunLinkRepairAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             "watch-links" => await RunLinkWatcherAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "devcontainer" => await new DevcontainerFeatureRuntime(_stdout, _stderr).RunAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
+            "devcontainer" => await new DevcontainerFeatureRuntime(stdout, stderr).RunAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
             _ => await UnknownSystemSubcommandAsync(args[1]).ConfigureAwait(false),
         };
     }
 
     private async Task<int> UnknownSystemSubcommandAsync(string subcommand)
     {
-        await _stderr.WriteLineAsync($"Unknown system subcommand: {subcommand}").ConfigureAwait(false);
-        await _stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
+        await stderr.WriteLineAsync($"Unknown system subcommand: {subcommand}").ConfigureAwait(false);
+        await stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
         return 1;
     }
 
@@ -68,7 +68,7 @@ internal sealed class ContainerRuntimeCommandService
             {
                 case "--help":
                 case "-h":
-                    await _stdout.WriteLineAsync(
+                    await stdout.WriteLineAsync(
                         "Usage: cai system init [--data-dir <path>] [--home-dir <path>] [--manifests-dir <path>] [--template-hooks <path>] [--workspace-hooks <path>] [--workspace-dir <path>] [--quiet]").ConfigureAwait(false);
                     return 0;
                 case "--quiet":
@@ -77,7 +77,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--data-dir":
                     if (!TryReadOptionValue(args, ref index, out dataDir))
                     {
-                        await _stderr.WriteLineAsync("--data-dir requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--data-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -85,7 +85,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--home-dir":
                     if (!TryReadOptionValue(args, ref index, out homeDir))
                     {
-                        await _stderr.WriteLineAsync("--home-dir requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--home-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -93,7 +93,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--manifests-dir":
                     if (!TryReadOptionValue(args, ref index, out manifestsDir))
                     {
-                        await _stderr.WriteLineAsync("--manifests-dir requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--manifests-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -101,7 +101,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--template-hooks":
                     if (!TryReadOptionValue(args, ref index, out templateHooksDir))
                     {
-                        await _stderr.WriteLineAsync("--template-hooks requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--template-hooks requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -109,7 +109,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--workspace-hooks":
                     if (!TryReadOptionValue(args, ref index, out workspaceHooksDir))
                     {
-                        await _stderr.WriteLineAsync("--workspace-hooks requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--workspace-hooks requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -117,13 +117,13 @@ internal sealed class ContainerRuntimeCommandService
                 case "--workspace-dir":
                     if (!TryReadOptionValue(args, ref index, out workspaceDir))
                     {
-                        await _stderr.WriteLineAsync("--workspace-dir requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--workspace-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
                     break;
                 default:
-                    await _stderr.WriteLineAsync($"Unknown system init option: {token}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Unknown system init option: {token}").ConfigureAwait(false);
                     return 1;
             }
         }
@@ -148,32 +148,32 @@ internal sealed class ContainerRuntimeCommandService
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (JsonException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (ArgumentException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (NotSupportedException ex)
         {
-            await _stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }
@@ -192,7 +192,7 @@ internal sealed class ContainerRuntimeCommandService
             {
                 case "--help":
                 case "-h":
-                    await _stdout.WriteLineAsync(
+                    await stdout.WriteLineAsync(
                         "Usage: cai system link-repair [--check|--fix|--dry-run] [--quiet] [--builtin-spec <path>] [--user-spec <path>] [--checked-at-file <path>]").ConfigureAwait(false);
                     return 0;
                 case "--check":
@@ -210,7 +210,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--builtin-spec":
                     if (!TryReadOptionValue(args, ref index, out builtinSpecPath))
                     {
-                        await _stderr.WriteLineAsync("--builtin-spec requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--builtin-spec requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -218,7 +218,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--user-spec":
                     if (!TryReadOptionValue(args, ref index, out userSpecPath))
                     {
-                        await _stderr.WriteLineAsync("--user-spec requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--user-spec requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -226,20 +226,20 @@ internal sealed class ContainerRuntimeCommandService
                 case "--checked-at-file":
                     if (!TryReadOptionValue(args, ref index, out checkedAtFilePath))
                     {
-                        await _stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
                     break;
                 default:
-                    await _stderr.WriteLineAsync($"Unknown system link-repair option: {token}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Unknown system link-repair option: {token}").ConfigureAwait(false);
                     return 1;
             }
         }
 
         if (!File.Exists(builtinSpecPath))
         {
-            await _stderr.WriteLineAsync($"ERROR: Built-in link spec not found: {builtinSpecPath}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: Built-in link spec not found: {builtinSpecPath}").ConfigureAwait(false);
             return 1;
         }
 
@@ -256,32 +256,32 @@ internal sealed class ContainerRuntimeCommandService
                 catch (InvalidOperationException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (IOException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (UnauthorizedAccessException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (JsonException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (ArgumentException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
                 catch (NotSupportedException ex)
                 {
                     stats.Errors++;
-                    await _stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {ex.Message}").ConfigureAwait(false);
                 }
             }
 
@@ -306,32 +306,32 @@ internal sealed class ContainerRuntimeCommandService
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (JsonException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (ArgumentException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
         catch (NotSupportedException ex)
         {
-            await _stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
     }
@@ -349,7 +349,7 @@ internal sealed class ContainerRuntimeCommandService
             {
                 case "--help":
                 case "-h":
-                    await _stdout.WriteLineAsync("Usage: cai system watch-links [--poll-interval <seconds>] [--imported-at-file <path>] [--checked-at-file <path>] [--quiet]").ConfigureAwait(false);
+                    await stdout.WriteLineAsync("Usage: cai system watch-links [--poll-interval <seconds>] [--imported-at-file <path>] [--checked-at-file <path>] [--quiet]").ConfigureAwait(false);
                     return 0;
                 case "--quiet":
                     quiet = true;
@@ -357,7 +357,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--poll-interval":
                     if (!TryReadOptionValue(args, ref index, out var intervalRaw) || !int.TryParse(intervalRaw, out pollIntervalSeconds) || pollIntervalSeconds < 1)
                     {
-                        await _stderr.WriteLineAsync("--poll-interval requires a positive integer value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--poll-interval requires a positive integer value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -365,7 +365,7 @@ internal sealed class ContainerRuntimeCommandService
                 case "--imported-at-file":
                     if (!TryReadOptionValue(args, ref index, out importedAtPath))
                     {
-                        await _stderr.WriteLineAsync("--imported-at-file requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--imported-at-file requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
@@ -373,13 +373,13 @@ internal sealed class ContainerRuntimeCommandService
                 case "--checked-at-file":
                     if (!TryReadOptionValue(args, ref index, out checkedAtPath))
                     {
-                        await _stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
+                        await stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
                     break;
                 default:
-                    await _stderr.WriteLineAsync($"Unknown system watch-links option: {token}").ConfigureAwait(false);
+                    await stderr.WriteLineAsync($"Unknown system watch-links option: {token}").ConfigureAwait(false);
                     return 1;
             }
         }
@@ -425,7 +425,7 @@ internal sealed class ContainerRuntimeCommandService
             }
             else
             {
-                await _stderr.WriteLineAsync("[ERROR] Repair command failed").ConfigureAwait(false);
+                await stderr.WriteLineAsync("[ERROR] Repair command failed").ConfigureAwait(false);
             }
         }
 
@@ -458,7 +458,7 @@ internal sealed class ContainerRuntimeCommandService
             if (string.IsNullOrWhiteSpace(linkPath) || string.IsNullOrWhiteSpace(targetPath))
             {
                 stats.Errors++;
-                await _stderr.WriteLineAsync($"[WARN] Skipping invalid link spec entry in {specPath}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Skipping invalid link spec entry in {specPath}").ConfigureAwait(false);
                 continue;
             }
 
@@ -507,7 +507,7 @@ internal sealed class ContainerRuntimeCommandService
             else
             {
                 stats.Errors++;
-                await _stderr.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
                 return;
             }
         }
@@ -545,7 +545,7 @@ internal sealed class ContainerRuntimeCommandService
             if (!removeFirst)
             {
                 stats.Errors++;
-                await _stderr.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
                 return;
             }
 
@@ -589,21 +589,21 @@ internal sealed class ContainerRuntimeCommandService
             return;
         }
 
-        await _stdout.WriteLineAsync().ConfigureAwait(false);
-        await _stdout.WriteLineAsync(mode == LinkRepairMode.DryRun ? "=== Dry-Run Summary ===" : "=== Link Status Summary ===").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"  OK:      {stats.Ok}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"  Broken:  {stats.Broken}").ConfigureAwait(false);
-        await _stdout.WriteLineAsync($"  Missing: {stats.Missing}").ConfigureAwait(false);
+        await stdout.WriteLineAsync().ConfigureAwait(false);
+        await stdout.WriteLineAsync(mode == LinkRepairMode.DryRun ? "=== Dry-Run Summary ===" : "=== Link Status Summary ===").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  OK:      {stats.Ok}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  Broken:  {stats.Broken}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  Missing: {stats.Missing}").ConfigureAwait(false);
         if (mode == LinkRepairMode.Fix)
         {
-            await _stdout.WriteLineAsync($"  Fixed:   {stats.Fixed}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  Fixed:   {stats.Fixed}").ConfigureAwait(false);
         }
         else if (mode == LinkRepairMode.DryRun)
         {
-            await _stdout.WriteLineAsync($"  Would fix: {stats.Fixed}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"  Would fix: {stats.Fixed}").ConfigureAwait(false);
         }
 
-        await _stdout.WriteLineAsync($"  Errors:  {stats.Errors}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"  Errors:  {stats.Errors}").ConfigureAwait(false);
     }
 
     private async Task EnsureVolumeStructureAsync(string dataDir, string manifestsDir, bool quiet)
@@ -620,38 +620,38 @@ internal sealed class ContainerRuntimeCommandService
             }
             catch (InvalidOperationException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
             catch (IOException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
             catch (UnauthorizedAccessException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
             catch (JsonException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
             catch (ArgumentException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
             catch (NotSupportedException ex)
             {
-                await _stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Native init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
         }
         else
         {
-            await _stderr.WriteLineAsync("[WARN] Built-in manifests not found, using fallback volume structure").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] Built-in manifests not found, using fallback volume structure").ConfigureAwait(false);
             EnsureFallbackVolumeStructure(dataDir);
         }
 
@@ -674,7 +674,7 @@ internal sealed class ContainerRuntimeCommandService
     {
         if (await IsSymlinkAsync(envFilePath).ConfigureAwait(false))
         {
-            await _stderr.WriteLineAsync("[WARN] .env is symlink - skipping").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] .env is symlink - skipping").ConfigureAwait(false);
             return;
         }
 
@@ -689,12 +689,12 @@ internal sealed class ContainerRuntimeCommandService
         }
         catch (IOException)
         {
-            await _stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
             return;
         }
         catch (UnauthorizedAccessException)
         {
-            await _stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
+            await stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
             return;
         }
 
@@ -729,7 +729,7 @@ internal sealed class ContainerRuntimeCommandService
             var value = line[(separator + 1)..];
             if (!IsValidEnvKey(key))
             {
-                await _stderr.WriteLineAsync($"[WARN] line {index + 1}: invalid key '{key}' - skipping").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] line {index + 1}: invalid key '{key}' - skipping").ConfigureAwait(false);
                 continue;
             }
 
@@ -789,14 +789,14 @@ internal sealed class ContainerRuntimeCommandService
 
         if (await IsSymlinkAsync(newDir).ConfigureAwait(false))
         {
-            await _stderr.WriteLineAsync($"[WARN] {newDir} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] {newDir} is a symlink - cannot migrate git config").ConfigureAwait(false);
             return;
         }
 
         Directory.CreateDirectory(newDir);
         if (await IsSymlinkAsync(newPath).ConfigureAwait(false))
         {
-            await _stderr.WriteLineAsync($"[WARN] {newPath} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] {newPath} is a symlink - cannot migrate git config").ConfigureAwait(false);
             return;
         }
 
@@ -825,7 +825,7 @@ internal sealed class ContainerRuntimeCommandService
 
         if (Directory.Exists(destination))
         {
-            await _stderr.WriteLineAsync($"[WARN] Destination {destination} exists but is not a regular file - skipping").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] Destination {destination} exists but is not a regular file - skipping").ConfigureAwait(false);
             return;
         }
 
@@ -871,13 +871,13 @@ internal sealed class ContainerRuntimeCommandService
 
         if (!Path.IsPathRooted(hostWorkspace))
         {
-            await _stderr.WriteLineAsync($"[WARN] CAI_HOST_WORKSPACE must be absolute path: {hostWorkspace}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] CAI_HOST_WORKSPACE must be absolute path: {hostWorkspace}").ConfigureAwait(false);
             return;
         }
 
         if (!IsAllowedWorkspacePrefix(hostWorkspace))
         {
-            await _stderr.WriteLineAsync($"[WARN] CAI_HOST_WORKSPACE must be under /home/, /tmp/, /mnt/, /workspaces/, or /Users/: {hostWorkspace}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] CAI_HOST_WORKSPACE must be under /home/, /tmp/, /mnt/, /workspaces/, or /Users/: {hostWorkspace}").ConfigureAwait(false);
             return;
         }
 
@@ -926,27 +926,27 @@ internal sealed class ContainerRuntimeCommandService
         }
         catch (InvalidOperationException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
         catch (IOException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
         catch (JsonException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
         catch (NotSupportedException ex)
         {
-            await _stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
     }
 
@@ -976,7 +976,7 @@ internal sealed class ContainerRuntimeCommandService
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsExecutable(hook))
             {
-                await _stderr.WriteLineAsync($"[WARN] Skipping non-executable hook: {hook}").ConfigureAwait(false);
+                await stderr.WriteLineAsync($"[WARN] Skipping non-executable hook: {hook}").ConfigureAwait(false);
                 continue;
             }
 
@@ -1168,7 +1168,7 @@ internal sealed class ContainerRuntimeCommandService
             return;
         }
 
-        await _stdout.WriteLineAsync($"[INFO] {message}").ConfigureAwait(false);
+        await stdout.WriteLineAsync($"[INFO] {message}").ConfigureAwait(false);
     }
 
     private static bool TryReadOptionValue(string[] args, ref int index, out string value)
