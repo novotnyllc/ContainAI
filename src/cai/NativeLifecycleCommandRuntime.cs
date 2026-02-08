@@ -84,6 +84,18 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return sessionRuntime.RunExecAsync(options, cancellationToken);
     }
 
+    public static Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunDockerCoreAsync(options.DockerArgs, cancellationToken);
+    }
+
+    public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunStatusCoreAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
+    }
+
     private async Task<int> RunDockerAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         if (args.Count > 1 && (args[1] is "-h" or "--help"))
@@ -92,6 +104,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 0;
         }
 
+        return await RunDockerCoreAsync(args.Skip(1).ToArray(), cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task<int> RunDockerCoreAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken)
+    {
         var executable = IsExecutableOnPath("containai-docker")
             ? "containai-docker"
             : "docker";
@@ -107,9 +124,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
-        for (var index = 1; index < args.Count; index++)
+        foreach (var argument in dockerArguments)
         {
-            dockerArgs.Add(args[index]);
+            dockerArgs.Add(argument);
         }
 
         return await RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
@@ -174,6 +191,16 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
+        return await RunStatusCoreAsync(outputJson, verbose, workspace, container, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunStatusCoreAsync(
+        bool outputJson,
+        bool verbose,
+        string? workspace,
+        string? container,
+        CancellationToken cancellationToken)
+    {
         if (!string.IsNullOrWhiteSpace(workspace) && !string.IsNullOrWhiteSpace(container))
         {
             await stderr.WriteLineAsync("--workspace and --container are mutually exclusive").ConfigureAwait(false);
