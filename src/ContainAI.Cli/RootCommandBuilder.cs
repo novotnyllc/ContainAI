@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Encodings.Web;
@@ -41,41 +42,32 @@ internal static partial class RootCommandBuilder
                 CommandArgs: Array.Empty<string>()),
             cancellationToken));
 
-        foreach (var name in CommandCatalog.RoutedCommandOrder)
-        {
-            var command = name switch
-            {
-                "run" => CreateRunCommand(runtime),
-                "shell" => CreateShellCommand(runtime),
-                "exec" => CreateExecCommand(runtime),
-                "doctor" => CreateDoctorCommand(runtime),
-                "setup" => CreateSetupCommand(runtime),
-                "validate" => CreateValidateCommand(runtime),
-                "docker" => CreateDockerCommand(runtime),
-                "import" => CreateImportCommand(runtime),
-                "export" => CreateExportCommand(runtime),
-                "sync" => CreateSyncCommand(runtime),
-                "stop" => CreateStopCommand(runtime),
-                "status" => CreateStatusCommand(runtime),
-                "gc" => CreateGcCommand(runtime),
-                "ssh" => CreateSshCommand(runtime),
-                "links" => CreateLinksCommand(runtime),
-                "config" => CreateConfigCommand(runtime),
-                "manifest" => CreateManifestCommand(runtime),
-                "template" => CreateTemplateCommand(runtime),
-                "update" => CreateUpdateCommand(runtime),
-                "refresh" => CreateRefreshCommand(runtime),
-                "uninstall" => CreateUninstallCommand(runtime),
-                "help" => CreateHelpCommand(runtime),
-                "system" => CreateSystemCommand(runtime),
-                "completion" => CreateCompletionCommand(root),
-                "version" => CreateVersionCommand(runtime),
-                "acp" => AcpCommandBuilder.Build(runtime),
-                _ => throw new InvalidOperationException($"Unsupported routed command '{name}'."),
-            };
-
-            root.Subcommands.Add(command);
-        }
+        root.Subcommands.Add(CreateRunCommand(runtime));
+        root.Subcommands.Add(CreateShellCommand(runtime));
+        root.Subcommands.Add(CreateExecCommand(runtime));
+        root.Subcommands.Add(CreateDoctorCommand(runtime));
+        root.Subcommands.Add(CreateSetupCommand(runtime));
+        root.Subcommands.Add(CreateValidateCommand(runtime));
+        root.Subcommands.Add(CreateDockerCommand(runtime));
+        root.Subcommands.Add(CreateImportCommand(runtime));
+        root.Subcommands.Add(CreateExportCommand(runtime));
+        root.Subcommands.Add(CreateSyncCommand(runtime));
+        root.Subcommands.Add(CreateStopCommand(runtime));
+        root.Subcommands.Add(CreateStatusCommand(runtime));
+        root.Subcommands.Add(CreateGcCommand(runtime));
+        root.Subcommands.Add(CreateSshCommand(runtime));
+        root.Subcommands.Add(CreateLinksCommand(runtime));
+        root.Subcommands.Add(CreateConfigCommand(runtime));
+        root.Subcommands.Add(CreateManifestCommand(runtime));
+        root.Subcommands.Add(CreateTemplateCommand(runtime));
+        root.Subcommands.Add(CreateUpdateCommand(runtime));
+        root.Subcommands.Add(CreateRefreshCommand(runtime));
+        root.Subcommands.Add(CreateUninstallCommand(runtime));
+        root.Subcommands.Add(CreateCompletionCommand(root));
+        root.Subcommands.Add(CreateVersionCommand(runtime));
+        root.Subcommands.Add(CreateHelpCommand(runtime));
+        root.Subcommands.Add(CreateSystemCommand(runtime));
+        root.Subcommands.Add(AcpCommandBuilder.Build(runtime));
 
         return root;
     }
@@ -561,7 +553,10 @@ internal static partial class RootCommandBuilder
             var line = parseResult.GetValue(lineOption) ?? string.Empty;
             var requestedPosition = parseResult.GetValue(positionOption) ?? line.Length;
             var normalized = NormalizeCompletionInput(line, requestedPosition);
-            var completionArgs = NormalizeCompletionArguments(normalized.Line);
+            var knownCommands = root.Subcommands
+                .Select(static command => command.Name)
+                .ToFrozenSet(StringComparer.Ordinal);
+            var completionArgs = NormalizeCompletionArguments(normalized.Line, knownCommands);
             var completionResult = CommandLineParser.Parse(root, completionArgs, configuration: null);
 
             foreach (var completion in completionResult.GetCompletions(position: normalized.Cursor))
@@ -623,7 +618,7 @@ internal static partial class RootCommandBuilder
         return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
     }
 
-    private static string[] NormalizeCompletionArguments(string line)
+    private static string[] NormalizeCompletionArguments(string line, FrozenSet<string> knownCommands)
     {
         var normalized = CommandLineParser.SplitCommandLine(line).ToArray();
         if (normalized.Length == 0)
@@ -638,7 +633,7 @@ internal static partial class RootCommandBuilder
             _ => normalized,
         };
 
-        if (ShouldImplicitRunForCompletion(normalized))
+        if (ShouldImplicitRunForCompletion(normalized, knownCommands))
         {
             return ["run", .. normalized];
         }
@@ -646,7 +641,7 @@ internal static partial class RootCommandBuilder
         return normalized;
     }
 
-    private static bool ShouldImplicitRunForCompletion(string[] args)
+    private static bool ShouldImplicitRunForCompletion(string[] args, FrozenSet<string> knownCommands)
     {
         if (args.Length == 0)
         {
@@ -654,7 +649,7 @@ internal static partial class RootCommandBuilder
         }
 
         var firstToken = args[0];
-        if (CommandCatalog.RootParserTokens.Contains(firstToken))
+        if (firstToken is "help" or "--help" or "-h")
         {
             return false;
         }
@@ -664,12 +659,12 @@ internal static partial class RootCommandBuilder
             return true;
         }
 
-        if (CommandCatalog.RoutedCommands.Any(command => command.StartsWith(firstToken, StringComparison.OrdinalIgnoreCase)))
+        if (knownCommands.Any(command => command.StartsWith(firstToken, StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }
 
-        return !CommandCatalog.RoutedCommands.Contains(firstToken);
+        return !knownCommands.Contains(firstToken);
     }
 
     private static string ExpandHome(string path)

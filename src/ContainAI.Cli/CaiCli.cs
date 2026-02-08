@@ -15,7 +15,7 @@ public static class CaiCli
 
         var normalizedArgs = NormalizeRootAliases(args);
         var root = CreateRootCommand(runtime);
-        if (normalizedArgs.Length > 0 && ShouldImplicitRun(normalizedArgs))
+        if (normalizedArgs.Length > 0 && ShouldImplicitRun(normalizedArgs, root))
         {
             var redirected = new string[normalizedArgs.Length + 1];
             redirected[0] = "run";
@@ -50,11 +50,11 @@ public static class CaiCli
         return args;
     }
 
-    private static bool ShouldImplicitRun(string[] args)
+    private static bool ShouldImplicitRun(string[] args, RootCommand root)
     {
         var firstToken = args[0];
 
-        if (CommandCatalog.RootParserTokens.Contains(firstToken))
+        if (firstToken is "help" or "--help" or "-h")
         {
             return false;
         }
@@ -64,6 +64,6 @@ public static class CaiCli
             return true;
         }
 
-        return !CommandCatalog.RoutedCommands.Contains(firstToken);
+        return !root.Subcommands.Any(command => string.Equals(command.Name, firstToken, StringComparison.Ordinal));
     }
 }

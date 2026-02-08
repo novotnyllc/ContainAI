@@ -56,7 +56,6 @@ dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:
 `cai` commands are statically defined in:
 
 - `src/ContainAI.Cli/RootCommandBuilder.cs`
-- `src/ContainAI.Cli/CommandCatalog.cs`
 
 No runtime command discovery is used. Completion is internal via:
 
