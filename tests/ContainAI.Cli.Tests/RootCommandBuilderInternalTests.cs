@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Reflection;
 using ContainAI.Cli;
 using Xunit;
@@ -7,6 +8,8 @@ namespace ContainAI.Cli.Tests;
 public sealed class RootCommandBuilderInternalTests
 {
     private static readonly string[] PsArgs = ["ps"];
+    private static readonly FrozenSet<string> EmptyCommandSet = Array.Empty<string>().ToFrozenSet(StringComparer.Ordinal);
+    private static readonly FrozenSet<string> RefreshCommandSet = new HashSet<string>(StringComparer.Ordinal) { "refresh" }.ToFrozenSet(StringComparer.Ordinal);
     private static readonly Type RootCommandBuilderType =
         typeof(CaiCli).Assembly.GetType("ContainAI.Cli.RootCommandBuilder")
         ?? throw new InvalidOperationException("RootCommandBuilder type not found.");
@@ -104,7 +107,7 @@ public sealed class RootCommandBuilderInternalTests
     {
         var result = (IReadOnlyList<string>)InvokeStatic(
             "NormalizeCompletionArguments",
-            ["--refresh --rebuild"]);
+            ["--refresh --rebuild", RefreshCommandSet]);
 
         Assert.Equal(["refresh", "--rebuild"], result);
     }
@@ -114,7 +117,7 @@ public sealed class RootCommandBuilderInternalTests
     {
         var result = (IReadOnlyList<string>)InvokeStatic(
             "NormalizeCompletionArguments",
-            ["--fresh /tmp/workspace"]);
+            ["--fresh /tmp/workspace", EmptyCommandSet]);
 
         Assert.Equal(["run", "--fresh", "/tmp/workspace"], result);
     }

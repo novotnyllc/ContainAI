@@ -1010,9 +1010,7 @@ Host {containerName}
             return ContainerLookupResult.Success(generated);
         }
 
-        var legacy = ContainerNameGenerator.GenerateLegacy(workspace);
-        var legacyExists = await DockerCaptureAsync(context, ["inspect", "--type", "container", legacy], cancellationToken).ConfigureAwait(false);
-        return legacyExists.ExitCode == 0 ? ContainerLookupResult.Success(legacy) : ContainerLookupResult.Empty();
+        return ContainerLookupResult.Empty();
     }
 
     private static async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)

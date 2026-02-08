@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace ContainAI.Cli.Host;
 
 internal static class ContainerNameGenerator
@@ -47,14 +44,6 @@ internal static class ContainerNameGenerator
         }
 
         return $"{repo}-{branch}";
-    }
-
-    public static string GenerateLegacy(string workspace)
-    {
-        var normalized = Path.GetFullPath(workspace).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        var hash = Convert.ToHexString(bytes).ToLowerInvariant();
-        return $"containai-{hash[..12]}";
     }
 
     public static string SanitizeNameComponent(string value, string fallback)

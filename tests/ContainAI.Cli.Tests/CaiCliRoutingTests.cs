@@ -514,7 +514,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_IsTreatedAsRunArguments()
+    public async Task AcpStyleFlag_IsTreatedAsRunArguments()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -529,7 +529,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_WithoutAgent_IsTreatedAsRunArgument()
+    public async Task AcpStyleFlag_WithoutAgent_IsTreatedAsRunArgument()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -544,7 +544,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task LegacyAcpFlag_WithHelp_ShowsTopLevelHelpWithoutRuntimeInvocation()
+    public async Task AcpStyleFlag_WithHelp_ShowsTopLevelHelpWithoutRuntimeInvocation()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -657,7 +657,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task VersionWithJson_UsesNativePath_WithoutLegacyBridge()
+    public async Task VersionWithJson_UsesNativePathDirectly()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;

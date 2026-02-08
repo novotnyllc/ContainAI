@@ -814,10 +814,8 @@ internal sealed class ContainerRuntimeCommandService
             return;
         }
 
-        var primarySource = Path.Combine(dataDir, "git", "gitconfig");
-        var legacySource = Path.Combine(dataDir, ".gitconfig");
-        var source = ChooseReadableNonEmptyFile(primarySource, legacySource);
-        if (source is null)
+        var source = Path.Combine(dataDir, "git", "gitconfig");
+        if (!File.Exists(source) || new FileInfo(source).Length == 0)
         {
             return;
         }
@@ -832,27 +830,6 @@ internal sealed class ContainerRuntimeCommandService
         File.Copy(source, tempDestination, overwrite: true);
         File.Move(tempDestination, destination, overwrite: true);
         await LogInfoAsync(quiet, "Git config loaded from data volume").ConfigureAwait(false);
-    }
-
-    private static string? ChooseReadableNonEmptyFile(params string[] paths)
-    {
-        foreach (var path in paths)
-        {
-            if (!File.Exists(path))
-            {
-                continue;
-            }
-
-            var info = new FileInfo(path);
-            if (info.Length == 0)
-            {
-                continue;
-            }
-
-            return path;
-        }
-
-        return null;
     }
 
     private async Task SetupWorkspaceSymlinkAsync(string workspaceDir, bool quiet)

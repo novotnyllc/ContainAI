@@ -1,20 +1,20 @@
 # =============================================================================
 # TMUX
-# XDG precedence: legacy ~/.tmux.conf syncs first as fallback, then XDG
-# ~/.config/tmux/ overwrites. This ensures XDG wins when both exist.
+# ~/.tmux.conf syncs first, then ~/.config/tmux/ overwrites. This ensures
+# ~/.config/tmux/ values win when both are present.
 # =============================================================================
 
 [[entries]]
 source = ".tmux.conf"
 target = "config/tmux/tmux.conf"
 container_link = ""  # No direct symlink - file is inside config/tmux dir
-flags = "f"  # file (fallback for legacy users)
+flags = "f"  # file
 
 [[entries]]
 source = ".config/tmux"
 target = "config/tmux"
 container_link = ".config/tmux"
-flags = "d"  # directory (XDG, preferred)
+flags = "d"  # directory
 
 [[entries]]
 source = ".local/share/tmux"
