@@ -234,7 +234,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(
             ["completion", "suggest", "--line", "cai st", "--position", "6"],
@@ -255,7 +255,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(
             ["completion", "suggest", "--line", string.Empty, "--position", "5"],
@@ -272,7 +272,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(
             ["completion", "suggest", "--line", "docker ru", "--position", "42"],
@@ -289,7 +289,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(
             ["completion", "suggest", "--line", "cai --fr", "--position", "8"],
@@ -307,7 +307,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(
             ["completion", "suggest", "--line", "/usr/local/bin/cai st", "--position", "21"],
@@ -621,7 +621,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync(["version", "--json"], runtime, console, cancellationToken);
 
@@ -692,7 +692,7 @@ public sealed class CaiCliRoutingTests
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
-        var console = new TestCaiConsole();
+        using var console = new TestCaiConsole();
 
         var exitCode = await CaiCli.RunAsync([token, "--json"], runtime, console, cancellationToken);
 
@@ -706,13 +706,15 @@ public sealed class CaiCliRoutingTests
         Assert.True(payload.RootElement.TryGetProperty("install_dir", out _));
     }
 
-    private sealed class TestCaiConsole : ICaiConsole
+    private sealed class TestCaiConsole : ICaiConsole, IDisposable
     {
         public StringWriter Output { get; } = new();
 
         public TextWriter OutputWriter => Output;
 
         public TextWriter ErrorWriter { get; } = TextWriter.Null;
+
+        public void Dispose() => Output.Dispose();
     }
 
     private sealed class FakeRuntime : ICaiCommandRuntime
