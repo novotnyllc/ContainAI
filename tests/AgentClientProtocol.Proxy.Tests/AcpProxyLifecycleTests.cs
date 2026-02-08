@@ -14,8 +14,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_FullSessionLifecycle_RoutesRequestsAndTranslatesSessionIds()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -137,8 +139,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionNew_WhenAgentInitializeFails_ReturnsSessionCreationError()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.InitializeError);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.InitializeError);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -159,8 +163,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionNew_WhenAgentOmitsSessionId_ReturnsSessionCreationError()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.MissingSessionId);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.MissingSessionId);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -181,8 +187,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_WhenInputEndsWithActiveSession_ShutsDownSessionGracefully()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -209,8 +217,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionPrompt_WhenAgentEmitsMalformedJson_ContinuesProcessing()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.MalformedPromptOutput);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.MalformedPromptOutput);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -254,8 +264,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionNew_WhenCachedInitializeMissingVersion_UsesDefaultProtocolVersion()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.Success);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -290,8 +302,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionNew_WhenAgentSessionNewErrorMissingMessage_ReturnsUnknownError()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SessionNewErrorWithoutMessage);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SessionNewErrorWithoutMessage);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -312,8 +326,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionPrompt_WhenAgentEmitsBlankAndNullLines_ContinuesProcessing()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.PromptOutputIncludesBlankAndNull);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.PromptOutputIncludesBlankAndNull);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -357,8 +373,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_SessionEnd_WhenAgentDoesNotExit_StillAcknowledgesAfterTimeout()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -392,8 +410,10 @@ public sealed class AcpProxyLifecycleTests
     [Fact]
     public async Task RunAsync_Shutdown_WhenAgentDoesNotExit_CompletesAfterTimeout()
     {
-        await using var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
-        await using var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken);
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
 
         await harness.WriteAsync(new JsonRpcMessage
         {
@@ -534,7 +554,7 @@ done
                 return [];
             }
 
-            return await File.ReadAllLinesAsync(_transcriptPath, cancellationToken);
+            return await File.ReadAllLinesAsync(_transcriptPath, cancellationToken).ConfigureAwait(false);
         }
 
         public async ValueTask DisposeAsync()
@@ -553,11 +573,11 @@ done
                 }
                 catch (IOException) when (attempt < 4)
                 {
-                    await Task.Delay(50);
+                    await Task.Delay(50).ConfigureAwait(false);
                 }
                 catch (UnauthorizedAccessException) when (attempt < 4)
                 {
-                    await Task.Delay(50);
+                    await Task.Delay(50).ConfigureAwait(false);
                 }
             }
         }
@@ -613,7 +633,7 @@ done
         public async Task WriteAsync(JsonRpcMessage message)
         {
             var line = JsonSerializer.Serialize(message, AcpJsonContext.Default.JsonRpcMessage);
-            await _stdinWriter.WriteLineAsync(line);
+            await _stdinWriter.WriteLineAsync(line).ConfigureAwait(false);
         }
 
         public async Task<JsonRpcMessage> ReadMessageAsync(CancellationToken cancellationToken)
@@ -621,7 +641,7 @@ done
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromSeconds(10));
 
-            var line = await _stdoutReader.ReadLineAsync(timeout.Token);
+            var line = await _stdoutReader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
             Assert.False(string.IsNullOrWhiteSpace(line));
 
             var message = JsonSerializer.Deserialize(line!, AcpJsonContext.Default.JsonRpcMessage);
@@ -636,8 +656,8 @@ done
             }
 
             _inputCompleted = true;
-            await _stdinWriter.DisposeAsync();
-            await _stdinPipe.Writer.CompleteAsync();
+            await _stdinWriter.DisposeAsync().ConfigureAwait(false);
+            await _stdinPipe.Writer.CompleteAsync().ConfigureAwait(false);
         }
 
         public Task<int> WaitForExitAsync(CancellationToken cancellationToken)
@@ -647,9 +667,17 @@ done
         {
             try
             {
-                await CompleteInputAsync();
+                await CompleteInputAsync().ConfigureAwait(false);
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                System.Diagnostics.Debug.WriteLine(ex);
+            }
+            catch (InvalidOperationException ex)
             {
                 System.Diagnostics.Debug.WriteLine(ex);
             }
@@ -659,9 +687,9 @@ done
             _stdinReaderStream.Dispose();
             _stdoutReader.Dispose();
             _stdoutWriterStream.Dispose();
-            await _stdinPipe.Reader.CompleteAsync();
-            await _stdoutPipe.Reader.CompleteAsync();
-            await _stdoutPipe.Writer.CompleteAsync();
+            await _stdinPipe.Reader.CompleteAsync().ConfigureAwait(false);
+            await _stdoutPipe.Reader.CompleteAsync().ConfigureAwait(false);
+            await _stdoutPipe.Writer.CompleteAsync().ConfigureAwait(false);
         }
     }
 

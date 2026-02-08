@@ -16,7 +16,7 @@ public sealed class AcpSessionAdvancedTests
         await session.WriteToAgentAsync(new JsonRpcMessage
         {
             Method = "session/prompt",
-        });
+        }).ConfigureAwait(true);
     }
 
     [Fact]
@@ -40,7 +40,7 @@ public sealed class AcpSessionAdvancedTests
             });
 
         Assert.True(completed);
-        var response = await waitTask;
+        var response = await waitTask.ConfigureAwait(true);
         Assert.NotNull(response);
         Assert.Equal("req-1", response.Id?.GetValue<string>());
     }
@@ -55,7 +55,9 @@ public sealed class AcpSessionAdvancedTests
             Method = "initialize",
         };
 
-        var response = await session.SendAndWaitForResponseAsync(request, "req-timeout", TimeSpan.FromMilliseconds(50));
+        var response = await session
+            .SendAndWaitForResponseAsync(request, "req-timeout", TimeSpan.FromMilliseconds(50))
+            .ConfigureAwait(true);
 
         Assert.Null(response);
     }
@@ -73,7 +75,7 @@ public sealed class AcpSessionAdvancedTests
         var waitTask = session.SendAndWaitForResponseAsync(request, "req-cancel", TimeSpan.FromSeconds(10));
         session.Cancel();
 
-        var response = await waitTask;
+        var response = await waitTask.ConfigureAwait(true);
         Assert.Null(response);
     }
 
@@ -104,12 +106,12 @@ public sealed class AcpSessionAdvancedTests
             Id = JsonValue.Create("capture"),
             Method = "session/prompt",
             Params = new JsonObject { ["sessionId"] = "proxy-1" },
-        });
+        }).ConfigureAwait(true);
 
         process.StandardInput.Close();
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken).ConfigureAwait(true);
 
-        var lines = await File.ReadAllLinesAsync(temp.Path, TestContext.Current.CancellationToken);
+        var lines = await File.ReadAllLinesAsync(temp.Path, TestContext.Current.CancellationToken).ConfigureAwait(true);
         Assert.Single(lines);
         Assert.Contains("\"method\":\"session/prompt\"", lines[0], StringComparison.Ordinal);
         Assert.Contains("\"sessionId\":\"proxy-1\"", lines[0], StringComparison.Ordinal);
@@ -128,14 +130,14 @@ public sealed class AcpSessionAdvancedTests
         var waitTask = session.SendAndWaitForResponseAsync(request, "req-dispose", TimeSpan.FromSeconds(30));
         session.Dispose();
 
-        var response = await waitTask;
+        var response = await waitTask.ConfigureAwait(true);
         Assert.Null(response);
     }
 
     [Fact]
     public void Dispose_WithNonStartedProcess_IgnoresKillErrors()
     {
-        var session = new AcpSession("/workspace")
+        using var session = new AcpSession("/workspace")
         {
             AgentProcess = new Process(),
         };

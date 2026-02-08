@@ -154,7 +154,7 @@ done
             return;
         }
 
-        await fileCreated.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+        await fileCreated.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
     }
 
     private static void EnsureExecutable(string path)

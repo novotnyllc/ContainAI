@@ -240,7 +240,7 @@ public sealed class AcpProxyTests
         using var stderrWriter = new StringWriter();
         using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: new ThrowingSpawner("not used"));
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync().ConfigureAwait(true);
 
         var exitCode = await proxy.RunAsync(stdin, cancellation.Token);
 
@@ -258,7 +258,7 @@ public sealed class AcpProxyTests
         using var stderrWriter = new StringWriter();
         using var proxy = new AcpProxy("claude", stdout, stderrWriter, agentSpawner: spawner);
 
-        var exitCode = await proxy.RunAsync(stdin, CancellationToken.None);
+        var exitCode = await proxy.RunAsync(stdin, CancellationToken.None).ConfigureAwait(true);
 
         var outputLines = Encoding.UTF8
             .GetString(stdout.ToArray())

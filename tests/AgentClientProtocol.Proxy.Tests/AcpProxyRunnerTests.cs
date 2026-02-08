@@ -41,7 +41,7 @@ public sealed class AcpProxyRunnerTests
         ConsoleCancelEventHandler? registeredHandler = null;
         var stdout = new MemoryStream();
         var stderr = new StringWriter();
-        var proxy = new FakeProxy(exitCode: 0, completeOnCancel: true);
+        using var proxy = new FakeProxy(exitCode: 0, completeOnCancel: true);
 
         var runner = CreateRunner(
             (_, _, _, _) => proxy,
@@ -69,7 +69,7 @@ public sealed class AcpProxyRunnerTests
 
         registeredHandler.Invoke(this, cancelArgs);
 
-        var exitCode = await runTask;
+        var exitCode = await runTask.ConfigureAwait(true);
 
         Assert.True(proxy.CancelCalled);
         Assert.True(cancelArgs.Cancel);
