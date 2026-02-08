@@ -26,15 +26,19 @@ jobs:
           - arch: amd64
             runner: ubuntu-24.04
             tarball_target: linux-x64
+            rid: linux-x64
           - arch: arm64
             runner: ubuntu-24.04-arm
             tarball_target: linux-arm64
+            rid: linux-arm64
           - arch: macos-x64
             runner: macos-15-intel
             tarball_target: macos-x64
+            rid: osx-x64
           - arch: macos-arm64
             runner: macos-26
             tarball_target: macos-arm64
+            rid: osx-arm64
 
     steps:
       - name: Checkout repository
@@ -59,19 +63,15 @@ jobs:
           echo "============================================="
           echo "Creating tarball for ${{ matrix.tarball_target }}"
           echo "============================================="
-          case "${{ matrix.tarball_target }}" in
-            linux-x64) rid="linux-x64" ;;
-            linux-arm64) rid="linux-arm64" ;;
-            macos-x64) rid="osx-x64" ;;
-            macos-arm64) rid="osx-arm64" ;;
-            *) echo "ERROR: Unknown tarball target: ${{ matrix.tarball_target }}" >&2; exit 1 ;;
-          esac
           dotnet build ./src/cai/cai.csproj \
             -t:BuildContainAITarballs \
             -p:Configuration=Release \
-            -p:ContainAIRuntimeIdentifiers="$rid" \
+            -p:ContainAIRuntimeIdentifiers="${{ matrix.rid }}" \
             -p:ContainAIVersion="$NBGV_SemVer2" \
-            -p:ContainAIOutputDir=./artifacts
+            -p:ContainAIOutputDir=./artifacts \
+            -warnaserror \
+            -p:WarningsNotAsErrors= \
+            -p:TrimmerSingleWarn=false
 
           ls -la ./artifacts/
 
