@@ -1,0 +1,21 @@
+# Team shared profile
+# Copy to: .containai/config.toml in a repository
+
+default_excludes = [
+  "vscode-server",
+  "claude/skills",
+  "codex/skills",
+  "*.log",
+]
+
+[agent]
+default = "claude"
+data_volume = "team-shared"
+
+[credentials]
+mode = "none"
+
+[env]
+from_host = true
+import = ["NODE_ENV", "LOG_LEVEL"]
+env_file = ".env.local"

@@ -1,0 +1,20 @@
+# Isolated workspace profile
+# Copy to: .containai/config.toml
+
+default_excludes = [
+  "claude/skills",
+  "codex/skills",
+  "*.history",
+  "*.cache",
+]
+
+[agent]
+default = "claude"
+data_volume = "isolated-workspace"
+
+[credentials]
+mode = "none"
+
+[env]
+from_host = false
+import = []

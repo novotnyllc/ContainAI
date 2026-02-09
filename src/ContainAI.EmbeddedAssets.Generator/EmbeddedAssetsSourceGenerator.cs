@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Xml.Linq;
@@ -15,9 +16,16 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        var additionalFileContents = context.AdditionalTextsProvider
+            .Select(static (file, cancellationToken) => new AdditionalFileContent(
+                file.Path ?? string.Empty,
+                file.GetText(cancellationToken)?.ToString() ?? string.Empty))
+            .Collect();
+
         var parsedResxFiles = context.AdditionalTextsProvider
             .Where(static file => file.Path.EndsWith(".resx", StringComparison.OrdinalIgnoreCase))
-            .Select(static (file, cancellationToken) => ParseResxFile(file, cancellationToken))
+            .Combine(additionalFileContents)
+            .Select(static (tuple, cancellationToken) => ParseResxFile(tuple.Left, tuple.Right, cancellationToken))
             .Where(static parsed => !parsed.Entries.IsDefaultOrEmpty)
             .Collect();
 
@@ -47,7 +55,10 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
         });
     }
 
-    private static ParsedResxFile ParseResxFile(AdditionalText file, CancellationToken cancellationToken)
+    private static ParsedResxFile ParseResxFile(
+        AdditionalText file,
+        ImmutableArray<AdditionalFileContent> additionalFiles,
+        CancellationToken cancellationToken)
     {
         var filePath = file.Path ?? string.Empty;
         var content = file.GetText(cancellationToken)?.ToString();
@@ -55,6 +66,8 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
         {
             return ParsedResxFile.Empty(filePath);
         }
+
+        var additionalFileMap = BuildAdditionalFileMap(additionalFiles);
 
         try
         {
@@ -74,7 +87,7 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                var value = dataElement.Element("value")?.Value;
+                var value = ResolveValue(filePath, dataElement, additionalFileMap);
                 entries.Add(new AssetEntry(keyValue!, value ?? string.Empty));
             }
 
@@ -87,6 +100,81 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
         catch (InvalidOperationException)
         {
             return ParsedResxFile.Empty(filePath);
+        }
+    }
+
+    private static Dictionary<string, string> BuildAdditionalFileMap(ImmutableArray<AdditionalFileContent> additionalFiles)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var additionalFile in additionalFiles)
+        {
+            if (string.IsNullOrWhiteSpace(additionalFile.Path))
+            {
+                continue;
+            }
+
+            var fullPath = NormalizePath(additionalFile.Path);
+            if (string.IsNullOrWhiteSpace(fullPath))
+            {
+                continue;
+            }
+
+            map[fullPath] = additionalFile.Content;
+        }
+
+        return map;
+    }
+
+    private static string ResolveValue(
+        string resxPath,
+        XElement dataElement,
+        Dictionary<string, string> additionalFileMap)
+    {
+        var value = dataElement.Element("value")?.Value ?? string.Empty;
+        var type = dataElement.Attribute("type")?.Value;
+        if (string.IsNullOrWhiteSpace(type) ||
+            !type.Contains("ResXFileRef", StringComparison.Ordinal))
+        {
+            return value;
+        }
+
+        var separatorIndex = value.IndexOf(';');
+        var fileRefPath = separatorIndex >= 0 ? value.Substring(0, separatorIndex) : value;
+        if (string.IsNullOrWhiteSpace(fileRefPath))
+        {
+            return string.Empty;
+        }
+
+        var baseDirectory = Path.GetDirectoryName(resxPath);
+        var normalizedPath = fileRefPath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+        var fullPath = NormalizePath(Path.Combine(baseDirectory ?? string.Empty, normalizedPath));
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return string.Empty;
+        }
+
+        if (additionalFileMap.TryGetValue(fullPath, out var linkedValue))
+        {
+            return linkedValue;
+        }
+
+        return string.Empty;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return string.Empty;
         }
     }
 
@@ -203,5 +291,18 @@ public sealed class EmbeddedAssetsSourceGenerator : IIncrementalGenerator
         public ImmutableArray<AssetEntry> Entries { get; }
 
         public static ParsedResxFile Empty(string path) => new(path, []);
+    }
+
+    private readonly struct AdditionalFileContent
+    {
+        public AdditionalFileContent(string path, string content)
+        {
+            Path = path;
+            Content = content;
+        }
+
+        public string Path { get; }
+
+        public string Content { get; }
     }
 }

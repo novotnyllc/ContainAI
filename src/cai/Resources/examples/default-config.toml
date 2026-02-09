@@ -1,0 +1,13 @@
+# ContainAI user config
+# Location: ~/.config/containai/config.toml
+
+[agent]
+default = "claude"
+data_volume = "containai-data"
+
+[credentials]
+mode = "none"
+
+[env]
+from_host = true
+import = []

@@ -11,8 +11,12 @@
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <SelfContained Condition="'$(RuntimeIdentifier)'!=''">true</SelfContained>
-    <OptimizationPreference>Speed</OptimizationPreference>
-    <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <UseSizeOptimizedLinq>true</UseSizeOptimizedLinq>
+    <DebuggerSupport>false</DebuggerSupport>
+    <StackTraceSupport>false</StackTraceSupport>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
@@ -36,7 +40,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Remove="Resources/EmbeddedAssets.resx" />
     <AdditionalFiles Include="Resources/EmbeddedAssets.resx" ContainAIEmbeddedAssets="true" />
+    <AdditionalFiles Include="../manifests/*.toml" />
+    <AdditionalFiles Include="../container/Dockerfile.template-system" />
+    <AdditionalFiles Include="Resources/examples/*.toml" />
   </ItemGroup>
 
   <PropertyGroup>
