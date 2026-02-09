@@ -1,9 +1,4 @@
-using System.Collections;
-using System.Globalization;
-using System.Text;
 using System.Text.RegularExpressions;
-using CsToml;
-using CsToml.Error;
 
 namespace ContainAI.Cli.Host;
 
@@ -137,7 +132,7 @@ internal static partial class TomlCommandProcessor
         var path = parsed.WorkspacePathOrUnsetPath!;
         var filePath = parsed.FilePath!;
 
-        if (!File.Exists(filePath))
+        if (!FileExists(filePath))
         {
             return new TomlCommandResult(0, "{}", string.Empty);
         }
@@ -203,7 +198,7 @@ internal static partial class TomlCommandProcessor
             return new TomlCommandResult(1, string.Empty, $"Error: Workspace path must be absolute: {wsPath}");
         }
 
-        if (!File.Exists(parsed.FilePath!))
+        if (!FileExists(parsed.FilePath!))
         {
             return new TomlCommandResult(0, string.Empty, string.Empty);
         }
@@ -263,7 +258,7 @@ internal static partial class TomlCommandProcessor
             return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
         }
 
-        if (!File.Exists(parsed.FilePath!))
+        if (!FileExists(parsed.FilePath!))
         {
             return new TomlCommandResult(0, string.Empty, string.Empty);
         }
