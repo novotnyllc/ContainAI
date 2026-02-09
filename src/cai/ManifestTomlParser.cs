@@ -3,9 +3,16 @@ using CsToml.Error;
 
 namespace ContainAI.Cli.Host;
 
-internal static class ManifestTomlParser
+internal interface IManifestTomlParser
 {
-    public static IReadOnlyList<ManifestEntry> Parse(
+    IReadOnlyList<ManifestEntry> Parse(string manifestPath, bool includeDisabled, bool includeSourceFile);
+
+    IReadOnlyList<ManifestAgentEntry> ParseAgents(string manifestPath);
+}
+
+internal sealed class ManifestTomlParser : IManifestTomlParser
+{
+    public IReadOnlyList<ManifestEntry> Parse(
         string manifestPath,
         bool includeDisabled,
         bool includeSourceFile)
@@ -29,7 +36,7 @@ internal static class ManifestTomlParser
         return entries;
     }
 
-    public static IReadOnlyList<ManifestAgentEntry> ParseAgents(string manifestPath)
+    public IReadOnlyList<ManifestAgentEntry> ParseAgents(string manifestPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
 

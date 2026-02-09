@@ -3,11 +3,16 @@ namespace ContainAI.Cli.Host;
 internal static partial class ManifestApplier
 {
     public static int ApplyInitDirs(string manifestPath, string dataDirectory)
+        => ApplyInitDirs(manifestPath, dataDirectory, new ManifestTomlParser());
+
+    public static int ApplyInitDirs(string manifestPath, string dataDirectory, IManifestTomlParser manifestTomlParser)
     {
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
         var dataRoot = Path.GetFullPath(dataDirectory);
         Directory.CreateDirectory(dataRoot);
 
-        var parsed = ManifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false);
+        var parsed = manifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false);
         var applied = 0;
 
         foreach (var entry in parsed.Where(static entry => string.Equals(entry.Type, "entry", StringComparison.Ordinal)))

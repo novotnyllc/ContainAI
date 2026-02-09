@@ -188,7 +188,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 shellcheck -x install.sh
 
 # Integration tests
-dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-class "*SyncIntegrationTests" --xunit-info
 
 # ACP proxy tests
 dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj --configuration Release -- --xunit-info

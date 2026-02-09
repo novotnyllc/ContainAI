@@ -1,17 +1,17 @@
 namespace ContainAI.Cli.Host;
 
-internal static partial class ShellProfileIntegration
+internal sealed partial class ShellProfileIntegrationService
 {
-    public static string GetProfileDirectoryPath(string homeDirectory)
+    public string GetProfileDirectoryPath(string homeDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         return Path.Combine(homeDirectory, ".config", "containai", "profile.d");
     }
 
-    public static string GetProfileScriptPath(string homeDirectory)
+    public string GetProfileScriptPath(string homeDirectory)
         => Path.Combine(GetProfileDirectoryPath(homeDirectory), ProfileScriptFileName);
 
-    public static string ResolvePreferredShellProfilePath(string homeDirectory, string? shellPath)
+    public string ResolvePreferredShellProfilePath(string homeDirectory, string? shellPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
 
@@ -25,7 +25,7 @@ internal static partial class ShellProfileIntegration
         };
     }
 
-    public static IReadOnlyList<string> GetCandidateShellProfilePaths(string homeDirectory, string? shellPath)
+    public IReadOnlyList<string> GetCandidateShellProfilePaths(string homeDirectory, string? shellPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
 

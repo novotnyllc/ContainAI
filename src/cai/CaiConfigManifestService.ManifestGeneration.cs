@@ -72,17 +72,17 @@ internal sealed partial class CaiConfigManifestService
         }
     }
 
-    private static (string Content, int Count) GenerateManifest(string kind, string manifestPath)
+    private (string Content, int Count) GenerateManifest(string kind, string manifestPath)
     {
         var generated = kind switch
         {
-            "container-link-spec" => ManifestGenerators.GenerateContainerLinkSpec(manifestPath),
+            "container-link-spec" => ManifestGenerators.GenerateContainerLinkSpec(manifestPath, manifestTomlParser),
             _ => throw new InvalidOperationException($"unknown generator kind: {kind}"),
         };
         return (generated.Content, generated.Count);
     }
 
-    private static int ApplyManifest(
+    private int ApplyManifest(
         string kind,
         string manifestPath,
         string dataDir,
@@ -91,9 +91,9 @@ internal sealed partial class CaiConfigManifestService
         string caiBinaryPath) =>
         kind switch
         {
-            "container-links" => ManifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir),
-            "init-dirs" => ManifestApplier.ApplyInitDirs(manifestPath, dataDir),
-            "agent-shims" => ManifestApplier.ApplyAgentShims(manifestPath, shimDir, caiBinaryPath),
+            "container-links" => ManifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir, manifestTomlParser),
+            "init-dirs" => ManifestApplier.ApplyInitDirs(manifestPath, dataDir, manifestTomlParser),
+            "agent-shims" => ManifestApplier.ApplyAgentShims(manifestPath, shimDir, caiBinaryPath, manifestTomlParser),
             _ => throw new InvalidOperationException($"unknown apply kind: {kind}"),
         };
 

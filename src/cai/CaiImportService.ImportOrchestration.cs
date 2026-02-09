@@ -2,16 +2,63 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class CaiImportService : CaiRuntimeSupport
+internal interface IImportOrchestrationOperations
 {
-    private async Task<int> RunImportCoreAsync(ParsedImportOptions options, CancellationToken cancellationToken)
+    Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken);
+}
+
+internal sealed class CaiImportOrchestrationOperations : CaiRuntimeSupport
+    , IImportOrchestrationOperations
+{
+    private readonly IManifestTomlParser manifestTomlParser;
+    private readonly IImportManifestCatalog manifestCatalog;
+    private readonly IImportPathOperations pathOperations;
+    private readonly IImportTransferOperations transferOperations;
+    private readonly IImportEnvironmentOperations environmentOperations;
+
+    public CaiImportOrchestrationOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            standardOutput,
+            standardError,
+            new ManifestTomlParser(),
+            new CaiImportManifestCatalog(),
+            new CaiImportPathOperations(standardOutput, standardError),
+            new CaiImportTransferOperations(standardOutput, standardError),
+            new CaiImportEnvironmentOperations(standardOutput, standardError))
+    {
+    }
+
+    internal CaiImportOrchestrationOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IManifestTomlParser manifestTomlParser,
+        IImportManifestCatalog importManifestCatalog,
+        IImportPathOperations importPathOperations,
+        IImportTransferOperations importTransferOperations,
+        IImportEnvironmentOperations importEnvironmentOperations)
+        : base(standardOutput, standardError)
+    {
+        this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+        manifestCatalog = importManifestCatalog;
+        pathOperations = importPathOperations;
+        transferOperations = importTransferOperations;
+        environmentOperations = importEnvironmentOperations;
+    }
+
+    public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunImportCoreAsync(options, cancellationToken);
+    }
+
+    private async Task<int> RunImportCoreAsync(ImportCommandOptions options, CancellationToken cancellationToken)
     {
         var workspace = string.IsNullOrWhiteSpace(options.Workspace)
             ? Directory.GetCurrentDirectory()
             : Path.GetFullPath(ExpandHomePath(options.Workspace));
-        var explicitConfigPath = string.IsNullOrWhiteSpace(options.ConfigPath)
+        var explicitConfigPath = string.IsNullOrWhiteSpace(options.Config)
             ? null
-            : Path.GetFullPath(ExpandHomePath(options.ConfigPath));
+            : Path.GetFullPath(ExpandHomePath(options.Config));
 
         if (!string.IsNullOrWhiteSpace(explicitConfigPath) && !File.Exists(explicitConfigPath))
         {
@@ -19,16 +66,16 @@ internal sealed partial class CaiImportService : CaiRuntimeSupport
             return 1;
         }
 
-        var volume = await ResolveDataVolumeAsync(workspace, options.ExplicitVolume, cancellationToken).ConfigureAwait(false);
+        var volume = await ResolveDataVolumeAsync(workspace, options.DataVolume, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(volume))
         {
             await stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
             return 1;
         }
 
-        var sourcePath = string.IsNullOrWhiteSpace(options.SourcePath)
+        var sourcePath = string.IsNullOrWhiteSpace(options.From)
             ? ResolveHomeDirectory()
-            : Path.GetFullPath(ExpandHomePath(options.SourcePath));
+            : Path.GetFullPath(ExpandHomePath(options.From));
         if (!File.Exists(sourcePath) && !Directory.Exists(sourcePath))
         {
             await stderr.WriteLineAsync($"Import source not found: {sourcePath}").ConfigureAwait(false);
@@ -57,7 +104,7 @@ internal sealed partial class CaiImportService : CaiRuntimeSupport
         try
         {
             var manifestDirectory = manifestCatalog.ResolveDirectory();
-            manifestEntries = ManifestTomlParser.Parse(manifestDirectory, includeDisabled: false, includeSourceFile: false)
+            manifestEntries = manifestTomlParser.Parse(manifestDirectory, includeDisabled: false, includeSourceFile: false)
                 .Where(static entry => string.Equals(entry.Type, "entry", StringComparison.Ordinal))
                 .Where(static entry => !string.IsNullOrWhiteSpace(entry.Source))
                 .Where(static entry => !entry.Flags.Contains('G', StringComparison.Ordinal))
@@ -190,7 +237,7 @@ internal sealed partial class CaiImportService : CaiRuntimeSupport
             }
         }
 
-        var environmentCode = await ImportEnvironmentVariablesAsync(
+        var environmentCode = await environmentOperations.ImportEnvironmentVariablesAsync(
             volume,
             workspace,
             explicitConfigPath,

@@ -1,8 +1,13 @@
 namespace ContainAI.Cli.Host;
 
-internal static class InstallDeploymentService
+internal interface IInstallDeploymentService
 {
-    public static InstallDeploymentResult Deploy(string sourceExecutablePath, string installDir, string binDir)
+    InstallDeploymentResult Deploy(string sourceExecutablePath, string installDir, string binDir);
+}
+
+internal sealed class InstallDeploymentService : IInstallDeploymentService
+{
+    public InstallDeploymentResult Deploy(string sourceExecutablePath, string installDir, string binDir)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceExecutablePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(installDir);

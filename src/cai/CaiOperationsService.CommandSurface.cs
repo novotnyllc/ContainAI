@@ -15,9 +15,19 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     private readonly ContainerLinkRepairService containerLinkRepairService;
 
     public CaiOperationsService(TextWriter standardOutput, TextWriter standardError)
+        : this(standardOutput, standardError, new ManifestTomlParser())
+    {
+    }
+
+    internal CaiOperationsService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IManifestTomlParser manifestTomlParser)
         : base(standardOutput, standardError)
     {
-        containerRuntimeCommandService = new ContainerRuntimeCommandService(stdout, stderr);
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
+        containerRuntimeCommandService = new ContainerRuntimeCommandService(stdout, stderr, manifestTomlParser);
         containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, ExecuteDockerCommandAsync);
     }
 

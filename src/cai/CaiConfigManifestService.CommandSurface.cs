@@ -4,10 +4,19 @@ namespace ContainAI.Cli.Host;
 
 internal sealed partial class CaiConfigManifestService : CaiRuntimeSupport
 {
+    private readonly IManifestTomlParser manifestTomlParser;
+
     public CaiConfigManifestService(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
+        : this(standardOutput, standardError, new ManifestTomlParser())
     {
     }
+
+    internal CaiConfigManifestService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IManifestTomlParser manifestTomlParser)
+        : base(standardOutput, standardError)
+        => this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
 
     public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
     {

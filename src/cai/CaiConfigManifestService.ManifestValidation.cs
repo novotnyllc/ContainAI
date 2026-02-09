@@ -23,11 +23,11 @@ internal sealed partial class CaiConfigManifestService
         foreach (var file in manifestFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ManifestTomlParser.Parse(file, includeDisabled: true, includeSourceFile: false);
+            manifestTomlParser.Parse(file, includeDisabled: true, includeSourceFile: false);
         }
 
         var linkSpec = GenerateManifest("container-link-spec", manifestDirectory);
-        var initApplied = ApplyInitDirsProbe(manifestDirectory);
+        var initApplied = ApplyInitDirsProbe(manifestDirectory, manifestTomlParser);
         if (initApplied <= 0)
         {
             await stderr.WriteLineAsync("ERROR: init-dir apply produced no operations").ConfigureAwait(false);
@@ -51,12 +51,12 @@ internal sealed partial class CaiConfigManifestService
             .OrderBy(static path => path, StringComparer.Ordinal)
             .ToArray();
 
-    private static int ApplyInitDirsProbe(string manifestDirectory)
+    private static int ApplyInitDirsProbe(string manifestDirectory, IManifestTomlParser manifestTomlParser)
     {
         var initProbeDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-check-{Guid.NewGuid():N}");
         try
         {
-            return ManifestApplier.ApplyInitDirs(manifestDirectory, initProbeDir);
+            return ManifestApplier.ApplyInitDirs(manifestDirectory, initProbeDir, manifestTomlParser);
         }
         finally
         {

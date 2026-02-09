@@ -3,13 +3,22 @@ namespace ContainAI.Cli.Host;
 internal static partial class AgentShimDispatcher
 {
     public static async Task<int?> TryRunAsync(string invocationName, IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => await TryRunAsync(invocationName, args, new ManifestTomlParser(), cancellationToken).ConfigureAwait(false);
+
+    public static async Task<int?> TryRunAsync(
+        string invocationName,
+        IReadOnlyList<string> args,
+        IManifestTomlParser manifestTomlParser,
+        CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
         if (string.IsNullOrWhiteSpace(invocationName) || string.Equals(invocationName, "cai", StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
 
-        var definition = ResolveDefinition(invocationName);
+        var definition = ResolveDefinition(manifestTomlParser, invocationName);
         if (definition is null)
         {
             return null;

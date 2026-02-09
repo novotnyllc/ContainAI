@@ -195,7 +195,7 @@ Common pitfalls to avoid are documented in [.flow/memory/pitfalls.md](.flow/memo
 | Command | Purpose |
 |--------|---------|
 | `dotnet test --solution ContainAI.slnx -c Release --xunit-info` | Full unit/integration test suite |
-| `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=SyncIntegration" --xunit-info` | Docker-backed sync integration tests |
+| `dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-class "*SyncIntegrationTests" --xunit-info` | Docker-backed sync integration tests |
 
 ### Documentation Validation
 
@@ -217,7 +217,7 @@ cd containai
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
 
 # Run sync integration tests (requires Docker)
-dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-class "*SyncIntegrationTests" --xunit-info
 ```
 
 ### Test Output Format
@@ -248,7 +248,7 @@ When adding new tests:
 1. **Run tests** to ensure nothing is broken:
    ```bash
    dotnet test --solution ContainAI.slnx -c Release --xunit-info
-   dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-trait "Category=SyncIntegration" --xunit-info
+   dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --configuration Release -- --filter-class "*SyncIntegrationTests" --xunit-info
    ```
 
 2. **Follow coding conventions** described above

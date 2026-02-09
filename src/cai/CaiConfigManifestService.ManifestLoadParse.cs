@@ -10,7 +10,7 @@ internal sealed partial class CaiConfigManifestService
     {
         try
         {
-            var parsed = ManifestTomlParser.Parse(manifestPath, includeDisabled, emitSourceFile);
+            var parsed = manifestTomlParser.Parse(manifestPath, includeDisabled, emitSourceFile);
             foreach (var entry in parsed)
             {
                 cancellationToken.ThrowIfCancellationRequested();

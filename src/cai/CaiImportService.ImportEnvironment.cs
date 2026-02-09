@@ -1,15 +1,28 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
-using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class CaiImportService : CaiRuntimeSupport
+internal interface IImportEnvironmentOperations
 {
-    private async Task<int> ImportEnvironmentVariablesAsync(
+    Task<int> ImportEnvironmentVariablesAsync(
+        string volume,
+        string workspace,
+        string? explicitConfigPath,
+        bool dryRun,
+        bool verbose,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
+    , IImportEnvironmentOperations
+{
+    public CaiImportEnvironmentOperations(TextWriter standardOutput, TextWriter standardError)
+        : base(standardOutput, standardError)
+    {
+    }
+
+    public async Task<int> ImportEnvironmentVariablesAsync(
         string volume,
         string workspace,
         string? explicitConfigPath,
@@ -167,6 +180,7 @@ internal sealed partial class CaiImportService : CaiRuntimeSupport
                 await stderr.WriteLineAsync("[WARN] [env].from_host must be a boolean; using false").ConfigureAwait(false);
             }
         }
+
         var merged = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, value) in fileVariables)
         {

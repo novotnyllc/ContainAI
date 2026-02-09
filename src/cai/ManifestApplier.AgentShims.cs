@@ -7,7 +7,16 @@ internal static partial class ManifestApplier
     private static readonly Regex CommandNameRegex = CommandNameRegexFactory();
 
     public static int ApplyAgentShims(string manifestPath, string shimDirectory, string caiExecutablePath)
+        => ApplyAgentShims(manifestPath, shimDirectory, caiExecutablePath, new ManifestTomlParser());
+
+    public static int ApplyAgentShims(
+        string manifestPath,
+        string shimDirectory,
+        string caiExecutablePath,
+        IManifestTomlParser manifestTomlParser)
     {
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
         if (!Path.IsPathRooted(shimDirectory))
         {
             throw new InvalidOperationException($"shim directory must be absolute: {shimDirectory}");
@@ -22,7 +31,7 @@ internal static partial class ManifestApplier
         var caiPath = Path.GetFullPath(caiExecutablePath);
         Directory.CreateDirectory(shimRoot);
 
-        var agents = ManifestTomlParser.ParseAgents(manifestPath);
+        var agents = manifestTomlParser.ParseAgents(manifestPath);
         var applied = 0;
 
         foreach (var agent in agents)

@@ -1,8 +1,8 @@
 namespace ContainAI.Cli.Host;
 
-internal static partial class ShellProfileIntegration
+internal sealed partial class ShellProfileIntegrationService
 {
-    public static async Task<bool> EnsureProfileScriptAsync(string homeDirectory, string binDirectory, CancellationToken cancellationToken)
+    public async Task<bool> EnsureProfileScriptAsync(string homeDirectory, string binDirectory, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(binDirectory);
@@ -24,7 +24,7 @@ internal static partial class ShellProfileIntegration
         return true;
     }
 
-    public static async Task<bool> EnsureHookInShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
+    public async Task<bool> EnsureHookInShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
 
@@ -50,7 +50,7 @@ internal static partial class ShellProfileIntegration
         return true;
     }
 
-    public static async Task<bool> RemoveHookFromShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
+    public async Task<bool> RemoveHookFromShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
 
@@ -69,7 +69,7 @@ internal static partial class ShellProfileIntegration
         return true;
     }
 
-    public static Task<bool> RemoveProfileScriptAsync(string homeDirectory, CancellationToken cancellationToken)
+    public Task<bool> RemoveProfileScriptAsync(string homeDirectory, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         cancellationToken.ThrowIfCancellationRequested();

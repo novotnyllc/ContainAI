@@ -3,11 +3,20 @@ namespace ContainAI.Cli.Host;
 internal static partial class ManifestApplier
 {
     public static int ApplyContainerLinks(string manifestPath, string homeDirectory, string dataDirectory)
+        => ApplyContainerLinks(manifestPath, homeDirectory, dataDirectory, new ManifestTomlParser());
+
+    public static int ApplyContainerLinks(
+        string manifestPath,
+        string homeDirectory,
+        string dataDirectory,
+        IManifestTomlParser manifestTomlParser)
     {
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
         var homeRoot = Path.GetFullPath(homeDirectory);
         var dataRoot = Path.GetFullPath(dataDirectory);
 
-        var entries = ManifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false)
+        var entries = manifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false)
             .Where(static entry => !string.IsNullOrWhiteSpace(entry.ContainerLink))
             .Where(static entry => !entry.Flags.Contains('G', StringComparison.Ordinal))
             .ToArray();

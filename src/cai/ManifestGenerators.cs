@@ -6,8 +6,13 @@ namespace ContainAI.Cli.Host;
 internal static class ManifestGenerators
 {
     public static ManifestGeneratedArtifact GenerateContainerLinkSpec(string manifestPath)
+        => GenerateContainerLinkSpec(manifestPath, new ManifestTomlParser());
+
+    public static ManifestGeneratedArtifact GenerateContainerLinkSpec(string manifestPath, IManifestTomlParser manifestTomlParser)
     {
-        var parsed = ManifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false);
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
+
+        var parsed = manifestTomlParser.Parse(manifestPath, includeDisabled: true, includeSourceFile: false);
         var links = parsed
             .Where(static entry => !string.IsNullOrEmpty(entry.ContainerLink))
             .Where(static entry => !entry.Flags.Contains('G', StringComparison.Ordinal))

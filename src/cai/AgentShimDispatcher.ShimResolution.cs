@@ -2,14 +2,14 @@ namespace ContainAI.Cli.Host;
 
 internal static partial class AgentShimDispatcher
 {
-    private static ManifestAgentEntry? ResolveDefinition(string invocationName)
+    private static ManifestAgentEntry? ResolveDefinition(IManifestTomlParser manifestTomlParser, string invocationName)
     {
         foreach (var manifestDirectory in ResolveManifestDirectories())
         {
             IReadOnlyList<ManifestAgentEntry> agents;
             try
             {
-                agents = ManifestTomlParser.ParseAgents(manifestDirectory);
+                agents = manifestTomlParser.ParseAgents(manifestDirectory);
             }
             catch (IOException)
             {

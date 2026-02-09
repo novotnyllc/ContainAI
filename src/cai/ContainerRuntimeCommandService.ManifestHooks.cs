@@ -14,7 +14,7 @@ internal sealed partial class ContainerRuntimeCommandService
             await LogInfoAsync(quiet, "Applying init directory policy from manifests").ConfigureAwait(false);
             try
             {
-                _ = ManifestApplier.ApplyInitDirs(manifestsDir, dataDir);
+                _ = ManifestApplier.ApplyInitDirs(manifestsDir, dataDir, manifestTomlParser);
             }
             catch (InvalidOperationException ex)
             {
@@ -85,11 +85,11 @@ internal sealed partial class ContainerRuntimeCommandService
         await LogInfoAsync(quiet, $"Found {manifestFiles.Length} user manifest(s), generating runtime configuration...").ConfigureAwait(false);
         try
         {
-            _ = ManifestApplier.ApplyInitDirs(userManifestDirectory, dataDir);
-            _ = ManifestApplier.ApplyContainerLinks(userManifestDirectory, homeDir, dataDir);
-            _ = ManifestApplier.ApplyAgentShims(userManifestDirectory, "/opt/containai/user-agent-shims", "/usr/local/bin/cai");
+            _ = ManifestApplier.ApplyInitDirs(userManifestDirectory, dataDir, manifestTomlParser);
+            _ = ManifestApplier.ApplyContainerLinks(userManifestDirectory, homeDir, dataDir, manifestTomlParser);
+            _ = ManifestApplier.ApplyAgentShims(userManifestDirectory, "/opt/containai/user-agent-shims", "/usr/local/bin/cai", manifestTomlParser);
 
-            var userSpec = ManifestGenerators.GenerateContainerLinkSpec(userManifestDirectory);
+            var userSpec = ManifestGenerators.GenerateContainerLinkSpec(userManifestDirectory, manifestTomlParser);
             var userSpecPath = Path.Combine(dataDir, "containai", "user-link-spec.json");
             Directory.CreateDirectory(Path.GetDirectoryName(userSpecPath)!);
             await File.WriteAllTextAsync(userSpecPath, userSpec.Content).ConfigureAwait(false);

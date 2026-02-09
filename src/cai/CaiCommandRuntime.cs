@@ -25,17 +25,27 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
         AcpProxyRunner proxyRunner,
         TextWriter? standardOutput = null,
         TextWriter? standardError = null)
+        : this(proxyRunner, new ManifestTomlParser(), standardOutput, standardError)
+    {
+    }
+
+    internal CaiCommandRuntime(
+        AcpProxyRunner proxyRunner,
+        IManifestTomlParser manifestTomlParser,
+        TextWriter? standardOutput = null,
+        TextWriter? standardError = null)
     {
         ArgumentNullException.ThrowIfNull(proxyRunner);
+        ArgumentNullException.ThrowIfNull(manifestTomlParser);
 
         acpProxyRunner = proxyRunner;
         stdout = standardOutput ?? Console.Out;
         stderr = standardError ?? Console.Error;
 
         sessionRuntime = new SessionCommandRuntime(stdout, stderr);
-        operationsService = new CaiOperationsService(stdout, stderr);
-        configManifestService = new CaiConfigManifestService(stdout, stderr);
-        importService = new CaiImportService(stdout, stderr);
+        operationsService = new CaiOperationsService(stdout, stderr, manifestTomlParser);
+        configManifestService = new CaiConfigManifestService(stdout, stderr, manifestTomlParser);
+        importService = new CaiImportService(stdout, stderr, manifestTomlParser);
         installRuntime = new InstallCommandRuntime();
         examplesRuntime = new ExamplesCommandRuntime();
     }

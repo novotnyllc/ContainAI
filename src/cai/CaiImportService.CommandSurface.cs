@@ -4,46 +4,67 @@ namespace ContainAI.Cli.Host;
 
 internal sealed partial class CaiImportService : CaiRuntimeSupport
 {
-    private readonly IImportManifestCatalog manifestCatalog;
-    private readonly IImportPathOperations pathOperations;
-    private readonly IImportTransferOperations transferOperations;
+    private readonly IImportOrchestrationOperations orchestrationOperations;
 
     public CaiImportService(TextWriter standardOutput, TextWriter standardError)
         : this(
             standardOutput,
             standardError,
+            new ManifestTomlParser(),
             new CaiImportManifestCatalog(),
             new CaiImportPathOperations(standardOutput, standardError),
-            new CaiImportTransferOperations(standardOutput, standardError))
+            new CaiImportTransferOperations(standardOutput, standardError),
+            new CaiImportEnvironmentOperations(standardOutput, standardError))
     {
     }
 
     internal CaiImportService(
         TextWriter standardOutput,
         TextWriter standardError,
+        IManifestTomlParser manifestTomlParser)
+        : this(
+            standardOutput,
+            standardError,
+            manifestTomlParser,
+            new CaiImportManifestCatalog(),
+            new CaiImportPathOperations(standardOutput, standardError),
+            new CaiImportTransferOperations(standardOutput, standardError),
+            new CaiImportEnvironmentOperations(standardOutput, standardError))
+    {
+    }
+
+    internal CaiImportService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IManifestTomlParser manifestTomlParser,
         IImportManifestCatalog importManifestCatalog,
         IImportPathOperations importPathOperations,
-        IImportTransferOperations importTransferOperations)
-        : base(standardOutput, standardError)
+        IImportTransferOperations importTransferOperations,
+        IImportEnvironmentOperations importEnvironmentOperations)
+        : this(
+            standardOutput,
+            standardError,
+            new CaiImportOrchestrationOperations(
+                standardOutput,
+                standardError,
+                manifestTomlParser,
+                importManifestCatalog,
+                importPathOperations,
+                importTransferOperations,
+                importEnvironmentOperations))
     {
-        manifestCatalog = importManifestCatalog;
-        pathOperations = importPathOperations;
-        transferOperations = importTransferOperations;
     }
+
+    internal CaiImportService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportOrchestrationOperations importOrchestrationOperations)
+        : base(standardOutput, standardError)
+        => orchestrationOperations = importOrchestrationOperations ?? throw new ArgumentNullException(nameof(importOrchestrationOperations));
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var parsed = new ParsedImportOptions(
-            SourcePath: options.From,
-            ExplicitVolume: options.DataVolume,
-            Workspace: options.Workspace,
-            ConfigPath: options.Config,
-            DryRun: options.DryRun,
-            NoExcludes: options.NoExcludes,
-            NoSecrets: options.NoSecrets,
-            Verbose: options.Verbose,
-            Error: null);
-        return RunImportCoreAsync(parsed, cancellationToken);
+        return orchestrationOperations.RunImportAsync(options, cancellationToken);
     }
 }

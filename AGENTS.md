@@ -27,7 +27,7 @@ dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:
 
 # Run tests
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
-dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-trait "Category=SyncIntegration" --xunit-info
+dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj -c Release -- --filter-class "*SyncIntegrationTests" --xunit-info
 
 # Lint installer script
 shellcheck -x install.sh
@@ -39,7 +39,7 @@ shellcheck -x install.sh
 src/
 ├── cai/                # Native CLI host entrypoint and runtime
 │   ├── Program.cs
-│   ├── NativeLifecycleCommandRuntime.cs
+│   ├── CaiCommandRuntime.cs
 │   └── ContainerRuntimeCommandService.cs
 ├── ContainAI.Cli/      # System.CommandLine command surface and routing
 ├── manifests/          # Per-agent manifest files (sync config source)

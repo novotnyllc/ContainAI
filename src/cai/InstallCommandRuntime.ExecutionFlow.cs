@@ -8,9 +8,9 @@ internal sealed partial class InstallCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var installDir = ResolveInstallDirectory(options.InstallDir);
-        var binDir = ResolveBinDirectory(options.BinDir);
-        var homeDirectory = ResolveHomeDirectory();
+        var installDir = pathResolver.ResolveInstallDirectory(options.InstallDir);
+        var binDir = pathResolver.ResolveBinDirectory(options.BinDir);
+        var homeDirectory = pathResolver.ResolveHomeDirectory();
 
         await WriteInfoAsync("ContainAI installer starting", cancellationToken).ConfigureAwait(false);
         await WriteInfoAsync($"Install directory: {installDir}", cancellationToken).ConfigureAwait(false);
@@ -21,7 +21,7 @@ internal sealed partial class InstallCommandRuntime
             await WriteInfoAsync($"Channel: {options.Channel}", cancellationToken).ConfigureAwait(false);
         }
 
-        var sourceExecutablePath = ResolveCurrentExecutablePath();
+        var sourceExecutablePath = pathResolver.ResolveCurrentExecutablePath();
         if (sourceExecutablePath is null)
         {
             await WriteErrorAsync("Unable to resolve the current cai executable path.", cancellationToken).ConfigureAwait(false);
@@ -32,8 +32,8 @@ internal sealed partial class InstallCommandRuntime
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var deployment = InstallDeploymentService.Deploy(sourceExecutablePath, installDir, binDir);
-            var assets = InstallAssetMaterializer.Materialize(installDir, homeDirectory);
+            var deployment = deploymentService.Deploy(sourceExecutablePath, installDir, binDir);
+            var assets = assetMaterializer.Materialize(installDir, homeDirectory);
 
             await WriteSuccessAsync($"Installed binary: {deployment.InstalledExecutablePath}", cancellationToken).ConfigureAwait(false);
             await WriteSuccessAsync($"Installed wrapper: {deployment.WrapperPath}", cancellationToken).ConfigureAwait(false);
@@ -142,11 +142,11 @@ internal sealed partial class InstallCommandRuntime
             return;
         }
 
-        var profileScriptUpdated = await ShellProfileIntegration
+        var profileScriptUpdated = await shellProfileIntegration
             .EnsureProfileScriptAsync(homeDirectory, binDir, cancellationToken)
             .ConfigureAwait(false);
-        var shellProfilePath = ShellProfileIntegration.ResolvePreferredShellProfilePath(homeDirectory, Environment.GetEnvironmentVariable("SHELL"));
-        var shellHookUpdated = await ShellProfileIntegration
+        var shellProfilePath = shellProfileIntegration.ResolvePreferredShellProfilePath(homeDirectory, pathResolver.GetEnvironmentVariable("SHELL"));
+        var shellHookUpdated = await shellProfileIntegration
             .EnsureHookInShellProfileAsync(shellProfilePath, cancellationToken)
             .ConfigureAwait(false);
         if (!profileScriptUpdated && !shellHookUpdated)

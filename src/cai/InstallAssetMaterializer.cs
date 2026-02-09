@@ -1,8 +1,13 @@
 namespace ContainAI.Cli.Host;
 
-internal static class InstallAssetMaterializer
+internal interface IInstallAssetMaterializer
 {
-    public static InstallAssetMaterializationResult Materialize(string installDir, string homeDirectory)
+    InstallAssetMaterializationResult Materialize(string installDir, string homeDirectory);
+}
+
+internal sealed class InstallAssetMaterializer : IInstallAssetMaterializer
+{
+    public InstallAssetMaterializationResult Materialize(string installDir, string homeDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(installDir);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);

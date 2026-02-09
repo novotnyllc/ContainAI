@@ -1,8 +1,8 @@
 namespace ContainAI.Cli.Host;
 
-internal static partial class ShellProfileIntegration
+internal sealed partial class ShellProfileIntegrationService
 {
-    public static bool HasHookBlock(string content)
+    public bool HasHookBlock(string content)
         => content.Contains(ShellIntegrationStartMarker, StringComparison.Ordinal)
            && content.Contains(ShellIntegrationEndMarker, StringComparison.Ordinal);
 
