@@ -328,63 +328,38 @@ internal sealed partial class NativeLifecycleCommandRuntime
     public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "update",
-        };
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--stop-containers", options.StopContainers);
-        AppendFlag(args, "--force", options.Force);
-        AppendFlag(args, "--lima-recreate", options.LimaRecreate);
-        AppendFlag(args, "--verbose", options.Verbose);
-        return RunUpdateAsync(args, cancellationToken);
+        return RunUpdateCoreAsync(
+            dryRun: options.DryRun,
+            stopContainers: options.StopContainers || options.Force,
+            limaRecreate: options.LimaRecreate,
+            showHelp: false,
+            cancellationToken);
     }
 
     public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "refresh",
-        };
-        AppendFlag(args, "--rebuild", options.Rebuild);
-        AppendFlag(args, "--verbose", options.Verbose);
-        return RunRefreshAsync(args, cancellationToken);
+        return RunRefreshCoreAsync(
+            rebuild: options.Rebuild,
+            showHelp: false,
+            cancellationToken);
     }
 
     public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "uninstall",
-        };
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--containers", options.Containers);
-        AppendFlag(args, "--volumes", options.Volumes);
-        AppendFlag(args, "--force", options.Force);
-        AppendFlag(args, "--verbose", options.Verbose);
-        return RunUninstallAsync(args, cancellationToken);
+        return RunUninstallCoreAsync(
+            dryRun: options.DryRun,
+            removeContainers: options.Containers,
+            removeVolumes: options.Volumes,
+            showHelp: false,
+            cancellationToken);
     }
 
     public Task<int> RunHelpAsync(HelpCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "help",
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.Topic))
-        {
-            args.Add(options.Topic);
-        }
-
-        return RunHelpAsync(args, cancellationToken);
+        return RunHelpCoreAsync(options.Topic, cancellationToken);
     }
 
     public Task<int> RunVersionCommandAsync(CancellationToken cancellationToken)
@@ -721,15 +696,20 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
     private async Task<int> RunHelpAsync(List<string> args, CancellationToken cancellationToken)
     {
+        var topic = args.Count > 1 ? args[1] : null;
+        return await RunHelpCoreAsync(topic, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunHelpCoreAsync(string? topic, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (args.Count <= 1)
+        if (string.IsNullOrWhiteSpace(topic))
         {
             await stdout.WriteLineAsync(GetRootHelpText()).ConfigureAwait(false);
             return 0;
         }
 
-        var topic = args[1];
         return topic switch
         {
             "config" => await WriteUsageAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false),
@@ -2988,16 +2968,27 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var stopContainers = args.Contains("--stop-containers", StringComparer.Ordinal) || args.Contains("--force", StringComparer.Ordinal);
         var limaRecreate = args.Contains("--lima-recreate", StringComparer.Ordinal);
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-        if (showHelp)
-        {
-            await stdout.WriteLineAsync("Usage: cai update [--dry-run] [--stop-containers] [--force] [--lima-recreate]").ConfigureAwait(false);
-            return 0;
-        }
 
         if (!ValidateOptions(args, 1, "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose", "--help", "-h"))
         {
             await stderr.WriteLineAsync("Unknown update option. Use 'cai update --help'.").ConfigureAwait(false);
             return 1;
+        }
+
+        return await RunUpdateCoreAsync(dryRun, stopContainers, limaRecreate, showHelp, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunUpdateCoreAsync(
+        bool dryRun,
+        bool stopContainers,
+        bool limaRecreate,
+        bool showHelp,
+        CancellationToken cancellationToken)
+    {
+        if (showHelp)
+        {
+            await stdout.WriteLineAsync("Usage: cai update [--dry-run] [--stop-containers] [--force] [--lima-recreate]").ConfigureAwait(false);
+            return 0;
         }
 
         if (dryRun)
@@ -3049,7 +3040,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
-        var refreshCode = await RunRefreshAsync(["refresh", "--rebuild"], cancellationToken).ConfigureAwait(false);
+        var refreshCode = await RunRefreshCoreAsync(rebuild: true, showHelp: false, cancellationToken).ConfigureAwait(false);
         if (refreshCode != 0)
         {
             return refreshCode;
@@ -3069,16 +3060,24 @@ internal sealed partial class NativeLifecycleCommandRuntime
     private async Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-        if (showHelp)
-        {
-            await stdout.WriteLineAsync("Usage: cai refresh [--rebuild] [--verbose]").ConfigureAwait(false);
-            return 0;
-        }
-
         if (!ValidateOptions(args, 1, "--rebuild", "--verbose", "--help", "-h"))
         {
             await stderr.WriteLineAsync("Unknown refresh option. Use 'cai refresh --help'.").ConfigureAwait(false);
             return 1;
+        }
+
+        return await RunRefreshCoreAsync(
+            rebuild: args.Contains("--rebuild", StringComparer.Ordinal),
+            showHelp,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunRefreshCoreAsync(bool rebuild, bool showHelp, CancellationToken cancellationToken)
+    {
+        if (showHelp)
+        {
+            await stdout.WriteLineAsync("Usage: cai refresh [--rebuild] [--verbose]").ConfigureAwait(false);
+            return 0;
         }
 
         var channel = await ResolveChannelAsync(cancellationToken).ConfigureAwait(false);
@@ -3094,7 +3093,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        if (!args.Contains("--rebuild", StringComparer.Ordinal))
+        if (!rebuild)
         {
             await stdout.WriteLineAsync("Refresh complete.").ConfigureAwait(false);
             return 0;
@@ -3145,12 +3144,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
     private async Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-        if (showHelp)
-        {
-            await stdout.WriteLineAsync("Usage: cai uninstall [--dry-run] [--containers] [--volumes] [--force]").ConfigureAwait(false);
-            return 0;
-        }
-
         if (!ValidateOptions(args, 1, "--dry-run", "--containers", "--volumes", "--force", "--verbose", "--help", "-h"))
         {
             await stderr.WriteLineAsync("Unknown uninstall option. Use 'cai uninstall --help'.").ConfigureAwait(false);
@@ -3160,6 +3153,21 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
         var removeContainers = args.Contains("--containers", StringComparer.Ordinal);
         var removeVolumes = args.Contains("--volumes", StringComparer.Ordinal);
+        return await RunUninstallCoreAsync(dryRun, removeContainers, removeVolumes, showHelp, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunUninstallCoreAsync(
+        bool dryRun,
+        bool removeContainers,
+        bool removeVolumes,
+        bool showHelp,
+        CancellationToken cancellationToken)
+    {
+        if (showHelp)
+        {
+            await stdout.WriteLineAsync("Usage: cai uninstall [--dry-run] [--containers] [--volumes] [--force]").ConfigureAwait(false);
+            return 0;
+        }
 
         await RemoveShellIntegrationAsync(dryRun, cancellationToken).ConfigureAwait(false);
 
