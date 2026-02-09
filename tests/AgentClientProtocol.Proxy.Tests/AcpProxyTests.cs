@@ -162,7 +162,7 @@ public sealed class AcpProxyTests
     }
 
     [Fact]
-    public async Task RunAsync_RouteThrowsNonJsonException_ReportsProcessingError()
+    public async Task RunAsync_InvalidRequestParams_ReturnsInvalidParamsError()
     {
         var (exitCode, responses, stderr) = await RunProxyAsync(
             [
@@ -179,8 +179,32 @@ public sealed class AcpProxyTests
             new ThrowingSpawner("not used"));
 
         Assert.Equal(0, exitCode);
+        Assert.Empty(stderr);
+        var response = Assert.Single(responses);
+        Assert.Equal("req-throw", response.Id?.GetValue<string>());
+        Assert.Equal(JsonRpcErrorCodes.InvalidParams, response.Error?.Code);
+        Assert.Contains("Invalid params", response.Error?.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_InvalidNotificationParams_IsIgnoredAndLogged()
+    {
+        var (exitCode, responses, stderr) = await RunProxyAsync(
+            [
+                ToLine(new JsonRpcEnvelope
+                {
+                    Method = "session/prompt",
+                    Params = new JsonObject
+                    {
+                        ["sessionId"] = JsonValue.Create(42),
+                    },
+                }),
+            ],
+            new ThrowingSpawner("not used"));
+
+        Assert.Equal(0, exitCode);
         Assert.Empty(responses);
-        Assert.Contains("JSON parse error", stderr, StringComparison.Ordinal);
+        Assert.Contains("Malformed notification params skipped", stderr, StringComparison.Ordinal);
     }
 
     [Fact]

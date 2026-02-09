@@ -12,6 +12,8 @@ namespace AgentClientProtocol.Proxy.Sessions;
 public sealed class AgentSpawner : IAgentSpawner
 {
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+    private const int InputChannelCapacity = 512;
+    private const int OutputChannelCapacity = 512;
     private readonly bool directSpawn;
     private readonly TextWriter stderr;
     private readonly string caiExecutable;
@@ -35,14 +37,16 @@ public sealed class AgentSpawner : IAgentSpawner
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(agent);
 
-        var input = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        var input = Channel.CreateBounded<string>(new BoundedChannelOptions(InputChannelCapacity)
         {
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = false,
             AllowSynchronousContinuations = false,
         });
-        var output = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        var output = Channel.CreateBounded<string>(new BoundedChannelOptions(OutputChannelCapacity)
         {
+            FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
             SingleWriter = true,
             AllowSynchronousContinuations = false,

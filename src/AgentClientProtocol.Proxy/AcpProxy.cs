@@ -145,34 +145,50 @@ public sealed class AcpProxy : IDisposable
         if (message.Method == null && message.Id != null && (message.Result != null || message.Error != null))
             return;
 
-        // Route based on method
-        switch (message.Method)
+        try
         {
-            case "initialize":
-                await HandleInitializeAsync(message).ConfigureAwait(false);
-                break;
+            // Route based on method
+            switch (message.Method)
+            {
+                case "initialize":
+                    await HandleInitializeAsync(message).ConfigureAwait(false);
+                    break;
 
-            case "session/new":
-                await HandleSessionNewAsync(message).ConfigureAwait(false);
-                break;
+                case "session/new":
+                    await HandleSessionNewAsync(message).ConfigureAwait(false);
+                    break;
 
-            case "session/prompt":
-            case "session/end":
-                await RouteToSessionAsync(message).ConfigureAwait(false);
-                break;
+                case "session/prompt":
+                case "session/end":
+                    await RouteToSessionAsync(message).ConfigureAwait(false);
+                    break;
 
-            default:
-                // For unknown methods: only respond with error if it's a request (has id)
-                // JSON-RPC forbids responding to notifications (no id)
-                if (message.Id != null)
-                {
-                    await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
-                        message.Id,
-                        JsonRpcErrorCodes.MethodNotFound,
-                        $"Method not found: {message.Method}")).ConfigureAwait(false);
-                }
-                // Notifications are silently ignored (per JSON-RPC spec)
-                break;
+                default:
+                    // For unknown methods: only respond with error if it's a request (has id)
+                    // JSON-RPC forbids responding to notifications (no id)
+                    if (message.Id != null)
+                    {
+                        await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                            message.Id,
+                            JsonRpcErrorCodes.MethodNotFound,
+                            $"Method not found: {message.Method}")).ConfigureAwait(false);
+                    }
+                    // Notifications are silently ignored (per JSON-RPC spec)
+                    break;
+            }
+        }
+        catch (JsonException ex)
+        {
+            if (message.Id != null)
+            {
+                await output.EnqueueAsync(JsonRpcHelpers.CreateErrorResponse(
+                    message.Id,
+                    JsonRpcErrorCodes.InvalidParams,
+                    $"Invalid params: {ex.Message}")).ConfigureAwait(false);
+                return;
+            }
+
+            await errorSink.WriteLineAsync($"Malformed notification params skipped: {ex.Message}").ConfigureAwait(false);
         }
     }
 
