@@ -20,8 +20,7 @@ internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
     public AcpProxyProcessAdapter(
         string agent,
         Stream stdout,
-        TextWriter stderr,
-        bool directSpawn) => proxy = new AcpProxy(agent, stdout, stderr, directSpawn);
+        TextWriter stderr) => proxy = new AcpProxy(agent, stdout, stderr);
 
     public void Cancel() => proxy.Cancel();
 
@@ -32,32 +31,29 @@ internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
 
 internal sealed class AcpProxyRunner
 {
-    private readonly Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactory;
+    private readonly Func<string, Stream, TextWriter, IAcpProxyProcess> proxyFactory;
     private readonly Func<Stream> stdinFactory;
     private readonly Func<Stream> stdoutFactory;
     private readonly TextWriter stderr;
-    private readonly Func<bool> directSpawnResolver;
     private readonly Action<ConsoleCancelEventHandler> subscribeCancelHandler;
     private readonly Action<ConsoleCancelEventHandler> unsubscribeCancelHandler;
 
     public AcpProxyRunner()
         : this(
-            static (agent, stdout, stderr, directSpawn) => new AcpProxyProcessAdapter(agent, stdout, stderr, directSpawn),
+            static (agent, stdout, stderr) => new AcpProxyProcessAdapter(agent, stdout, stderr),
             static () => Console.OpenStandardInput(),
             static () => Console.OpenStandardOutput(),
             Console.Error,
-            static () => Environment.GetEnvironmentVariable("CAI_ACP_DIRECT_SPAWN") == "1",
             static handler => Console.CancelKeyPress += handler,
             static handler => Console.CancelKeyPress -= handler)
     {
     }
 
     internal AcpProxyRunner(
-        Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactoryFactory,
+        Func<string, Stream, TextWriter, IAcpProxyProcess> proxyFactoryFactory,
         Func<Stream> standardInputFactory,
         Func<Stream> standardOutputFactory,
         TextWriter errorWriter,
-        Func<bool> directSpawnValueResolver,
         Action<ConsoleCancelEventHandler> subscribeCancelKeyHandler,
         Action<ConsoleCancelEventHandler> unsubscribeCancelKeyHandler)
     {
@@ -65,7 +61,6 @@ internal sealed class AcpProxyRunner
         stdinFactory = standardInputFactory;
         stdoutFactory = standardOutputFactory;
         stderr = errorWriter;
-        directSpawnResolver = directSpawnValueResolver;
         subscribeCancelHandler = subscribeCancelKeyHandler;
         unsubscribeCancelHandler = unsubscribeCancelKeyHandler;
     }
@@ -73,15 +68,13 @@ internal sealed class AcpProxyRunner
     public async Task<int> RunAsync(string? agent, CancellationToken cancellationToken)
     {
         var resolvedAgent = string.IsNullOrWhiteSpace(agent) ? "claude" : agent;
-        var directSpawn = directSpawnResolver();
 
         try
         {
             using var proxy = proxyFactory(
                 resolvedAgent,
                 stdoutFactory(),
-                stderr,
-                directSpawn);
+                stderr);
 
             ConsoleCancelEventHandler handler = (_, e) =>
             {

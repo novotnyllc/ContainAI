@@ -410,7 +410,7 @@ SSH is a common example - disabled by default for security, but users can opt-in
 
 ## Step 4: Validate Manifest-Derived Artifacts
 
-ContainAI now applies manifest behavior directly in native `.NET` code (`manifest apply ...`) and emits only JSON data artifacts when generation is needed.
+ContainAI applies manifest behavior directly in native `.NET` code (`manifest apply ...`) and emits only JSON data artifacts when generation is needed.
 
 ### Validation and JSON Artifact Commands
 
@@ -422,7 +422,7 @@ dotnet run --project src/cai -- manifest check src/manifests
 dotnet run --project src/cai -- manifest generate container-link-spec src/manifests artifacts/container-generated/link-spec.json
 ```
 
-**Note**: Shell script artifact generation was removed. Build/runtime flows consume native `cai manifest apply ...` behavior directly.
+Build/runtime flows consume native `cai manifest apply ...` behavior directly.
 
 ### Consistency Check
 

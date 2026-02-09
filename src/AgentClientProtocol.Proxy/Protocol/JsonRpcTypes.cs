@@ -191,7 +191,6 @@ public readonly record struct JsonRpcData
     }
 
     public static implicit operator JsonRpcData(JsonNode node) => FromJsonNode(node);
-
 }
 
 internal sealed class JsonRpcDataConverter : JsonConverter<JsonRpcData>

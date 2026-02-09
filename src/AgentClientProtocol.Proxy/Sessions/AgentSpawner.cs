@@ -14,22 +14,13 @@ public sealed class AgentSpawner : IAgentSpawner
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
     private const int InputChannelCapacity = 512;
     private const int OutputChannelCapacity = 512;
-    private readonly bool directSpawn;
     private readonly TextWriter stderr;
-    private readonly string caiExecutable;
 
     /// <summary>
     /// Creates a new agent spawner.
     /// </summary>
-    /// <param name="directSpawn">If true, spawns the agent directly; otherwise wraps with cai exec.</param>
-    /// <param name="stderr">Stream to forward agent stderr to.</param>
-    /// <param name="caiExecutable">ContainAI executable path used for container-side execution.</param>
-    public AgentSpawner(bool useDirectSpawn, TextWriter errorWriter, string caiExecutablePath = "cai")
-    {
-        directSpawn = useDirectSpawn;
-        stderr = errorWriter;
-        caiExecutable = caiExecutablePath;
-    }
+    /// <param name="errorWriter">Stream to forward agent stderr to.</param>
+    public AgentSpawner(TextWriter errorWriter) => stderr = errorWriter;
 
     /// <inheritdoc />
     public async Task SpawnAgentAsync(AcpSession session, string agent, CancellationToken cancellationToken = default)
@@ -53,7 +44,7 @@ public sealed class AgentSpawner : IAgentSpawner
         });
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        var command = BuildCommand(session, agent)
+        var command = BuildCommand(agent)
             .WithValidation(CommandResultValidation.None)
             .WithStandardInputPipe(PipeSource.Create((stream, token) => PumpInputAsync(input.Reader, stream, token)))
             .WithStandardOutputPipe(PipeTarget.ToDelegate((line, token) => output.Writer.WriteAsync(line, token).AsTask(), Utf8NoBom))
@@ -78,30 +69,8 @@ public sealed class AgentSpawner : IAgentSpawner
             $"Agent '{agent}' not found. Ensure the agent binary is installed and in PATH.",
             ex);
 
-    private Command BuildCommand(AcpSession session, string agent)
-    {
-        if (directSpawn)
-        {
-            return Cli.Wrap(agent)
-                .WithArguments(args => args.Add("--acp"));
-        }
-
-        return Cli.Wrap(caiExecutable)
-            .WithEnvironmentVariables(env => env.Set("CAI_NO_UPDATE_CHECK", "1"))
-            .WithArguments(args => args
-                .Add("exec")
-                .Add("--workspace")
-                .Add(session.Workspace)
-                .Add("--quiet")
-                .Add("--")
-                .Add("bash")
-                // Use -c (not -lc) to avoid login shell profile output on stdout.
-                .Add("-c")
-                // Safe: agent name passed as $1, not string-interpolated into shell body.
-                .Add("command -v -- \"$1\" >/dev/null 2>&1 || { printf \"Agent '%s' not found in container\\n\" \"$1\" >&2; exit 127; }; exec -- \"$1\" --acp")
-                .Add("--")
-                .Add(agent));
-    }
+    private static Command BuildCommand(string agent)
+        => Cli.Wrap(agent).WithArguments(args => args.Add("--acp"));
 
     private async Task RunCommandAsync(
         Command command,

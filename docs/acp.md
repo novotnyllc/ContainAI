@@ -1,6 +1,6 @@
 # ACP Integration
 
-ContainAI supports the [Agent Client Protocol](https://agentclientprotocol.com) (ACP) for editor integration. This allows editors like Zed and VS Code to run AI agents in secure, containerized environments.
+ContainAI supports the [Agent Client Protocol](https://agentclientprotocol.com) (ACP) for editor integration. This allows editors like Zed and VS Code to run AI agents in isolated environments.
 
 ## Quick Start
 
@@ -33,15 +33,11 @@ Configure your editor to use `cai acp proxy <agent>`:
 sequenceDiagram
     participant Editor
     participant Proxy as cai acp proxy (Proxy)
-    participant Exec as cai exec
-    participant Container
     participant Agent as Agent (claude --acp)
     participant MCP as MCP Servers
 
     Editor->>Proxy: ACP stdio (NDJSON)
-    Proxy->>Exec: Spawn container exec
-    Exec->>Container: SSH/exec
-    Container->>Agent: Run agent --acp
+    Proxy->>Agent: Spawn agent --acp
     Agent->>MCP: Connect to MCP servers
     MCP-->>Agent: Tool responses
     Agent-->>Proxy: Response
@@ -51,7 +47,7 @@ sequenceDiagram
 1. Editor spawns `cai acp proxy claude`
 2. Editor sends `initialize`, then `session/new` with workspace and MCP config
 3. Proxy resolves workspace root (git root or `.containai/config.toml` parent)
-4. Proxy spawns `cai exec` which handles container creation/SSH
+4. Proxy spawns `<agent> --acp` through `CliWrap`
 5. Agent handles MCP servers (spawns stdio, connects to HTTP/SSE)
 6. All communication proxied through
 
@@ -68,7 +64,7 @@ sequenceDiagram
 One proxy process can handle multiple editor sessions:
 
 - Each `session/new` can target a different workspace
-- Different workspaces use different containers
+- Different workspaces use different agent sessions
 - Subdirectories map to their workspace root
 - Messages routed by `sessionId`
 
@@ -80,7 +76,7 @@ When the editor sends a `cwd` in `session/new`, the proxy resolves it to a works
 2. Find nearest `.containai/config.toml` (ContainAI project root)
 3. Use `cwd` as-is (fallback)
 
-Multiple sessions with paths in the same workspace tree share the same container.
+Multiple sessions with paths in the same workspace tree share the same workspace mapping context.
 
 ## MCP Servers
 
@@ -90,51 +86,44 @@ MCP (Model Context Protocol) servers provide tools and context to the agent. The
 
 | MCP Type | Works? | Notes |
 |----------|--------|-------|
-| HTTP/SSE (remote) | Yes | Agent connects directly from container |
-| Stdio (in container) | Yes | Package must be installed in container |
-| HTTP/SSE (localhost) | Limited | See "Host-Local Services" below |
-| Stdio (host-only) | No | Can't spawn host processes from container |
+| HTTP/SSE (remote) | Yes | Agent connects directly from the runtime environment |
+| Stdio (local) | Yes | Package must be installed where `cai acp proxy` runs |
+| HTTP/SSE (`localhost`) | Yes | Works when the service is reachable from the runtime environment |
+| Stdio (remote-only) | No | Process must be launchable from the local runtime environment |
 
-### Installing MCP Packages in Container
+### Installing MCP Packages
 
-For stdio MCP servers to work, their packages must be installed in the container image. You can add them to your template's Dockerfile:
+For stdio MCP servers to work, their packages must be installed in the same environment as `cai acp proxy`:
 
-```dockerfile
-# In your custom template Dockerfile
-RUN npm install -g @modelcontextprotocol/server-filesystem \
-                   @mcp/fetch \
-                   @mcp/postgres
-```
-
-Or install at runtime via shell:
 ```bash
-cai shell
-npm install -g @mcp/whatever
+npm install -g @modelcontextprotocol/server-filesystem \
+               @mcp/fetch \
+               @mcp/postgres
 ```
 
 ### Host-Local Services
 
-To access MCP servers running on your host machine:
+If `cai acp proxy` runs inside an isolated runtime and you need host-local services:
 
-1. Create container with host networking flag:
+1. Ensure your runtime can resolve host networking:
    ```bash
    docker run --add-host=host.docker.internal:host-gateway ...
    ```
 
 2. Configure MCP URL as `http://host.docker.internal:PORT/...`
 
-**Note**: This requires manual container configuration. The `--add-host` flag must be added to container creation, which is not currently automated by ContainAI.
+**Note**: In isolated/containerized runtimes this often requires explicit `--add-host` configuration.
 
 ### Path Translation
 
 Your local paths work transparently:
 ```
-/home/user/project -> /home/agent/workspace (symlink in container)
+/home/user/project -> /home/agent/workspace
 ```
 
 MCP server args containing workspace paths are translated automatically:
 
-| Host Path | Container Path |
+| Host Path | Runtime Path |
 |-----------|----------------|
 | `/home/user/project` | `/home/agent/workspace` |
 | `/home/user/project/src` | `/home/agent/workspace/src` |
@@ -144,7 +133,7 @@ The translation is path-aware and only applies to absolute paths that are descen
 
 ## Supported Agents
 
-ContainAI supports **any agent** that implements the ACP protocol. The agent binary must be installed in the container and support the `--acp` flag.
+ContainAI supports **any agent** that implements the ACP protocol. The agent binary must be available in `PATH` and support the `--acp` flag.
 
 ### Built-in Agents
 
@@ -162,7 +151,7 @@ Any ACP-compatible agent can be used:
 cai acp proxy myagent
 
 # The agent must:
-# 1. Be installed in the container (in $PATH)
+# 1. Be installed and available on PATH
 # 2. Support the --acp flag for ACP protocol mode
 ```
 
@@ -235,7 +224,7 @@ With an ACP-compatible extension, add to `settings.json`:
 
 ### Agent not starting
 
-Verify the agent is installed in the container:
+Verify the agent is installed and available on PATH:
 ```bash
 cai shell
 command -v <agent>  # e.g., command -v claude or command -v myagent
@@ -243,35 +232,30 @@ command -v <agent>  # e.g., command -v claude or command -v myagent
 ```
 
 If the agent is not found, you'll see an error like:
-```
-Agent '<agent>' not found in container
-```
+`Agent '<agent>' not found. Ensure the agent binary is installed and in PATH.`
 
 **Solutions:**
 - Check the agent name spelling matches the binary name
-- Install the agent in your template Dockerfile
-- Install at runtime: `cai shell` then install the agent (e.g., `npm install -g @mycompany/myagent`)
+- Install the agent so it is available on PATH
 
 ### MCP server not found
 
 ```bash
-cai shell
 which npx  # Verify npm available
 npx @mcp/fetch --version  # Verify MCP package works
 ```
 
-If the package is not found, install it in the container or add it to your template's Dockerfile.
+If the package is not found, install it in the runtime environment where ACP is running.
 
 ### Can't reach host services
 
-From container, verify `host.docker.internal` resolves:
+From the runtime environment, verify `host.docker.internal` resolves (when applicable):
 ```bash
-cai shell
 ping host.docker.internal  # Should resolve to host IP
 curl http://host.docker.internal:8080/  # Test connectivity
 ```
 
-If this fails, the container needs the `--add-host=host.docker.internal:host-gateway` flag.
+If this fails in an isolated runtime, add `--add-host=host.docker.internal:host-gateway` to the runtime/container launch configuration.
 
 ### Multiple sessions not routing
 
@@ -289,25 +273,14 @@ The proxy uses NDJSON (newline-delimited JSON) framing. If you see parsing error
 
 ACP requires stdout purity - only protocol messages should appear. If you see diagnostic output:
 
-- The proxy sets `CAI_NO_UPDATE_CHECK=1` to suppress update checks
 - All ContainAI diagnostic output goes to stderr in ACP mode
 - Check for shell initialization scripts that may print to stdout
-
-### Container not created
-
-The proxy uses `cai exec` internally. Verify it works standalone:
-```bash
-cai exec --workspace /path/to/project echo "hello"
-```
-
-If this fails, check your ContainAI configuration and Docker setup with `cai doctor`.
 
 ### Session timeout
 
 The proxy waits up to 30 seconds for agent responses to `initialize` and `session/new`. If timeouts occur:
 
-- Check container startup time (may be slow on first run)
-- Verify agent is responsive: `cai exec -- claude --version`
+- Verify agent is responsive: `claude --version`
 - Check for errors in stderr output
 
 ## Environment Variables
@@ -317,15 +290,14 @@ For testing and debugging:
 | Variable | Description |
 |----------|-------------|
 | `CAI_ACP_TEST_MODE=1` | Allow any agent name (for testing) |
-| `CAI_ACP_DIRECT_SPAWN=1` | Bypass containers, spawn agent directly |
-| `CAI_NO_UPDATE_CHECK=1` | Skip update checks (set automatically in ACP mode) |
+| `CAI_NO_UPDATE_CHECK=1` | Skip update checks |
 
 ## Limitations
 
 - **Stdio transport only**: HTTP/WebSocket ACP transport not supported
-- **Host MCP servers**: Stdio servers that only exist on the host cannot run in container
-- **host.docker.internal**: Requires manual container configuration for host-local HTTP services
-- **Agent availability**: Only agents installed in the container image are available
+- **Host MCP servers**: Stdio servers that only exist on another host cannot run without host access
+- **host.docker.internal**: Requires explicit runtime/container networking configuration for host-local HTTP services
+- **Agent availability**: Agents must be installed and available on PATH
 
 ## References
 

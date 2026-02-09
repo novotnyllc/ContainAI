@@ -17,7 +17,7 @@ public sealed class AcpProxyRunnerTests
         var stderr = new StringWriter();
 
         var runner = CreateRunner(
-            (agent, _, _, _) =>
+            (agent, _, _) =>
             {
                 capturedAgent = agent;
                 return new FakeProxy(configuredExitCode: 17);
@@ -44,7 +44,7 @@ public sealed class AcpProxyRunnerTests
         using var proxy = new FakeProxy(configuredExitCode: 0, shouldCompleteOnCancel: true);
 
         var runner = CreateRunner(
-            (_, _, _, _) => proxy,
+            (_, _, _) => proxy,
             stdin: Stream.Null,
             stdout: stdout,
             stderr: stderr,
@@ -87,7 +87,7 @@ public sealed class AcpProxyRunnerTests
         var cancellationToken = new CancellationToken(canceled: true);
 
         var runner = CreateRunner(
-            (_, _, _, _) => new FakeProxy(
+            (_, _, _) => new FakeProxy(
                 runAsyncDelegate: (_, ct) =>
                 {
                     ct.ThrowIfCancellationRequested();
@@ -111,7 +111,7 @@ public sealed class AcpProxyRunnerTests
         var stderr = new StringWriter();
 
         var runner = CreateRunner(
-            (_, _, _, _) => throw new ArgumentException("agent invalid"),
+            (_, _, _) => throw new ArgumentException("agent invalid"),
             stdin: Stream.Null,
             stdout: stdout,
             stderr: stderr);
@@ -130,7 +130,7 @@ public sealed class AcpProxyRunnerTests
         var stderr = new StringWriter();
 
         var runner = CreateRunner(
-            (_, _, _, _) => throw new InvalidOperationException("startup failed"),
+            (_, _, _) => throw new InvalidOperationException("startup failed"),
             stdin: Stream.Null,
             stdout: stdout,
             stderr: stderr);
@@ -143,11 +143,10 @@ public sealed class AcpProxyRunnerTests
     }
 
     private static AcpProxyRunner CreateRunner(
-        Func<string, Stream, TextWriter, bool, IAcpProxyProcess> proxyFactory,
+        Func<string, Stream, TextWriter, IAcpProxyProcess> proxyFactory,
         Stream stdin,
         Stream stdout,
         TextWriter stderr,
-        bool directSpawn = false,
         Action<ConsoleCancelEventHandler>? subscribeCancelHandler = null,
         Action<ConsoleCancelEventHandler>? unsubscribeCancelHandler = null)
     {
@@ -156,7 +155,6 @@ public sealed class AcpProxyRunnerTests
             () => stdin,
             () => stdout,
             stderr,
-            () => directSpawn,
             subscribeCancelHandler ?? (_ => { }),
             unsubscribeCancelHandler ?? (_ => { }));
     }

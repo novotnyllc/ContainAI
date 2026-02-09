@@ -108,6 +108,8 @@ Specialist agents
 - Keep command surface statically modeled in `System.CommandLine`; avoid ad-hoc runtime command/option discovery.
 - Keep core config parsing in-process with `.NET` libraries (`System.Text.Json`, `CsToml`); do not reintroduce parser executable dependencies (`jq`, `yq`, Python) for CLI config paths.
 - Keep shell completion internal (`cai completion suggest`); do not add `dotnet-suggest` or other external completion dependencies.
+- Keep ACP agent launching direct (`agent --acp`) and native; do not shell through `bash -c` or invoke `cai exec` from ACP runtime code.
+- Keep runtime/packaging flows native (`dotnet build`, `dotnet publish`, `cai ...`); do not regenerate legacy shell helper scripts beyond `install.sh` bootstrap and devcontainer feature install entrypoint.
 - Keep regex usage on source-generated regex (`[GeneratedRegex]`), not runtime regex construction.
 - Keep tests on `xunit.v3.mtp-v2` + Microsoft Testing Platform v2 and use Central Package Management for all package versions.
 - Keep coverage gates at or above 97% line coverage for `ContainAI.Cli`, `ContainAI.Cli.Abstractions`, and `AgentClientProtocol.Proxy`.

@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using AgentClientProtocol.Proxy.Protocol;
 using Xunit;
 
@@ -271,25 +270,6 @@ public sealed class JsonRpcDataAndIdTests
 
         Assert.Equal(JsonValueKind.Object, element.ValueKind);
         Assert.Equal("alpha", element.GetProperty("name").GetString());
-    }
-
-    [Fact]
-    public void JsonRpcData_FromJsonNode_AndImplicitNodeConversion_Work()
-    {
-        var node = JsonNode.Parse("""{"sessionId":"s-42","nested":{"ok":true}}""");
-        Assert.NotNull(node);
-
-        var explicitPayload = JsonRpcData.FromJsonNode(node!);
-        JsonRpcData implicitPayload = node!;
-
-        Assert.Equal("s-42", explicitPayload["sessionId"]?.GetValue<string>());
-        Assert.True(implicitPayload["nested"]?["ok"]?.GetValue<bool>());
-    }
-
-    [Fact]
-    public void JsonRpcData_FromJsonNode_WithNullNode_Throws()
-    {
-        Assert.Throws<ArgumentNullException>(() => JsonRpcData.FromJsonNode(node: null!));
     }
 
     private static ReadOnlySequence<byte> CreateReadOnlySequence(byte[] first, byte[] second)

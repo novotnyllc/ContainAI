@@ -1528,7 +1528,6 @@ These variables are used during `cai setup` for advanced configuration.
 | `CONTAINAI_DEBUG` | Enable debug logging to stderr | `0` |
 | `CAI_YES` | Auto-confirm prompts (for scripts) | `0` |
 | `CAI_ACP_TEST_MODE` | Allow any agent name in ACP (testing) | `0` |
-| `CAI_ACP_DIRECT_SPAWN` | Bypass containers in ACP (testing) | `0` |
 
 **Precedence:**
 1. CLI flags (highest)

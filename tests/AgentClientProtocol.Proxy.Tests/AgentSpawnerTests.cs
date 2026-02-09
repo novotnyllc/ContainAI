@@ -1,5 +1,3 @@
-using System.Text.Json.Nodes;
-using AgentClientProtocol.Proxy.Protocol;
 using AgentClientProtocol.Proxy.Sessions;
 using Xunit;
 
@@ -11,7 +9,7 @@ public sealed class AgentSpawnerTests
     public async Task SpawnAgent_DirectSpawn_WithMissingBinary_ThrowsWithClearMessage()
     {
         using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(useDirectSpawn: true, TextWriter.Null);
+        var spawner = new AgentSpawner(TextWriter.Null);
         var missingAgent = $"containai-missing-{Guid.NewGuid():N}";
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -24,68 +22,12 @@ public sealed class AgentSpawnerTests
     public async Task SpawnAgent_DirectSpawn_StartsTransport()
     {
         using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(useDirectSpawn: true, TextWriter.Null);
+        var spawner = new AgentSpawner(TextWriter.Null);
 
         await spawner.SpawnAgentAsync(session, "sh", TestContext.Current.CancellationToken);
         Assert.NotNull(session.AgentOutput);
         Assert.NotNull(session.AgentExecutionTask);
         session.Cancel();
-    }
-
-    [Fact]
-    public async Task SpawnAgent_ContainerMode_UsesCaiExecWrapperArguments()
-    {
-        using var temp = new TempDirectory();
-        var fakeCaiPath = Path.Combine(temp.Path, "cai");
-        var argsFile = Path.Combine(temp.Path, "args.log");
-        var envFile = Path.Combine(temp.Path, "env.log");
-
-        var script = $$"""
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "$CAI_NO_UPDATE_CHECK" > "{{envFile}}"
-printf '%s\n' "$@" > "{{argsFile}}"
-while IFS= read -r _; do
-  :
-done
-""";
-        await File.WriteAllTextAsync(fakeCaiPath, script.ReplaceLineEndings("\n"), TestContext.Current.CancellationToken);
-        EnsureExecutable(fakeCaiPath);
-
-        using var session = new AcpSession("/tmp/workspace");
-        var spawner = new AgentSpawner(useDirectSpawn: false, TextWriter.Null, fakeCaiPath);
-        await spawner.SpawnAgentAsync(session, "claude", TestContext.Current.CancellationToken);
-        await session.WriteToAgentAsync(new JsonRpcEnvelope
-        {
-            Id = "probe",
-            Method = "session/prompt",
-            Params = new JsonObject
-            {
-                ["sessionId"] = "proxy-1",
-            },
-        }).ConfigureAwait(true);
-
-        await WaitForFileAsync(argsFile, TestContext.Current.CancellationToken);
-        session.Cancel();
-        if (session.AgentExecutionTask != null)
-        {
-            await session.AgentExecutionTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
-        }
-
-        var args = await File.ReadAllLinesAsync(argsFile, TestContext.Current.CancellationToken);
-        Assert.Equal("exec", args[0]);
-        Assert.Equal("--workspace", args[1]);
-        Assert.Equal("/tmp/workspace", args[2]);
-        Assert.Equal("--quiet", args[3]);
-        Assert.Equal("--", args[4]);
-        Assert.Equal("bash", args[5]);
-        Assert.Equal("-c", args[6]);
-        Assert.Contains("command -v -- \"$1\"", args[7], StringComparison.Ordinal);
-        Assert.Equal("--", args[8]);
-        Assert.Equal("claude", args[9]);
-
-        var env = await File.ReadAllTextAsync(envFile, TestContext.Current.CancellationToken);
-        Assert.Contains("1", env, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,7 +49,7 @@ done
         using var session = new AcpSession("/tmp/workspace");
         var stderrLineReceived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var stderr = new MatchNotifyingStringWriter("forwarded-error", stderrLineReceived);
-        var spawner = new AgentSpawner(useDirectSpawn: true, stderr);
+        var spawner = new AgentSpawner(stderr);
 
         await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
         await stderrLineReceived.Task.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
@@ -136,7 +78,7 @@ done
 
         using var session = new AcpSession("/tmp/workspace");
         using var stderr = new StringWriter();
-        var spawner = new AgentSpawner(useDirectSpawn: true, stderr);
+        var spawner = new AgentSpawner(stderr);
         await spawner.SpawnAgentAsync(session, fakeAgentPath, TestContext.Current.CancellationToken);
 
         if (session.AgentExecutionTask != null)
@@ -159,46 +101,6 @@ done
                 completionSource.TrySetResult();
             }
         }
-    }
-
-    private static async Task WaitForFileAsync(string path, CancellationToken cancellationToken)
-    {
-        if (File.Exists(path))
-        {
-            return;
-        }
-
-        var directory = Path.GetDirectoryName(path);
-        var fileName = Path.GetFileName(path);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            throw new InvalidOperationException($"Unable to watch directory for path: {path}");
-        }
-
-        var fileCreated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var watcher = new FileSystemWatcher(directory, fileName)
-        {
-            EnableRaisingEvents = true,
-        };
-        using var cancellation = cancellationToken.Register(
-            static state => ((TaskCompletionSource)state!).TrySetCanceled(),
-            fileCreated);
-
-        watcher.Created += (_, _) => fileCreated.TrySetResult();
-        watcher.Changed += (_, _) =>
-        {
-            if (File.Exists(path))
-            {
-                fileCreated.TrySetResult();
-            }
-        };
-
-        if (File.Exists(path))
-        {
-            return;
-        }
-
-        await fileCreated.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
     }
 
     private static void EnsureExecutable(string path)

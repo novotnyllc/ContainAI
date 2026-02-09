@@ -11,7 +11,7 @@ namespace AgentClientProtocol.Proxy;
 
 /// <summary>
 /// ACP terminating proxy that handles ACP protocol from editors,
-/// routes to containerized agents via cai exec.
+/// and routes to agent processes over ACP.
 /// </summary>
 public sealed class AcpProxy : IDisposable
 {
@@ -31,13 +31,11 @@ public sealed class AcpProxy : IDisposable
     /// <param name="agent">The agent binary name (any agent supporting --acp flag).</param>
     /// <param name="stdout">Stream for JSON-RPC output.</param>
     /// <param name="stderr">Stream for diagnostic output.</param>
-    /// <param name="directSpawn">If true, spawns agent directly without cai exec.</param>
     /// <param name="agentSpawner">Optional custom agent spawner. If null, default spawner is used.</param>
     public AcpProxy(
         string agentName,
         Stream outputStream,
         TextWriter errorWriter,
-        bool directSpawn = false,
         IAgentSpawner? customAgentSpawner = null)
     {
         ArgumentNullException.ThrowIfNull(agentName);
@@ -47,7 +45,7 @@ public sealed class AcpProxy : IDisposable
         agent = agentName;
         output = new OutputWriter(outputStream);
         errorSink = new ErrorSink(errorWriter);
-        agentSpawner = customAgentSpawner ?? new AgentSpawner(directSpawn, errorWriter);
+        agentSpawner = customAgentSpawner ?? new AgentSpawner(errorWriter);
 
         // No static allow-list here; agent validation happens when spawn starts.
     }

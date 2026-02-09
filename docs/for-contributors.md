@@ -20,7 +20,7 @@ Prerequisites: .NET SDK 10+, Docker CLI (`docker --version`), Bash 4.0+, and Git
 
 3. **Reload shell integration (or use explicit binary path)**:
    ```bash
-   # Open a new shell, or source your profile so `cai` is on PATH now
+   # Open a new shell, or source your profile so `cai` is on PATH
    source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
 
    # Verify CLI is available
