@@ -1,0 +1,73 @@
+namespace ContainAI.Cli.Host;
+
+internal sealed partial class ContainerRuntimeCommandService
+{
+    private async Task MigrateGitConfigAsync(string dataDir, bool quiet)
+    {
+        var oldPath = Path.Combine(dataDir, ".gitconfig");
+        var newDir = Path.Combine(dataDir, "git");
+        var newPath = Path.Combine(newDir, "gitconfig");
+
+        if (!File.Exists(oldPath) || await IsSymlinkAsync(oldPath).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var oldInfo = new FileInfo(oldPath);
+        if (oldInfo.Length == 0)
+        {
+            return;
+        }
+
+        var needsNewPath = !File.Exists(newPath) || new FileInfo(newPath).Length == 0;
+        if (!needsNewPath)
+        {
+            return;
+        }
+
+        if (await IsSymlinkAsync(newDir).ConfigureAwait(false))
+        {
+            await stderr.WriteLineAsync($"[WARN] {newDir} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            return;
+        }
+
+        Directory.CreateDirectory(newDir);
+        if (await IsSymlinkAsync(newPath).ConfigureAwait(false))
+        {
+            await stderr.WriteLineAsync($"[WARN] {newPath} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            return;
+        }
+
+        var tempPath = $"{newPath}.tmp.{Environment.ProcessId}";
+        File.Copy(oldPath, tempPath, overwrite: true);
+        File.Move(tempPath, newPath, overwrite: true);
+        File.Delete(oldPath);
+        await LogInfoAsync(quiet, $"Migrated git config from {oldPath} to {newPath}").ConfigureAwait(false);
+    }
+
+    private async Task SetupGitConfigAsync(string dataDir, string homeDir, bool quiet)
+    {
+        var destination = Path.Combine(homeDir, ".gitconfig");
+        if (await IsSymlinkAsync(destination).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        var source = Path.Combine(dataDir, "git", "gitconfig");
+        if (!File.Exists(source) || new FileInfo(source).Length == 0)
+        {
+            return;
+        }
+
+        if (Directory.Exists(destination))
+        {
+            await stderr.WriteLineAsync($"[WARN] Destination {destination} exists but is not a regular file - skipping").ConfigureAwait(false);
+            return;
+        }
+
+        var tempDestination = $"{destination}.tmp.{Environment.ProcessId}";
+        File.Copy(source, tempDestination, overwrite: true);
+        File.Move(tempDestination, destination, overwrite: true);
+        await LogInfoAsync(quiet, "Git config loaded from data volume").ConfigureAwait(false);
+    }
+}
