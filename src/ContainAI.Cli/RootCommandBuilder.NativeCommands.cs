@@ -17,11 +17,11 @@ internal static partial class RootCommandBuilder
         command.Options.Add(resetLimaOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "doctor" };
+            var args = new List<string>();
             AppendFlag(args, "--json", parseResult.GetValue(jsonOption));
             AppendFlag(args, "--build-templates", parseResult.GetValue(buildTemplatesOption));
             AppendFlag(args, "--reset-lima", parseResult.GetValue(resetLimaOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunDoctorAsync(args, cancellationToken);
         });
 
         var fixCommand = new Command("fix", "Run doctor remediation routines.");
@@ -66,12 +66,12 @@ internal static partial class RootCommandBuilder
         });
         fixCommand.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "doctor", "fix" };
+            var args = new List<string>();
             AppendFlag(args, "--all", parseResult.GetValue(allOption));
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
             AppendArgument(args, parseResult.GetValue(targetArgument));
             AppendArgument(args, parseResult.GetValue(targetArgArgument));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunDoctorFixAsync(args, cancellationToken);
         });
 
         command.Subcommands.Add(fixCommand);
@@ -85,9 +85,9 @@ internal static partial class RootCommandBuilder
         command.Options.Add(jsonOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "validate" };
+            var args = new List<string>();
             AppendFlag(args, "--json", parseResult.GetValue(jsonOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunValidateAsync(args, cancellationToken);
         });
 
         return command;
@@ -105,13 +105,109 @@ internal static partial class RootCommandBuilder
         command.Options.Add(skipTemplatesOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "setup" };
+            var args = new List<string>();
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
             AppendFlag(args, "--skip-templates", parseResult.GetValue(skipTemplatesOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSetupAsync(args, cancellationToken);
         });
 
+        return command;
+    }
+
+    private static Command CreateInstallCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("install", "Install ContainAI into local user directories.");
+        var localOption = new Option<bool>("--local")
+        {
+            Description = "Require local install payload resolution.",
+        };
+        var yesOption = new Option<bool>("--yes")
+        {
+            Description = "Auto-confirm installer actions.",
+        };
+        var noSetupOption = new Option<bool>("--no-setup")
+        {
+            Description = "Skip automatic setup/update after install.",
+        };
+        var installDirOption = new Option<string?>("--install-dir")
+        {
+            Description = "Installation directory (overrides CAI_INSTALL_DIR).",
+        };
+        var binDirOption = new Option<string?>("--bin-dir")
+        {
+            Description = "Wrapper binary directory (overrides CAI_BIN_DIR).",
+        };
+        var channelOption = new Option<string?>("--channel")
+        {
+            Description = "Optional installer channel hint.",
+        };
+        channelOption.AcceptOnlyFromAmong("stable", "nightly");
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Enable verbose installer logging.",
+        };
+
+        command.Options.Add(localOption);
+        command.Options.Add(yesOption);
+        command.Options.Add(noSetupOption);
+        command.Options.Add(installDirOption);
+        command.Options.Add(binDirOption);
+        command.Options.Add(channelOption);
+        command.Options.Add(verboseOption);
+
+        command.SetAction((parseResult, cancellationToken) =>
+            runtime.RunInstallAsync(
+                new InstallCommandOptions(
+                    Local: parseResult.GetValue(localOption),
+                    Yes: parseResult.GetValue(yesOption),
+                    NoSetup: parseResult.GetValue(noSetupOption),
+                    InstallDir: parseResult.GetValue(installDirOption),
+                    BinDir: parseResult.GetValue(binDirOption),
+                    Channel: parseResult.GetValue(channelOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
+
+        return command;
+    }
+
+    private static Command CreateExamplesCommand(ICaiCommandRuntime runtime)
+    {
+        var command = new Command("examples", "List or export sample TOML configuration files.");
+        command.SetAction((_, cancellationToken) => runtime.RunExamplesListAsync(cancellationToken));
+
+        var list = new Command("list", "List available sample files.");
+        list.SetAction((_, cancellationToken) => runtime.RunExamplesListAsync(cancellationToken));
+
+        var export = new Command("export", "Write sample TOML files to a target directory.");
+        var outputDirOption = new Option<string?>("--output-dir", "-o")
+        {
+            Description = "Directory where sample TOML files will be written.",
+            Required = true,
+        };
+        var forceOption = new Option<bool>("--force")
+        {
+            Description = "Overwrite existing files in the output directory.",
+        };
+        export.Options.Add(outputDirOption);
+        export.Options.Add(forceOption);
+        export.SetAction((parseResult, cancellationToken) =>
+        {
+            var outputDir = parseResult.GetValue(outputDirOption);
+            if (string.IsNullOrWhiteSpace(outputDir))
+            {
+                throw new InvalidOperationException("--output-dir is required.");
+            }
+
+            return runtime.RunExamplesExportAsync(
+                new ExamplesExportCommandOptions(
+                    OutputDir: outputDir,
+                    Force: parseResult.GetValue(forceOption)),
+                cancellationToken);
+        });
+
+        command.Subcommands.Add(list);
+        command.Subcommands.Add(export);
         return command;
     }
 
@@ -144,7 +240,7 @@ internal static partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "import" };
+            var args = new List<string>();
             var sourcePath = parseResult.GetValue(sourcePathArgument);
             var from = parseResult.GetValue(fromOption);
             AppendOption(args, "--from", from ?? sourcePath);
@@ -155,7 +251,7 @@ internal static partial class RootCommandBuilder
             AppendFlag(args, "--no-excludes", parseResult.GetValue(noExcludesOption));
             AppendFlag(args, "--no-secrets", parseResult.GetValue(noSecretsOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunImportAsync(args, cancellationToken);
         });
 
         return command;
@@ -175,12 +271,12 @@ internal static partial class RootCommandBuilder
         command.Options.Add(workspaceOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "export" };
+            var args = new List<string>();
             AppendOption(args, "--output", parseResult.GetValue(outputOption));
             AppendOption(args, "--data-volume", parseResult.GetValue(dataVolumeOption));
             AppendOption(args, "--container", parseResult.GetValue(containerOption));
             AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunExportAsync(args, cancellationToken);
         });
 
         return command;
@@ -189,7 +285,7 @@ internal static partial class RootCommandBuilder
     private static Command CreateSyncCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("sync", "Run in-container sync operations.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["sync"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunSyncAsync(cancellationToken));
         return command;
     }
 
@@ -211,14 +307,14 @@ internal static partial class RootCommandBuilder
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "stop" };
+            var args = new List<string>();
             AppendFlag(args, "--all", parseResult.GetValue(allOption));
             AppendOption(args, "--container", parseResult.GetValue(containerOption));
             AppendFlag(args, "--remove", parseResult.GetValue(removeOption));
             AppendFlag(args, "--force", parseResult.GetValue(forceOption));
             AppendFlag(args, "--export", parseResult.GetValue(exportOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunStopAsync(args, cancellationToken);
         });
 
         return command;
@@ -238,12 +334,12 @@ internal static partial class RootCommandBuilder
         command.Options.Add(ageOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "gc" };
+            var args = new List<string>();
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
             AppendFlag(args, "--force", parseResult.GetValue(forceOption));
             AppendFlag(args, "--images", parseResult.GetValue(imagesOption));
             AppendOption(args, "--age", parseResult.GetValue(ageOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunGcAsync(args, cancellationToken);
         });
 
         return command;
@@ -252,16 +348,16 @@ internal static partial class RootCommandBuilder
     private static Command CreateSshCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("ssh", "Manage SSH integration.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["ssh"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunSshAsync(cancellationToken));
 
         var cleanup = new Command("cleanup", "Remove stale SSH host configs.");
         var dryRunOption = new Option<bool>("--dry-run");
         cleanup.Options.Add(dryRunOption);
         cleanup.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "ssh", "cleanup" };
+            var args = new List<string>();
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSshCleanupAsync(args, cancellationToken);
         });
 
         command.Subcommands.Add(cleanup);
@@ -271,7 +367,7 @@ internal static partial class RootCommandBuilder
     private static Command CreateLinksCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("links", "Check or repair container symlinks.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["links"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunLinksAsync(cancellationToken));
 
         command.Subcommands.Add(CreateLinksSubcommand("check", runtime));
         command.Subcommands.Add(CreateLinksSubcommand("fix", runtime));
@@ -305,7 +401,7 @@ internal static partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "links", name };
+            var args = new List<string>();
             AppendOption(args, "--name", parseResult.GetValue(nameOption));
             AppendOption(args, "--container", parseResult.GetValue(containerOption));
             AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption) ?? parseResult.GetValue(workspaceArgument));
@@ -313,7 +409,9 @@ internal static partial class RootCommandBuilder
             AppendFlag(args, "--quiet", parseResult.GetValue(quietOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
             AppendOption(args, "--config", parseResult.GetValue(configOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return name == "check"
+                ? runtime.RunLinksCheckAsync(args, cancellationToken)
+                : runtime.RunLinksFixAsync(args, cancellationToken);
         });
 
         return command;
@@ -329,10 +427,10 @@ internal static partial class RootCommandBuilder
         command.Options.Add(globalOption);
         command.Options.Add(workspaceOption);
         command.Options.Add(verboseOption);
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["config"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunConfigAsync(cancellationToken));
 
         var list = new Command("list");
-        list.SetAction((parseResult, cancellationToken) => runtime.RunNativeAsync(
+        list.SetAction((parseResult, cancellationToken) => runtime.RunConfigListAsync(
             BuildConfigArgs("list", parseResult, globalOption, workspaceOption, verboseOption),
             cancellationToken));
 
@@ -343,7 +441,7 @@ internal static partial class RootCommandBuilder
         {
             var args = BuildConfigArgs("get", parseResult, globalOption, workspaceOption, verboseOption);
             args.Add(parseResult.GetValue(getKey)!);
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunConfigGetAsync(args, cancellationToken);
         });
 
         var set = new Command("set");
@@ -356,7 +454,7 @@ internal static partial class RootCommandBuilder
             var args = BuildConfigArgs("set", parseResult, globalOption, workspaceOption, verboseOption);
             args.Add(parseResult.GetValue(setKey)!);
             args.Add(parseResult.GetValue(setValue)!);
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunConfigSetAsync(args, cancellationToken);
         });
 
         var unset = new Command("unset");
@@ -366,7 +464,7 @@ internal static partial class RootCommandBuilder
         {
             var args = BuildConfigArgs("unset", parseResult, globalOption, workspaceOption, verboseOption);
             args.Add(parseResult.GetValue(unsetKey)!);
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunConfigUnsetAsync(args, cancellationToken);
         });
 
         var resolveVolume = new Command("resolve-volume");
@@ -379,7 +477,7 @@ internal static partial class RootCommandBuilder
         {
             var args = BuildConfigArgs("resolve-volume", parseResult, globalOption, workspaceOption, verboseOption);
             AppendArgument(args, parseResult.GetValue(explicitVolume));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunConfigResolveVolumeAsync(args, cancellationToken);
         });
 
         command.Subcommands.Add(list);
@@ -397,7 +495,7 @@ internal static partial class RootCommandBuilder
         Option<string?> workspaceOption,
         Option<bool> verboseOption)
     {
-        var args = new List<string> { "config" };
+        var args = new List<string>();
         AppendFlag(args, "--global", parseResult.GetValue(globalOption));
         AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption));
         AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
@@ -408,7 +506,7 @@ internal static partial class RootCommandBuilder
     private static Command CreateManifestCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("manifest", "Parse manifests and generate derived artifacts.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["manifest"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunManifestAsync(cancellationToken));
 
         var parse = new Command("parse");
         var includeDisabledOption = new Option<bool>("--include-disabled");
@@ -419,11 +517,11 @@ internal static partial class RootCommandBuilder
         parse.Arguments.Add(parsePathArgument);
         parse.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "manifest", "parse" };
+            var args = new List<string>();
             AppendFlag(args, "--include-disabled", parseResult.GetValue(includeDisabledOption));
             AppendFlag(args, "--emit-source-file", parseResult.GetValue(emitSourceFileOption));
             args.Add(parseResult.GetValue(parsePathArgument)!);
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunManifestParseAsync(args, cancellationToken);
         });
 
         var generate = new Command("generate");
@@ -441,13 +539,11 @@ internal static partial class RootCommandBuilder
         {
             var args = new List<string>
             {
-                "manifest",
-                "generate",
                 parseResult.GetValue(kindArgument)!,
                 parseResult.GetValue(generateManifestPathArgument)!,
             };
             AppendArgument(args, parseResult.GetValue(outputPathArgument));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunManifestGenerateAsync(args, cancellationToken);
         });
 
         var apply = new Command("apply");
@@ -468,8 +564,6 @@ internal static partial class RootCommandBuilder
         {
             var args = new List<string>
             {
-                "manifest",
-                "apply",
                 parseResult.GetValue(applyKindArgument)!,
                 parseResult.GetValue(applyManifestPathArgument)!,
             };
@@ -477,7 +571,7 @@ internal static partial class RootCommandBuilder
             AppendOption(args, "--home-dir", parseResult.GetValue(homeDirOption));
             AppendOption(args, "--shim-dir", parseResult.GetValue(shimDirOption));
             AppendOption(args, "--cai-binary", parseResult.GetValue(caiBinaryOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunManifestApplyAsync(args, cancellationToken);
         });
 
         var check = new Command("check");
@@ -499,7 +593,7 @@ internal static partial class RootCommandBuilder
         });
         check.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "manifest", "check" };
+            var args = new List<string>();
             var fromOption = parseResult.GetValue(manifestDirOption);
             var fromArgument = parseResult.GetValue(manifestDirArgument);
             AppendOption(args, "--manifest-dir", fromOption);
@@ -508,7 +602,7 @@ internal static partial class RootCommandBuilder
                 AppendArgument(args, fromArgument);
             }
 
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunManifestCheckAsync(args, cancellationToken);
         });
 
         command.Subcommands.Add(parse);
@@ -521,7 +615,7 @@ internal static partial class RootCommandBuilder
     private static Command CreateTemplateCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("template", "Manage templates.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["template"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunTemplateAsync(cancellationToken));
 
         var upgrade = new Command("upgrade");
         var templateName = new Argument<string?>("name")
@@ -533,10 +627,10 @@ internal static partial class RootCommandBuilder
         upgrade.Options.Add(dryRunOption);
         upgrade.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "template", "upgrade" };
+            var args = new List<string>();
             AppendArgument(args, parseResult.GetValue(templateName));
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunTemplateUpgradeAsync(args, cancellationToken);
         });
 
         command.Subcommands.Add(upgrade);
@@ -559,13 +653,13 @@ internal static partial class RootCommandBuilder
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "update" };
+            var args = new List<string>();
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
             AppendFlag(args, "--stop-containers", parseResult.GetValue(stopContainersOption));
             AppendFlag(args, "--force", parseResult.GetValue(forceOption));
             AppendFlag(args, "--lima-recreate", parseResult.GetValue(limaRecreateOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunUpdateAsync(args, cancellationToken);
         });
 
         return command;
@@ -581,10 +675,10 @@ internal static partial class RootCommandBuilder
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "refresh" };
+            var args = new List<string>();
             AppendFlag(args, "--rebuild", parseResult.GetValue(rebuildOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunRefreshAsync(args, cancellationToken);
         });
 
         return command;
@@ -606,13 +700,13 @@ internal static partial class RootCommandBuilder
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "uninstall" };
+            var args = new List<string>();
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
             AppendFlag(args, "--containers", parseResult.GetValue(containersOption));
             AppendFlag(args, "--volumes", parseResult.GetValue(volumesOption));
             AppendFlag(args, "--force", parseResult.GetValue(forceOption));
             AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunUninstallAsync(args, cancellationToken);
         });
 
         return command;
@@ -629,9 +723,9 @@ internal static partial class RootCommandBuilder
         command.Arguments.Add(topic);
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "help" };
+            var args = new List<string>();
             AppendArgument(args, parseResult.GetValue(topic));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunHelpAsync(args, cancellationToken);
         });
 
         return command;
@@ -640,7 +734,7 @@ internal static partial class RootCommandBuilder
     private static Command CreateSystemCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("system", "Container-internal runtime commands.");
-        command.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["system"], cancellationToken));
+        command.SetAction((_, cancellationToken) => runtime.RunSystemAsync(cancellationToken));
 
         var init = new Command("init");
         var dataDirOption = new Option<string?>("--data-dir");
@@ -659,7 +753,7 @@ internal static partial class RootCommandBuilder
         init.Options.Add(quietOption);
         init.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "system", "init" };
+            var args = new List<string>();
             AppendOption(args, "--data-dir", parseResult.GetValue(dataDirOption));
             AppendOption(args, "--home-dir", parseResult.GetValue(homeDirOption));
             AppendOption(args, "--manifests-dir", parseResult.GetValue(manifestsDirOption));
@@ -667,7 +761,7 @@ internal static partial class RootCommandBuilder
             AppendOption(args, "--workspace-hooks", parseResult.GetValue(workspaceHooksOption));
             AppendOption(args, "--workspace-dir", parseResult.GetValue(workspaceDirOption));
             AppendFlag(args, "--quiet", parseResult.GetValue(quietOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSystemInitAsync(args, cancellationToken);
         });
 
         var linkRepair = new Command("link-repair");
@@ -687,7 +781,7 @@ internal static partial class RootCommandBuilder
         linkRepair.Options.Add(checkedAtFileOption);
         linkRepair.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "system", "link-repair" };
+            var args = new List<string>();
             AppendFlag(args, "--check", parseResult.GetValue(checkOption));
             AppendFlag(args, "--fix", parseResult.GetValue(fixOption));
             AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
@@ -695,7 +789,7 @@ internal static partial class RootCommandBuilder
             AppendOption(args, "--builtin-spec", parseResult.GetValue(builtinSpecOption));
             AppendOption(args, "--user-spec", parseResult.GetValue(userSpecOption));
             AppendOption(args, "--checked-at-file", parseResult.GetValue(checkedAtFileOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSystemLinkRepairAsync(args, cancellationToken);
         });
 
         var watchLinks = new Command("watch-links");
@@ -709,35 +803,35 @@ internal static partial class RootCommandBuilder
         watchLinks.Options.Add(watchQuietOption);
         watchLinks.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "system", "watch-links" };
+            var args = new List<string>();
             AppendOption(args, "--poll-interval", parseResult.GetValue(pollIntervalOption));
             AppendOption(args, "--imported-at-file", parseResult.GetValue(importedAtFileOption));
             AppendOption(args, "--checked-at-file", parseResult.GetValue(watchCheckedAtFileOption));
             AppendFlag(args, "--quiet", parseResult.GetValue(watchQuietOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSystemWatchLinksAsync(args, cancellationToken);
         });
 
         var devcontainer = new Command("devcontainer");
-        devcontainer.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["system", "devcontainer"], cancellationToken));
+        devcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerAsync(cancellationToken));
 
         var install = new Command("install");
         var featureDirOption = new Option<string?>("--feature-dir");
         install.Options.Add(featureDirOption);
         install.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string> { "system", "devcontainer", "install" };
+            var args = new List<string>();
             AppendOption(args, "--feature-dir", parseResult.GetValue(featureDirOption));
-            return runtime.RunNativeAsync(args, cancellationToken);
+            return runtime.RunSystemDevcontainerInstallAsync(args, cancellationToken);
         });
 
         var initDevcontainer = new Command("init");
-        initDevcontainer.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["system", "devcontainer", "init"], cancellationToken));
+        initDevcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerInitAsync(cancellationToken));
 
         var startDevcontainer = new Command("start");
-        startDevcontainer.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["system", "devcontainer", "start"], cancellationToken));
+        startDevcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerStartAsync(cancellationToken));
 
         var verifySysbox = new Command("verify-sysbox");
-        verifySysbox.SetAction((_, cancellationToken) => runtime.RunNativeAsync(["system", "devcontainer", "verify-sysbox"], cancellationToken));
+        verifySysbox.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerVerifySysboxAsync(cancellationToken));
 
         devcontainer.Subcommands.Add(install);
         devcontainer.Subcommands.Add(initDevcontainer);

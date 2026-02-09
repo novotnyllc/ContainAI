@@ -35,6 +35,27 @@
     </PackageReference>
   </ItemGroup>
 
+  <ItemGroup>
+    <AdditionalFiles Include="Resources/EmbeddedAssets.resx" ContainAIEmbeddedAssets="true" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ContainAIEmbeddedAssetsGeneratorProject>$(MSBuildThisFileDirectory)..\ContainAI.EmbeddedAssets.Generator\ContainAI.EmbeddedAssets.Generator.csproj</ContainAIEmbeddedAssetsGeneratorProject>
+    <ContainAIGeneratorConfigurationLower>$([System.String]::Copy('$(Configuration)').ToLowerInvariant())</ContainAIGeneratorConfigurationLower>
+    <ContainAIEmbeddedAssetsGeneratorDll>$(ArtifactsPath)bin/ContainAI.EmbeddedAssets.Generator/$(ContainAIGeneratorConfigurationLower)/ContainAI.EmbeddedAssets.Generator.dll</ContainAIEmbeddedAssetsGeneratorDll>
+  </PropertyGroup>
+
+  <Target Name="_BuildEmbeddedAssetsGenerator" BeforeTargets="CoreCompile">
+    <MSBuild
+      Projects="$(ContainAIEmbeddedAssetsGeneratorProject)"
+      Targets="Restore;Build"
+      Properties="Configuration=$(Configuration);PublishAot=false;PublishTrimmed=false;SelfContained=false" />
+  </Target>
+
+  <ItemGroup>
+    <Analyzer Include="$(ContainAIEmbeddedAssetsGeneratorDll)" />
+  </ItemGroup>
+
   <Import Project="build/ContainAI.Build.targets" />
 
 </Project>

@@ -539,7 +539,7 @@ public sealed class AcpProxy : IDisposable
             return default;
         }
 
-        return JsonSerializer.Deserialize(payload.Value.Element.GetRawText(), typeInfo);
+        return payload.Value.Element.Deserialize(typeInfo);
     }
 
     private static JsonRpcData SerializeElement<T>(T value, JsonTypeInfo<T> typeInfo)

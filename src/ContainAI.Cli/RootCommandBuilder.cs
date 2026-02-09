@@ -47,6 +47,8 @@ internal static partial class RootCommandBuilder
         root.Subcommands.Add(CreateShellCommand(runtime));
         root.Subcommands.Add(CreateExecCommand(runtime));
         root.Subcommands.Add(CreateDoctorCommand(runtime));
+        root.Subcommands.Add(CreateInstallCommand(runtime));
+        root.Subcommands.Add(CreateExamplesCommand(runtime));
         root.Subcommands.Add(CreateSetupCommand(runtime));
         root.Subcommands.Add(CreateValidateCommand(runtime));
         root.Subcommands.Add(CreateDockerCommand(runtime));
@@ -705,7 +707,7 @@ internal static partial class RootCommandBuilder
                 return 0;
             }
 
-            return await runtime.RunNativeAsync(["version"], cancellationToken).ConfigureAwait(false);
+            return await runtime.RunVersionAsync(cancellationToken).ConfigureAwait(false);
         });
 
         return versionCommand;

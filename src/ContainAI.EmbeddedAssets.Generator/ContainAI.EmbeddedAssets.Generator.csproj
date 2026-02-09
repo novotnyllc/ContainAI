@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsPublishable>false</IsPublishable>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <OutputItemType>Analyzer</OutputItemType>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(HOME)'!=''">$(HOME)/.nuget/packages</RestorePackagesPath>
+    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(UserProfile)'!=''">$(UserProfile)/.nuget/packages</RestorePackagesPath>
+    <NuGetPackageRoot Condition="'$(RestorePackagesPath)'!=''">$(RestorePackagesPath)/</NuGetPackageRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

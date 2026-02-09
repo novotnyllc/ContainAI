@@ -63,3 +63,16 @@ public sealed record StatusCommandOptions(
     string? Workspace,
     string? Container,
     bool Verbose);
+
+public sealed record InstallCommandOptions(
+    bool Local,
+    bool Yes,
+    bool NoSetup,
+    string? InstallDir,
+    string? BinDir,
+    string? Channel,
+    bool Verbose);
+
+public sealed record ExamplesExportCommandOptions(
+    string OutputDir,
+    bool Force);

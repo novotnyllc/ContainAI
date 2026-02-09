@@ -230,6 +230,55 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
+    public async Task InstallCommand_UsesTypedRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var exitCode = await CaiCli.RunAsync(
+            ["install", "--local", "--yes", "--no-setup", "--install-dir", "/tmp/install", "--bin-dir", "/tmp/bin", "--channel", "stable", "--verbose"],
+            runtime,
+            cancellationToken);
+
+        Assert.Equal(FakeRuntime.InstallExitCode, exitCode);
+        Assert.Empty(runtime.NativeCalls);
+        Assert.Collection(
+            runtime.InstallCalls,
+            options =>
+            {
+                Assert.True(options.Local);
+                Assert.True(options.Yes);
+                Assert.True(options.NoSetup);
+                Assert.True(options.Verbose);
+                Assert.Equal("/tmp/install", options.InstallDir);
+                Assert.Equal("/tmp/bin", options.BinDir);
+                Assert.Equal("stable", options.Channel);
+            });
+    }
+
+    [Fact]
+    public async Task ExamplesCommand_UsesTypedRuntime()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        var listExitCode = await CaiCli.RunAsync(["examples"], runtime, cancellationToken);
+        var exportExitCode = await CaiCli.RunAsync(["examples", "export", "--output-dir", "/tmp/examples", "--force"], runtime, cancellationToken);
+
+        Assert.Equal(FakeRuntime.ExamplesListExitCode, listExitCode);
+        Assert.Equal(FakeRuntime.ExamplesExportExitCode, exportExitCode);
+        Assert.Empty(runtime.NativeCalls);
+        Assert.Equal(1, runtime.ExamplesListCalls);
+        Assert.Collection(
+            runtime.ExamplesExportCalls,
+            options =>
+            {
+                Assert.Equal("/tmp/examples", options.OutputDir);
+                Assert.True(options.Force);
+            });
+    }
+
+    [Fact]
     public async Task CompletionCommand_Suggest_ReturnsContextualSuggestions()
     {
         var runtime = new FakeRuntime();
@@ -726,6 +775,9 @@ public sealed class CaiCliRoutingTests
         public const int StatusExitCode = 35;
         public const int NativeExitCode = 36;
         public const int AcpExitCode = 23;
+        public const int InstallExitCode = 24;
+        public const int ExamplesListExitCode = 25;
+        public const int ExamplesExportExitCode = 26;
 
         public List<RunCommandOptions> RunCalls { get; } = [];
 
@@ -740,6 +792,9 @@ public sealed class CaiCliRoutingTests
         public List<IReadOnlyList<string>> NativeCalls { get; } = [];
 
         public List<string> AcpCalls { get; } = [];
+        public List<InstallCommandOptions> InstallCalls { get; } = [];
+        public int ExamplesListCalls { get; private set; }
+        public List<ExamplesExportCommandOptions> ExamplesExportCalls { get; } = [];
 
         public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
         {
@@ -771,16 +826,164 @@ public sealed class CaiCliRoutingTests
             return Task.FromResult(StatusExitCode);
         }
 
-        public Task<int> RunNativeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        {
-            NativeCalls.Add(args.ToArray());
-            return Task.FromResult(NativeExitCode);
-        }
+        public Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["doctor"], args);
+
+        public Task<int> RunDoctorFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["doctor", "fix"], args);
+
+        public Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["validate"], args);
+
+        public Task<int> RunSetupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["setup"], args);
+
+        public Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["import"], args);
+
+        public Task<int> RunExportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["export"], args);
+
+        public Task<int> RunSyncAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["sync"]);
+
+        public Task<int> RunStopAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["stop"], args);
+
+        public Task<int> RunGcAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["gc"], args);
+
+        public Task<int> RunSshAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["ssh"]);
+
+        public Task<int> RunSshCleanupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["ssh", "cleanup"], args);
+
+        public Task<int> RunLinksAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["links"]);
+
+        public Task<int> RunLinksCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["links", "check"], args);
+
+        public Task<int> RunLinksFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["links", "fix"], args);
+
+        public Task<int> RunConfigAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["config"]);
+
+        public Task<int> RunConfigListAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["config"], args);
+
+        public Task<int> RunConfigGetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["config"], args);
+
+        public Task<int> RunConfigSetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["config"], args);
+
+        public Task<int> RunConfigUnsetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["config"], args);
+
+        public Task<int> RunConfigResolveVolumeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["config"], args);
+
+        public Task<int> RunManifestAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["manifest"]);
+
+        public Task<int> RunManifestParseAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["manifest", "parse"], args);
+
+        public Task<int> RunManifestGenerateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["manifest", "generate"], args);
+
+        public Task<int> RunManifestApplyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["manifest", "apply"], args);
+
+        public Task<int> RunManifestCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["manifest", "check"], args);
+
+        public Task<int> RunTemplateAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["template"]);
+
+        public Task<int> RunTemplateUpgradeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["template", "upgrade"], args);
+
+        public Task<int> RunUpdateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["update"], args);
+
+        public Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["refresh"], args);
+
+        public Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["uninstall"], args);
+
+        public Task<int> RunHelpAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["help"], args);
+
+        public Task<int> RunSystemAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["system"]);
+
+        public Task<int> RunSystemInitAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "init"], args);
+
+        public Task<int> RunSystemLinkRepairAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "link-repair"], args);
+
+        public Task<int> RunSystemWatchLinksAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "watch-links"], args);
+
+        public Task<int> RunSystemDevcontainerAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "devcontainer"]);
+
+        public Task<int> RunSystemDevcontainerInstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "devcontainer", "install"], args);
+
+        public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "devcontainer", "init"]);
+
+        public Task<int> RunSystemDevcontainerStartAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "devcontainer", "start"]);
+
+        public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["system", "devcontainer", "verify-sysbox"]);
+
+        public Task<int> RunVersionAsync(CancellationToken cancellationToken)
+            => RecordNativeCall(["version"]);
 
         public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
         {
             AcpCalls.Add(agent);
             return Task.FromResult(AcpExitCode);
+        }
+
+        public Task<int> RunInstallAsync(InstallCommandOptions options, CancellationToken cancellationToken)
+        {
+            InstallCalls.Add(options);
+            return Task.FromResult(InstallExitCode);
+        }
+
+        public Task<int> RunExamplesListAsync(CancellationToken cancellationToken)
+        {
+            ExamplesListCalls++;
+            return Task.FromResult(ExamplesListExitCode);
+        }
+
+        public Task<int> RunExamplesExportAsync(ExamplesExportCommandOptions options, CancellationToken cancellationToken)
+        {
+            ExamplesExportCalls.Add(options);
+            return Task.FromResult(ExamplesExportExitCode);
+        }
+
+        private Task<int> RecordNativeCall(IReadOnlyList<string> args)
+        {
+            NativeCalls.Add(args.ToArray());
+            return Task.FromResult(NativeExitCode);
+        }
+
+        private Task<int> RecordNativeCall(IReadOnlyList<string> commandPath, IReadOnlyList<string> args)
+        {
+            return args.Count == 0
+                ? RecordNativeCall(commandPath)
+                : RecordNativeCall([.. commandPath, .. args]);
         }
     }
 }
