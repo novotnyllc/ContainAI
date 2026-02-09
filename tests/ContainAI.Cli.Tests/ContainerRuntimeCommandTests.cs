@@ -17,7 +17,7 @@ public sealed class ContainerRuntimeCommandTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("cai system devcontainer install", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("system devcontainer install", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

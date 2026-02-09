@@ -68,134 +68,10 @@ internal sealed class ContainerRuntimeCommandService
     public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
         => devcontainerRuntime.RunVerifySysboxAsync(cancellationToken);
 
-    // Backward-compatible typed entrypoints used by in-flight runtime refactors.
-    public Task<int> RunInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
-        => RunSystemInitAsync(options, cancellationToken);
-
-    public Task<int> RunLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
-        => RunSystemLinkRepairAsync(options, cancellationToken);
-
-    public Task<int> RunWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
-        => RunSystemWatchLinksAsync(options, cancellationToken);
-
-    public Task<int> RunDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
-        => RunSystemDevcontainerInstallAsync(options, cancellationToken);
-
-    public async Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        if (args.Count < 2)
-        {
-            return await WriteSystemUsageAndFailAsync().ConfigureAwait(false);
-        }
-
-        return args[1] switch
-        {
-            "init" => await RunInitLegacyAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "link-repair" => await RunLinkRepairLegacyAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "watch-links" => await RunLinkWatcherLegacyAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "devcontainer" => await devcontainerRuntime.RunAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            _ => await UnknownSystemSubcommandAsync(args[1]).ConfigureAwait(false),
-        };
-    }
-
     private async Task<int> WriteSystemUsageAndFailAsync()
     {
         await stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
         return 1;
-    }
-
-    private async Task<int> UnknownSystemSubcommandAsync(string subcommand)
-    {
-        await stderr.WriteLineAsync($"Unknown system subcommand: {subcommand}").ConfigureAwait(false);
-        await stderr.WriteLineAsync("Usage: cai system <init|link-repair|watch-links|devcontainer>").ConfigureAwait(false);
-        return 1;
-    }
-
-    private async Task<int> RunInitLegacyAsync(string[] args, CancellationToken cancellationToken)
-    {
-        var options = new SystemInitCommandOptions(
-            DataDir: null,
-            HomeDir: null,
-            ManifestsDir: null,
-            TemplateHooks: null,
-            WorkspaceHooks: null,
-            WorkspaceDir: null,
-            Quiet: false);
-
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    await stdout.WriteLineAsync(
-                        "Usage: cai system init [--data-dir <path>] [--home-dir <path>] [--manifests-dir <path>] [--template-hooks <path>] [--workspace-hooks <path>] [--workspace-dir <path>] [--quiet]").ConfigureAwait(false);
-                    return 0;
-                case "--quiet":
-                    options = options with { Quiet = true };
-                    break;
-                case "--data-dir":
-                    if (!TryReadOptionValue(args, ref index, out var dataDir))
-                    {
-                        await stderr.WriteLineAsync("--data-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { DataDir = dataDir };
-                    break;
-                case "--home-dir":
-                    if (!TryReadOptionValue(args, ref index, out var homeDir))
-                    {
-                        await stderr.WriteLineAsync("--home-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { HomeDir = homeDir };
-                    break;
-                case "--manifests-dir":
-                    if (!TryReadOptionValue(args, ref index, out var manifestsDir))
-                    {
-                        await stderr.WriteLineAsync("--manifests-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { ManifestsDir = manifestsDir };
-                    break;
-                case "--template-hooks":
-                    if (!TryReadOptionValue(args, ref index, out var templateHooksDir))
-                    {
-                        await stderr.WriteLineAsync("--template-hooks requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { TemplateHooks = templateHooksDir };
-                    break;
-                case "--workspace-hooks":
-                    if (!TryReadOptionValue(args, ref index, out var workspaceHooksDir))
-                    {
-                        await stderr.WriteLineAsync("--workspace-hooks requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { WorkspaceHooks = workspaceHooksDir };
-                    break;
-                case "--workspace-dir":
-                    if (!TryReadOptionValue(args, ref index, out var workspaceDir))
-                    {
-                        await stderr.WriteLineAsync("--workspace-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { WorkspaceDir = workspaceDir };
-                    break;
-                default:
-                    await stderr.WriteLineAsync($"Unknown system init option: {token}").ConfigureAwait(false);
-                    return 1;
-            }
-        }
-
-        return await RunInitCoreAsync(options, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunInitCoreAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
@@ -256,75 +132,6 @@ internal sealed class ContainerRuntimeCommandService
             await stderr.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
             return 1;
         }
-    }
-
-    private async Task<int> RunLinkRepairLegacyAsync(string[] args, CancellationToken cancellationToken)
-    {
-        var options = new SystemLinkRepairCommandOptions(
-            Check: false,
-            Fix: false,
-            DryRun: false,
-            Quiet: false,
-            BuiltinSpec: null,
-            UserSpec: null,
-            CheckedAtFile: null);
-
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    await stdout.WriteLineAsync(
-                        "Usage: cai system link-repair [--check|--fix|--dry-run] [--quiet] [--builtin-spec <path>] [--user-spec <path>] [--checked-at-file <path>]").ConfigureAwait(false);
-                    return 0;
-                case "--check":
-                    options = options with { Check = true };
-                    break;
-                case "--fix":
-                    options = options with { Fix = true };
-                    break;
-                case "--dry-run":
-                    options = options with { DryRun = true };
-                    break;
-                case "--quiet":
-                    options = options with { Quiet = true };
-                    break;
-                case "--builtin-spec":
-                    if (!TryReadOptionValue(args, ref index, out var builtinSpecPath))
-                    {
-                        await stderr.WriteLineAsync("--builtin-spec requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { BuiltinSpec = builtinSpecPath };
-                    break;
-                case "--user-spec":
-                    if (!TryReadOptionValue(args, ref index, out var userSpecPath))
-                    {
-                        await stderr.WriteLineAsync("--user-spec requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { UserSpec = userSpecPath };
-                    break;
-                case "--checked-at-file":
-                    if (!TryReadOptionValue(args, ref index, out var checkedAtFilePath))
-                    {
-                        await stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { CheckedAtFile = checkedAtFilePath };
-                    break;
-                default:
-                    await stderr.WriteLineAsync($"Unknown system link-repair option: {token}").ConfigureAwait(false);
-                    return 1;
-            }
-        }
-
-        return await RunLinkRepairCoreAsync(options, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunLinkRepairCoreAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
@@ -432,62 +239,6 @@ internal sealed class ContainerRuntimeCommandService
             await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
-    }
-
-    private async Task<int> RunLinkWatcherLegacyAsync(string[] args, CancellationToken cancellationToken)
-    {
-        var options = new SystemWatchLinksCommandOptions(
-            PollInterval: null,
-            ImportedAtFile: null,
-            CheckedAtFile: null,
-            Quiet: false);
-
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    await stdout.WriteLineAsync("Usage: cai system watch-links [--poll-interval <seconds>] [--imported-at-file <path>] [--checked-at-file <path>] [--quiet]").ConfigureAwait(false);
-                    return 0;
-                case "--quiet":
-                    options = options with { Quiet = true };
-                    break;
-                case "--poll-interval":
-                    if (!TryReadOptionValue(args, ref index, out var pollInterval))
-                    {
-                        await stderr.WriteLineAsync("--poll-interval requires a positive integer value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { PollInterval = pollInterval };
-                    break;
-                case "--imported-at-file":
-                    if (!TryReadOptionValue(args, ref index, out var importedAtPath))
-                    {
-                        await stderr.WriteLineAsync("--imported-at-file requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { ImportedAtFile = importedAtPath };
-                    break;
-                case "--checked-at-file":
-                    if (!TryReadOptionValue(args, ref index, out var checkedAtPath))
-                    {
-                        await stderr.WriteLineAsync("--checked-at-file requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { CheckedAtFile = checkedAtPath };
-                    break;
-                default:
-                    await stderr.WriteLineAsync($"Unknown system watch-links option: {token}").ConfigureAwait(false);
-                    return 1;
-            }
-        }
-
-        return await RunLinkWatcherCoreAsync(options, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunLinkWatcherCoreAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
@@ -1288,19 +1039,6 @@ internal sealed class ContainerRuntimeCommandService
         }
 
         await stdout.WriteLineAsync($"[INFO] {message}").ConfigureAwait(false);
-    }
-
-    private static bool TryReadOptionValue(string[] args, ref int index, out string value)
-    {
-        value = string.Empty;
-        if (index + 1 >= args.Length)
-        {
-            return false;
-        }
-
-        index++;
-        value = args[index];
-        return true;
     }
 
     private static async Task WriteTimestampAsync(string path)

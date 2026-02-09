@@ -12,12 +12,6 @@
     <OutputItemType>Analyzer</OutputItemType>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(HOME)'!=''">$(HOME)/.nuget/packages</RestorePackagesPath>
-    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(UserProfile)'!=''">$(UserProfile)/.nuget/packages</RestorePackagesPath>
-    <NuGetPackageRoot Condition="'$(RestorePackagesPath)'!=''">$(RestorePackagesPath)/</NuGetPackageRoot>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
   </ItemGroup>

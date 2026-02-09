@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using ContainAI.Cli;
 using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
@@ -21,6 +20,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     private readonly TextWriter stderr;
     private readonly NativeSessionCommandRuntime sessionRuntime;
     private readonly ContainerRuntimeCommandService containerRuntimeCommandService;
+    private readonly ContainerLinkRepairService containerLinkRepairService;
 
     public NativeLifecycleCommandRuntime(TextWriter? standardOutput = null, TextWriter? standardError = null)
     {
@@ -28,49 +28,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         stderr = standardError ?? Console.Error;
         sessionRuntime = new NativeSessionCommandRuntime(stdout, stderr);
         containerRuntimeCommandService = new ContainerRuntimeCommandService(stdout, stderr);
-    }
-
-    public Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        if (args.Count == 0)
-        {
-            return Task.FromResult(1);
-        }
-
-        var listArgs = args as List<string> ?? [.. args];
-
-        return args[0] switch
-        {
-            "run" or "shell" or "exec" => RunSessionCommandViaCliAsync(args, cancellationToken),
-            "docker" => RunDockerAsync(listArgs, cancellationToken),
-            "status" => RunStatusAsync(listArgs, cancellationToken),
-            "help" => RunHelpAsync(listArgs, cancellationToken),
-            "version" => RunVersionAsync(listArgs, cancellationToken),
-            "doctor" => RunDoctorAsync(listArgs, cancellationToken),
-            "validate" => RunValidateAsync(listArgs, cancellationToken),
-            "setup" => RunSetupAsync(listArgs, cancellationToken),
-            "import" => RunImportAsync(listArgs, cancellationToken),
-            "export" => RunExportAsync(listArgs, cancellationToken),
-            "sync" => RunSyncAsync(listArgs, cancellationToken),
-            "links" => RunLinksAsync(listArgs, cancellationToken),
-            "update" => RunUpdateAsync(listArgs, cancellationToken),
-            "refresh" => RunRefreshAsync(listArgs, cancellationToken),
-            "uninstall" => RunUninstallAsync(listArgs, cancellationToken),
-            "config" => RunConfigAsync(listArgs, cancellationToken),
-            "manifest" => RunManifestAsync(listArgs, cancellationToken),
-            "template" => RunTemplateAsync(listArgs, cancellationToken),
-            "ssh" => RunSshAsync(listArgs, cancellationToken),
-            "stop" => RunStopAsync(listArgs, cancellationToken),
-            "gc" => RunGcAsync(listArgs, cancellationToken),
-            "system" => containerRuntimeCommandService.RunAsync(listArgs, cancellationToken),
-            _ => Task.FromResult(1),
-        };
-    }
-
-    private Task<int> RunSessionCommandViaCliAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var runtime = new CaiCommandRuntime(new AcpProxyRunner(), this);
-        return CaiCli.RunAsync(args.ToArray(), runtime, cancellationToken);
+        containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, ExecuteDockerCommandAsync);
     }
 
     public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
@@ -106,127 +64,91 @@ internal sealed partial class NativeLifecycleCommandRuntime
     public Task<int> RunDoctorAsync(DoctorCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "doctor" };
-        AppendFlag(args, "--json", options.Json);
-        AppendFlag(args, "--build-templates", options.BuildTemplates);
-        AppendFlag(args, "--reset-lima", options.ResetLima);
-
-        return RunDoctorAsync(args, cancellationToken);
+        return RunDoctorCoreAsync(options.Json, options.BuildTemplates, options.ResetLima, cancellationToken);
     }
 
     public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "doctor", "fix" };
-        AppendFlag(args, "--all", options.All);
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendValue(args, options.Target);
-        AppendValue(args, options.TargetArg);
-
-        return RunDoctorAsync(args, cancellationToken);
+        return RunDoctorFixCoreAsync(options.All, options.DryRun, options.Target, options.TargetArg, cancellationToken);
     }
 
     public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = options.Json
-            ? new[] { "validate", "--json" }
-            : new[] { "validate" };
-
-        return RunValidateAsync(args, cancellationToken);
+        return RunDoctorCoreAsync(options.Json, buildTemplates: false, resetLima: false, cancellationToken);
     }
 
     public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "setup" };
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--verbose", options.Verbose);
-        AppendFlag(args, "--skip-templates", options.SkipTemplates);
-
-        return RunSetupAsync(args, cancellationToken);
+        return RunSetupCoreAsync(
+            dryRun: options.DryRun,
+            verbose: options.Verbose,
+            skipTemplates: options.SkipTemplates,
+            showHelp: false,
+            cancellationToken);
     }
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "import" };
-        AppendOption(args, "--from", options.From);
-        AppendOption(args, "--data-volume", options.DataVolume);
-        AppendOption(args, "--workspace", options.Workspace);
-        AppendOption(args, "--config", options.Config);
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--no-excludes", options.NoExcludes);
-        AppendFlag(args, "--no-secrets", options.NoSecrets);
-        AppendFlag(args, "--verbose", options.Verbose);
-
-        return RunImportAsync(args, cancellationToken);
+        var parsed = new ParsedImportOptions(
+            SourcePath: options.From,
+            ExplicitVolume: options.DataVolume,
+            Workspace: options.Workspace,
+            ConfigPath: options.Config,
+            DryRun: options.DryRun,
+            NoExcludes: options.NoExcludes,
+            NoSecrets: options.NoSecrets,
+            Verbose: options.Verbose,
+            Error: null);
+        return RunImportCoreAsync(parsed, cancellationToken);
     }
 
     public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "export" };
-        AppendOption(args, "--output", options.Output);
-        AppendOption(args, "--data-volume", options.DataVolume);
-        AppendOption(args, "--container", options.Container);
-        AppendOption(args, "--workspace", options.Workspace);
-
-        return RunExportAsync(args, cancellationToken);
+        return RunExportCoreAsync(options.Output, options.DataVolume, options.Container, options.Workspace, cancellationToken);
     }
 
     public Task<int> RunSyncCommandAsync(CancellationToken cancellationToken)
-        => RunSyncAsync(["sync"], cancellationToken);
+        => RunSyncCoreAsync(cancellationToken);
 
     public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "stop" };
-        AppendFlag(args, "--all", options.All);
-        AppendOption(args, "--container", options.Container);
-        AppendFlag(args, "--remove", options.Remove);
-        AppendFlag(args, "--force", options.Force);
-        AppendFlag(args, "--export", options.Export);
-        AppendFlag(args, "--verbose", options.Verbose);
-
-        return RunStopAsync(args, cancellationToken);
+        return RunStopCoreAsync(
+            containerName: options.Container,
+            stopAll: options.All,
+            remove: options.Remove,
+            force: options.Force,
+            exportFirst: options.Export,
+            cancellationToken);
     }
 
     public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "gc" };
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--force", options.Force);
-        AppendFlag(args, "--images", options.Images);
-        AppendOption(args, "--age", options.Age);
-
-        return RunGcAsync(args, cancellationToken);
+        return RunGcCoreAsync(
+            dryRun: options.DryRun,
+            force: options.Force,
+            includeImages: options.Images,
+            ageValue: options.Age ?? "30d",
+            cancellationToken);
     }
 
     public Task<int> RunSshCommandAsync(CancellationToken cancellationToken)
-        => RunSshAsync(["ssh"], cancellationToken);
+        => WriteSshUsageAsync();
 
     public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "ssh", "cleanup" };
-        AppendFlag(args, "--dry-run", options.DryRun);
-
-        return RunSshAsync(args, cancellationToken);
+        return RunSshCleanupCoreAsync(options.DryRun, cancellationToken);
     }
 
     public Task<int> RunLinksCommandAsync(CancellationToken cancellationToken)
-        => RunLinksAsync(["links"], cancellationToken);
+        => WriteLinksUsageAsync();
 
     public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
         => RunLinksSubcommandAsync("check", options, cancellationToken);
@@ -278,7 +200,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     }
 
     public Task<int> RunManifestCommandAsync(CancellationToken cancellationToken)
-        => RunManifestAsync(["manifest"], cancellationToken);
+        => WriteManifestUsageAsync();
 
     public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
     {
@@ -312,17 +234,12 @@ internal sealed partial class NativeLifecycleCommandRuntime
     }
 
     public Task<int> RunTemplateCommandAsync(CancellationToken cancellationToken)
-        => RunTemplateAsync(["template"], cancellationToken);
+        => WriteTemplateUsageAsync();
 
     public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string> { "template", "upgrade" };
-        AppendValue(args, options.Name);
-        AppendFlag(args, "--dry-run", options.DryRun);
-
-        return RunTemplateAsync(args, cancellationToken);
+        return RunTemplateUpgradeCoreAsync(options.Name, options.DryRun, cancellationToken);
     }
 
     public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
@@ -363,69 +280,46 @@ internal sealed partial class NativeLifecycleCommandRuntime
     }
 
     public Task<int> RunVersionCommandAsync(CancellationToken cancellationToken)
-        => RunVersionAsync(["version"], cancellationToken);
+        => RunVersionCoreAsync(json: false, cancellationToken);
 
     public Task<int> RunSystemCommandAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system"], cancellationToken);
-
-    public Task<int> RunSystemInitCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "init", .. args], cancellationToken);
+        => containerRuntimeCommandService.RunSystemAsync(cancellationToken);
 
     public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunInitAsync(options, cancellationToken);
+        return containerRuntimeCommandService.RunSystemInitAsync(options, cancellationToken);
     }
-
-    public Task<int> RunSystemLinkRepairCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "link-repair", .. args], cancellationToken);
 
     public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunLinkRepairAsync(options, cancellationToken);
+        return containerRuntimeCommandService.RunSystemLinkRepairAsync(options, cancellationToken);
     }
-
-    public Task<int> RunSystemWatchLinksCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "watch-links", .. args], cancellationToken);
 
     public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunWatchLinksAsync(options, cancellationToken);
+        return containerRuntimeCommandService.RunSystemWatchLinksAsync(options, cancellationToken);
     }
 
     public Task<int> RunSystemDevcontainerCommandAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "devcontainer"], cancellationToken);
-
-    public Task<int> RunSystemDevcontainerInstallCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "install", .. args], cancellationToken);
+        => containerRuntimeCommandService.RunSystemDevcontainerAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunDevcontainerInstallAsync(options, cancellationToken);
+        return containerRuntimeCommandService.RunSystemDevcontainerInstallAsync(options, cancellationToken);
     }
 
     public Task<int> RunSystemDevcontainerInitCommandAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "init"], cancellationToken);
+        => containerRuntimeCommandService.RunSystemDevcontainerInitAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerStartCommandAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "start"], cancellationToken);
+        => containerRuntimeCommandService.RunSystemDevcontainerStartAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerVerifySysboxCommandAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "verify-sysbox"], cancellationToken);
-
-    private async Task<int> RunDockerAsync(List<string> args, CancellationToken cancellationToken)
-    {
-        if (args.Count > 1 && (args[1] is "-h" or "--help"))
-        {
-            await stdout.WriteLineAsync("Usage: cai docker [docker-args...]").ConfigureAwait(false);
-            return 0;
-        }
-
-        return await RunDockerCoreAsync(args.Skip(1).ToArray(), cancellationToken).ConfigureAwait(false);
-    }
+        => containerRuntimeCommandService.RunSystemDevcontainerVerifySysboxAsync(cancellationToken);
 
     private static async Task<int> RunDockerCoreAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken)
     {
@@ -450,68 +344,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         return await RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<int> RunStatusAsync(List<string> args, CancellationToken cancellationToken)
-    {
-        var outputJson = false;
-        var verbose = false;
-        string? workspace = null;
-        string? container = null;
-
-        for (var index = 1; index < args.Count; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    await stdout.WriteLineAsync("Usage: cai status [--workspace <path> | --container <name>] [--json] [--verbose]").ConfigureAwait(false);
-                    return 0;
-                case "--json":
-                    outputJson = true;
-                    break;
-                case "--verbose":
-                    verbose = true;
-                    break;
-                case "--workspace":
-                    if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
-                    {
-                        await stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    workspace = args[++index];
-                    break;
-                case "--container":
-                    if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
-                    {
-                        await stderr.WriteLineAsync("--container requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    container = args[++index];
-                    break;
-                default:
-                    if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-                    {
-                        workspace = token[12..];
-                    }
-                    else if (token.StartsWith("--container=", StringComparison.Ordinal))
-                    {
-                        container = token[12..];
-                    }
-                    else
-                    {
-                        await stderr.WriteLineAsync($"Unknown status option: {token}").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    break;
-            }
-        }
-
-        return await RunStatusCoreAsync(outputJson, verbose, workspace, container, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunStatusCoreAsync(
@@ -694,12 +526,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunHelpAsync(List<string> args, CancellationToken cancellationToken)
-    {
-        var topic = args.Count > 1 ? args[1] : null;
-        return await RunHelpCoreAsync(topic, cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task<int> RunHelpCoreAsync(string? topic, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -727,10 +553,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunVersionAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunVersionCoreAsync(bool json, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var json = args.Contains("--json", StringComparer.Ordinal);
         var versionInfo = InstallMetadata.ResolveVersionInfo();
         var installType = InstallMetadata.GetInstallTypeLabel(versionInfo.InstallType);
 
@@ -744,30 +569,12 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunDoctorCoreAsync(
+        bool outputJson,
+        bool buildTemplates,
+        bool resetLima,
+        CancellationToken cancellationToken)
     {
-        if (args.Count > 1 && string.Equals(args[1], "fix", StringComparison.Ordinal))
-        {
-            return await RunDoctorFixAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false);
-        }
-
-        if (!ValidateOptions(args, 1, "--json", "--build-templates", "--reset-lima", "--help", "-h"))
-        {
-            await stderr.WriteLineAsync("Unknown doctor option. Use 'cai doctor --help'.").ConfigureAwait(false);
-            return 1;
-        }
-
-        if (args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal))
-        {
-            await stdout.WriteLineAsync("Usage: cai doctor [--json] [--build-templates] [--reset-lima]").ConfigureAwait(false);
-            await stdout.WriteLineAsync("       cai doctor fix [--all | container [--all|<name>] | template [--all|<name>] ]").ConfigureAwait(false);
-            return 0;
-        }
-
-        var outputJson = args.Contains("--json", StringComparer.Ordinal);
-        var buildTemplates = args.Contains("--build-templates", StringComparer.Ordinal);
-        var resetLima = args.Contains("--reset-lima", StringComparer.Ordinal);
-
         if (resetLima)
         {
             if (!OperatingSystem.IsMacOS())
@@ -826,30 +633,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return dockerCli && contextExists && dockerInfo && sysboxRuntime && templateStatus ? 0 : 1;
     }
 
-    private async Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunSetupCoreAsync(
+        bool dryRun,
+        bool verbose,
+        bool skipTemplates,
+        bool showHelp,
+        CancellationToken cancellationToken)
     {
-        var doctorArgs = args.Contains("--json", StringComparer.Ordinal)
-            ? new[] { "doctor", "--json" }
-            : new[] { "doctor" };
-        return await RunDoctorAsync(doctorArgs, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<int> RunSetupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var verbose = args.Contains("--verbose", StringComparer.Ordinal);
-        var skipTemplates = args.Contains("--skip-templates", StringComparer.Ordinal);
-        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
         if (showHelp)
         {
             await stdout.WriteLineAsync("Usage: cai setup [--dry-run] [--verbose] [--skip-templates]").ConfigureAwait(false);
             return 0;
-        }
-
-        if (!ValidateOptions(args, 1, "--dry-run", "--verbose", "--skip-templates", "--help", "-h"))
-        {
-            await stderr.WriteLineAsync("Unknown setup option. Use 'cai setup --help'.").ConfigureAwait(false);
-            return 1;
         }
 
         var home = ResolveHomeDirectory();
@@ -937,7 +731,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
-        var doctorExitCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
+        var doctorExitCode = await RunDoctorCoreAsync(outputJson: false, buildTemplates: false, resetLima: false, cancellationToken).ConfigureAwait(false);
         if (doctorExitCode != 0)
         {
             await stderr.WriteLineAsync("Setup completed with warnings. Run `cai doctor` for details.").ConfigureAwait(false);
@@ -948,16 +742,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return doctorExitCode;
     }
 
-    private async Task<int> RunDoctorFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunDoctorFixCoreAsync(
+        bool fixAll,
+        bool dryRun,
+        string? target,
+        string? targetArg,
+        CancellationToken cancellationToken)
     {
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var fixAll = args.Contains("--all", StringComparer.Ordinal);
-
-        var target = args.FirstOrDefault(static token => !token.StartsWith('-'));
-        var targetArg = args.SkipWhile(static token => token.StartsWith('-'))
-            .Skip(1)
-            .FirstOrDefault(static token => !token.StartsWith('-'));
-
         if (target is null && !fixAll)
         {
             await stdout.WriteLineAsync("Available doctor fix targets:").ConfigureAwait(false);
@@ -979,7 +770,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             Directory.CreateDirectory(containAiDir);
             Directory.CreateDirectory(sshDir);
             await EnsureSshIncludeDirectiveAsync(cancellationToken).ConfigureAwait(false);
-            await RunSshAsync(["ssh", "cleanup"], cancellationToken).ConfigureAwait(false);
+            _ = await RunSshCleanupCoreAsync(dryRun: false, cancellationToken).ConfigureAwait(false);
         }
 
         if (fixAll || string.Equals(target, "template", StringComparison.Ordinal))
@@ -1116,15 +907,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return string.Empty;
     }
 
-    private async Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunImportCoreAsync(ParsedImportOptions options, CancellationToken cancellationToken)
     {
-        var options = ParseImportOptions(args);
-        if (options.Error is not null)
-        {
-            await stderr.WriteLineAsync(options.Error).ConfigureAwait(false);
-            return 1;
-        }
-
         var workspace = string.IsNullOrWhiteSpace(options.Workspace)
             ? Directory.GetCurrentDirectory()
             : Path.GetFullPath(ExpandHomePath(options.Workspace));
@@ -1417,99 +1201,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         return 0;
-    }
-
-    private static ParsedImportOptions ParseImportOptions(IReadOnlyList<string> args)
-    {
-        string? sourcePath = null;
-        string? explicitVolume = null;
-        string? workspace = null;
-        string? configPath = null;
-        var dryRun = false;
-        var noExcludes = false;
-        var noSecrets = false;
-        var verbose = false;
-
-        for (var index = 1; index < args.Count; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--from":
-                    if (index + 1 >= args.Count)
-                    {
-                        return ParsedImportOptions.WithError("--from requires a value");
-                    }
-
-                    sourcePath = args[++index];
-                    break;
-                case "--data-volume":
-                    if (index + 1 >= args.Count)
-                    {
-                        return ParsedImportOptions.WithError("--data-volume requires a value");
-                    }
-
-                    explicitVolume = args[++index];
-                    break;
-                case "--workspace":
-                    if (index + 1 >= args.Count)
-                    {
-                        return ParsedImportOptions.WithError("--workspace requires a value");
-                    }
-
-                    workspace = args[++index];
-                    break;
-                case "--config":
-                    if (index + 1 >= args.Count)
-                    {
-                        return ParsedImportOptions.WithError("--config requires a value");
-                    }
-
-                    configPath = args[++index];
-                    break;
-                case "--dry-run":
-                    dryRun = true;
-                    break;
-                case "--no-excludes":
-                    noExcludes = true;
-                    break;
-                case "--no-secrets":
-                    noSecrets = true;
-                    break;
-                case "--verbose":
-                    verbose = true;
-                    break;
-                default:
-                    if (token.StartsWith("--from=", StringComparison.Ordinal))
-                    {
-                        sourcePath = token[7..];
-                    }
-                    else if (token.StartsWith("--data-volume=", StringComparison.Ordinal))
-                    {
-                        explicitVolume = token[14..];
-                    }
-                    else if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-                    {
-                        workspace = token[12..];
-                    }
-                    else if (token.StartsWith("--config=", StringComparison.Ordinal))
-                    {
-                        configPath = token[9..];
-                    }
-                    else if (token.StartsWith('-'))
-                    {
-                        return ParsedImportOptions.WithError($"Unknown import option: {token}");
-                    }
-                    else if (string.IsNullOrWhiteSpace(sourcePath))
-                    {
-                        sourcePath = token;
-                    }
-
-                    break;
-            }
-        }
-
-        return new ParsedImportOptions(sourcePath, explicitVolume, workspace, configPath, dryRun, noExcludes, noSecrets, verbose, null);
     }
 
     private static async Task<bool> ResolveImportExcludePrivAsync(string workspace, string? explicitConfigPath, CancellationToken cancellationToken)
@@ -2722,12 +2413,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunExportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunExportCoreAsync(
+        string? output,
+        string? explicitVolume,
+        string? container,
+        string? workspace,
+        CancellationToken cancellationToken)
     {
-        var output = GetOptionValue(args, "--output") ?? GetOptionValue(args, "-o");
-        var explicitVolume = GetOptionValue(args, "--data-volume");
-        var container = GetOptionValue(args, "--container");
-        var workspace = GetOptionValue(args, "--workspace") ?? Directory.GetCurrentDirectory();
+        workspace ??= Directory.GetCurrentDirectory();
         var volume = string.IsNullOrWhiteSpace(container)
             ? await ResolveDataVolumeAsync(workspace, explicitVolume, cancellationToken).ConfigureAwait(false)
             : await ResolveDataVolumeFromContainerAsync(container, explicitVolume, cancellationToken).ConfigureAwait(false);
@@ -2763,7 +2456,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunSyncAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunSyncCoreAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var sourceRoot = ResolveHomeDirectory();
@@ -2791,84 +2484,20 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunLinksAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> WriteLinksUsageAsync()
     {
-        if (args.Count < 2 || args[1] is "-h" or "--help")
-        {
-            await stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
-            return 0;
-        }
+        await stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
+        return 0;
+    }
 
-        var subcommand = args[1];
-        if (!string.Equals(subcommand, "check", StringComparison.Ordinal) &&
-            !string.Equals(subcommand, "fix", StringComparison.Ordinal))
-        {
-            await stderr.WriteLineAsync($"Unknown links subcommand: {subcommand}").ConfigureAwait(false);
-            return 1;
-        }
-
-        string? containerName = null;
-        string? workspace = null;
-        var dryRun = false;
-        var quiet = false;
-
-        for (var index = 2; index < args.Count; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--name":
-                case "--container":
-                    if (index + 1 >= args.Count)
-                    {
-                        await stderr.WriteLineAsync($"{token} requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    containerName = args[++index];
-                    break;
-                case "--workspace":
-                    if (index + 1 >= args.Count)
-                    {
-                        await stderr.WriteLineAsync("--workspace requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    workspace = args[++index];
-                    break;
-                case "--dry-run":
-                    dryRun = true;
-                    break;
-                case "--quiet":
-                case "-q":
-                    quiet = true;
-                    break;
-                case "--verbose":
-                case "--config":
-                    if (token == "--config" && index + 1 < args.Count)
-                    {
-                        index++;
-                    }
-                    break;
-                case "-h":
-                case "--help":
-                    await stdout.WriteLineAsync("Usage: cai links <check|fix> [--name <container>] [--workspace <path>] [--dry-run] [--quiet]").ConfigureAwait(false);
-                    return 0;
-                default:
-                    if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(workspace))
-                    {
-                        workspace = token;
-                    }
-                    else if (!string.Equals(token, "--", StringComparison.Ordinal))
-                    {
-                        await stderr.WriteLineAsync($"Unknown links option: {token}").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    break;
-            }
-        }
-
+    private async Task<int> RunLinksCoreAsync(
+        string subcommand,
+        string? containerName,
+        string? workspace,
+        bool dryRun,
+        bool quiet,
+        CancellationToken cancellationToken)
+    {
         var resolvedWorkspace = string.IsNullOrWhiteSpace(workspace)
             ? Directory.GetCurrentDirectory()
             : Path.GetFullPath(ExpandHomePath(workspace));
@@ -2913,69 +2542,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
-        var command = new List<string>
-        {
-            "exec",
-            containerName,
-            "cai",
-            "system",
-            "link-repair",
-        };
+        var mode = string.Equals(subcommand, "check", StringComparison.Ordinal)
+            ? ContainerLinkRepairMode.Check
+            : dryRun
+                ? ContainerLinkRepairMode.DryRun
+                : ContainerLinkRepairMode.Fix;
 
-        if (string.Equals(subcommand, "check", StringComparison.Ordinal))
-        {
-            command.Add("--check");
-        }
-        else if (dryRun)
-        {
-            command.Add("--dry-run");
-        }
-        else
-        {
-            command.Add("--fix");
-        }
-
-        if (quiet)
-        {
-            command.Add("--quiet");
-        }
-
-        var runResult = await DockerCaptureAsync(command, cancellationToken).ConfigureAwait(false);
-        if (!quiet)
-        {
-            var output = runResult.StandardOutput.Trim();
-            if (!string.IsNullOrWhiteSpace(output))
-            {
-                await stdout.WriteLineAsync(output).ConfigureAwait(false);
-            }
-        }
-
-        if (runResult.ExitCode != 0)
-        {
-            var error = runResult.StandardError.Trim();
-            if (!string.IsNullOrWhiteSpace(error))
-            {
-                await stderr.WriteLineAsync(error).ConfigureAwait(false);
-            }
-        }
-
-        return runResult.ExitCode;
-    }
-
-    private async Task<int> RunUpdateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var stopContainers = args.Contains("--stop-containers", StringComparer.Ordinal) || args.Contains("--force", StringComparer.Ordinal);
-        var limaRecreate = args.Contains("--lima-recreate", StringComparer.Ordinal);
-        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-
-        if (!ValidateOptions(args, 1, "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose", "--help", "-h"))
-        {
-            await stderr.WriteLineAsync("Unknown update option. Use 'cai update --help'.").ConfigureAwait(false);
-            return 1;
-        }
-
-        return await RunUpdateCoreAsync(dryRun, stopContainers, limaRecreate, showHelp, cancellationToken).ConfigureAwait(false);
+        return await containerLinkRepairService
+            .RunAsync(containerName, mode, quiet, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<int> RunUpdateCoreAsync(
@@ -3046,7 +2621,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return refreshCode;
         }
 
-        var doctorCode = await RunDoctorAsync(["doctor"], cancellationToken).ConfigureAwait(false);
+        var doctorCode = await RunDoctorCoreAsync(outputJson: false, buildTemplates: false, resetLima: false, cancellationToken).ConfigureAwait(false);
         if (doctorCode != 0)
         {
             await stderr.WriteLineAsync("Update completed with validation warnings. Run `cai doctor` for details.").ConfigureAwait(false);
@@ -3055,21 +2630,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         await stdout.WriteLineAsync("Update complete.").ConfigureAwait(false);
         return 0;
-    }
-
-    private async Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-        if (!ValidateOptions(args, 1, "--rebuild", "--verbose", "--help", "-h"))
-        {
-            await stderr.WriteLineAsync("Unknown refresh option. Use 'cai refresh --help'.").ConfigureAwait(false);
-            return 1;
-        }
-
-        return await RunRefreshCoreAsync(
-            rebuild: args.Contains("--rebuild", StringComparer.Ordinal),
-            showHelp,
-            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunRefreshCoreAsync(bool rebuild, bool showHelp, CancellationToken cancellationToken)
@@ -3139,21 +2699,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         return failures == 0 ? 0 : 1;
-    }
-
-    private async Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var showHelp = args.Contains("--help", StringComparer.Ordinal) || args.Contains("-h", StringComparer.Ordinal);
-        if (!ValidateOptions(args, 1, "--dry-run", "--containers", "--volumes", "--force", "--verbose", "--help", "-h"))
-        {
-            await stderr.WriteLineAsync("Unknown uninstall option. Use 'cai uninstall --help'.").ConfigureAwait(false);
-            return 1;
-        }
-
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var removeContainers = args.Contains("--containers", StringComparer.Ordinal);
-        var removeVolumes = args.Contains("--volumes", StringComparer.Ordinal);
-        return await RunUninstallCoreAsync(dryRun, removeContainers, removeVolumes, showHelp, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunUninstallCoreAsync(
@@ -3284,23 +2829,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
     }
 
-    private async Task<int> RunConfigAsync(List<string> args, CancellationToken cancellationToken)
-    {
-        if (args.Count < 2)
-        {
-            return await WriteConfigUsageAsync().ConfigureAwait(false);
-        }
-
-        var parsed = ParseConfigOptions(args.Skip(1).ToArray());
-        if (parsed.Error is not null)
-        {
-            await stderr.WriteLineAsync(parsed.Error).ConfigureAwait(false);
-            return 1;
-        }
-
-        return await RunParsedConfigCommandAsync(parsed, cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task<int> WriteConfigUsageAsync()
     {
         await stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
@@ -3331,72 +2859,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
         };
     }
 
-    private async Task<int> RunManifestAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> WriteManifestUsageAsync()
     {
-        if (args.Count < 2 || args[1] is "-h" or "--help")
-        {
-            await stdout.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
-            return 0;
-        }
-
-        return args[1] switch
-        {
-            "parse" => await RunManifestParseAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "generate" => await RunManifestGenerateAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "apply" => await RunManifestApplyAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            "check" => await RunManifestCheckAsync(args.Skip(2).ToArray(), cancellationToken).ConfigureAwait(false),
-            _ => await WriteManifestSubcommandErrorAsync(args[1]).ConfigureAwait(false),
-        };
-    }
-
-    private async Task<int> WriteManifestSubcommandErrorAsync(string subcommand)
-    {
-        await stderr.WriteLineAsync($"Unknown manifest subcommand: {subcommand}").ConfigureAwait(false);
-        await stderr.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
-        return 1;
-    }
-
-    private async Task<int> RunManifestParseAsync(string[] args, CancellationToken cancellationToken)
-    {
-        var includeDisabled = false;
-        var emitSourceFile = false;
-        string? manifestPath = null;
-
-        foreach (var token in args)
-        {
-            switch (token)
-            {
-                case "--include-disabled":
-                    includeDisabled = true;
-                    break;
-                case "--emit-source-file":
-                    emitSourceFile = true;
-                    break;
-                default:
-                    if (token.StartsWith('-'))
-                    {
-                        await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    if (manifestPath is not null)
-                    {
-                        await stderr.WriteLineAsync("ERROR: only one manifest path is supported").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    manifestPath = token;
-                    break;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(manifestPath))
-        {
-            await stderr.WriteLineAsync("ERROR: manifest file or directory required").ConfigureAwait(false);
-            return 1;
-        }
-
-        return await RunManifestParseCoreAsync(manifestPath, includeDisabled, emitSourceFile, cancellationToken).ConfigureAwait(false);
+        await stdout.WriteLineAsync("Usage: cai manifest <parse|generate|apply|check> ...").ConfigureAwait(false);
+        return 0;
     }
 
     private async Task<int> RunManifestParseCoreAsync(
@@ -3431,21 +2897,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
             await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
-    }
-
-    private async Task<int> RunManifestGenerateAsync(string[] args, CancellationToken cancellationToken)
-    {
-        if (args.Length < 2)
-        {
-            await stderr.WriteLineAsync("ERROR: usage: cai manifest generate container-link-spec <manifest_path_or_dir> [output_path]").ConfigureAwait(false);
-            return 1;
-        }
-
-        var kind = args[0];
-        var manifestPath = args[1];
-        var outputPath = args.Length >= 3 ? args[2] : null;
-
-        return await RunManifestGenerateCoreAsync(kind, manifestPath, outputPath, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunManifestGenerateCoreAsync(
@@ -3496,109 +2947,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
     }
 
-    private async Task<int> RunManifestApplyAsync(string[] args, CancellationToken cancellationToken)
-    {
-        if (args.Length < 2)
-        {
-            await stderr.WriteLineAsync("ERROR: usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [options]").ConfigureAwait(false);
-            return 1;
-        }
-
-        var kind = args[0];
-        var manifestPath = args[1];
-        var dataDir = "/mnt/agent-data";
-        var homeDir = "/home/agent";
-        var shimDir = "/opt/containai/user-agent-shims";
-        var caiBinaryPath = "/usr/local/bin/cai";
-
-        for (var index = 2; index < args.Length; index++)
-        {
-            var token = args[index];
-            if (token is "-h" or "--help")
-            {
-                await stdout.WriteLineAsync("Usage: cai manifest apply <container-links|init-dirs|agent-shims> <manifest_path_or_dir> [--data-dir <path>] [--home-dir <path>] [--shim-dir <path>] [--cai-binary <path>]").ConfigureAwait(false);
-                return 0;
-            }
-
-            if (token == "--data-dir")
-            {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
-                {
-                    await stderr.WriteLineAsync("ERROR: --data-dir requires a value").ConfigureAwait(false);
-                    return 1;
-                }
-
-                dataDir = args[++index];
-                continue;
-            }
-
-            if (token.StartsWith("--data-dir=", StringComparison.Ordinal))
-            {
-                dataDir = token[11..];
-                continue;
-            }
-
-            if (token == "--home-dir")
-            {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
-                {
-                    await stderr.WriteLineAsync("ERROR: --home-dir requires a value").ConfigureAwait(false);
-                    return 1;
-                }
-
-                homeDir = args[++index];
-                continue;
-            }
-
-            if (token.StartsWith("--home-dir=", StringComparison.Ordinal))
-            {
-                homeDir = token[11..];
-                continue;
-            }
-
-            if (token == "--shim-dir")
-            {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
-                {
-                    await stderr.WriteLineAsync("ERROR: --shim-dir requires a value").ConfigureAwait(false);
-                    return 1;
-                }
-
-                shimDir = args[++index];
-                continue;
-            }
-
-            if (token.StartsWith("--shim-dir=", StringComparison.Ordinal))
-            {
-                shimDir = token[11..];
-                continue;
-            }
-
-            if (token == "--cai-binary")
-            {
-                if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
-                {
-                    await stderr.WriteLineAsync("ERROR: --cai-binary requires a value").ConfigureAwait(false);
-                    return 1;
-                }
-
-                caiBinaryPath = args[++index];
-                continue;
-            }
-
-            if (token.StartsWith("--cai-binary=", StringComparison.Ordinal))
-            {
-                caiBinaryPath = token[13..];
-                continue;
-            }
-
-            await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
-            return 1;
-        }
-
-        return await RunManifestApplyCoreAsync(kind, manifestPath, dataDir, homeDir, shimDir, caiBinaryPath, cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task<int> RunManifestApplyCoreAsync(
         string kind,
         string manifestPath,
@@ -3637,55 +2985,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
             await stderr.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
             return 1;
         }
-    }
-
-    private async Task<int> RunManifestCheckAsync(string[] args, CancellationToken cancellationToken)
-    {
-        string? manifestDirectory = null;
-
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "-h":
-                case "--help":
-                    await stdout.WriteLineAsync("Usage: cai manifest check [--manifest-dir <path>]").ConfigureAwait(false);
-                    return 0;
-                case "--manifest-dir":
-                    if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
-                    {
-                        await stderr.WriteLineAsync("ERROR: --manifest-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    manifestDirectory = args[++index];
-                    break;
-                default:
-                    if (token.StartsWith("--manifest-dir=", StringComparison.Ordinal))
-                    {
-                        manifestDirectory = token[15..];
-                        break;
-                    }
-
-                    if (token.StartsWith('-'))
-                    {
-                        await stderr.WriteLineAsync($"ERROR: unknown option: {token}").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    if (manifestDirectory is not null)
-                    {
-                        await stderr.WriteLineAsync("ERROR: only one manifest directory can be specified").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    manifestDirectory = token;
-                    break;
-            }
-        }
-
-        return await RunManifestCheckCoreAsync(manifestDirectory, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<int> RunManifestCheckCoreAsync(string? manifestDirectory, CancellationToken cancellationToken)
@@ -3982,23 +3281,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunTemplateAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> WriteTemplateUsageAsync()
     {
-        if (args.Count < 2 || args[1] is "-h" or "--help")
-        {
-            await stdout.WriteLineAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false);
-            return 0;
-        }
+        await stdout.WriteLineAsync("Usage: cai template upgrade [name] [--dry-run]").ConfigureAwait(false);
+        return 0;
+    }
 
-        if (!string.Equals(args[1], "upgrade", StringComparison.Ordinal))
-        {
-            await stderr.WriteLineAsync($"Unknown template subcommand: {args[1]}").ConfigureAwait(false);
-            return 1;
-        }
-
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var templateName = args.Skip(2).FirstOrDefault(static token => !token.StartsWith('-'));
-
+    private async Task<int> RunTemplateUpgradeCoreAsync(
+        string? templateName,
+        bool dryRun,
+        CancellationToken cancellationToken)
+    {
         var templatesRoot = ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
@@ -4047,21 +3340,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunSshAsync(List<string> args, CancellationToken cancellationToken)
+    private async Task<int> WriteSshUsageAsync()
     {
-        if (args.Count < 2 || args[1] is "-h" or "--help")
-        {
-            await stdout.WriteLineAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false);
-            return 0;
-        }
+        await stdout.WriteLineAsync("Usage: cai ssh cleanup [--dry-run]").ConfigureAwait(false);
+        return 0;
+    }
 
-        if (!string.Equals(args[1], "cleanup", StringComparison.Ordinal))
-        {
-            await stderr.WriteLineAsync($"Unknown ssh subcommand: {args[1]}").ConfigureAwait(false);
-            return 1;
-        }
-
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
+    private async Task<int> RunSshCleanupCoreAsync(bool dryRun, CancellationToken cancellationToken)
+    {
         var sshDir = Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d");
         if (!Directory.Exists(sshDir))
         {
@@ -4098,20 +3384,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunStopAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunStopCoreAsync(
+        string? containerName,
+        bool stopAll,
+        bool remove,
+        bool force,
+        bool exportFirst,
+        CancellationToken cancellationToken)
     {
-        var containerName = GetOptionValue(args, "--container");
-        var stopAll = args.Contains("--all", StringComparer.Ordinal);
-        var remove = args.Contains("--remove", StringComparer.Ordinal);
-        var force = args.Contains("--force", StringComparer.Ordinal);
-        var exportFirst = args.Contains("--export", StringComparer.Ordinal);
-
-        if (!ValidateStopArgs(args, out var stopValidationError))
-        {
-            await stderr.WriteLineAsync(stopValidationError).ConfigureAwait(false);
-            return 1;
-        }
-
         if (stopAll && !string.IsNullOrWhiteSpace(containerName))
         {
             await stderr.WriteLineAsync("--all and --container are mutually exclusive").ConfigureAwait(false);
@@ -4199,7 +3479,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             cancellationToken.ThrowIfCancellationRequested();
             if (exportFirst)
             {
-                var exportExitCode = await RunExportAsync(["export", "--container", target.Container], cancellationToken).ConfigureAwait(false);
+                var exportExitCode = await RunExportCoreAsync(output: null, explicitVolume: null, container: target.Container, workspace: null, cancellationToken).ConfigureAwait(false);
                 if (exportExitCode != 0)
                 {
                     failures++;
@@ -4236,12 +3516,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return failures == 0 ? 0 : 1;
     }
 
-    private async Task<int> RunGcAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunGcCoreAsync(
+        bool dryRun,
+        bool force,
+        bool includeImages,
+        string ageValue,
+        CancellationToken cancellationToken)
     {
-        var dryRun = args.Contains("--dry-run", StringComparer.Ordinal);
-        var force = args.Contains("--force", StringComparer.Ordinal);
-        var includeImages = args.Contains("--images", StringComparer.Ordinal);
-        var ageValue = GetOptionValue(args, "--age") ?? "30d";
         if (!TryParseAgeDuration(ageValue, out var minimumAge))
         {
             await stderr.WriteLineAsync($"Invalid --age value: {ageValue}").ConfigureAwait(false);
@@ -4423,6 +3704,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         dockerArgs.AddRange(args);
         return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
+    }
+
+    private static async Task<CommandExecutionResult> ExecuteDockerCommandAsync(
+        IReadOnlyList<string> args,
+        string? standardInput,
+        CancellationToken cancellationToken)
+    {
+        var result = standardInput is null
+            ? await DockerCaptureAsync(args, cancellationToken).ConfigureAwait(false)
+            : await DockerCaptureAsync(args, standardInput, cancellationToken).ConfigureAwait(false);
+        return new CommandExecutionResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
     private static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
@@ -4800,104 +4092,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return (Path.GetFullPath(workspace), null);
     }
 
-    private static ParsedConfigCommand ParseConfigOptions(string[] args)
-    {
-        var global = false;
-        string? workspace = null;
-        var tail = new List<string>();
-
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            if (token is "-g" or "--global")
-            {
-                global = true;
-                continue;
-            }
-
-            if (token == "--workspace")
-            {
-                if (index + 1 >= args.Length)
-                {
-                    return ParsedConfigCommand.WithError("--workspace requires a value");
-                }
-
-                workspace = args[++index];
-                continue;
-            }
-
-            if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-            {
-                workspace = token[12..];
-                continue;
-            }
-
-            if (token == "--verbose")
-            {
-                continue;
-            }
-
-            tail.Add(token);
-        }
-
-        if (tail.Count == 0)
-        {
-            return ParsedConfigCommand.WithError("config requires a subcommand");
-        }
-
-        var action = tail[0];
-        return action switch
-        {
-            "list" => new ParsedConfigCommand(action, null, null, global, workspace, null),
-            "get" when tail.Count >= 2 => new ParsedConfigCommand(action, tail[1], null, global, workspace, null),
-            "set" when tail.Count >= 3 => new ParsedConfigCommand(action, tail[1], tail[2], global, workspace, null),
-            "unset" when tail.Count >= 2 => new ParsedConfigCommand(action, tail[1], null, global, workspace, null),
-            "resolve-volume" => new ParsedConfigCommand(action, tail.Count >= 2 ? tail[1] : null, null, false, workspace, null),
-            _ => ParsedConfigCommand.WithError("invalid config command usage"),
-        };
-    }
-
-    private static bool ValidateStopArgs(IReadOnlyList<string> args, out string error)
-    {
-        for (var index = 1; index < args.Count; index++)
-        {
-            var token = args[index];
-            if (token is "--all" or "--remove" or "--force" or "--export" or "--verbose")
-            {
-                continue;
-            }
-
-            if (token == "--container")
-            {
-                if (index + 1 >= args.Count || args[index + 1].StartsWith('-'))
-                {
-                    error = "--container requires a value";
-                    return false;
-                }
-
-                index++;
-                continue;
-            }
-
-            if (token.StartsWith("--container=", StringComparison.Ordinal))
-            {
-                if (token.Length <= "--container=".Length)
-                {
-                    error = "--container requires a value";
-                    return false;
-                }
-
-                continue;
-            }
-
-            error = $"Unknown stop option: {token}";
-            return false;
-        }
-
-        error = string.Empty;
-        return true;
-    }
-
     private static bool TryParseAgeDuration(string value, out TimeSpan duration)
     {
         duration = default;
@@ -4934,109 +4128,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return DateTimeOffset.TryParse(createdRaw, out var created) ? created : null;
     }
 
-    private static string? GetOptionValue(IReadOnlyList<string> args, string option)
-    {
-        for (var index = 0; index < args.Count; index++)
-        {
-            if (string.Equals(args[index], option, StringComparison.Ordinal))
-            {
-                if (index + 1 < args.Count)
-                {
-                    return args[index + 1];
-                }
-
-                return string.Empty;
-            }
-
-            if (args[index].StartsWith(option + "=", StringComparison.Ordinal))
-            {
-                return args[index][(option.Length + 1)..];
-            }
-        }
-
-        return null;
-    }
-
-    private static bool ValidateOptions(IReadOnlyList<string> args, int startIndex, params string[] allowed)
-    {
-        var allowedSet = new HashSet<string>(allowed, StringComparer.Ordinal);
-        for (var index = startIndex; index < args.Count; index++)
-        {
-            var token = args[index];
-            if (!token.StartsWith('-'))
-            {
-                continue;
-            }
-
-            if (allowedSet.Contains(token))
-            {
-                continue;
-            }
-
-            return false;
-        }
-
-        return true;
-    }
-
-    private static void AppendFlag(List<string> args, string option, bool enabled)
-    {
-        if (enabled)
-        {
-            args.Add(option);
-        }
-    }
-
-    private static void AppendOption(List<string> args, string option, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            args.Add(option);
-            args.Add(value);
-        }
-    }
-
-    private static void AppendValue(List<string> args, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            args.Add(value);
-        }
-    }
-
     private Task<int> RunLinksSubcommandAsync(string subcommand, LinksSubcommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "links",
-            subcommand,
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.Name))
-        {
-            args.Add("--name");
-            args.Add(options.Name);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Container))
-        {
-            args.Add("--container");
-            args.Add(options.Container);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Workspace))
-        {
-            args.Add("--workspace");
-            args.Add(options.Workspace);
-        }
-
-        AppendFlag(args, "--dry-run", options.DryRun);
-        AppendFlag(args, "--quiet", options.Quiet);
-        AppendFlag(args, "--verbose", options.Verbose);
-        AppendOption(args, "--config", options.Config);
-        return RunLinksAsync(args, cancellationToken);
+        var containerName = string.IsNullOrWhiteSpace(options.Container) ? options.Name : options.Container;
+        return RunLinksCoreAsync(subcommand, containerName, options.Workspace, options.DryRun, options.Quiet, cancellationToken);
     }
 
     private static string GetRootHelpText() => """
@@ -5437,11 +4533,7 @@ Examples:
         bool NoExcludes,
         bool NoSecrets,
         bool Verbose,
-        string? Error)
-    {
-        public static ParsedImportOptions WithError(string error)
-            => new(null, null, null, null, false, false, false, false, error);
-    }
+        string? Error);
 
     private readonly record struct AdditionalImportPath(
         string SourcePath,
@@ -5464,9 +4556,5 @@ Examples:
         string? Value,
         bool Global,
         string? Workspace,
-        string? Error)
-    {
-        public static ParsedConfigCommand WithError(string error)
-            => new(string.Empty, null, null, false, null, error);
-    }
+        string? Error);
 }

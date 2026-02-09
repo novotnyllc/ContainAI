@@ -4,6 +4,9 @@
     <!-- ArtifactsOutput: Output goes to artifacts/ directory -->
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts/</ArtifactsPath>
+    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(HOME)'!=''">$(HOME)/.nuget/packages</RestorePackagesPath>
+    <RestorePackagesPath Condition="'$(RestorePackagesPath)'=='' and '$(NUGET_PACKAGES)'=='' and '$(UserProfile)'!=''">$(UserProfile)/.nuget/packages</RestorePackagesPath>
+    <NuGetPackageRoot Condition="'$(NuGetPackageRoot)'=='' and '$(RestorePackagesPath)'!=''">$(RestorePackagesPath)/</NuGetPackageRoot>
   </PropertyGroup>
 
   <PropertyGroup>

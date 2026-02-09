@@ -73,7 +73,7 @@ public sealed class NativeLifecycleParityTests
         var exitCode = await runtime.RunAsync(["status", "--definitely-unknown"], TestContext.Current.CancellationToken);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("Unknown status option", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Unrecognized command or argument '--definitely-unknown'", stderr.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class NativeLifecycleParityTests
         var exitCode = await runtime.RunAsync(["docker", "--help"], TestContext.Current.CancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Usage: cai docker", stdout.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Run Docker in the ContainAI runtime context.", stdout.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

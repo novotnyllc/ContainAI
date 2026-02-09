@@ -50,60 +50,6 @@ internal sealed partial class DevcontainerFeatureRuntime
         return RunInstallCoreAsync(options, cancellationToken);
     }
 
-    public async Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        if (args.Count == 0)
-        {
-            return await RunDevcontainerAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        return args[0] switch
-        {
-            "install" => await RunInstallLegacyAsync(args.Skip(1).ToArray(), cancellationToken).ConfigureAwait(false),
-            "init" => await RunInitAsync(cancellationToken).ConfigureAwait(false),
-            "start" => await RunStartAsync(cancellationToken).ConfigureAwait(false),
-            "verify-sysbox" => await RunVerifySysboxAsync(cancellationToken).ConfigureAwait(false),
-            _ => await UnknownSubcommandAsync(args[0]).ConfigureAwait(false),
-        };
-    }
-
-    private async Task<int> UnknownSubcommandAsync(string subcommand)
-    {
-        await stderr.WriteLineAsync($"Unknown devcontainer subcommand: {subcommand}").ConfigureAwait(false);
-        await stderr.WriteLineAsync("Usage: cai system devcontainer <install|init|start|verify-sysbox>").ConfigureAwait(false);
-        return 1;
-    }
-
-    private async Task<int> RunInstallLegacyAsync(string[] args, CancellationToken cancellationToken)
-    {
-        var options = new SystemDevcontainerInstallCommandOptions(FeatureDir: null);
-        for (var index = 0; index < args.Length; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    await stdout.WriteLineAsync("Usage: cai system devcontainer install [--feature-dir <path>]").ConfigureAwait(false);
-                    return 0;
-                case "--feature-dir":
-                    if (!TryReadValue(args, ref index, out var featureDirectory))
-                    {
-                        await stderr.WriteLineAsync("--feature-dir requires a value").ConfigureAwait(false);
-                        return 1;
-                    }
-
-                    options = options with { FeatureDir = featureDirectory };
-                    break;
-                default:
-                    await stderr.WriteLineAsync($"Unknown install option: {token}").ConfigureAwait(false);
-                    return 1;
-            }
-        }
-
-        return await RunInstallCoreAsync(options, cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task<int> RunInstallCoreAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
     {
         var featureDirectory = options.FeatureDir;
@@ -802,19 +748,6 @@ internal sealed partial class DevcontainerFeatureRuntime
         }
 
         return false;
-    }
-
-    private static bool TryReadValue(string[] args, ref int index, out string value)
-    {
-        value = string.Empty;
-        if (index + 1 >= args.Length)
-        {
-            return false;
-        }
-
-        index++;
-        value = args[index];
-        return true;
     }
 
     private static async Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
