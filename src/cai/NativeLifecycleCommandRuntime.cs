@@ -96,6 +96,129 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return RunStatusCoreAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
     }
 
+    public Task<int> RunDoctorCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunDoctorAsync(["doctor", .. args], cancellationToken);
+
+    public Task<int> RunDoctorFixCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunDoctorFixAsync(["doctor", "fix", .. args], cancellationToken);
+
+    public Task<int> RunValidateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunValidateAsync(["validate", .. args], cancellationToken);
+
+    public Task<int> RunSetupCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunSetupAsync(["setup", .. args], cancellationToken);
+
+    public Task<int> RunImportCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunImportAsync(["import", .. args], cancellationToken);
+
+    public Task<int> RunExportCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunExportAsync(["export", .. args], cancellationToken);
+
+    public Task<int> RunSyncCommandAsync(CancellationToken cancellationToken)
+        => RunSyncAsync(["sync"], cancellationToken);
+
+    public Task<int> RunStopCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunStopAsync(["stop", .. args], cancellationToken);
+
+    public Task<int> RunGcCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunGcAsync(["gc", .. args], cancellationToken);
+
+    public Task<int> RunSshCommandAsync(CancellationToken cancellationToken)
+        => RunSshAsync(["ssh"], cancellationToken);
+
+    public Task<int> RunSshCleanupCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunSshAsync(["ssh", "cleanup", .. args], cancellationToken);
+
+    public Task<int> RunLinksCommandAsync(CancellationToken cancellationToken)
+        => RunLinksAsync(["links"], cancellationToken);
+
+    public Task<int> RunLinksCheckCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunLinksAsync(["links", "check", .. args], cancellationToken);
+
+    public Task<int> RunLinksFixCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunLinksAsync(["links", "fix", .. args], cancellationToken);
+
+    public Task<int> RunConfigCommandAsync(CancellationToken cancellationToken)
+        => RunConfigAsync(["config"], cancellationToken);
+
+    public Task<int> RunConfigListCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunConfigAsync(["config", "list", .. args], cancellationToken);
+
+    public Task<int> RunConfigGetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunConfigAsync(["config", "get", .. args], cancellationToken);
+
+    public Task<int> RunConfigSetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunConfigAsync(["config", "set", .. args], cancellationToken);
+
+    public Task<int> RunConfigUnsetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunConfigAsync(["config", "unset", .. args], cancellationToken);
+
+    public Task<int> RunConfigResolveVolumeCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunConfigAsync(["config", "resolve-volume", .. args], cancellationToken);
+
+    public Task<int> RunManifestCommandAsync(CancellationToken cancellationToken)
+        => RunManifestAsync(["manifest"], cancellationToken);
+
+    public Task<int> RunManifestParseCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunManifestAsync(["manifest", "parse", .. args], cancellationToken);
+
+    public Task<int> RunManifestGenerateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunManifestAsync(["manifest", "generate", .. args], cancellationToken);
+
+    public Task<int> RunManifestApplyCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunManifestAsync(["manifest", "apply", .. args], cancellationToken);
+
+    public Task<int> RunManifestCheckCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunManifestAsync(["manifest", "check", .. args], cancellationToken);
+
+    public Task<int> RunTemplateCommandAsync(CancellationToken cancellationToken)
+        => RunTemplateAsync(["template"], cancellationToken);
+
+    public Task<int> RunTemplateUpgradeCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunTemplateAsync(["template", "upgrade", .. args], cancellationToken);
+
+    public Task<int> RunUpdateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunUpdateAsync(["update", .. args], cancellationToken);
+
+    public Task<int> RunRefreshCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunRefreshAsync(["refresh", .. args], cancellationToken);
+
+    public Task<int> RunUninstallCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunUninstallAsync(["uninstall", .. args], cancellationToken);
+
+    public Task<int> RunHelpCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => RunHelpAsync(["help", .. args], cancellationToken);
+
+    public Task<int> RunVersionCommandAsync(CancellationToken cancellationToken)
+        => RunVersionAsync(["version"], cancellationToken);
+
+    public Task<int> RunSystemCommandAsync(CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system"], cancellationToken);
+
+    public Task<int> RunSystemInitCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "init", .. args], cancellationToken);
+
+    public Task<int> RunSystemLinkRepairCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "link-repair", .. args], cancellationToken);
+
+    public Task<int> RunSystemWatchLinksCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "watch-links", .. args], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerCommandAsync(CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "devcontainer"], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerInstallCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "install", .. args], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerInitCommandAsync(CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "init"], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerStartCommandAsync(CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "start"], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerVerifySysboxCommandAsync(CancellationToken cancellationToken)
+        => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "verify-sysbox"], cancellationToken);
+
     private async Task<int> RunDockerAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         if (args.Count > 1 && (args[1] is "-h" or "--help"))
@@ -2816,6 +2939,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var removeContainers = args.Contains("--containers", StringComparer.Ordinal);
         var removeVolumes = args.Contains("--volumes", StringComparer.Ordinal);
 
+        await RemoveShellIntegrationAsync(dryRun, cancellationToken).ConfigureAwait(false);
+
         var contextsToRemove = new[] { "containai-docker", "containai-secure", "docker-containai" };
         foreach (var context in contextsToRemove)
         {
@@ -2885,6 +3010,48 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         await stdout.WriteLineAsync("Uninstall complete.").ConfigureAwait(false);
         return 0;
+    }
+
+    private async Task RemoveShellIntegrationAsync(bool dryRun, CancellationToken cancellationToken)
+    {
+        var homeDirectory = ResolveHomeDirectory();
+        var profileScriptPath = ShellProfileIntegration.GetProfileScriptPath(homeDirectory);
+        if (dryRun)
+        {
+            if (File.Exists(profileScriptPath))
+            {
+                await stdout.WriteLineAsync($"Would remove shell profile script: {profileScriptPath}").ConfigureAwait(false);
+            }
+        }
+        else if (await ShellProfileIntegration.RemoveProfileScriptAsync(homeDirectory, cancellationToken).ConfigureAwait(false))
+        {
+            await stdout.WriteLineAsync($"Removed shell profile script: {profileScriptPath}").ConfigureAwait(false);
+        }
+
+        foreach (var shellProfilePath in ShellProfileIntegration.GetCandidateShellProfilePaths(homeDirectory, Environment.GetEnvironmentVariable("SHELL")))
+        {
+            if (!File.Exists(shellProfilePath))
+            {
+                continue;
+            }
+
+            var existing = await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false);
+            if (!ShellProfileIntegration.HasHookBlock(existing))
+            {
+                continue;
+            }
+
+            if (dryRun)
+            {
+                await stdout.WriteLineAsync($"Would remove shell integration from: {shellProfilePath}").ConfigureAwait(false);
+                continue;
+            }
+
+            if (await ShellProfileIntegration.RemoveHookFromShellProfileAsync(shellProfilePath, cancellationToken).ConfigureAwait(false))
+            {
+                await stdout.WriteLineAsync($"Removed shell integration from: {shellProfilePath}").ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task<int> RunConfigAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)

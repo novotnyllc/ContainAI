@@ -494,6 +494,8 @@ cai install [options]
 - Installs wrappers (`cai`, `containai-docker`) into bin dir.
 - Materializes bundled manifests, template-system Dockerfile, and example TOML files.
 - Writes default `~/.config/containai/config.toml` when missing.
+- Writes `~/.config/containai/profile.d/containai.sh` and hooks it from your shell profile when `--yes` is provided.
+- Shell integration enables PATH setup plus command completion for `cai` and `containai-docker`.
 - Runs `cai setup` unless `--no-setup` is set.
 
 **Examples:**
@@ -1258,6 +1260,7 @@ cai completion suggest --line "cai man" --position 7
 **Notes:**
 - `cai completion suggest` is provided by the CLI itself; `dotnet-suggest` is not required.
 - Shell integrations should call `cai completion suggest` directly from shell completion functions.
+- `cai install --yes` wires the completion hook for both `cai` and `containai-docker`.
 - The completion protocol follows the .NET tab-completion guidance: <https://learn.microsoft.com/en-us/dotnet/standard/commandline/how-to-enable-tab-completion>.
 
 ---
@@ -1378,7 +1381,7 @@ cai refresh --rebuild
 
 ### cai uninstall
 
-Clean removal of system-level components.
+Remove shell integration and ContainAI Docker contexts; optionally remove managed containers/volumes.
 
 **Synopsis:**
 ```bash
@@ -1396,9 +1399,9 @@ cai uninstall [options]
 | `--verbose` | Enable verbose output |
 
 **What Gets Removed:**
-- `containai-docker.service` (systemd unit)
 - Docker contexts: `containai-docker`, `containai-secure`, `docker-containai`
-- Network security iptables rules
+- Shell profile hook block added by `cai install`
+- `~/.config/containai/profile.d/containai.sh`
 
 **With `--containers`:**
 - All containers with `containai.managed=true` label
@@ -1408,6 +1411,8 @@ cai uninstall [options]
 
 **What is PRESERVED:**
 - `~/.config/containai/` - SSH keys, config.toml
+- `~/.local/share/containai/` - installed `cai` binary and bundled assets
+- `~/.local/bin/cai` and `~/.local/bin/containai-docker` - installed wrappers
 - `~/.ssh/containai.d/` - SSH host configs
 - `/etc/containai/docker/` - daemon.json
 - `/var/lib/containai-docker/` - Docker data, images
@@ -1419,7 +1424,7 @@ cai uninstall [options]
 # Preview removal
 cai uninstall --dry-run
 
-# Remove system components
+# Remove contexts + shell integration
 cai uninstall
 
 # Also remove containers

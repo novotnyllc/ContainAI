@@ -56,7 +56,7 @@ internal sealed class InstallCommandRuntime
                 $"Materialized assets (manifests={assets.ManifestFilesWritten}, templates={assets.TemplateFilesWritten}, examples={assets.ExampleFilesWritten}, default_config={assets.WroteDefaultConfig})",
                 cancellationToken).ConfigureAwait(false);
 
-            await EnsurePathConfigurationAsync(binDir, options.Yes, cancellationToken).ConfigureAwait(false);
+            await EnsureShellIntegrationAsync(binDir, homeDirectory, options.Yes, cancellationToken).ConfigureAwait(false);
 
             if (options.NoSetup)
             {
@@ -142,88 +142,33 @@ internal sealed class InstallCommandRuntime
         return setupExitCode;
     }
 
-    private async Task EnsurePathConfigurationAsync(string binDir, bool autoUpdateShellConfig, CancellationToken cancellationToken)
+    private async Task EnsureShellIntegrationAsync(
+        string binDir,
+        string homeDirectory,
+        bool autoUpdateShellConfig,
+        CancellationToken cancellationToken)
     {
-        if (IsPathEntryPresent(binDir))
-        {
-            return;
-        }
-
         if (!autoUpdateShellConfig)
         {
             await WriteWarningAsync(
-                $"`{binDir}` is not on PATH. Add it to your shell profile or rerun installer with --yes.",
+                $"Shell integration not updated. Rerun with --yes to wire PATH/completions for `{binDir}`.",
                 cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var rcFile = ResolveShellProfilePath();
-        var line = BuildPathExportLine(binDir);
-
-        Directory.CreateDirectory(Path.GetDirectoryName(rcFile)!);
-        var currentContent = File.Exists(rcFile) ? await File.ReadAllTextAsync(rcFile, cancellationToken).ConfigureAwait(false) : string.Empty;
-        if (currentContent.Contains(line, StringComparison.Ordinal))
+        var profileScriptUpdated = await ShellProfileIntegration
+            .EnsureProfileScriptAsync(homeDirectory, binDir, cancellationToken)
+            .ConfigureAwait(false);
+        var shellProfilePath = ShellProfileIntegration.ResolvePreferredShellProfilePath(homeDirectory, Environment.GetEnvironmentVariable("SHELL"));
+        var shellHookUpdated = await ShellProfileIntegration
+            .EnsureHookInShellProfileAsync(shellProfilePath, cancellationToken)
+            .ConfigureAwait(false);
+        if (!profileScriptUpdated && !shellHookUpdated)
         {
             return;
         }
 
-        var appendedContent = string.IsNullOrWhiteSpace(currentContent)
-            ? line + Environment.NewLine
-            : currentContent.TrimEnd() + Environment.NewLine + line + Environment.NewLine;
-        await File.WriteAllTextAsync(rcFile, appendedContent, cancellationToken).ConfigureAwait(false);
-        await WriteInfoAsync($"Updated PATH in {rcFile}", cancellationToken).ConfigureAwait(false);
-    }
-
-    private static string ResolveShellProfilePath()
-    {
-        var shellPath = Environment.GetEnvironmentVariable("SHELL") ?? string.Empty;
-        var shellName = Path.GetFileName(shellPath);
-        var home = ResolveHomeDirectory();
-
-        return shellName switch
-        {
-            "zsh" => Path.Combine(home, ".zshrc"),
-            "fish" => Path.Combine(home, ".config", "fish", "config.fish"),
-            _ => File.Exists(Path.Combine(home, ".bash_profile"))
-                ? Path.Combine(home, ".bash_profile")
-                : Path.Combine(home, ".bashrc"),
-        };
-    }
-
-    private static string BuildPathExportLine(string binDir)
-    {
-        var home = ResolveHomeDirectory().Replace('\\', '/');
-        var normalized = binDir.Replace('\\', '/');
-        if (normalized.StartsWith(home + "/", StringComparison.Ordinal))
-        {
-            normalized = "$HOME/" + normalized[(home.Length + 1)..];
-        }
-
-        return $"export PATH=\"{normalized}:$PATH\"";
-    }
-
-    private static bool IsPathEntryPresent(string binDir)
-    {
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrWhiteSpace(pathValue))
-        {
-            return false;
-        }
-
-        var normalizedBin = Path.GetFullPath(binDir)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var segments = pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var segment in segments)
-        {
-            var normalizedSegment = Path.GetFullPath(segment)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (string.Equals(normalizedSegment, normalizedBin, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        await WriteInfoAsync($"Updated shell integration in {shellProfilePath}", cancellationToken).ConfigureAwait(false);
     }
 
     private static string? ResolveCurrentExecutablePath()

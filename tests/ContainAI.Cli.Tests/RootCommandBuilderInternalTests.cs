@@ -57,6 +57,17 @@ public sealed class RootCommandBuilderInternalTests
     }
 
     [Fact]
+    public void NormalizeCompletionInput_WithContainAiDockerInvocation_RewritesToDockerSubcommand()
+    {
+        var result = ((string Line, int Cursor))InvokeStatic(
+            "NormalizeCompletionInput",
+            ["containai-docker ru", 19]);
+
+        Assert.Equal("docker ru", result.Line);
+        Assert.Equal("docker ru".Length, result.Cursor);
+    }
+
+    [Fact]
     public void ExpandHome_WithoutTilde_ReturnsInputUnchanged()
     {
         var result = (string)InvokeStatic("ExpandHome", ["/tmp/workspace"]);

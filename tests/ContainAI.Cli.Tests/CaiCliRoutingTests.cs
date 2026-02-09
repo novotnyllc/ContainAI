@@ -334,6 +334,42 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
+    public async Task CompletionCommand_Suggest_WithCaiDockerPrefix_ReturnsDockerSuggestions()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var console = new TestCaiConsole();
+
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "cai docker ru", "--position", "13"],
+            runtime,
+            console,
+            cancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("run", console.Output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
+    [Fact]
+    public async Task CompletionCommand_Suggest_WithContainAiDockerPrefix_ReturnsDockerSuggestions()
+    {
+        var runtime = new FakeRuntime();
+        var cancellationToken = TestContext.Current.CancellationToken;
+        using var console = new TestCaiConsole();
+
+        var exitCode = await CaiCli.RunAsync(
+            ["completion", "suggest", "--line", "containai-docker ru", "--position", "19"],
+            runtime,
+            console,
+            cancellationToken);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("run", console.Output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(runtime.NativeCalls);
+    }
+
+    [Fact]
     public async Task CompletionCommand_Suggest_WithFlagFirstInput_UsesImplicitRunOptions()
     {
         var runtime = new FakeRuntime();

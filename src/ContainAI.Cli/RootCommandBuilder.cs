@@ -9,6 +9,53 @@ namespace ContainAI.Cli;
 
 internal static partial class RootCommandBuilder
 {
+    private static readonly string[] DockerCompletionTokens =
+    [
+        "attach",
+        "build",
+        "buildx",
+        "commit",
+        "compose",
+        "container",
+        "context",
+        "cp",
+        "create",
+        "exec",
+        "image",
+        "images",
+        "info",
+        "inspect",
+        "kill",
+        "load",
+        "login",
+        "logout",
+        "logs",
+        "network",
+        "pause",
+        "port",
+        "ps",
+        "pull",
+        "push",
+        "rename",
+        "restart",
+        "rm",
+        "rmi",
+        "run",
+        "save",
+        "search",
+        "start",
+        "stats",
+        "stop",
+        "system",
+        "tag",
+        "top",
+        "unpause",
+        "update",
+        "version",
+        "volume",
+        "wait",
+    ];
+
     public static RootCommand Build(ICaiCommandRuntime runtime, ICaiConsole console)
     {
         ArgumentNullException.ThrowIfNull(runtime);
@@ -474,6 +521,7 @@ internal static partial class RootCommandBuilder
             Arity = ArgumentArity.ZeroOrMore,
             Description = "Arguments forwarded to docker.",
         };
+        dockerArgs.CompletionSources.Add(DockerCompletionTokens);
 
         command.Arguments.Add(dockerArgs);
         command.SetAction((parseResult, cancellationToken) => runtime.RunDockerAsync(
@@ -607,18 +655,36 @@ internal static partial class RootCommandBuilder
         }
 
         var invocationToken = line[start..end];
-        if (!string.Equals(Path.GetFileNameWithoutExtension(invocationToken), "cai", StringComparison.OrdinalIgnoreCase))
+        var invocationName = Path.GetFileNameWithoutExtension(invocationToken);
+        if (string.Equals(invocationName, "cai", StringComparison.OrdinalIgnoreCase))
         {
-            return (line, clampedPosition);
+            var trimStart = end;
+            while (trimStart < line.Length && char.IsWhiteSpace(line[trimStart]))
+            {
+                trimStart++;
+            }
+
+            return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
         }
 
-        var trimStart = end;
-        while (trimStart < line.Length && char.IsWhiteSpace(line[trimStart]))
+        if (string.Equals(invocationName, "containai-docker", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(invocationName, "docker-containai", StringComparison.OrdinalIgnoreCase))
         {
-            trimStart++;
+            var trimStart = end;
+            while (trimStart < line.Length && char.IsWhiteSpace(line[trimStart]))
+            {
+                trimStart++;
+            }
+
+            var remainder = line[trimStart..];
+            var rewritten = string.IsNullOrWhiteSpace(remainder)
+                ? "docker "
+                : $"docker {remainder}";
+            var cursor = "docker ".Length + Math.Max(0, clampedPosition - trimStart);
+            return (rewritten, Math.Clamp(cursor, 0, rewritten.Length));
         }
 
-        return (line[trimStart..], Math.Max(0, clampedPosition - trimStart));
+        return (line, clampedPosition);
     }
 
     private static string[] NormalizeCompletionArguments(string line, FrozenSet<string> knownCommands)
@@ -683,9 +749,14 @@ internal static partial class RootCommandBuilder
             home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
-        return path.Length == 1
-            ? home!
-            : Path.Combine(home!, path[2..]);
+        if (path.Length == 1)
+        {
+            return home!;
+        }
+
+        return path[1] is '/' or '\\'
+            ? Path.Combine(home!, path[2..])
+            : path;
     }
 
     private static Command CreateVersionCommand(ICaiCommandRuntime runtime, ICaiConsole console)
