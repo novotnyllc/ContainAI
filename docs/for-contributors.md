@@ -49,8 +49,8 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p
 # Build a single layer during iteration
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
-# Multi-arch build and push
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
+# Multi-arch publishing is handled in CI using native per-arch runners and manifest merge.
+# Local commands should remain single-arch.
 
 # Publish native AOT CLI binary
 dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -warnaserror -p:PublishAot=true -p:PublishTrimmed=true -p:TrimmerSingleWarn=false

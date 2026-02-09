@@ -34,8 +34,8 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p
 # single layer
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
-# multi-arch with buildx setup
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
+# publishing flow (CI): native per-arch builds + manifest merge
+# local builds should stay single-arch
 ```
 
 ### Build and test

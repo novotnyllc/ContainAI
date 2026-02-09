@@ -17,14 +17,10 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p
 # Build single layer (faster iteration)
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
-# Build with buildx setup (installs binfmt + builder if needed)
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
+# Build and push single-arch layers from the current host architecture
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPush=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
 
-# Build and tag for a registry (prefix applies to all layers)
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=latest
-
-# CI-style multi-arch build (amd64 + arm64)
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+# CI handles multi-arch publishing using native amd64/arm64 runners plus manifest merge
 
 # Publish native AOT CLI binary
 dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
@@ -103,7 +99,7 @@ Specialist agents
 - All function variables must be `local` to prevent shell pollution
 - Functions return status codes; use stdout for data, stderr for errors
 - Error handling: `set -euo pipefail` at script start
-- Build images use buildx by default; platform defaults to `linux/<host-arch>`. Use `--platforms` for CI multi-arch, `--build-setup` to configure buildx/binfmt, and `--image-prefix` to tag/push to a registry.
+- Build images use the native host architecture by default. Multi-arch publication is handled in CI on native amd64/arm64 runners with manifest merge; do not rely on local binfmt emulation.
 - **Verbose pattern:** Commands are silent by default (Unix Rule of Silence). Info messages use `_cai_info()` which respects `_CAI_VERBOSE`. Use `--verbose` flag (long form only, no `-v`) or `CONTAINAI_VERBOSE=1` env var. Warnings/errors always emit to stderr. Precedence: `--quiet` > `--verbose` > `CONTAINAI_VERBOSE`.
 
 ## .NET 10 Migration Guardrails

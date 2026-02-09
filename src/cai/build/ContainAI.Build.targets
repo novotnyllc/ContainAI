@@ -31,6 +31,9 @@
     <Error
       Condition="'$(ContainAILayer)'!='all' and '$(ContainAILayer)'!='base' and '$(ContainAILayer)'!='sdks' and '$(ContainAILayer)'!='agents' and '$(ContainAILayer)'!='final'"
       Text="ContainAILayer must be one of: all, base, sdks, agents, final." />
+    <Error
+      Condition="'$(ContainAIPush)'!='true' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(ContainAIPlatforms)', ','))"
+      Text="Multi-arch container builds are publishing-only. Build a single native architecture locally, or set ContainAIPush=true for publishing." />
 
     <PropertyGroup>
       <_ContainAIBuildBase>false</_ContainAIBuildBase>
@@ -81,10 +84,10 @@
       <_ContainAIDockerCommand Condition="'$(_ContainAIUseBuildx)'=='true'">docker buildx build$(_ContainAIBuilderArg)$(_ContainAIPlatformsArg)$(_ContainAIPushArg)$(_ContainAILoadArg)</_ContainAIDockerCommand>
     </PropertyGroup>
 
-    <Exec
+    <Message
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
-      IgnoreStandardErrorWarningFormat="true"
-      Command="docker run --privileged --rm tonistiigi/binfmt --install all" />
+      Importance="High"
+      Text="ContainAIBuildSetup=true: configuring buildx builder only. Ensure binfmt/QEMU is already configured on the host for cross-arch builds." />
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
