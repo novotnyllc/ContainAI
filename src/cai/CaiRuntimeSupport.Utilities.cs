@@ -369,16 +369,6 @@ internal abstract partial class CaiRuntimeSupport
         bool Verbose,
         string? Error);
 
-    protected readonly record struct AdditionalImportPath(
-        string SourcePath,
-        string TargetPath,
-        bool IsDirectory,
-        bool ApplyPrivFilter);
-
-    protected readonly record struct ImportedSymlink(
-        string RelativePath,
-        string Target);
-
     protected readonly record struct EnvFilePathResolution(string? Path, string? Error);
     protected readonly record struct ParsedEnvFile(
         IReadOnlyDictionary<string, string> Values,
