@@ -18,22 +18,32 @@ Prerequisites: .NET SDK 10+, Docker CLI (`docker --version`), Bash 4.0+, and Git
    ```
    `install.sh` delegates install operations to `cai install --local --yes --no-setup`.
 
-3. **Build the native CLI and test projects**:
+3. **Reload shell integration (or use explicit binary path)**:
+   ```bash
+   # Open a new shell, or source your profile so `cai` is on PATH now
+   source ~/.bashrc 2>/dev/null || source ~/.zshrc 2>/dev/null || true
+
+   # Verify CLI is available
+   cai version
+   ```
+   If your shell profile is not reloaded yet, use `~/.local/bin/cai` directly.
+
+4. **Build the native CLI and test projects**:
    ```bash
    dotnet build ContainAI.slnx -c Release
    ```
 
-4. **Run one-time runtime setup**:
+5. **Run one-time runtime setup**:
    ```bash
    cai setup
    ```
 
-5. **Verify your environment**:
+6. **Verify your environment**:
    ```bash
    cai doctor
    ```
 
-6. **Export sample configs when validating import/sync flows**:
+7. **Export sample configs when validating import/sync flows**:
    ```bash
    cai examples export --output-dir ./.containai/examples --force
    ```
