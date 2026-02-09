@@ -189,12 +189,12 @@ COPY src/services/docker.service.d/ /etc/systemd/system/docker.service.d/
 # Install native cai binary + runtime manifests so system services can use cai.
 # =============================================================================
 ARG TARGETARCH
-RUN --mount=type=bind,source=artifacts/cai-tarballs,target=/tmp/cai,readonly \
+RUN --mount=type=bind,source=artifacts,target=/tmp/cai,readonly \
     set -euo pipefail; \
     tarball=""; \
     case "${TARGETARCH:-}" in \
-        amd64) tarball="$(ls -1 /tmp/cai/containai-*-linux-x64.tar.gz 2>/dev/null | head -n 1)" ;; \
-        arm64) tarball="$(ls -1 /tmp/cai/containai-*-linux-arm64.tar.gz 2>/dev/null | head -n 1)" ;; \
+        amd64) tarball="$(find /tmp/cai /tmp/cai/cai-tarballs -maxdepth 1 -type f -name 'containai-*-linux-x64.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)" ;; \
+        arm64) tarball="$(find /tmp/cai /tmp/cai/cai-tarballs -maxdepth 1 -type f -name 'containai-*-linux-arm64.tar.gz' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)" ;; \
         *) echo "ERROR: Unsupported TARGETARCH: ${TARGETARCH:-unset}" >&2; exit 1 ;; \
     esac; \
     if [[ -z "$tarball" || ! -f "$tarball" ]]; then \

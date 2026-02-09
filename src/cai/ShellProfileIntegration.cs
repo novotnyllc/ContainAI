@@ -225,6 +225,7 @@ internal static class ShellProfileIntegration
             "  }",
             "  complete -o default -F _cai_complete cai",
             "  complete -o default -F _cai_complete containai-docker",
+            "  complete -o default -F _cai_complete docker-containai",
             "fi",
             string.Empty);
     }

@@ -20,6 +20,7 @@ public sealed class ShellProfileIntegrationTests
         Assert.True(changed);
         Assert.Contains("complete -o default -F _cai_complete cai", content, StringComparison.Ordinal);
         Assert.Contains("complete -o default -F _cai_complete containai-docker", content, StringComparison.Ordinal);
+        Assert.Contains("complete -o default -F _cai_complete docker-containai", content, StringComparison.Ordinal);
         Assert.Contains("$HOME/.local/bin", content, StringComparison.Ordinal);
     }
 

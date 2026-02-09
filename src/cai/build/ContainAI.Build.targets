@@ -48,18 +48,22 @@
 
     <Exec
       Condition="'$(_ContainAIBuildBase)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.base&quot; -t &quot;$(ContainAIImagePrefix)/base:$(ContainAIImageTag)&quot; --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
 
     <Exec
       Condition="'$(_ContainAIBuildSdks)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.sdks&quot; -t &quot;$(ContainAIImagePrefix)/sdks:$(ContainAIImageTag)&quot; --build-arg BASE_IMAGE=$(ContainAIImagePrefix)/base:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
 
     <Exec
       Condition="'$(_ContainAIBuildAgents)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile.agents&quot; -t &quot;$(ContainAIImagePrefix)/agents:$(ContainAIImageTag)&quot; --build-arg SDKS_IMAGE=$(ContainAIImagePrefix)/sdks:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
 
     <Exec
       Condition="'$(_ContainAIBuildFinal)'=='true' and '$(ContainAISkipDockerBuild)'!='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="$(_ContainAIDockerCommand) -f &quot;$(ContainAIRepositoryRoot)/src/container/Dockerfile&quot; -t &quot;$(ContainAIImagePrefix):$(ContainAIImageTag)&quot; --build-arg AGENTS_IMAGE=$(ContainAIImagePrefix)/agents:$(ContainAIImageTag) --build-arg CONTAINAI_VERSION=$(ContainAIVersion) &quot;$(ContainAIRepositoryRoot)&quot;" />
   </Target>
 
@@ -79,10 +83,12 @@
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="docker run --privileged --rm tonistiigi/binfmt --install all" />
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="docker buildx inspect $(_ContainAIEffectiveBuildxBuilder)"
       IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_ContainAIBuildxInspectExitCode" />
@@ -90,10 +96,12 @@
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'!='0'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="docker buildx create --name $(_ContainAIEffectiveBuildxBuilder) --use" />
 
     <Exec
       Condition="'$(_ContainAIUseBuildx)'=='true' and '$(ContainAIBuildSetup)'=='true' and '$(_ContainAIBuildxInspectExitCode)'=='0'"
+      IgnoreStandardErrorWarningFormat="true"
       Command="docker buildx use $(_ContainAIEffectiveBuildxBuilder)" />
   </Target>
 
@@ -116,9 +124,11 @@
       <ContainAIPackageDir>$(ContainAIStagingRoot)/$(ContainAIPackageName)</ContainAIPackageDir>
       <ContainAIPublishedBinaryPath>$(PublishDir)$(AssemblyName)$(ExecutableExtension)</ContainAIPublishedBinaryPath>
       <ContainAITarballPath>$(ContainAIOutputDir)/$(ContainAIPackageName).tar.gz</ContainAITarballPath>
+      <ContainAITarballMirrorDir>$(ContainAIOutputDir)/cai-tarballs</ContainAITarballMirrorDir>
+      <ContainAITarballMirrorPath>$(ContainAITarballMirrorDir)/$(ContainAIPackageName).tar.gz</ContainAITarballMirrorPath>
     </PropertyGroup>
 
-    <MakeDir Directories="$(ContainAIOutputDir)" />
+    <MakeDir Directories="$(ContainAIOutputDir);$(ContainAITarballMirrorDir)" />
     <RemoveDir Directories="$(ContainAIStagingRoot)" />
     <MakeDir Directories="$(ContainAIPackageDir);$(ContainAIPackageDir)/manifests;$(ContainAIPackageDir)/templates;$(ContainAIPackageDir)/container" />
 
@@ -143,8 +153,10 @@
     <Error Condition="!Exists('$(ContainAIPackageDir)/container/Dockerfile.template-system')" Text="Missing required runtime file in package staging: container/Dockerfile.template-system" />
 
     <Exec Command="tar -czf &quot;$(ContainAITarballPath)&quot; -C &quot;$(ContainAIStagingRoot)&quot; &quot;$(ContainAIPackageName)&quot;" />
+    <Copy SourceFiles="$(ContainAITarballPath)" DestinationFiles="$(ContainAITarballMirrorPath)" />
 
     <Message Importance="High" Text="Created release tarball: $(ContainAITarballPath)" />
+    <Message Importance="High" Text="Mirrored release tarball: $(ContainAITarballMirrorPath)" />
   </Target>
 
 </Project>
