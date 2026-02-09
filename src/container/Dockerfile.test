@@ -95,7 +95,6 @@ RUN cat <<'EOF' > /usr/local/bin/start-dockerd.sh
 set -euo pipefail
 
 dockerd \
-  --host=unix:///var/run/docker-test.sock \
   --pidfile=/var/run/docker-test.pid \
   --log-level=error \
   >/var/log/dockerd-test.log 2>&1 &
