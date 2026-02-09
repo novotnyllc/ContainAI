@@ -862,116 +862,327 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
             return Task.FromResult(StatusExitCode);
         }
 
-        public Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["doctor"], args);
+        public Task<int> RunDoctorAsync(DoctorCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--json", options.Json);
+            AppendFlag(args, "--build-templates", options.BuildTemplates);
+            AppendFlag(args, "--reset-lima", options.ResetLima);
+            return RecordNativeCall(["doctor"], args);
+        }
 
-        public Task<int> RunDoctorFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["doctor", "fix"], args);
+        public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--all", options.All);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendArgument(args, options.Target);
+            AppendArgument(args, options.TargetArg);
+            return RecordNativeCall(["doctor", "fix"], args);
+        }
 
-        public Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["validate"], args);
+        public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--json", options.Json);
+            return RecordNativeCall(["validate"], args);
+        }
 
-        public Task<int> RunSetupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["setup"], args);
+        public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--verbose", options.Verbose);
+            AppendFlag(args, "--skip-templates", options.SkipTemplates);
+            return RecordNativeCall(["setup"], args);
+        }
 
-        public Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["import"], args);
+        public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--from", options.From);
+            AppendOption(args, "--data-volume", options.DataVolume);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendOption(args, "--config", options.Config);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--no-excludes", options.NoExcludes);
+            AppendFlag(args, "--no-secrets", options.NoSecrets);
+            AppendFlag(args, "--verbose", options.Verbose);
+            return RecordNativeCall(["import"], args);
+        }
 
-        public Task<int> RunExportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["export"], args);
+        public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--output", options.Output);
+            AppendOption(args, "--data-volume", options.DataVolume);
+            AppendOption(args, "--container", options.Container);
+            AppendOption(args, "--workspace", options.Workspace);
+            return RecordNativeCall(["export"], args);
+        }
 
         public Task<int> RunSyncAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["sync"]);
 
-        public Task<int> RunStopAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["stop"], args);
+        public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--all", options.All);
+            AppendOption(args, "--container", options.Container);
+            AppendFlag(args, "--remove", options.Remove);
+            AppendFlag(args, "--force", options.Force);
+            AppendFlag(args, "--export", options.Export);
+            AppendFlag(args, "--verbose", options.Verbose);
+            return RecordNativeCall(["stop"], args);
+        }
 
-        public Task<int> RunGcAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["gc"], args);
+        public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--force", options.Force);
+            AppendFlag(args, "--images", options.Images);
+            AppendOption(args, "--age", options.Age);
+            return RecordNativeCall(["gc"], args);
+        }
 
         public Task<int> RunSshAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["ssh"]);
 
-        public Task<int> RunSshCleanupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["ssh", "cleanup"], args);
+        public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--dry-run", options.DryRun);
+            return RecordNativeCall(["ssh", "cleanup"], args);
+        }
 
         public Task<int> RunLinksAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["links"]);
 
-        public Task<int> RunLinksCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["links", "check"], args);
+        public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--name", options.Name);
+            AppendOption(args, "--container", options.Container);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--quiet", options.Quiet);
+            AppendFlag(args, "--verbose", options.Verbose);
+            AppendOption(args, "--config", options.Config);
+            return RecordNativeCall(["links", "check"], args);
+        }
 
-        public Task<int> RunLinksFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["links", "fix"], args);
+        public Task<int> RunLinksFixAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--name", options.Name);
+            AppendOption(args, "--container", options.Container);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--quiet", options.Quiet);
+            AppendFlag(args, "--verbose", options.Verbose);
+            AppendOption(args, "--config", options.Config);
+            return RecordNativeCall(["links", "fix"], args);
+        }
 
         public Task<int> RunConfigAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["config"]);
 
-        public Task<int> RunConfigListAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["config"], args);
+        public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--global", options.Global);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--verbose", options.Verbose);
+            args.Add("list");
+            return RecordNativeCall(["config"], args);
+        }
 
-        public Task<int> RunConfigGetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["config"], args);
+        public Task<int> RunConfigGetAsync(ConfigGetCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--global", options.Global);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--verbose", options.Verbose);
+            args.Add("get");
+            args.Add(options.Key);
+            return RecordNativeCall(["config"], args);
+        }
 
-        public Task<int> RunConfigSetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["config"], args);
+        public Task<int> RunConfigSetAsync(ConfigSetCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--global", options.Global);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--verbose", options.Verbose);
+            args.Add("set");
+            args.Add(options.Key);
+            args.Add(options.Value);
+            return RecordNativeCall(["config"], args);
+        }
 
-        public Task<int> RunConfigUnsetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["config"], args);
+        public Task<int> RunConfigUnsetAsync(ConfigUnsetCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--global", options.Global);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--verbose", options.Verbose);
+            args.Add("unset");
+            args.Add(options.Key);
+            return RecordNativeCall(["config"], args);
+        }
 
-        public Task<int> RunConfigResolveVolumeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["config"], args);
+        public Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--global", options.Global);
+            AppendOption(args, "--workspace", options.Workspace);
+            AppendFlag(args, "--verbose", options.Verbose);
+            args.Add("resolve-volume");
+            AppendArgument(args, options.ExplicitVolume);
+            return RecordNativeCall(["config"], args);
+        }
 
         public Task<int> RunManifestAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["manifest"]);
 
-        public Task<int> RunManifestParseAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["manifest", "parse"], args);
+        public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--include-disabled", options.IncludeDisabled);
+            AppendFlag(args, "--emit-source-file", options.EmitSourceFile);
+            args.Add(options.ManifestPath);
+            return RecordNativeCall(["manifest", "parse"], args);
+        }
 
-        public Task<int> RunManifestGenerateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["manifest", "generate"], args);
+        public Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>
+            {
+                options.Kind,
+                options.ManifestPath,
+            };
+            AppendArgument(args, options.OutputPath);
+            return RecordNativeCall(["manifest", "generate"], args);
+        }
 
-        public Task<int> RunManifestApplyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["manifest", "apply"], args);
+        public Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>
+            {
+                options.Kind,
+                options.ManifestPath,
+            };
+            AppendOption(args, "--data-dir", options.DataDir);
+            AppendOption(args, "--home-dir", options.HomeDir);
+            AppendOption(args, "--shim-dir", options.ShimDir);
+            AppendOption(args, "--cai-binary", options.CaiBinary);
+            return RecordNativeCall(["manifest", "apply"], args);
+        }
 
-        public Task<int> RunManifestCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["manifest", "check"], args);
+        public Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--manifest-dir", options.ManifestDir);
+            return RecordNativeCall(["manifest", "check"], args);
+        }
 
         public Task<int> RunTemplateAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["template"]);
 
-        public Task<int> RunTemplateUpgradeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["template", "upgrade"], args);
+        public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendArgument(args, options.Name);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            return RecordNativeCall(["template", "upgrade"], args);
+        }
 
-        public Task<int> RunUpdateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["update"], args);
+        public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--stop-containers", options.StopContainers);
+            AppendFlag(args, "--force", options.Force);
+            AppendFlag(args, "--lima-recreate", options.LimaRecreate);
+            AppendFlag(args, "--verbose", options.Verbose);
+            return RecordNativeCall(["update"], args);
+        }
 
-        public Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["refresh"], args);
+        public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--rebuild", options.Rebuild);
+            AppendFlag(args, "--verbose", options.Verbose);
+            return RecordNativeCall(["refresh"], args);
+        }
 
-        public Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["uninstall"], args);
+        public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--containers", options.Containers);
+            AppendFlag(args, "--volumes", options.Volumes);
+            AppendFlag(args, "--force", options.Force);
+            AppendFlag(args, "--verbose", options.Verbose);
+            return RecordNativeCall(["uninstall"], args);
+        }
 
-        public Task<int> RunHelpAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["help"], args);
+        public Task<int> RunHelpAsync(HelpCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendArgument(args, options.Topic);
+            return RecordNativeCall(["help"], args);
+        }
 
         public Task<int> RunSystemAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["system"]);
 
-        public Task<int> RunSystemInitAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["system", "init"], args);
+        public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--data-dir", options.DataDir);
+            AppendOption(args, "--home-dir", options.HomeDir);
+            AppendOption(args, "--manifests-dir", options.ManifestsDir);
+            AppendOption(args, "--template-hooks", options.TemplateHooks);
+            AppendOption(args, "--workspace-hooks", options.WorkspaceHooks);
+            AppendOption(args, "--workspace-dir", options.WorkspaceDir);
+            AppendFlag(args, "--quiet", options.Quiet);
+            return RecordNativeCall(["system", "init"], args);
+        }
 
-        public Task<int> RunSystemLinkRepairAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["system", "link-repair"], args);
+        public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendFlag(args, "--check", options.Check);
+            AppendFlag(args, "--fix", options.Fix);
+            AppendFlag(args, "--dry-run", options.DryRun);
+            AppendFlag(args, "--quiet", options.Quiet);
+            AppendOption(args, "--builtin-spec", options.BuiltinSpec);
+            AppendOption(args, "--user-spec", options.UserSpec);
+            AppendOption(args, "--checked-at-file", options.CheckedAtFile);
+            return RecordNativeCall(["system", "link-repair"], args);
+        }
 
-        public Task<int> RunSystemWatchLinksAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["system", "watch-links"], args);
+        public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--poll-interval", options.PollInterval);
+            AppendOption(args, "--imported-at-file", options.ImportedAtFile);
+            AppendOption(args, "--checked-at-file", options.CheckedAtFile);
+            AppendFlag(args, "--quiet", options.Quiet);
+            return RecordNativeCall(["system", "watch-links"], args);
+        }
 
         public Task<int> RunSystemDevcontainerAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["system", "devcontainer"]);
 
-        public Task<int> RunSystemDevcontainerInstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-            => RecordNativeCall(["system", "devcontainer", "install"], args);
+        public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+        {
+            var args = new List<string>();
+            AppendOption(args, "--feature-dir", options.FeatureDir);
+            return RecordNativeCall(["system", "devcontainer", "install"], args);
+        }
 
         public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
             => RecordNativeCall(["system", "devcontainer", "init"]);
@@ -1015,11 +1226,36 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
             return Task.FromResult(NativeExitCode);
         }
 
-        private Task<int> RecordNativeCall(IReadOnlyList<string> commandPath, IReadOnlyList<string> args)
+        private Task<int> RecordNativeCall(IReadOnlyList<string> commandPath, List<string> args)
         {
             return args.Count == 0
                 ? RecordNativeCall(commandPath)
                 : RecordNativeCall([.. commandPath, .. args]);
+        }
+
+        private static void AppendFlag(List<string> args, string option, bool enabled)
+        {
+            if (enabled)
+            {
+                args.Add(option);
+            }
+        }
+
+        private static void AppendOption(List<string> args, string option, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                args.Add(option);
+                args.Add(value);
+            }
+        }
+
+        private static void AppendArgument(List<string> args, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                args.Add(value);
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
+using ContainAI.Cli.Abstractions;
 using ContainAI.Cli.Host;
 using Xunit;
 
@@ -140,10 +141,12 @@ public sealed class NativeLifecycleParityTests
         using var stderr = new StringWriter();
         var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
 
-        var exitCode = await runtime.RunConfigGetCommandAsync([], TestContext.Current.CancellationToken);
+        var exitCode = await runtime.RunConfigGetAsync(
+            new ConfigGetCommandOptions(false, null, false, string.Empty),
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("invalid config command usage", stderr.ToString(), StringComparison.Ordinal);
+        Assert.Contains("config get requires <key>", stderr.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("config requires a subcommand", stderr.ToString(), StringComparison.Ordinal);
     }
 

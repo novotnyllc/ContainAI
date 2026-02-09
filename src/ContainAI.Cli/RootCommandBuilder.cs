@@ -126,18 +126,9 @@ internal static partial class RootCommandBuilder
     {
         var command = new Command("run", "Start or attach to a runtime shell.");
 
-        var workspaceOption = new Option<string?>("--workspace", "-w")
-        {
-            Description = "Workspace path for command execution.",
-        };
-        var freshOption = new Option<bool>("--fresh")
-        {
-            Description = "Request a fresh runtime environment.",
-        };
-        var restartOption = new Option<bool>("--restart")
-        {
-            Description = "Alias for --fresh.",
-        };
+        var workspaceOption = CreateWorkspaceOption("Workspace path for command execution.");
+        var freshOption = CreateFreshOption();
+        var restartOption = CreateRestartOption();
         var detachedOption = new Option<bool>("--detached", "-d")
         {
             Description = "Run in detached mode.",
@@ -150,58 +141,22 @@ internal static partial class RootCommandBuilder
         {
             Description = "Acknowledge credential risk for credential import modes.",
         };
-        var dataVolumeOption = new Option<string?>("--data-volume")
-        {
-            Description = "Data volume override.",
-        };
-        var configOption = new Option<string?>("--config")
-        {
-            Description = "Path to config file.",
-        };
-        var containerOption = new Option<string?>("--container")
-        {
-            Description = "Attach to a specific container.",
-        };
-        var forceOption = new Option<bool>("--force")
-        {
-            Description = "Force operation where supported.",
-        };
-        var quietOption = new Option<bool>("--quiet", "-q")
-        {
-            Description = "Suppress non-essential output.",
-        };
-        var verboseOption = new Option<bool>("--verbose")
-        {
-            Description = "Enable verbose output.",
-        };
-        var debugOption = new Option<bool>("--debug", "-D")
-        {
-            Description = "Enable debug output.",
-        };
-        var dryRunOption = new Option<bool>("--dry-run")
-        {
-            Description = "Show planned actions without executing.",
-        };
+        var dataVolumeOption = CreateDataVolumeOption();
+        var configOption = CreateConfigOption();
+        var containerOption = CreateContainerOption();
+        var forceOption = CreateForceOption();
+        var quietOption = CreateQuietOption();
+        var verboseOption = CreateVerboseOption();
+        var debugOption = CreateDebugOption();
+        var dryRunOption = CreateDryRunOption();
         var imageTagOption = new Option<string?>("--image-tag")
         {
             Description = "Override image tag.",
         };
-        var templateOption = new Option<string?>("--template")
-        {
-            Description = "Template name.",
-        };
-        var channelOption = new Option<string?>("--channel")
-        {
-            Description = "Channel override.",
-        };
-        var memoryOption = new Option<string?>("--memory")
-        {
-            Description = "Container memory limit.",
-        };
-        var cpusOption = new Option<string?>("--cpus")
-        {
-            Description = "Container CPU limit.",
-        };
+        var templateOption = CreateTemplateOption();
+        var channelOption = CreateChannelOption();
+        var memoryOption = CreateMemoryOption();
+        var cpusOption = CreateCpusOption();
         var envOption = new Option<string[]>("--env", "-e")
         {
             Description = "Environment variable assignment.",
@@ -218,26 +173,28 @@ internal static partial class RootCommandBuilder
             Description = "Optional command to execute in the login shell.",
         };
 
-        command.Options.Add(workspaceOption);
-        command.Options.Add(freshOption);
-        command.Options.Add(restartOption);
-        command.Options.Add(detachedOption);
-        command.Options.Add(credentialsOption);
-        command.Options.Add(acknowledgeCredentialRiskOption);
-        command.Options.Add(dataVolumeOption);
-        command.Options.Add(configOption);
-        command.Options.Add(containerOption);
-        command.Options.Add(forceOption);
-        command.Options.Add(quietOption);
-        command.Options.Add(verboseOption);
-        command.Options.Add(debugOption);
-        command.Options.Add(dryRunOption);
-        command.Options.Add(imageTagOption);
-        command.Options.Add(templateOption);
-        command.Options.Add(channelOption);
-        command.Options.Add(memoryOption);
-        command.Options.Add(cpusOption);
-        command.Options.Add(envOption);
+        AddOptions(
+            command,
+            workspaceOption,
+            freshOption,
+            restartOption,
+            detachedOption,
+            credentialsOption,
+            acknowledgeCredentialRiskOption,
+            dataVolumeOption,
+            configOption,
+            containerOption,
+            forceOption,
+            quietOption,
+            verboseOption,
+            debugOption,
+            dryRunOption,
+            imageTagOption,
+            templateOption,
+            channelOption,
+            memoryOption,
+            cpusOption,
+            envOption);
         command.Arguments.Add(pathArgument);
         command.Arguments.Add(commandArgs);
 
@@ -293,97 +250,54 @@ internal static partial class RootCommandBuilder
     {
         var command = new Command("shell", "Open an interactive login shell.");
 
-        var workspaceOption = new Option<string?>("--workspace", "-w")
-        {
-            Description = "Workspace path for shell execution.",
-        };
-        var dataVolumeOption = new Option<string?>("--data-volume")
-        {
-            Description = "Data volume override.",
-        };
-        var configOption = new Option<string?>("--config")
-        {
-            Description = "Path to config file.",
-        };
-        var containerOption = new Option<string?>("--container")
-        {
-            Description = "Attach to a specific container.",
-        };
-        var freshOption = new Option<bool>("--fresh")
-        {
-            Description = "Request a fresh runtime environment.",
-        };
-        var restartOption = new Option<bool>("--restart")
-        {
-            Description = "Alias for --fresh.",
-        };
+        var workspaceOption = CreateWorkspaceOption("Workspace path for shell execution.");
+        var dataVolumeOption = CreateDataVolumeOption();
+        var configOption = CreateConfigOption();
+        var containerOption = CreateContainerOption();
+        var freshOption = CreateFreshOption();
+        var restartOption = CreateRestartOption();
         var resetOption = new Option<bool>("--reset")
         {
             Description = "Create a reset volume shell session.",
         };
-        var forceOption = new Option<bool>("--force")
-        {
-            Description = "Force operation where supported.",
-        };
-        var quietOption = new Option<bool>("--quiet", "-q")
-        {
-            Description = "Suppress non-essential output.",
-        };
-        var verboseOption = new Option<bool>("--verbose")
-        {
-            Description = "Enable verbose output.",
-        };
-        var debugOption = new Option<bool>("--debug", "-D")
-        {
-            Description = "Enable debug output.",
-        };
-        var dryRunOption = new Option<bool>("--dry-run")
-        {
-            Description = "Show planned actions without executing.",
-        };
+        var forceOption = CreateForceOption();
+        var quietOption = CreateQuietOption();
+        var verboseOption = CreateVerboseOption();
+        var debugOption = CreateDebugOption();
+        var dryRunOption = CreateDryRunOption();
         var imageTagOption = new Option<string?>("--image-tag")
         {
             Description = "Override image tag.",
         };
-        var templateOption = new Option<string?>("--template")
-        {
-            Description = "Template name.",
-        };
-        var channelOption = new Option<string?>("--channel")
-        {
-            Description = "Channel override.",
-        };
-        var memoryOption = new Option<string?>("--memory")
-        {
-            Description = "Container memory limit.",
-        };
-        var cpusOption = new Option<string?>("--cpus")
-        {
-            Description = "Container CPU limit.",
-        };
+        var templateOption = CreateTemplateOption();
+        var channelOption = CreateChannelOption();
+        var memoryOption = CreateMemoryOption();
+        var cpusOption = CreateCpusOption();
         var pathArgument = new Argument<string?>("path")
         {
             Arity = ArgumentArity.ZeroOrOne,
             Description = "Workspace path (optional positional form).",
         };
 
-        command.Options.Add(workspaceOption);
-        command.Options.Add(dataVolumeOption);
-        command.Options.Add(configOption);
-        command.Options.Add(containerOption);
-        command.Options.Add(freshOption);
-        command.Options.Add(restartOption);
-        command.Options.Add(resetOption);
-        command.Options.Add(forceOption);
-        command.Options.Add(quietOption);
-        command.Options.Add(verboseOption);
-        command.Options.Add(debugOption);
-        command.Options.Add(dryRunOption);
-        command.Options.Add(imageTagOption);
-        command.Options.Add(templateOption);
-        command.Options.Add(channelOption);
-        command.Options.Add(memoryOption);
-        command.Options.Add(cpusOption);
+        AddOptions(
+            command,
+            workspaceOption,
+            dataVolumeOption,
+            configOption,
+            containerOption,
+            freshOption,
+            restartOption,
+            resetOption,
+            forceOption,
+            quietOption,
+            verboseOption,
+            debugOption,
+            dryRunOption,
+            imageTagOption,
+            templateOption,
+            channelOption,
+            memoryOption,
+            cpusOption);
         command.Arguments.Add(pathArgument);
 
         command.SetAction((parseResult, cancellationToken) =>
@@ -424,67 +338,36 @@ internal static partial class RootCommandBuilder
     {
         var command = new Command("exec", "Execute a command through SSH.");
 
-        var workspaceOption = new Option<string?>("--workspace", "-w")
-        {
-            Description = "Workspace path for command execution.",
-        };
-        var containerOption = new Option<string?>("--container")
-        {
-            Description = "Attach to a specific container.",
-        };
-        var templateOption = new Option<string?>("--template")
-        {
-            Description = "Template name.",
-        };
-        var channelOption = new Option<string?>("--channel")
-        {
-            Description = "Channel override.",
-        };
-        var dataVolumeOption = new Option<string?>("--data-volume")
-        {
-            Description = "Data volume override.",
-        };
-        var configOption = new Option<string?>("--config")
-        {
-            Description = "Path to config file.",
-        };
-        var freshOption = new Option<bool>("--fresh")
-        {
-            Description = "Request a fresh runtime environment.",
-        };
-        var forceOption = new Option<bool>("--force")
-        {
-            Description = "Force operation where supported.",
-        };
-        var quietOption = new Option<bool>("--quiet", "-q")
-        {
-            Description = "Suppress non-essential output.",
-        };
-        var verboseOption = new Option<bool>("--verbose")
-        {
-            Description = "Enable verbose output.",
-        };
-        var debugOption = new Option<bool>("--debug", "-D")
-        {
-            Description = "Enable debug output.",
-        };
+        var workspaceOption = CreateWorkspaceOption("Workspace path for command execution.");
+        var containerOption = CreateContainerOption();
+        var templateOption = CreateTemplateOption();
+        var channelOption = CreateChannelOption();
+        var dataVolumeOption = CreateDataVolumeOption();
+        var configOption = CreateConfigOption();
+        var freshOption = CreateFreshOption();
+        var forceOption = CreateForceOption();
+        var quietOption = CreateQuietOption();
+        var verboseOption = CreateVerboseOption();
+        var debugOption = CreateDebugOption();
         var commandArgs = new Argument<string[]>("command")
         {
             Arity = ArgumentArity.OneOrMore,
             Description = "Command and arguments passed to ssh.",
         };
 
-        command.Options.Add(workspaceOption);
-        command.Options.Add(containerOption);
-        command.Options.Add(templateOption);
-        command.Options.Add(channelOption);
-        command.Options.Add(dataVolumeOption);
-        command.Options.Add(configOption);
-        command.Options.Add(freshOption);
-        command.Options.Add(forceOption);
-        command.Options.Add(quietOption);
-        command.Options.Add(verboseOption);
-        command.Options.Add(debugOption);
+        AddOptions(
+            command,
+            workspaceOption,
+            containerOption,
+            templateOption,
+            channelOption,
+            dataVolumeOption,
+            configOption,
+            freshOption,
+            forceOption,
+            quietOption,
+            verboseOption,
+            debugOption);
         command.Arguments.Add(commandArgs);
 
         command.SetAction((parseResult, cancellationToken) =>
@@ -508,6 +391,104 @@ internal static partial class RootCommandBuilder
 
         return command;
     }
+
+    private static void AddOptions(Command command, params Option[] options)
+    {
+        foreach (var option in options)
+        {
+            command.Options.Add(option);
+        }
+    }
+
+    private static Option<string?> CreateWorkspaceOption(string description)
+        => new("--workspace", "-w")
+        {
+            Description = description,
+        };
+
+    private static Option<bool> CreateFreshOption()
+        => new("--fresh")
+        {
+            Description = "Request a fresh runtime environment.",
+        };
+
+    private static Option<bool> CreateRestartOption()
+        => new("--restart")
+        {
+            Description = "Alias for --fresh.",
+        };
+
+    private static Option<string?> CreateDataVolumeOption()
+        => new("--data-volume")
+        {
+            Description = "Data volume override.",
+        };
+
+    private static Option<string?> CreateConfigOption()
+        => new("--config")
+        {
+            Description = "Path to config file.",
+        };
+
+    private static Option<string?> CreateContainerOption()
+        => new("--container")
+        {
+            Description = "Attach to a specific container.",
+        };
+
+    private static Option<bool> CreateForceOption()
+        => new("--force")
+        {
+            Description = "Force operation where supported.",
+        };
+
+    private static Option<bool> CreateQuietOption()
+        => new("--quiet", "-q")
+        {
+            Description = "Suppress non-essential output.",
+        };
+
+    private static Option<bool> CreateVerboseOption()
+        => new("--verbose")
+        {
+            Description = "Enable verbose output.",
+        };
+
+    private static Option<bool> CreateDebugOption()
+        => new("--debug", "-D")
+        {
+            Description = "Enable debug output.",
+        };
+
+    private static Option<bool> CreateDryRunOption()
+        => new("--dry-run")
+        {
+            Description = "Show planned actions without executing.",
+        };
+
+    private static Option<string?> CreateTemplateOption()
+        => new("--template")
+        {
+            Description = "Template name.",
+        };
+
+    private static Option<string?> CreateChannelOption()
+        => new("--channel")
+        {
+            Description = "Channel override.",
+        };
+
+    private static Option<string?> CreateMemoryOption()
+        => new("--memory")
+        {
+            Description = "Container memory limit.",
+        };
+
+    private static Option<string?> CreateCpusOption()
+        => new("--cpus")
+        {
+            Description = "Container CPU limit.",
+        };
 
     private static Command CreateDockerCommand(ICaiCommandRuntime runtime)
     {

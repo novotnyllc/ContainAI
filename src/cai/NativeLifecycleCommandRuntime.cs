@@ -107,25 +107,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "doctor",
-        };
-
-        if (options.Json)
-        {
-            args.Add("--json");
-        }
-
-        if (options.BuildTemplates)
-        {
-            args.Add("--build-templates");
-        }
-
-        if (options.ResetLima)
-        {
-            args.Add("--reset-lima");
-        }
+        var args = new List<string> { "doctor" };
+        AppendFlag(args, "--json", options.Json);
+        AppendFlag(args, "--build-templates", options.BuildTemplates);
+        AppendFlag(args, "--reset-lima", options.ResetLima);
 
         return RunDoctorAsync(args, cancellationToken);
     }
@@ -134,31 +119,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "doctor",
-            "fix",
-        };
-
-        if (options.All)
-        {
-            args.Add("--all");
-        }
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Target))
-        {
-            args.Add(options.Target);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.TargetArg))
-        {
-            args.Add(options.TargetArg);
-        }
+        var args = new List<string> { "doctor", "fix" };
+        AppendFlag(args, "--all", options.All);
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendValue(args, options.Target);
+        AppendValue(args, options.TargetArg);
 
         return RunDoctorAsync(args, cancellationToken);
     }
@@ -178,25 +143,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "setup",
-        };
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
-
-        if (options.Verbose)
-        {
-            args.Add("--verbose");
-        }
-
-        if (options.SkipTemplates)
-        {
-            args.Add("--skip-templates");
-        }
+        var args = new List<string> { "setup" };
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--verbose", options.Verbose);
+        AppendFlag(args, "--skip-templates", options.SkipTemplates);
 
         return RunSetupAsync(args, cancellationToken);
     }
@@ -205,54 +155,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "import",
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.From))
-        {
-            args.Add("--from");
-            args.Add(options.From);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.DataVolume))
-        {
-            args.Add("--data-volume");
-            args.Add(options.DataVolume);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Workspace))
-        {
-            args.Add("--workspace");
-            args.Add(options.Workspace);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Config))
-        {
-            args.Add("--config");
-            args.Add(options.Config);
-        }
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
-
-        if (options.NoExcludes)
-        {
-            args.Add("--no-excludes");
-        }
-
-        if (options.NoSecrets)
-        {
-            args.Add("--no-secrets");
-        }
-
-        if (options.Verbose)
-        {
-            args.Add("--verbose");
-        }
+        var args = new List<string> { "import" };
+        AppendOption(args, "--from", options.From);
+        AppendOption(args, "--data-volume", options.DataVolume);
+        AppendOption(args, "--workspace", options.Workspace);
+        AppendOption(args, "--config", options.Config);
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--no-excludes", options.NoExcludes);
+        AppendFlag(args, "--no-secrets", options.NoSecrets);
+        AppendFlag(args, "--verbose", options.Verbose);
 
         return RunImportAsync(args, cancellationToken);
     }
@@ -261,34 +172,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "export",
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.Output))
-        {
-            args.Add("--output");
-            args.Add(options.Output);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.DataVolume))
-        {
-            args.Add("--data-volume");
-            args.Add(options.DataVolume);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Container))
-        {
-            args.Add("--container");
-            args.Add(options.Container);
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Workspace))
-        {
-            args.Add("--workspace");
-            args.Add(options.Workspace);
-        }
+        var args = new List<string> { "export" };
+        AppendOption(args, "--output", options.Output);
+        AppendOption(args, "--data-volume", options.DataVolume);
+        AppendOption(args, "--container", options.Container);
+        AppendOption(args, "--workspace", options.Workspace);
 
         return RunExportAsync(args, cancellationToken);
     }
@@ -300,41 +188,13 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "stop",
-        };
-
-        if (options.All)
-        {
-            args.Add("--all");
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Container))
-        {
-            args.Add("--container");
-            args.Add(options.Container);
-        }
-
-        if (options.Remove)
-        {
-            args.Add("--remove");
-        }
-
-        if (options.Force)
-        {
-            args.Add("--force");
-        }
-
-        if (options.Export)
-        {
-            args.Add("--export");
-        }
-
-        if (options.Verbose)
-        {
-            args.Add("--verbose");
-        }
+        var args = new List<string> { "stop" };
+        AppendFlag(args, "--all", options.All);
+        AppendOption(args, "--container", options.Container);
+        AppendFlag(args, "--remove", options.Remove);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--export", options.Export);
+        AppendFlag(args, "--verbose", options.Verbose);
 
         return RunStopAsync(args, cancellationToken);
     }
@@ -343,31 +203,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "gc",
-        };
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
-
-        if (options.Force)
-        {
-            args.Add("--force");
-        }
-
-        if (options.Images)
-        {
-            args.Add("--images");
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.Age))
-        {
-            args.Add("--age");
-            args.Add(options.Age);
-        }
+        var args = new List<string> { "gc" };
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--images", options.Images);
+        AppendOption(args, "--age", options.Age);
 
         return RunGcAsync(args, cancellationToken);
     }
@@ -379,16 +219,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "ssh",
-            "cleanup",
-        };
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
+        var args = new List<string> { "ssh", "cleanup" };
+        AppendFlag(args, "--dry-run", options.DryRun);
 
         return RunSshAsync(args, cancellationToken);
     }
@@ -571,21 +403,9 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var args = new List<string>
-        {
-            "template",
-            "upgrade",
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.Name))
-        {
-            args.Add(options.Name);
-        }
-
-        if (options.DryRun)
-        {
-            args.Add("--dry-run");
-        }
+        var args = new List<string> { "template", "upgrade" };
+        AppendValue(args, options.Name);
+        AppendFlag(args, "--dry-run", options.DryRun);
 
         return RunTemplateAsync(args, cancellationToken);
     }
@@ -5204,6 +5024,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         if (!string.IsNullOrWhiteSpace(value))
         {
             args.Add(option);
+            args.Add(value);
+        }
+    }
+
+    private static void AppendValue(List<string> args, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
             args.Add(value);
         }
     }
