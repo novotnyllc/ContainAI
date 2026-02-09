@@ -12,22 +12,13 @@ public sealed class WorkspaceStateTests
         using var temp = new TemporaryDirectory();
         var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var setVolume = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-workspace-key", "/tmp/test-workspace", "data_volume", "test-vol",
-        ]);
+        var setVolume = TomlCommandProcessor.SetWorkspaceKey(configPath, "/tmp/test-workspace", "data_volume", "test-vol");
         Assert.Equal(0, setVolume.ExitCode);
 
-        var setContainer = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-workspace-key", "/tmp/test-workspace", "container_name", "my-container",
-        ]);
+        var setContainer = TomlCommandProcessor.SetWorkspaceKey(configPath, "/tmp/test-workspace", "container_name", "my-container");
         Assert.Equal(0, setContainer.ExitCode);
 
-        var getWorkspace = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--get-workspace", "/tmp/test-workspace",
-        ]);
+        var getWorkspace = TomlCommandProcessor.GetWorkspace(configPath, "/tmp/test-workspace");
 
         Assert.Equal(0, getWorkspace.ExitCode);
         using var json = JsonDocument.Parse(getWorkspace.StandardOutput);
@@ -41,10 +32,7 @@ public sealed class WorkspaceStateTests
         using var temp = new TemporaryDirectory();
         var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var result = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-workspace-key", "relative/path", "k", "v",
-        ]);
+        var result = TomlCommandProcessor.SetWorkspaceKey(configPath, "relative/path", "k", "v");
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("Workspace path must be absolute", result.StandardError, StringComparison.Ordinal);
@@ -56,22 +44,13 @@ public sealed class WorkspaceStateTests
         using var temp = new TemporaryDirectory();
         var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var set = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-workspace-key", "/tmp/test-workspace", "agent", "codex",
-        ]);
+        var set = TomlCommandProcessor.SetWorkspaceKey(configPath, "/tmp/test-workspace", "agent", "codex");
         Assert.Equal(0, set.ExitCode);
 
-        var unset = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--unset-workspace-key", "/tmp/test-workspace", "agent",
-        ]);
+        var unset = TomlCommandProcessor.UnsetWorkspaceKey(configPath, "/tmp/test-workspace", "agent");
         Assert.Equal(0, unset.ExitCode);
 
-        var get = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--get-workspace", "/tmp/test-workspace",
-        ]);
+        var get = TomlCommandProcessor.GetWorkspace(configPath, "/tmp/test-workspace");
         Assert.Equal(0, get.ExitCode);
 
         using var json = JsonDocument.Parse(get.StandardOutput);
@@ -85,29 +64,17 @@ public sealed class WorkspaceStateTests
         using var temp = new TemporaryDirectory();
         var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var set = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-key", "agent.data_volume", "containai-data",
-        ]);
+        var set = TomlCommandProcessor.SetKey(configPath, "agent.data_volume", "containai-data");
         Assert.Equal(0, set.ExitCode);
 
-        var get = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--key", "agent.data_volume",
-        ]);
+        var get = TomlCommandProcessor.GetKey(configPath, "agent.data_volume");
         Assert.Equal(0, get.ExitCode);
         Assert.Equal("containai-data", get.StandardOutput);
 
-        var unset = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--unset-key", "agent.data_volume",
-        ]);
+        var unset = TomlCommandProcessor.UnsetKey(configPath, "agent.data_volume");
         Assert.Equal(0, unset.ExitCode);
 
-        var getAfter = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--key", "agent.data_volume",
-        ]);
+        var getAfter = TomlCommandProcessor.GetKey(configPath, "agent.data_volume");
         Assert.Equal(0, getAfter.ExitCode);
         Assert.Equal(string.Empty, getAfter.StandardOutput);
     }
@@ -123,10 +90,7 @@ public sealed class WorkspaceStateTests
         using var temp = new TemporaryDirectory();
         var configPath = Path.Combine(temp.Path, "config", "containai", "config.toml");
 
-        var set = TomlCommandProcessor.Execute([
-            "--file", configPath,
-            "--set-workspace-key", "/tmp/test-workspace", "k", "v",
-        ]);
+        var set = TomlCommandProcessor.SetWorkspaceKey(configPath, "/tmp/test-workspace", "k", "v");
 
         Assert.Equal(0, set.ExitCode);
 

@@ -42,70 +42,16 @@ internal sealed class NativeSessionCommandRuntime
         stderr = standardError;
     }
 
-    public async Task<int> RunRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var parse = ParseRunOptions(args);
-        if (!parse.Success)
-        {
-            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
-            return 1;
-        }
-
-        if (parse.ShowHelp)
-        {
-            await stdout.WriteLineAsync(GetRunUsageText()).ConfigureAwait(false);
-            return 0;
-        }
-
-        return await RunSessionAsync(parse.Options with { Mode = SessionMode.Run }, cancellationToken).ConfigureAwait(false);
-    }
-
     public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
         return RunSessionAsync(ToSessionOptions(options), cancellationToken);
     }
 
-    public async Task<int> RunShellAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var parse = ParseShellOptions(args);
-        if (!parse.Success)
-        {
-            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
-            return 1;
-        }
-
-        if (parse.ShowHelp)
-        {
-            await stdout.WriteLineAsync(GetShellUsageText()).ConfigureAwait(false);
-            return 0;
-        }
-
-        return await RunSessionAsync(parse.Options with { Mode = SessionMode.Shell }, cancellationToken).ConfigureAwait(false);
-    }
-
     public Task<int> RunShellAsync(ShellCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
         return RunSessionAsync(ToSessionOptions(options), cancellationToken);
-    }
-
-    public async Task<int> RunExecAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        var parse = ParseExecOptions(args);
-        if (!parse.Success)
-        {
-            await stderr.WriteLineAsync(parse.Error).ConfigureAwait(false);
-            return parse.ErrorCode;
-        }
-
-        if (parse.ShowHelp)
-        {
-            await stdout.WriteLineAsync(GetExecUsageText()).ConfigureAwait(false);
-            return 0;
-        }
-
-        return await RunSessionAsync(parse.Options with { Mode = SessionMode.Exec }, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<int> RunExecAsync(ExecCommandOptions options, CancellationToken cancellationToken)
@@ -542,11 +488,15 @@ internal sealed class NativeSessionCommandRuntime
             await File.WriteAllTextAsync(configPath, string.Empty, cancellationToken).ConfigureAwait(false);
         }
 
-        await RunParseTomlAsync(["--file", configPath, "--set-workspace-key", session.Workspace, "container_name", session.ContainerName], cancellationToken).ConfigureAwait(false);
+        await RunTomlAsync(
+            () => TomlCommandProcessor.SetWorkspaceKey(configPath, session.Workspace, "container_name", session.ContainerName),
+            cancellationToken).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CONTAINAI_DATA_VOLUME")))
         {
-            await RunParseTomlAsync(["--file", configPath, "--set-workspace-key", session.Workspace, "data_volume", session.DataVolume], cancellationToken).ConfigureAwait(false);
+            await RunTomlAsync(
+                () => TomlCommandProcessor.SetWorkspaceKey(configPath, session.Workspace, "data_volume", session.DataVolume),
+                cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -958,7 +908,7 @@ Host {containerName}
         var configPath = ResolveUserConfigPath();
         if (File.Exists(configPath))
         {
-            var ws = await RunParseTomlAsync(["--file", configPath, "--get-workspace", workspace], cancellationToken).ConfigureAwait(false);
+            var ws = await RunTomlAsync(() => TomlCommandProcessor.GetWorkspace(configPath, workspace), cancellationToken).ConfigureAwait(false);
             if (ws.ExitCode == 0 && !string.IsNullOrWhiteSpace(ws.StandardOutput))
             {
                 using var json = JsonDocument.Parse(ws.StandardOutput);
@@ -1182,7 +1132,7 @@ Host {containerName}
             return null;
         }
 
-        var contextResult = await RunParseTomlAsync(["--file", configPath, "--key", "secure_engine.context_name"], cancellationToken).ConfigureAwait(false);
+        var contextResult = await RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "secure_engine.context_name"), cancellationToken).ConfigureAwait(false);
         if (contextResult.ExitCode != 0)
         {
             return null;
@@ -1218,7 +1168,7 @@ Host {containerName}
         var userConfig = ResolveUserConfigPath();
         if (File.Exists(userConfig))
         {
-            var state = await RunParseTomlAsync(["--file", userConfig, "--get-workspace", workspace], cancellationToken).ConfigureAwait(false);
+            var state = await RunTomlAsync(() => TomlCommandProcessor.GetWorkspace(userConfig, workspace), cancellationToken).ConfigureAwait(false);
             if (state.ExitCode == 0 && !string.IsNullOrWhiteSpace(state.StandardOutput))
             {
                 using var json = JsonDocument.Parse(state.StandardOutput);
@@ -1237,7 +1187,7 @@ Host {containerName}
         var discoveredConfig = FindConfigFile(workspace, explicitConfig);
         if (!string.IsNullOrWhiteSpace(discoveredConfig) && File.Exists(discoveredConfig))
         {
-            var localWorkspace = await RunParseTomlAsync(["--file", discoveredConfig, "--get-workspace", workspace], cancellationToken).ConfigureAwait(false);
+            var localWorkspace = await RunTomlAsync(() => TomlCommandProcessor.GetWorkspace(discoveredConfig, workspace), cancellationToken).ConfigureAwait(false);
             if (localWorkspace.ExitCode == 0 && !string.IsNullOrWhiteSpace(localWorkspace.StandardOutput))
             {
                 using var json = JsonDocument.Parse(localWorkspace.StandardOutput);
@@ -1252,7 +1202,7 @@ Host {containerName}
                 }
             }
 
-            var global = await RunParseTomlAsync(["--file", discoveredConfig, "--key", "agent.data_volume"], cancellationToken).ConfigureAwait(false);
+            var global = await RunTomlAsync(() => TomlCommandProcessor.GetKey(discoveredConfig, "agent.data_volume"), cancellationToken).ConfigureAwait(false);
             if (global.ExitCode == 0)
             {
                 var value = global.StandardOutput.Trim();
@@ -1632,575 +1582,10 @@ Host {containerName}
         return string.IsNullOrWhiteSpace(trimmed) ? fallback : trimmed;
     }
 
-    private static string GetRunUsageText() => "Usage: cai run [path] [options] [-- command]";
-
-    private static string GetShellUsageText() => "Usage: cai shell [path] [options]";
-
-    private static string GetExecUsageText() => "Usage: cai exec [options] [--] <command> [args...]";
-
-    private static ParseResult ParseRunOptions(IReadOnlyList<string> args)
-    {
-        var options = SessionCommandOptions.Create(SessionMode.Run);
-        var index = 1;
-
-        while (index < args.Count)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--":
-                    options = options with { CommandArgs = args.Skip(index + 1).ToArray() };
-                    return ParseResult.SuccessResult(options);
-                case "--help":
-                case "-h":
-                    return ParseResult.HelpResult(options);
-                case "--credentials":
-                    if (!TryReadValue(args, ref index, out var credentials))
-                    {
-                        return ParseResult.ErrorResult("--credentials requires a value");
-                    }
-
-                    options = options with { Credentials = credentials };
-                    break;
-                case "--acknowledge-credential-risk":
-                    options = options with { AcknowledgeCredentialRisk = true };
-                    break;
-                case "--data-volume":
-                    if (!TryReadValue(args, ref index, out var dataVolume))
-                    {
-                        return ParseResult.ErrorResult("--data-volume requires a value");
-                    }
-
-                    options = options with { DataVolume = dataVolume };
-                    break;
-                case "--config":
-                    if (!TryReadValue(args, ref index, out var config))
-                    {
-                        return ParseResult.ErrorResult("--config requires a value");
-                    }
-
-                    options = options with { ExplicitConfig = config };
-                    break;
-                case "--workspace":
-                case "-w":
-                    if (!TryReadValue(args, ref index, out var workspace))
-                    {
-                        return ParseResult.ErrorResult("--workspace requires a value");
-                    }
-
-                    options = options with { Workspace = workspace };
-                    break;
-                default:
-                    if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-                    {
-                        options = options with { Workspace = token[12..] };
-                    }
-                    else if (token.StartsWith("-w", StringComparison.Ordinal) && token.Length > 2)
-                    {
-                        options = options with { Workspace = token[2..] };
-                    }
-                    else if (token == "--container")
-                    {
-                        if (!TryReadValue(args, ref index, out var container))
-                        {
-                            return ParseResult.ErrorResult("--container requires a value");
-                        }
-
-                        options = options with { Container = container };
-                    }
-                    else if (token.StartsWith("--container=", StringComparison.Ordinal))
-                    {
-                        options = options with { Container = token[12..] };
-                    }
-                    else if (token is "--restart" or "--fresh")
-                    {
-                        options = options with { Fresh = true };
-                    }
-                    else if (token == "--force")
-                    {
-                        options = options with { Force = true };
-                    }
-                    else if (token is "--detached" or "-d")
-                    {
-                        options = options with { Detached = true };
-                    }
-                    else if (token is "--quiet" or "-q")
-                    {
-                        options = options with { Quiet = true };
-                    }
-                    else if (token == "--verbose")
-                    {
-                        options = options with { Verbose = true };
-                    }
-                    else if (token is "--debug" or "-D")
-                    {
-                        options = options with { Debug = true };
-                    }
-                    else if (token == "--dry-run")
-                    {
-                        options = options with { DryRun = true };
-                    }
-                    else if (token == "--image-tag")
-                    {
-                        if (!TryReadValue(args, ref index, out var imageTag))
-                        {
-                            return ParseResult.ErrorResult("--image-tag requires a value");
-                        }
-
-                        options = options with { ImageTag = imageTag };
-                    }
-                    else if (token.StartsWith("--image-tag=", StringComparison.Ordinal))
-                    {
-                        options = options with { ImageTag = token[("--image-tag=".Length)..] };
-                    }
-                    else if (token == "--template")
-                    {
-                        if (!TryReadValue(args, ref index, out var template))
-                        {
-                            return ParseResult.ErrorResult("--template requires a value");
-                        }
-
-                        options = options with { Template = template };
-                    }
-                    else if (token.StartsWith("--template=", StringComparison.Ordinal))
-                    {
-                        options = options with { Template = token[("--template=".Length)..] };
-                    }
-                    else if (token == "--channel")
-                    {
-                        if (!TryReadValue(args, ref index, out var channel))
-                        {
-                            return ParseResult.ErrorResult("--channel requires a value");
-                        }
-
-                        options = options with { Channel = channel };
-                    }
-                    else if (token.StartsWith("--channel=", StringComparison.Ordinal))
-                    {
-                        options = options with { Channel = token[("--channel=".Length)..] };
-                    }
-                    else if (token == "--memory")
-                    {
-                        if (!TryReadValue(args, ref index, out var memory))
-                        {
-                            return ParseResult.ErrorResult("--memory requires a value");
-                        }
-
-                        options = options with { Memory = memory };
-                    }
-                    else if (token.StartsWith("--memory=", StringComparison.Ordinal))
-                    {
-                        options = options with { Memory = token[("--memory=".Length)..] };
-                    }
-                    else if (token == "--cpus")
-                    {
-                        if (!TryReadValue(args, ref index, out var cpus))
-                        {
-                            return ParseResult.ErrorResult("--cpus requires a value");
-                        }
-
-                        options = options with { Cpus = cpus };
-                    }
-                    else if (token.StartsWith("--cpus=", StringComparison.Ordinal))
-                    {
-                        options = options with { Cpus = token[("--cpus=".Length)..] };
-                    }
-                    else if (token is "--mount-docker-socket" or "--please-root-my-host" or "--allow-host-credentials" or "--i-understand-this-exposes-host-credentials" or "--allow-host-docker-socket" or "--i-understand-this-grants-root-access")
-                    {
-                        return ParseResult.ErrorResult($"{token} is no longer supported in cai run");
-                    }
-                    else if (token is "--volume" or "-v" || token.StartsWith("--volume=", StringComparison.Ordinal) || (token.StartsWith("-v", StringComparison.Ordinal) && token.Length > 2))
-                    {
-                        return ParseResult.ErrorResult("--volume is not supported in containai run");
-                    }
-                    else if (token is "--env" or "-e")
-                    {
-                        if (!TryReadValue(args, ref index, out var envVar))
-                        {
-                            return ParseResult.ErrorResult("--env requires a value");
-                        }
-
-                        options.EnvVars.Add(envVar);
-                    }
-                    else if (token.StartsWith("--env=", StringComparison.Ordinal))
-                    {
-                        options.EnvVars.Add(token[("--env=".Length)..]);
-                    }
-                    else if (token.StartsWith("-e", StringComparison.Ordinal) && token.Length > 2)
-                    {
-                        options.EnvVars.Add(token[2..]);
-                    }
-                    else if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
-                    {
-                        options = options with { Workspace = token };
-                    }
-                    else
-                    {
-                        return ParseResult.ErrorResult($"Unknown option: {token}");
-                    }
-
-                    break;
-            }
-
-            index++;
-        }
-
-        return ParseResult.SuccessResult(options);
-    }
-
-    private static ParseResult ParseShellOptions(IReadOnlyList<string> args)
-    {
-        var options = SessionCommandOptions.Create(SessionMode.Shell);
-        var index = 1;
-
-        while (index < args.Count)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    return ParseResult.HelpResult(options);
-                case "--data-volume":
-                    if (!TryReadValue(args, ref index, out var dataVolume))
-                    {
-                        return ParseResult.ErrorResult("--data-volume requires a value");
-                    }
-
-                    options = options with { DataVolume = dataVolume };
-                    break;
-                case "--config":
-                    if (!TryReadValue(args, ref index, out var config))
-                    {
-                        return ParseResult.ErrorResult("--config requires a value");
-                    }
-
-                    options = options with { ExplicitConfig = config };
-                    break;
-                case "--workspace":
-                case "-w":
-                    if (!TryReadValue(args, ref index, out var workspace))
-                    {
-                        return ParseResult.ErrorResult("--workspace requires a value");
-                    }
-
-                    options = options with { Workspace = workspace };
-                    break;
-                default:
-                    if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-                    {
-                        options = options with { Workspace = token[12..] };
-                    }
-                    else if (token.StartsWith("-w", StringComparison.Ordinal) && token.Length > 2)
-                    {
-                        options = options with { Workspace = token[2..] };
-                    }
-                    else if (token == "--container")
-                    {
-                        if (!TryReadValue(args, ref index, out var container))
-                        {
-                            return ParseResult.ErrorResult("--container requires a value");
-                        }
-
-                        options = options with { Container = container };
-                    }
-                    else if (token.StartsWith("--container=", StringComparison.Ordinal))
-                    {
-                        options = options with { Container = token[12..] };
-                    }
-                    else if (token is "--restart" or "--fresh")
-                    {
-                        options = options with { Fresh = true };
-                    }
-                    else if (token == "--reset")
-                    {
-                        options = options with { Reset = true };
-                    }
-                    else if (token == "--force")
-                    {
-                        options = options with { Force = true };
-                    }
-                    else if (token is "--quiet" or "-q")
-                    {
-                        options = options with { Quiet = true };
-                    }
-                    else if (token == "--verbose")
-                    {
-                        options = options with { Verbose = true };
-                    }
-                    else if (token is "--debug" or "-D")
-                    {
-                        options = options with { Debug = true };
-                    }
-                    else if (token == "--dry-run")
-                    {
-                        options = options with { DryRun = true };
-                    }
-                    else if (token == "--image-tag")
-                    {
-                        if (!TryReadValue(args, ref index, out var imageTag))
-                        {
-                            return ParseResult.ErrorResult("--image-tag requires a value");
-                        }
-
-                        options = options with { ImageTag = imageTag };
-                    }
-                    else if (token.StartsWith("--image-tag=", StringComparison.Ordinal))
-                    {
-                        options = options with { ImageTag = token[("--image-tag=".Length)..] };
-                    }
-                    else if (token == "--template")
-                    {
-                        if (!TryReadValue(args, ref index, out var template))
-                        {
-                            return ParseResult.ErrorResult("--template requires a value");
-                        }
-
-                        options = options with { Template = template };
-                    }
-                    else if (token.StartsWith("--template=", StringComparison.Ordinal))
-                    {
-                        options = options with { Template = token[("--template=".Length)..] };
-                    }
-                    else if (token == "--channel")
-                    {
-                        if (!TryReadValue(args, ref index, out var channel))
-                        {
-                            return ParseResult.ErrorResult("--channel requires a value");
-                        }
-
-                        options = options with { Channel = channel };
-                    }
-                    else if (token.StartsWith("--channel=", StringComparison.Ordinal))
-                    {
-                        options = options with { Channel = token[("--channel=".Length)..] };
-                    }
-                    else if (token == "--memory")
-                    {
-                        if (!TryReadValue(args, ref index, out var memory))
-                        {
-                            return ParseResult.ErrorResult("--memory requires a value");
-                        }
-
-                        options = options with { Memory = memory };
-                    }
-                    else if (token.StartsWith("--memory=", StringComparison.Ordinal))
-                    {
-                        options = options with { Memory = token[("--memory=".Length)..] };
-                    }
-                    else if (token == "--cpus")
-                    {
-                        if (!TryReadValue(args, ref index, out var cpus))
-                        {
-                            return ParseResult.ErrorResult("--cpus requires a value");
-                        }
-
-                        options = options with { Cpus = cpus };
-                    }
-                    else if (token.StartsWith("--cpus=", StringComparison.Ordinal))
-                    {
-                        options = options with { Cpus = token[("--cpus=".Length)..] };
-                    }
-                    else if (token is "--mount-docker-socket" or "--please-root-my-host" or "--allow-host-credentials" or "--i-understand-this-exposes-host-credentials" or "--allow-host-docker-socket" or "--i-understand-this-grants-root-access")
-                    {
-                        return ParseResult.ErrorResult($"{token} is not supported in cai shell");
-                    }
-                    else if (token is "--env" or "-e" || token.StartsWith("--env=", StringComparison.Ordinal) || (token.StartsWith("-e", StringComparison.Ordinal) && token.Length > 2))
-                    {
-                        return ParseResult.ErrorResult("--env is not supported in cai shell (SSH mode)");
-                    }
-                    else if (token is "--volume" or "-v" || token.StartsWith("--volume=", StringComparison.Ordinal) || (token.StartsWith("-v", StringComparison.Ordinal) && token.Length > 2))
-                    {
-                        return ParseResult.ErrorResult("--volume is not supported in cai shell (SSH mode)");
-                    }
-                    else if (!token.StartsWith('-') && string.IsNullOrWhiteSpace(options.Workspace) && Directory.Exists(ExpandHome(token)))
-                    {
-                        options = options with { Workspace = token };
-                    }
-                    else
-                    {
-                        return ParseResult.ErrorResult($"Unknown option: {token}");
-                    }
-
-                    break;
-            }
-
-            index++;
-        }
-
-        return ParseResult.SuccessResult(options);
-    }
-
-    private static ParseResult ParseExecOptions(IReadOnlyList<string> args)
-    {
-        var options = SessionCommandOptions.Create(SessionMode.Exec);
-        var command = new List<string>();
-        var index = 1;
-
-        while (index < args.Count)
-        {
-            var token = args[index];
-
-            if (token == "--")
-            {
-                command.AddRange(args.Skip(index + 1));
-                break;
-            }
-
-            if (command.Count > 0)
-            {
-                command.Add(token);
-                index++;
-                continue;
-            }
-
-            switch (token)
-            {
-                case "--help":
-                case "-h":
-                    return ParseResult.HelpResult(options);
-                case "--workspace":
-                case "-w":
-                    if (!TryReadValue(args, ref index, out var workspace))
-                    {
-                        return ParseResult.ErrorResult("--workspace requires a value");
-                    }
-
-                    options = options with { Workspace = workspace };
-                    break;
-                case "--container":
-                    if (!TryReadValue(args, ref index, out var container))
-                    {
-                        return ParseResult.ErrorResult("--container requires a value");
-                    }
-
-                    options = options with { Container = container };
-                    break;
-                case "--template":
-                    if (!TryReadValue(args, ref index, out var template))
-                    {
-                        return ParseResult.ErrorResult("--template requires a value");
-                    }
-
-                    options = options with { Template = template };
-                    break;
-                case "--channel":
-                    if (!TryReadValue(args, ref index, out var channel))
-                    {
-                        return ParseResult.ErrorResult("--channel requires a value");
-                    }
-
-                    options = options with { Channel = channel };
-                    break;
-                case "--data-volume":
-                    if (!TryReadValue(args, ref index, out var dataVolume))
-                    {
-                        return ParseResult.ErrorResult("--data-volume requires a value");
-                    }
-
-                    options = options with { DataVolume = dataVolume };
-                    break;
-                case "--config":
-                    if (!TryReadValue(args, ref index, out var config))
-                    {
-                        return ParseResult.ErrorResult("--config requires a value");
-                    }
-
-                    options = options with { ExplicitConfig = config };
-                    break;
-                case "--fresh":
-                    options = options with { Fresh = true };
-                    break;
-                case "--restart":
-                    return ParseResult.ErrorResult("--restart is not supported in cai exec", 1);
-                case "--force":
-                    options = options with { Force = true };
-                    break;
-                case "--quiet":
-                case "-q":
-                    options = options with { Quiet = true };
-                    break;
-                case "--verbose":
-                    options = options with { Verbose = true };
-                    break;
-                case "--debug":
-                case "-D":
-                    options = options with { Debug = true };
-                    break;
-                default:
-                    if (token.StartsWith("--workspace=", StringComparison.Ordinal))
-                    {
-                        options = options with { Workspace = token[12..] };
-                    }
-                    else if (token.StartsWith("-w", StringComparison.Ordinal) && token.Length > 2)
-                    {
-                        options = options with { Workspace = token[2..] };
-                    }
-                    else if (token.StartsWith("--container=", StringComparison.Ordinal))
-                    {
-                        options = options with { Container = token[("--container=".Length)..] };
-                    }
-                    else if (token.StartsWith("--template=", StringComparison.Ordinal))
-                    {
-                        options = options with { Template = token[("--template=".Length)..] };
-                    }
-                    else if (token.StartsWith("--channel=", StringComparison.Ordinal))
-                    {
-                        options = options with { Channel = token[("--channel=".Length)..] };
-                    }
-                    else if (token.StartsWith("--data-volume=", StringComparison.Ordinal))
-                    {
-                        options = options with { DataVolume = token[("--data-volume=".Length)..] };
-                    }
-                    else if (token.StartsWith("--config=", StringComparison.Ordinal))
-                    {
-                        options = options with { ExplicitConfig = token[("--config=".Length)..] };
-                    }
-                    else if (token.StartsWith('-'))
-                    {
-                        command.AddRange(args.Skip(index));
-                        index = args.Count;
-                        continue;
-                    }
-                    else
-                    {
-                        command.AddRange(args.Skip(index));
-                        index = args.Count;
-                        continue;
-                    }
-
-                    break;
-            }
-
-            index++;
-        }
-
-        if (command.Count == 0)
-        {
-            return ParseResult.ErrorResult("No command specified", 1);
-        }
-
-        options = options with { CommandArgs = command };
-        return ParseResult.SuccessResult(options);
-    }
-
-    private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)
-    {
-        value = string.Empty;
-        if (index + 1 >= args.Count)
-        {
-            return false;
-        }
-
-        value = ExpandHome(args[index + 1]);
-        index++;
-        return true;
-    }
-
-    private static async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var result = TomlCommandProcessor.Execute(args);
+        var result = operation();
         return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
@@ -2303,16 +1688,6 @@ Host {containerName}
                 DryRun: false,
                 CommandArgs: Array.Empty<string>(),
                 EnvVars: []);
-    }
-
-    private sealed record ParseResult(bool Success, bool ShowHelp, SessionCommandOptions Options, string Error, int ErrorCode)
-    {
-        public static ParseResult SuccessResult(SessionCommandOptions options) => new(true, false, options, string.Empty, 1);
-
-        public static ParseResult HelpResult(SessionCommandOptions options) => new(true, true, options, string.Empty, 0);
-
-        public static ParseResult ErrorResult(string error, int errorCode = 1)
-            => new(false, false, SessionCommandOptions.Create(SessionMode.Run), error, errorCode);
     }
 
     private sealed record ResolutionResult<T>(bool Success, T? Value, string? Error, int ErrorCode)

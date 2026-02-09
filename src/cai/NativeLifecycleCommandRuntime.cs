@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using ContainAI.Cli;
 using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
@@ -36,34 +37,40 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return Task.FromResult(1);
         }
 
+        var listArgs = args as List<string> ?? [.. args];
+
         return args[0] switch
         {
-            "run" => sessionRuntime.RunRunAsync(args, cancellationToken),
-            "shell" => sessionRuntime.RunShellAsync(args, cancellationToken),
-            "exec" => sessionRuntime.RunExecAsync(args, cancellationToken),
-            "docker" => RunDockerAsync(args, cancellationToken),
-            "status" => RunStatusAsync(args, cancellationToken),
-            "help" => RunHelpAsync(args, cancellationToken),
-            "version" => RunVersionAsync(args, cancellationToken),
-            "doctor" => RunDoctorAsync(args, cancellationToken),
-            "validate" => RunValidateAsync(args, cancellationToken),
-            "setup" => RunSetupAsync(args, cancellationToken),
-            "import" => RunImportAsync(args, cancellationToken),
-            "export" => RunExportAsync(args, cancellationToken),
-            "sync" => RunSyncAsync(args, cancellationToken),
-            "links" => RunLinksAsync(args, cancellationToken),
-            "update" => RunUpdateAsync(args, cancellationToken),
-            "refresh" => RunRefreshAsync(args, cancellationToken),
-            "uninstall" => RunUninstallAsync(args, cancellationToken),
-            "config" => RunConfigAsync(args, cancellationToken),
-            "manifest" => RunManifestAsync(args, cancellationToken),
-            "template" => RunTemplateAsync(args, cancellationToken),
-            "ssh" => RunSshAsync(args, cancellationToken),
-            "stop" => RunStopAsync(args, cancellationToken),
-            "gc" => RunGcAsync(args, cancellationToken),
-            "system" => containerRuntimeCommandService.RunAsync(args, cancellationToken),
+            "run" or "shell" or "exec" => RunSessionCommandViaCliAsync(args, cancellationToken),
+            "docker" => RunDockerAsync(listArgs, cancellationToken),
+            "status" => RunStatusAsync(listArgs, cancellationToken),
+            "help" => RunHelpAsync(listArgs, cancellationToken),
+            "version" => RunVersionAsync(listArgs, cancellationToken),
+            "doctor" => RunDoctorAsync(listArgs, cancellationToken),
+            "validate" => RunValidateAsync(listArgs, cancellationToken),
+            "setup" => RunSetupAsync(listArgs, cancellationToken),
+            "import" => RunImportAsync(listArgs, cancellationToken),
+            "export" => RunExportAsync(listArgs, cancellationToken),
+            "sync" => RunSyncAsync(listArgs, cancellationToken),
+            "links" => RunLinksAsync(listArgs, cancellationToken),
+            "update" => RunUpdateAsync(listArgs, cancellationToken),
+            "refresh" => RunRefreshAsync(listArgs, cancellationToken),
+            "uninstall" => RunUninstallAsync(listArgs, cancellationToken),
+            "config" => RunConfigAsync(listArgs, cancellationToken),
+            "manifest" => RunManifestAsync(listArgs, cancellationToken),
+            "template" => RunTemplateAsync(listArgs, cancellationToken),
+            "ssh" => RunSshAsync(listArgs, cancellationToken),
+            "stop" => RunStopAsync(listArgs, cancellationToken),
+            "gc" => RunGcAsync(listArgs, cancellationToken),
+            "system" => containerRuntimeCommandService.RunAsync(listArgs, cancellationToken),
             _ => Task.FromResult(1),
         };
+    }
+
+    private Task<int> RunSessionCommandViaCliAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        var runtime = new CaiCommandRuntime(new AcpProxyRunner(), this);
+        return CaiCli.RunAsync(args.ToArray(), runtime, cancellationToken);
     }
 
     public Task<int> RunRunAsync(RunCommandOptions options, CancellationToken cancellationToken)
@@ -96,98 +103,554 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return RunStatusCoreAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
     }
 
-    public Task<int> RunDoctorCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunDoctorAsync(["doctor", .. args], cancellationToken);
+    public Task<int> RunDoctorAsync(DoctorCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunDoctorFixCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunDoctorFixAsync(["doctor", "fix", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "doctor",
+        };
 
-    public Task<int> RunValidateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunValidateAsync(["validate", .. args], cancellationToken);
+        if (options.Json)
+        {
+            args.Add("--json");
+        }
 
-    public Task<int> RunSetupCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunSetupAsync(["setup", .. args], cancellationToken);
+        if (options.BuildTemplates)
+        {
+            args.Add("--build-templates");
+        }
 
-    public Task<int> RunImportCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunImportAsync(["import", .. args], cancellationToken);
+        if (options.ResetLima)
+        {
+            args.Add("--reset-lima");
+        }
 
-    public Task<int> RunExportCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunExportAsync(["export", .. args], cancellationToken);
+        return RunDoctorAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "doctor",
+            "fix",
+        };
+
+        if (options.All)
+        {
+            args.Add("--all");
+        }
+
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Target))
+        {
+            args.Add(options.Target);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.TargetArg))
+        {
+            args.Add(options.TargetArg);
+        }
+
+        return RunDoctorAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = options.Json
+            ? new[] { "validate", "--json" }
+            : new[] { "validate" };
+
+        return RunValidateAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "setup",
+        };
+
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+
+        if (options.Verbose)
+        {
+            args.Add("--verbose");
+        }
+
+        if (options.SkipTemplates)
+        {
+            args.Add("--skip-templates");
+        }
+
+        return RunSetupAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "import",
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.From))
+        {
+            args.Add("--from");
+            args.Add(options.From);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.DataVolume))
+        {
+            args.Add("--data-volume");
+            args.Add(options.DataVolume);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Workspace))
+        {
+            args.Add("--workspace");
+            args.Add(options.Workspace);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Config))
+        {
+            args.Add("--config");
+            args.Add(options.Config);
+        }
+
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+
+        if (options.NoExcludes)
+        {
+            args.Add("--no-excludes");
+        }
+
+        if (options.NoSecrets)
+        {
+            args.Add("--no-secrets");
+        }
+
+        if (options.Verbose)
+        {
+            args.Add("--verbose");
+        }
+
+        return RunImportAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "export",
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.Output))
+        {
+            args.Add("--output");
+            args.Add(options.Output);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.DataVolume))
+        {
+            args.Add("--data-volume");
+            args.Add(options.DataVolume);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Container))
+        {
+            args.Add("--container");
+            args.Add(options.Container);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Workspace))
+        {
+            args.Add("--workspace");
+            args.Add(options.Workspace);
+        }
+
+        return RunExportAsync(args, cancellationToken);
+    }
 
     public Task<int> RunSyncCommandAsync(CancellationToken cancellationToken)
         => RunSyncAsync(["sync"], cancellationToken);
 
-    public Task<int> RunStopCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunStopAsync(["stop", .. args], cancellationToken);
+    public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunGcCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunGcAsync(["gc", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "stop",
+        };
+
+        if (options.All)
+        {
+            args.Add("--all");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Container))
+        {
+            args.Add("--container");
+            args.Add(options.Container);
+        }
+
+        if (options.Remove)
+        {
+            args.Add("--remove");
+        }
+
+        if (options.Force)
+        {
+            args.Add("--force");
+        }
+
+        if (options.Export)
+        {
+            args.Add("--export");
+        }
+
+        if (options.Verbose)
+        {
+            args.Add("--verbose");
+        }
+
+        return RunStopAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "gc",
+        };
+
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+
+        if (options.Force)
+        {
+            args.Add("--force");
+        }
+
+        if (options.Images)
+        {
+            args.Add("--images");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Age))
+        {
+            args.Add("--age");
+            args.Add(options.Age);
+        }
+
+        return RunGcAsync(args, cancellationToken);
+    }
 
     public Task<int> RunSshCommandAsync(CancellationToken cancellationToken)
         => RunSshAsync(["ssh"], cancellationToken);
 
-    public Task<int> RunSshCleanupCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunSshAsync(["ssh", "cleanup", .. args], cancellationToken);
+    public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "ssh",
+            "cleanup",
+        };
+
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
+
+        return RunSshAsync(args, cancellationToken);
+    }
 
     public Task<int> RunLinksCommandAsync(CancellationToken cancellationToken)
         => RunLinksAsync(["links"], cancellationToken);
 
-    public Task<int> RunLinksCheckCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunLinksAsync(["links", "check", .. args], cancellationToken);
+    public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
+        => RunLinksSubcommandAsync("check", options, cancellationToken);
 
-    public Task<int> RunLinksFixCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunLinksAsync(["links", "fix", .. args], cancellationToken);
+    public Task<int> RunLinksFixAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
+        => RunLinksSubcommandAsync("fix", options, cancellationToken);
 
     public Task<int> RunConfigCommandAsync(CancellationToken cancellationToken)
         => RunConfigAsync(["config"], cancellationToken);
 
-    public Task<int> RunConfigListCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunConfigAsync(["config", "list", .. args], cancellationToken);
+    public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunConfigGetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunConfigAsync(["config", "get", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "config",
+        };
+        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
+        args.Add("list");
+        return RunConfigAsync(args, cancellationToken);
+    }
 
-    public Task<int> RunConfigSetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunConfigAsync(["config", "set", .. args], cancellationToken);
+    public Task<int> RunConfigGetAsync(ConfigGetCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunConfigUnsetCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunConfigAsync(["config", "unset", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "config",
+        };
+        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
+        args.Add("get");
+        args.Add(options.Key);
+        return RunConfigAsync(args, cancellationToken);
+    }
 
-    public Task<int> RunConfigResolveVolumeCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunConfigAsync(["config", "resolve-volume", .. args], cancellationToken);
+    public Task<int> RunConfigSetAsync(ConfigSetCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "config",
+        };
+        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
+        args.Add("set");
+        args.Add(options.Key);
+        args.Add(options.Value);
+        return RunConfigAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunConfigUnsetAsync(ConfigUnsetCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "config",
+        };
+        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
+        args.Add("unset");
+        args.Add(options.Key);
+        return RunConfigAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "config",
+        };
+        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
+        args.Add("resolve-volume");
+        if (!string.IsNullOrWhiteSpace(options.ExplicitVolume))
+        {
+            args.Add(options.ExplicitVolume);
+        }
+
+        return RunConfigAsync(args, cancellationToken);
+    }
 
     public Task<int> RunManifestCommandAsync(CancellationToken cancellationToken)
         => RunManifestAsync(["manifest"], cancellationToken);
 
-    public Task<int> RunManifestParseCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunManifestAsync(["manifest", "parse", .. args], cancellationToken);
+    public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunManifestGenerateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunManifestAsync(["manifest", "generate", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "manifest",
+            "parse",
+        };
+        if (options.IncludeDisabled)
+        {
+            args.Add("--include-disabled");
+        }
 
-    public Task<int> RunManifestApplyCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunManifestAsync(["manifest", "apply", .. args], cancellationToken);
+        if (options.EmitSourceFile)
+        {
+            args.Add("--emit-source-file");
+        }
 
-    public Task<int> RunManifestCheckCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunManifestAsync(["manifest", "check", .. args], cancellationToken);
+        args.Add(options.ManifestPath);
+        return RunManifestAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "manifest",
+            "generate",
+            options.Kind,
+            options.ManifestPath,
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.OutputPath))
+        {
+            args.Add(options.OutputPath);
+        }
+
+        return RunManifestAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "manifest",
+            "apply",
+            options.Kind,
+            options.ManifestPath,
+        };
+
+        AppendOption(args, "--data-dir", options.DataDir);
+        AppendOption(args, "--home-dir", options.HomeDir);
+        AppendOption(args, "--shim-dir", options.ShimDir);
+        AppendOption(args, "--cai-binary", options.CaiBinary);
+
+        return RunManifestAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "manifest",
+            "check",
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.ManifestDir))
+        {
+            args.Add("--manifest-dir");
+            args.Add(options.ManifestDir);
+        }
+
+        return RunManifestAsync(args, cancellationToken);
+    }
 
     public Task<int> RunTemplateCommandAsync(CancellationToken cancellationToken)
         => RunTemplateAsync(["template"], cancellationToken);
 
-    public Task<int> RunTemplateUpgradeCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunTemplateAsync(["template", "upgrade", .. args], cancellationToken);
+    public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
 
-    public Task<int> RunUpdateCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunUpdateAsync(["update", .. args], cancellationToken);
+        var args = new List<string>
+        {
+            "template",
+            "upgrade",
+        };
 
-    public Task<int> RunRefreshCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunRefreshAsync(["refresh", .. args], cancellationToken);
+        if (!string.IsNullOrWhiteSpace(options.Name))
+        {
+            args.Add(options.Name);
+        }
 
-    public Task<int> RunUninstallCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunUninstallAsync(["uninstall", .. args], cancellationToken);
+        if (options.DryRun)
+        {
+            args.Add("--dry-run");
+        }
 
-    public Task<int> RunHelpCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunHelpAsync(["help", .. args], cancellationToken);
+        return RunTemplateAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "update",
+        };
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--stop-containers", options.StopContainers);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--lima-recreate", options.LimaRecreate);
+        AppendFlag(args, "--verbose", options.Verbose);
+        return RunUpdateAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "refresh",
+        };
+        AppendFlag(args, "--rebuild", options.Rebuild);
+        AppendFlag(args, "--verbose", options.Verbose);
+        return RunRefreshAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "uninstall",
+        };
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--containers", options.Containers);
+        AppendFlag(args, "--volumes", options.Volumes);
+        AppendFlag(args, "--force", options.Force);
+        AppendFlag(args, "--verbose", options.Verbose);
+        return RunUninstallAsync(args, cancellationToken);
+    }
+
+    public Task<int> RunHelpAsync(HelpCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "help",
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.Topic))
+        {
+            args.Add(options.Topic);
+        }
+
+        return RunHelpAsync(args, cancellationToken);
+    }
 
     public Task<int> RunVersionCommandAsync(CancellationToken cancellationToken)
         => RunVersionAsync(["version"], cancellationToken);
@@ -198,17 +661,41 @@ internal sealed partial class NativeLifecycleCommandRuntime
     public Task<int> RunSystemInitCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "init", .. args], cancellationToken);
 
+    public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return containerRuntimeCommandService.RunInitAsync(options, cancellationToken);
+    }
+
     public Task<int> RunSystemLinkRepairCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "link-repair", .. args], cancellationToken);
 
+    public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return containerRuntimeCommandService.RunLinkRepairAsync(options, cancellationToken);
+    }
+
     public Task<int> RunSystemWatchLinksCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "watch-links", .. args], cancellationToken);
+
+    public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return containerRuntimeCommandService.RunWatchLinksAsync(options, cancellationToken);
+    }
 
     public Task<int> RunSystemDevcontainerCommandAsync(CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "devcontainer"], cancellationToken);
 
     public Task<int> RunSystemDevcontainerInstallCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "install", .. args], cancellationToken);
+
+    public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return containerRuntimeCommandService.RunDevcontainerInstallAsync(options, cancellationToken);
+    }
 
     public Task<int> RunSystemDevcontainerInitCommandAsync(CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "init"], cancellationToken);
@@ -219,7 +706,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     public Task<int> RunSystemDevcontainerVerifySysboxCommandAsync(CancellationToken cancellationToken)
         => containerRuntimeCommandService.RunAsync(["system", "devcontainer", "verify-sysbox"], cancellationToken);
 
-    private async Task<int> RunDockerAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunDockerAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count > 1 && (args[1] is "-h" or "--help"))
         {
@@ -255,7 +742,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return await RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<int> RunStatusAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunStatusAsync(List<string> args, CancellationToken cancellationToken)
     {
         var outputJson = false;
         var verbose = false;
@@ -497,7 +984,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunHelpAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunHelpAsync(List<string> args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -525,7 +1012,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunVersionAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunVersionAsync(List<string> args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var json = args.Contains("--json", StringComparer.Ordinal);
@@ -1320,7 +1807,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return true;
         }
 
-        var result = await RunParseTomlAsync(["--file", configPath, "--key", "import.exclude_priv"], cancellationToken).ConfigureAwait(false);
+        var result = await RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "import.exclude_priv"), cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             return true;
@@ -1345,7 +1832,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return [];
         }
 
-        var result = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
+        var result = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             if (verbose && !string.IsNullOrWhiteSpace(result.StandardError))
@@ -2307,7 +2794,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 0;
         }
 
-        var configResult = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
+        var configResult = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
         if (configResult.ExitCode != 0)
         {
             if (!string.IsNullOrWhiteSpace(configResult.StandardError))
@@ -2561,7 +3048,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunSyncAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunSyncAsync(List<string> args, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var sourceRoot = ResolveHomeDirectory();
@@ -2589,7 +3076,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunLinksAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunLinksAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
@@ -3054,7 +3541,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
     }
 
-    private async Task<int> RunConfigAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunConfigAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2)
         {
@@ -3091,7 +3578,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         };
     }
 
-    private async Task<int> RunManifestAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunManifestAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
@@ -3552,7 +4039,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
     private async Task<int> ConfigListAsync(string configPath, CancellationToken cancellationToken)
     {
-        var parseResult = await RunParseTomlAsync(["--file", configPath, "--json"], cancellationToken).ConfigureAwait(false);
+        var parseResult = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
         if (parseResult.ExitCode != 0)
         {
             await stderr.WriteLineAsync(parseResult.StandardError.Trim()).ConfigureAwait(false);
@@ -3581,8 +4068,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
 
         if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
-            var wsResult = await RunParseTomlAsync(
-                ["--file", configPath, "--get-workspace", workspaceScope.Workspace],
+            var wsResult = await RunTomlAsync(
+                () => TomlCommandProcessor.GetWorkspace(configPath, workspaceScope.Workspace),
                 cancellationToken).ConfigureAwait(false);
             if (wsResult.ExitCode != 0)
             {
@@ -3600,8 +4087,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
-        var getResult = await RunParseTomlAsync(
-            ["--file", configPath, "--key", normalizedKey],
+        var getResult = await RunTomlAsync(
+            () => TomlCommandProcessor.GetKey(configPath, normalizedKey),
             cancellationToken).ConfigureAwait(false);
 
         if (getResult.ExitCode != 0)
@@ -3632,14 +4119,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         ProcessResult setResult;
         if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
-            setResult = await RunParseTomlAsync(
-                ["--file", configPath, "--set-workspace-key", workspaceScope.Workspace, parsed.Key, parsed.Value],
+            setResult = await RunTomlAsync(
+                () => TomlCommandProcessor.SetWorkspaceKey(configPath, workspaceScope.Workspace, parsed.Key, parsed.Value),
                 cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            setResult = await RunParseTomlAsync(
-                ["--file", configPath, "--set-key", normalizedKey, parsed.Value],
+            setResult = await RunTomlAsync(
+                () => TomlCommandProcessor.SetKey(configPath, normalizedKey, parsed.Value),
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -3671,14 +4158,14 @@ internal sealed partial class NativeLifecycleCommandRuntime
         ProcessResult unsetResult;
         if (!parsed.Global && !string.IsNullOrWhiteSpace(workspaceScope.Workspace))
         {
-            unsetResult = await RunParseTomlAsync(
-                ["--file", configPath, "--unset-workspace-key", workspaceScope.Workspace, parsed.Key],
+            unsetResult = await RunTomlAsync(
+                () => TomlCommandProcessor.UnsetWorkspaceKey(configPath, workspaceScope.Workspace, parsed.Key),
                 cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            unsetResult = await RunParseTomlAsync(
-                ["--file", configPath, "--unset-key", normalizedKey],
+            unsetResult = await RunTomlAsync(
+                () => TomlCommandProcessor.UnsetKey(configPath, normalizedKey),
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -3707,7 +4194,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunTemplateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunTemplateAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
@@ -3772,7 +4259,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return 0;
     }
 
-    private async Task<int> RunSshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private async Task<int> RunSshAsync(List<string> args, CancellationToken cancellationToken)
     {
         if (args.Count < 2 || args[1] is "-h" or "--help")
         {
@@ -4407,7 +4894,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return "stable";
         }
 
-        var result = await RunParseTomlAsync(["--file", configPath, "--key", "image.channel"], cancellationToken).ConfigureAwait(false);
+        var result = await RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "image.channel"), cancellationToken).ConfigureAwait(false);
 
         if (result.ExitCode != 0)
         {
@@ -4439,8 +4926,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         var normalizedWorkspace = Path.GetFullPath(ExpandHomePath(workspace));
-        var workspaceState = await RunParseTomlAsync(
-            ["--file", configPath, "--get-workspace", normalizedWorkspace],
+        var workspaceState = await RunTomlAsync(
+            () => TomlCommandProcessor.GetWorkspace(configPath, normalizedWorkspace),
             cancellationToken).ConfigureAwait(false);
 
         if (workspaceState.ExitCode == 0 && !string.IsNullOrWhiteSpace(workspaceState.StandardOutput))
@@ -4457,8 +4944,8 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
-        var globalResult = await RunParseTomlAsync(
-            ["--file", configPath, "--key", "agent.data_volume"],
+        var globalResult = await RunTomlAsync(
+            () => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"),
             cancellationToken).ConfigureAwait(false);
 
         if (globalResult.ExitCode == 0)
@@ -4493,10 +4980,10 @@ internal sealed partial class NativeLifecycleCommandRuntime
         return string.IsNullOrWhiteSpace(volumeName) ? null : volumeName;
     }
 
-    private static async Task<ProcessResult> RunParseTomlAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    private static async Task<ProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var result = TomlCommandProcessor.Execute(args);
+        var result = operation();
         return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
     }
 
@@ -4702,6 +5189,65 @@ internal sealed partial class NativeLifecycleCommandRuntime
         }
 
         return true;
+    }
+
+    private static void AppendFlag(List<string> args, string option, bool enabled)
+    {
+        if (enabled)
+        {
+            args.Add(option);
+        }
+    }
+
+    private static void AppendOption(List<string> args, string option, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            args.Add(option);
+            args.Add(value);
+        }
+    }
+
+    private static void AppendConfigScopeArgs(List<string> args, bool global, string? workspace, bool verbose)
+    {
+        AppendFlag(args, "--global", global);
+        AppendOption(args, "--workspace", workspace);
+        AppendFlag(args, "--verbose", verbose);
+    }
+
+    private Task<int> RunLinksSubcommandAsync(string subcommand, LinksSubcommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var args = new List<string>
+        {
+            "links",
+            subcommand,
+        };
+
+        if (!string.IsNullOrWhiteSpace(options.Name))
+        {
+            args.Add("--name");
+            args.Add(options.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Container))
+        {
+            args.Add("--container");
+            args.Add(options.Container);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Workspace))
+        {
+            args.Add("--workspace");
+            args.Add(options.Workspace);
+        }
+
+        AppendFlag(args, "--dry-run", options.DryRun);
+        AppendFlag(args, "--quiet", options.Quiet);
+        AppendFlag(args, "--verbose", options.Verbose);
+        AppendOption(args, "--config", options.Config);
+        return RunLinksAsync(args, cancellationToken);
     }
 
     private static string GetRootHelpText() => """
@@ -4955,8 +5501,8 @@ Examples:
         var configPath = ResolveConfigPath(workspace);
         if (File.Exists(configPath))
         {
-            var workspaceResult = await RunParseTomlAsync(
-                ["--file", configPath, "--get-workspace", workspace],
+            var workspaceResult = await RunTomlAsync(
+                () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
                 cancellationToken).ConfigureAwait(false);
 
             if (workspaceResult.ExitCode == 0 && !string.IsNullOrWhiteSpace(workspaceResult.StandardOutput))

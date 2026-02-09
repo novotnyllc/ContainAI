@@ -14,28 +14,64 @@ internal static partial class TomlCommandProcessor
     private static readonly Regex WorkspaceKeyRegex = WorkspaceKeyRegexFactory();
     private static readonly Regex GlobalKeyRegex = GlobalKeyRegexFactory();
 
-    public static TomlCommandResult Execute(IReadOnlyList<string> args)
+    public static TomlCommandResult GetKey(string filePath, string key)
+        => Execute(CreateArguments(filePath) with { KeyOrExistsArg = key }, ExecuteKey);
+
+    public static TomlCommandResult GetJson(string filePath)
+        => Execute(CreateArguments(filePath), ExecuteJson);
+
+    public static TomlCommandResult Exists(string filePath, string key)
+        => Execute(CreateArguments(filePath) with { KeyOrExistsArg = key }, ExecuteExists);
+
+    public static TomlCommandResult GetEnv(string filePath)
+        => Execute(CreateArguments(filePath), ExecuteEnv);
+
+    public static TomlCommandResult GetWorkspace(string filePath, string workspacePath)
+        => Execute(CreateArguments(filePath) with { WorkspacePathOrUnsetPath = workspacePath }, ExecuteGetWorkspace);
+
+    public static TomlCommandResult SetWorkspaceKey(string filePath, string workspacePath, string key, string value)
+        => Execute(
+            CreateArguments(filePath) with
+            {
+                WorkspacePathOrUnsetPath = workspacePath,
+                WorkspaceKey = key,
+                Value = value,
+            },
+            ExecuteSetWorkspaceKey);
+
+    public static TomlCommandResult UnsetWorkspaceKey(string filePath, string workspacePath, string key)
+        => Execute(
+            CreateArguments(filePath) with
+            {
+                WorkspacePathOrUnsetPath = workspacePath,
+                WorkspaceKey = key,
+            },
+            ExecuteUnsetWorkspaceKey);
+
+    public static TomlCommandResult SetKey(string filePath, string key, string value)
+        => Execute(CreateArguments(filePath) with { KeyOrExistsArg = key, Value = value }, ExecuteSetKey);
+
+    public static TomlCommandResult UnsetKey(string filePath, string key)
+        => Execute(CreateArguments(filePath) with { KeyOrExistsArg = key }, ExecuteUnsetKey);
+
+    public static TomlCommandResult EmitAgents(string filePath)
+        => Execute(CreateArguments(filePath), ExecuteEmitAgents);
+
+    private static TomlCommandResult Execute(TomlCommandArguments arguments, Func<TomlCommandArguments, TomlCommandResult> operation)
     {
-        if (!TryParseArguments(args, out var parsed, out var parseError))
+        if (string.IsNullOrWhiteSpace(arguments.FilePath))
         {
-            return new TomlCommandResult(1, string.Empty, parseError);
+            return new TomlCommandResult(1, string.Empty, "Error: --file is required");
         }
 
-        return parsed.Mode switch
-        {
-            TomlMode.Key => ExecuteKey(parsed),
-            TomlMode.Json => ExecuteJson(parsed),
-            TomlMode.Exists => ExecuteExists(parsed),
-            TomlMode.Env => ExecuteEnv(parsed),
-            TomlMode.GetWorkspace => ExecuteGetWorkspace(parsed),
-            TomlMode.SetWorkspaceKey => ExecuteSetWorkspaceKey(parsed),
-            TomlMode.UnsetWorkspaceKey => ExecuteUnsetWorkspaceKey(parsed),
-            TomlMode.SetKey => ExecuteSetKey(parsed),
-            TomlMode.UnsetKey => ExecuteUnsetKey(parsed),
-            TomlMode.EmitAgents => ExecuteEmitAgents(parsed),
-            _ => new TomlCommandResult(1, string.Empty, "Error: Unsupported toml mode"),
-        };
+        return operation(arguments);
     }
+
+    private static TomlCommandArguments CreateArguments(string filePath)
+        => new()
+        {
+            FilePath = filePath,
+        };
 
     private static TomlCommandResult ExecuteKey(TomlCommandArguments parsed)
     {
@@ -1374,256 +1410,22 @@ internal static partial class TomlCommandProcessor
         }
     }
 
-    private static bool TryParseArguments(
-        IReadOnlyList<string> args,
-        out TomlCommandArguments parsed,
-        out string error)
-    {
-        parsed = new TomlCommandArguments();
-        error = string.Empty;
-
-        for (var index = 0; index < args.Count; index++)
-        {
-            var token = args[index];
-            switch (token)
-            {
-                case "--file":
-                case "-f":
-                    if (!TryReadValue(args, ref index, out var fileValue))
-                    {
-                        error = "Error: --file requires a value";
-                        return false;
-                    }
-
-                    parsed.FilePath = fileValue;
-                    break;
-                case "--key":
-                case "-k":
-                    if (!TryReadValue(args, ref index, out var keyValue))
-                    {
-                        error = "Error: --key requires a value";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.Key, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.KeyOrExistsArg = keyValue;
-                    break;
-                case "--json":
-                case "-j":
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.Json, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    break;
-                case "--exists":
-                case "-e":
-                    if (!TryReadValue(args, ref index, out var existsValue))
-                    {
-                        error = "Error: --exists requires a value";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.Exists, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.KeyOrExistsArg = existsValue;
-                    break;
-                case "--env":
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.Env, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    break;
-                case "--get-workspace":
-                    if (!TryReadValue(args, ref index, out var wsPath))
-                    {
-                        error = "Error: --get-workspace requires a value";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.GetWorkspace, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.WorkspacePathOrUnsetPath = wsPath;
-                    break;
-                case "--set-workspace-key":
-                    if (!TryReadValue(args, ref index, out var setWsPath) ||
-                        !TryReadValue(args, ref index, out var setWsKey) ||
-                        !TryReadValue(args, ref index, out var setWsValue))
-                    {
-                        error = "Error: --set-workspace-key requires PATH KEY VALUE";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.SetWorkspaceKey, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.WorkspacePathOrUnsetPath = setWsPath;
-                    parsed.WorkspaceKey = setWsKey;
-                    parsed.Value = setWsValue;
-                    break;
-                case "--unset-workspace-key":
-                    if (!TryReadValue(args, ref index, out var unsetWsPath) ||
-                        !TryReadValue(args, ref index, out var unsetWsKey))
-                    {
-                        error = "Error: --unset-workspace-key requires PATH KEY";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.UnsetWorkspaceKey, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.WorkspacePathOrUnsetPath = unsetWsPath;
-                    parsed.WorkspaceKey = unsetWsKey;
-                    break;
-                case "--set-key":
-                    if (!TryReadValue(args, ref index, out var setKey) ||
-                        !TryReadValue(args, ref index, out var setValue))
-                    {
-                        error = "Error: --set-key requires KEY VALUE";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.SetKey, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.KeyOrExistsArg = setKey;
-                    parsed.Value = setValue;
-                    break;
-                case "--unset-key":
-                    if (!TryReadValue(args, ref index, out var unsetKey))
-                    {
-                        error = "Error: --unset-key requires KEY";
-                        return false;
-                    }
-
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.UnsetKey, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    parsed.KeyOrExistsArg = unsetKey;
-                    break;
-                case "--emit-agents":
-                    parsed.Mode = AssignMode(parsed.Mode, TomlMode.EmitAgents, ref error);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        return false;
-                    }
-
-                    break;
-                default:
-                    if (token.StartsWith("--file=", StringComparison.Ordinal))
-                    {
-                        parsed.FilePath = token["--file=".Length..];
-                        break;
-                    }
-
-                    error = $"Error: Unknown toml option: {token}";
-                    return false;
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(parsed.FilePath))
-        {
-            error = "Error: --file is required";
-            return false;
-        }
-
-        if (parsed.Mode == TomlMode.None)
-        {
-            error = "Error: Must specify one of --key, --json, --exists, --env, --get-workspace, --set-workspace-key, --unset-workspace-key, --set-key, --unset-key, or --emit-agents";
-            return false;
-        }
-
-        return true;
-    }
-
-    private static TomlMode AssignMode(TomlMode current, TomlMode requested, ref string error)
-    {
-        if (current == TomlMode.None)
-        {
-            return requested;
-        }
-
-        if (current != requested)
-        {
-            error = "Error: Options are mutually exclusive";
-        }
-
-        return current;
-    }
-
-    private static bool TryReadValue(IReadOnlyList<string> args, ref int index, out string value)
-    {
-        if (index + 1 >= args.Count)
-        {
-            value = string.Empty;
-            return false;
-        }
-
-        value = args[++index];
-        return true;
-    }
-
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.CultureInvariant)]
     private static partial Regex WorkspaceKeyRegexFactory();
 
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_.]*$", RegexOptions.CultureInvariant)]
     private static partial Regex GlobalKeyRegexFactory();
 
-    private enum TomlMode
-    {
-        None,
-        Key,
-        Json,
-        Exists,
-        Env,
-        SetWorkspaceKey,
-        GetWorkspace,
-        UnsetWorkspaceKey,
-        SetKey,
-        UnsetKey,
-        EmitAgents,
-    }
-
     private sealed record TomlCommandArguments
     {
-        public string? FilePath { get; set; }
+        public string FilePath { get; init; } = string.Empty;
 
-        public TomlMode Mode { get; set; }
+        public string? KeyOrExistsArg { get; init; }
 
-        public string? KeyOrExistsArg { get; set; }
+        public string? WorkspacePathOrUnsetPath { get; init; }
 
-        public string? WorkspacePathOrUnsetPath { get; set; }
+        public string? WorkspaceKey { get; init; }
 
-        public string? WorkspaceKey { get; set; }
-
-        public string? Value { get; set; }
+        public string? Value { get; init; }
     }
 }
