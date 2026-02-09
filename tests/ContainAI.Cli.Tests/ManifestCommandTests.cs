@@ -37,7 +37,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(["manifest", "parse", manifestPath], TestContext.Current.CancellationToken);
 
             Assert.Equal(0, exitCode);
@@ -84,7 +84,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(["manifest", "parse", tempDir], TestContext.Current.CancellationToken);
 
             Assert.Equal(0, exitCode);
@@ -120,7 +120,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
                 ["manifest", "parse", "--include-disabled", manifestPath],
                 TestContext.Current.CancellationToken);
@@ -156,7 +156,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
                 ["manifest", "parse", "--emit-source-file", manifestPath],
                 TestContext.Current.CancellationToken);
@@ -189,7 +189,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(["manifest", "parse", manifestPath], TestContext.Current.CancellationToken);
 
             Assert.Equal(1, exitCode);
@@ -223,7 +223,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
                 ["manifest", "generate", "container-link-spec", manifestPath],
                 TestContext.Current.CancellationToken);
@@ -269,7 +269,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
                 ["manifest", "apply", "init-dirs", manifestPath, "--data-dir", dataDir],
                 TestContext.Current.CancellationToken);
@@ -318,7 +318,7 @@ public sealed class ManifestCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
             var exitCode = await runtime.RunAsync(
                 ["manifest", "apply", "container-links", manifestPath, "--home-dir", homeDir, "--data-dir", dataDir],
                 TestContext.Current.CancellationToken);
@@ -388,7 +388,7 @@ public sealed class ManifestCommandTests
 
                 using var stdout = new StringWriter();
                 using var stderr = new StringWriter();
-                var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+                var runtime = new CaiCommandRuntime(stdout, stderr);
                 var exitCode = await runtime.RunAsync(
                     ["manifest", "apply", "agent-shims", manifestPath, "--shim-dir", shimDir, "--cai-binary", caiPath],
                     TestContext.Current.CancellationToken);

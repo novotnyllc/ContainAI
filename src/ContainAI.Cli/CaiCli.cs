@@ -51,6 +51,16 @@ public static class CaiCli
 
     private static string[] NormalizeRootAliases(string[] args)
     {
+        if (args is ["help"])
+        {
+            return ["--help"];
+        }
+
+        if (args is ["help", .. var topicTokens] && topicTokens.Length > 0)
+        {
+            return [.. topicTokens, "--help"];
+        }
+
         if (args is ["--refresh", .. var refreshArgs])
         {
             return ["refresh", .. refreshArgs];
@@ -68,7 +78,7 @@ public static class CaiCli
     {
         var firstToken = args[0];
 
-        if (firstToken is "help" or "--help" or "-h")
+        if (firstToken is "--help" or "-h")
         {
             return false;
         }

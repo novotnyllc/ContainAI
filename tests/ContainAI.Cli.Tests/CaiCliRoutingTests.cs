@@ -34,7 +34,7 @@ public sealed class CaiCliRoutingTests
         Assert.True(runtime.RunCalls[0].Fresh);
         Assert.True(runtime.RunCalls[0].Detached);
         Assert.Equal(["echo", "ok"], runtime.RunCalls[0].CommandArgs);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class CaiCliRoutingTests
         Assert.Equal(FakeRuntime.ShellExitCode, exitCode);
         Assert.Single(runtime.ShellCalls);
         Assert.Equal("/tmp/workspace", runtime.ShellCalls[0].Workspace);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class CaiCliRoutingTests
         Assert.Equal(FakeRuntime.ExecExitCode, exitCode);
         Assert.Single(runtime.ExecCalls);
         Assert.Equal(["ssh-target", "echo", "hi"], runtime.ExecCalls[0].CommandArgs);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(runtime.StatusCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task NativeLifecycleCommand_UnknownSubcommand_ReturnsParserError()
+    public async Task SessionLifecycleCommand_UnknownSubcommand_ReturnsParserError()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -153,35 +153,33 @@ public sealed class CaiCliRoutingTests
         var exitCode = await CaiCli.RunAsync(["config", "mystery-subcommand", "--json"], runtime, cancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
-    public async Task ConfigCommand_UsesNativeLifecycleRuntime()
+    public async Task ConfigCommand_UsesRuntimeHandler()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["config", "set", "agent.default", "claude"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["config", "set", "agent.default", "claude"], call));
     }
 
     [Fact]
-    public async Task ConfigCommand_Root_UsesNativeRuntime()
+    public async Task ConfigCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["config"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["config"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -192,9 +190,9 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["config", "--global", "--workspace", "/tmp/w", "--verbose", "list"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["config", "--global", "--workspace", "/tmp/w", "--verbose", "list"], call));
     }
 
@@ -207,10 +205,10 @@ public sealed class CaiCliRoutingTests
         var getExitCode = await CaiCli.RunAsync(["config", "get", "agent.default"], runtime, cancellationToken);
         var unsetExitCode = await CaiCli.RunAsync(["config", "unset", "agent.default"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, getExitCode);
-        Assert.Equal(FakeRuntime.NativeExitCode, unsetExitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, getExitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, unsetExitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["config", "get", "agent.default"], call),
             call => Assert.Equal(["config", "unset", "agent.default"], call));
     }
@@ -223,9 +221,9 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["config", "resolve-volume", "explicit-vol"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["config", "resolve-volume", "explicit-vol"], call));
     }
 
@@ -241,7 +239,7 @@ public sealed class CaiCliRoutingTests
             cancellationToken);
 
         Assert.Equal(FakeRuntime.InstallExitCode, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Collection(
             runtime.InstallCalls,
             options =>
@@ -267,7 +265,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(FakeRuntime.ExamplesListExitCode, listExitCode);
         Assert.Equal(FakeRuntime.ExamplesExportExitCode, exportExitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Equal(1, runtime.ExamplesListCalls);
         Assert.Collection(
             runtime.ExamplesExportCalls,
@@ -296,7 +294,7 @@ public sealed class CaiCliRoutingTests
         Assert.Contains("status", output, StringComparison.Ordinal);
         Assert.Contains("stop", output, StringComparison.Ordinal);
         Assert.DoesNotContain("completion", output, StringComparison.Ordinal);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -313,7 +311,7 @@ public sealed class CaiCliRoutingTests
             cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -330,7 +328,7 @@ public sealed class CaiCliRoutingTests
             cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -348,7 +346,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("run", console.Output.ToString(), StringComparison.Ordinal);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -366,7 +364,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("run", console.Output.ToString(), StringComparison.Ordinal);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -384,7 +382,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("--fresh", console.Output.ToString(), StringComparison.Ordinal);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -402,7 +400,7 @@ public sealed class CaiCliRoutingTests
 
         Assert.Equal(0, exitCode);
         Assert.Contains("status", console.Output.ToString(), StringComparison.Ordinal);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -413,66 +411,58 @@ public sealed class CaiCliRoutingTests
 
         var exitCode = await CaiCli.RunAsync(["system", "init", "--quiet"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["system", "init", "--quiet"], call));
     }
 
     [Fact]
-    public async Task SystemCommand_Root_UsesNativeRuntime()
+    public async Task SystemCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["system"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["system"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
-    public async Task SystemDevcontainerCommand_Root_UsesNativeRuntime()
+    public async Task SystemDevcontainerCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["system", "devcontainer"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["system", "devcontainer"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
-    public async Task LinksCommand_Root_UsesNativeRuntime()
+    public async Task LinksCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["links"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["links"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
-    public async Task ManifestCommand_Root_UsesNativeRuntime()
+    public async Task ManifestCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["manifest"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["manifest"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
 [Fact]
@@ -483,24 +473,22 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         var exitCode = await CaiCli.RunAsync(["manifest", "check", "src/manifests"], runtime, cancellationToken);
 
-    Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+    Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
     Assert.Collection(
-        runtime.NativeCalls,
+        runtime.RuntimeCalls,
         call => Assert.Equal(["manifest", "check", "--manifest-dir", "src/manifests"], call));
 }
 
     [Fact]
-    public async Task TemplateCommand_Root_UsesNativeRuntime()
+    public async Task TemplateCommand_Root_ShowsParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["template"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["template"], call));
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -514,7 +502,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         Assert.Equal(FakeRuntime.RunExitCode, exitCode);
         Assert.Single(runtime.RunCalls);
         Assert.Equal(["mystery", "token"], runtime.RunCalls[0].CommandArgs);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -529,7 +517,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         Assert.Single(runtime.RunCalls);
         Assert.True(runtime.RunCalls[0].Fresh);
         Assert.Equal(["/tmp/workspace"], runtime.RunCalls[0].CommandArgs);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -542,7 +530,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["gemini"], runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -555,7 +543,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         Assert.Equal(FakeRuntime.AcpExitCode, exitCode);
         Assert.Equal(["claude"], runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -570,7 +558,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         Assert.Single(runtime.RunCalls);
         Assert.Equal(["--acp", "claude"], runtime.RunCalls[0].CommandArgs);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -585,7 +573,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         Assert.Single(runtime.RunCalls);
         Assert.Equal(["--acp"], runtime.RunCalls[0].CommandArgs);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -599,7 +587,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         Assert.Equal(0, exitCode);
         Assert.Empty(runtime.RunCalls);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -612,7 +600,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -625,7 +613,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         Assert.NotEqual(0, exitCode);
         Assert.Empty(runtime.AcpCalls);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -636,9 +624,9 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         var exitCode = await CaiCli.RunAsync(["--refresh", "--rebuild"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["refresh", "--rebuild"], call));
     }
 
@@ -650,39 +638,35 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         var exitCode = await CaiCli.RunAsync(["--refresh"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["refresh"], call));
     }
 
     [Fact]
-    public async Task HelpSubcommand_UsesNativeRuntime()
+    public async Task HelpSubcommand_UsesParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["help"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["help"], call));
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Empty(runtime.AcpCalls);
     }
 
     [Fact]
-    public async Task HelpSubcommand_WithTopic_UsesNativeRuntime()
+    public async Task HelpSubcommand_WithTopic_UsesParserHelp()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["help", "manifest"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["help", "manifest"], call));
+        Assert.Equal(0, exitCode);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Empty(runtime.AcpCalls);
     }
 
@@ -694,9 +678,9 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         var exitCode = await CaiCli.RunAsync(["version"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["version"], call));
         Assert.Empty(runtime.AcpCalls);
     }
@@ -711,7 +695,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         var exitCode = await CaiCli.RunAsync(["version", "--json"], runtime, console, cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Empty(runtime.AcpCalls);
 
         var output = console.Output.ToString();
@@ -735,7 +719,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         var exitCode = await CaiCli.RunAsync(["version", "--bogus"], runtime, cancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Theory]
@@ -749,7 +733,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         var exitCode = await CaiCli.RunAsync([token], runtime, cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Empty(runtime.AcpCalls);
     }
 
@@ -763,9 +747,9 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
 
         var exitCode = await CaiCli.RunAsync([token], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+        Assert.Equal(FakeRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             call => Assert.Equal(["version"], call));
         Assert.Empty(runtime.AcpCalls);
     }
@@ -782,7 +766,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         var exitCode = await CaiCli.RunAsync([token, "--json"], runtime, console, cancellationToken);
 
         Assert.Equal(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Empty(runtime.AcpCalls);
 
         using var payload = JsonDocument.Parse(console.Output.ToString());
@@ -809,7 +793,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
         public const int ExecExitCode = 33;
         public const int DockerExitCode = 34;
         public const int StatusExitCode = 35;
-        public const int NativeExitCode = 36;
+        public const int RuntimeExitCode = 36;
         public const int AcpExitCode = 23;
         public const int InstallExitCode = 24;
         public const int ExamplesListExitCode = 25;
@@ -823,7 +807,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
                     ExecExitCode,
                     DockerExitCode,
                     StatusExitCode,
-                    NativeExitCode,
+                    RuntimeExitCode,
                     AcpExitCode,
                     InstallExitCode,
                     ExamplesListExitCode,

@@ -4,7 +4,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 
 ## Maintenance Policy
 
-**Source of truth**: The native CLI implementation (`src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/`) is authoritative. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output.
+**Source of truth**: The native CLI implementation (`src/cai/CaiOperationsService.CommandSurface.cs`, `src/cai/CaiImportService.CommandSurface.cs`, `src/cai/CaiConfigManifestService.CommandSurface.cs`, and `src/ContainAI.Cli/`) is authoritative. The `cai --help` output shows commonly-used options; this documentation is comprehensive and includes advanced flags not shown in help output.
 
 **Command surface**: Commands and options are statically declared in `src/ContainAI.Cli/RootCommandBuilder.cs` and related command builder files. There is no runtime discovery or plugin-based command loading.
 
@@ -16,7 +16,7 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 - After changing environment variable behavior
 - After modifying exit codes
 
-**Verification**: Check `src/cai/NativeLifecycleCommandRuntime.cs` and `src/ContainAI.Cli/RootCommandBuilder.cs` for canonical command/flag routing.
+**Verification**: Check `src/cai/CaiOperationsService.CommandSurface.cs`, `src/cai/CaiImportService.CommandSurface.cs`, `src/cai/CaiConfigManifestService.CommandSurface.cs`, and `src/ContainAI.Cli/RootCommandBuilder.cs` for canonical command/flag routing.
 
 ## Quick Reference
 

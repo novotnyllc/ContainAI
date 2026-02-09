@@ -8,7 +8,7 @@ internal readonly record struct CaiRuntimeExitCodes(
     int Exec,
     int Docker,
     int Status,
-    int Native,
+    int Runtime,
     int Acp,
     int Install,
     int ExamplesList,
@@ -31,7 +31,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
 
     public List<StatusCommandOptions> StatusCalls { get; } = [];
 
-    public List<IReadOnlyList<string>> NativeCalls { get; } = [];
+    public List<IReadOnlyList<string>> RuntimeCalls { get; } = [];
 
     public List<string> AcpCalls { get; } = [];
 
@@ -77,7 +77,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--json", options.Json);
         AppendFlag(args, "--build-templates", options.BuildTemplates);
         AppendFlag(args, "--reset-lima", options.ResetLima);
-        return RecordNativeCall(["doctor"], args);
+        return RecordRuntimeCall(["doctor"], args);
     }
 
     public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
@@ -87,14 +87,14 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--dry-run", options.DryRun);
         AppendArgument(args, options.Target);
         AppendArgument(args, options.TargetArg);
-        return RecordNativeCall(["doctor", "fix"], args);
+        return RecordRuntimeCall(["doctor", "fix"], args);
     }
 
     public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         AppendFlag(args, "--json", options.Json);
-        return RecordNativeCall(["validate"], args);
+        return RecordRuntimeCall(["validate"], args);
     }
 
     public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
@@ -103,7 +103,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--dry-run", options.DryRun);
         AppendFlag(args, "--verbose", options.Verbose);
         AppendFlag(args, "--skip-templates", options.SkipTemplates);
-        return RecordNativeCall(["setup"], args);
+        return RecordRuntimeCall(["setup"], args);
     }
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
@@ -117,7 +117,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--no-excludes", options.NoExcludes);
         AppendFlag(args, "--no-secrets", options.NoSecrets);
         AppendFlag(args, "--verbose", options.Verbose);
-        return RecordNativeCall(["import"], args);
+        return RecordRuntimeCall(["import"], args);
     }
 
     public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
@@ -127,11 +127,11 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--data-volume", options.DataVolume);
         AppendOption(args, "--container", options.Container);
         AppendOption(args, "--workspace", options.Workspace);
-        return RecordNativeCall(["export"], args);
+        return RecordRuntimeCall(["export"], args);
     }
 
     public Task<int> RunSyncAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["sync"]);
+        => RecordRuntimeCall(["sync"]);
 
     public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
     {
@@ -142,7 +142,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--force", options.Force);
         AppendFlag(args, "--export", options.Export);
         AppendFlag(args, "--verbose", options.Verbose);
-        return RecordNativeCall(["stop"], args);
+        return RecordRuntimeCall(["stop"], args);
     }
 
     public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
@@ -152,21 +152,15 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--force", options.Force);
         AppendFlag(args, "--images", options.Images);
         AppendOption(args, "--age", options.Age);
-        return RecordNativeCall(["gc"], args);
+        return RecordRuntimeCall(["gc"], args);
     }
-
-    public Task<int> RunSshAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["ssh"]);
 
     public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         AppendFlag(args, "--dry-run", options.DryRun);
-        return RecordNativeCall(["ssh", "cleanup"], args);
+        return RecordRuntimeCall(["ssh", "cleanup"], args);
     }
-
-    public Task<int> RunLinksAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["links"]);
 
     public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
     {
@@ -178,7 +172,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--quiet", options.Quiet);
         AppendFlag(args, "--verbose", options.Verbose);
         AppendOption(args, "--config", options.Config);
-        return RecordNativeCall(["links", "check"], args);
+        return RecordRuntimeCall(["links", "check"], args);
     }
 
     public Task<int> RunLinksFixAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
@@ -191,11 +185,8 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--quiet", options.Quiet);
         AppendFlag(args, "--verbose", options.Verbose);
         AppendOption(args, "--config", options.Config);
-        return RecordNativeCall(["links", "fix"], args);
+        return RecordRuntimeCall(["links", "fix"], args);
     }
-
-    public Task<int> RunConfigAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["config"]);
 
     public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
     {
@@ -204,7 +195,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--workspace", options.Workspace);
         AppendFlag(args, "--verbose", options.Verbose);
         args.Add("list");
-        return RecordNativeCall(["config"], args);
+        return RecordRuntimeCall(["config"], args);
     }
 
     public Task<int> RunConfigGetAsync(ConfigGetCommandOptions options, CancellationToken cancellationToken)
@@ -215,7 +206,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--verbose", options.Verbose);
         args.Add("get");
         args.Add(options.Key);
-        return RecordNativeCall(["config"], args);
+        return RecordRuntimeCall(["config"], args);
     }
 
     public Task<int> RunConfigSetAsync(ConfigSetCommandOptions options, CancellationToken cancellationToken)
@@ -227,7 +218,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         args.Add("set");
         args.Add(options.Key);
         args.Add(options.Value);
-        return RecordNativeCall(["config"], args);
+        return RecordRuntimeCall(["config"], args);
     }
 
     public Task<int> RunConfigUnsetAsync(ConfigUnsetCommandOptions options, CancellationToken cancellationToken)
@@ -238,7 +229,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--verbose", options.Verbose);
         args.Add("unset");
         args.Add(options.Key);
-        return RecordNativeCall(["config"], args);
+        return RecordRuntimeCall(["config"], args);
     }
 
     public Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken)
@@ -249,11 +240,8 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--verbose", options.Verbose);
         args.Add("resolve-volume");
         AppendArgument(args, options.ExplicitVolume);
-        return RecordNativeCall(["config"], args);
+        return RecordRuntimeCall(["config"], args);
     }
-
-    public Task<int> RunManifestAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["manifest"]);
 
     public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
     {
@@ -261,14 +249,14 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--include-disabled", options.IncludeDisabled);
         AppendFlag(args, "--emit-source-file", options.EmitSourceFile);
         args.Add(options.ManifestPath);
-        return RecordNativeCall(["manifest", "parse"], args);
+        return RecordRuntimeCall(["manifest", "parse"], args);
     }
 
     public Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string> { options.Kind, options.ManifestPath };
         AppendArgument(args, options.OutputPath);
-        return RecordNativeCall(["manifest", "generate"], args);
+        return RecordRuntimeCall(["manifest", "generate"], args);
     }
 
     public Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken)
@@ -278,25 +266,22 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--home-dir", options.HomeDir);
         AppendOption(args, "--shim-dir", options.ShimDir);
         AppendOption(args, "--cai-binary", options.CaiBinary);
-        return RecordNativeCall(["manifest", "apply"], args);
+        return RecordRuntimeCall(["manifest", "apply"], args);
     }
 
     public Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         AppendOption(args, "--manifest-dir", options.ManifestDir);
-        return RecordNativeCall(["manifest", "check"], args);
+        return RecordRuntimeCall(["manifest", "check"], args);
     }
-
-    public Task<int> RunTemplateAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["template"]);
 
     public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         AppendArgument(args, options.Name);
         AppendFlag(args, "--dry-run", options.DryRun);
-        return RecordNativeCall(["template", "upgrade"], args);
+        return RecordRuntimeCall(["template", "upgrade"], args);
     }
 
     public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
@@ -307,7 +292,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--force", options.Force);
         AppendFlag(args, "--lima-recreate", options.LimaRecreate);
         AppendFlag(args, "--verbose", options.Verbose);
-        return RecordNativeCall(["update"], args);
+        return RecordRuntimeCall(["update"], args);
     }
 
     public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
@@ -315,7 +300,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         var args = new List<string>();
         AppendFlag(args, "--rebuild", options.Rebuild);
         AppendFlag(args, "--verbose", options.Verbose);
-        return RecordNativeCall(["refresh"], args);
+        return RecordRuntimeCall(["refresh"], args);
     }
 
     public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
@@ -326,18 +311,8 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendFlag(args, "--volumes", options.Volumes);
         AppendFlag(args, "--force", options.Force);
         AppendFlag(args, "--verbose", options.Verbose);
-        return RecordNativeCall(["uninstall"], args);
+        return RecordRuntimeCall(["uninstall"], args);
     }
-
-    public Task<int> RunHelpAsync(HelpCommandOptions options, CancellationToken cancellationToken)
-    {
-        var args = new List<string>();
-        AppendArgument(args, options.Topic);
-        return RecordNativeCall(["help"], args);
-    }
-
-    public Task<int> RunSystemAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["system"]);
 
     public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
     {
@@ -349,7 +324,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--workspace-hooks", options.WorkspaceHooks);
         AppendOption(args, "--workspace-dir", options.WorkspaceDir);
         AppendFlag(args, "--quiet", options.Quiet);
-        return RecordNativeCall(["system", "init"], args);
+        return RecordRuntimeCall(["system", "init"], args);
     }
 
     public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
@@ -362,7 +337,7 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--builtin-spec", options.BuiltinSpec);
         AppendOption(args, "--user-spec", options.UserSpec);
         AppendOption(args, "--checked-at-file", options.CheckedAtFile);
-        return RecordNativeCall(["system", "link-repair"], args);
+        return RecordRuntimeCall(["system", "link-repair"], args);
     }
 
     public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
@@ -372,30 +347,27 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         AppendOption(args, "--imported-at-file", options.ImportedAtFile);
         AppendOption(args, "--checked-at-file", options.CheckedAtFile);
         AppendFlag(args, "--quiet", options.Quiet);
-        return RecordNativeCall(["system", "watch-links"], args);
+        return RecordRuntimeCall(["system", "watch-links"], args);
     }
-
-    public Task<int> RunSystemDevcontainerAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["system", "devcontainer"]);
 
     public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
     {
         var args = new List<string>();
         AppendOption(args, "--feature-dir", options.FeatureDir);
-        return RecordNativeCall(["system", "devcontainer", "install"], args);
+        return RecordRuntimeCall(["system", "devcontainer", "install"], args);
     }
 
     public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["system", "devcontainer", "init"]);
+        => RecordRuntimeCall(["system", "devcontainer", "init"]);
 
     public Task<int> RunSystemDevcontainerStartAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["system", "devcontainer", "start"]);
+        => RecordRuntimeCall(["system", "devcontainer", "start"]);
 
     public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["system", "devcontainer", "verify-sysbox"]);
+        => RecordRuntimeCall(["system", "devcontainer", "verify-sysbox"]);
 
     public Task<int> RunVersionAsync(CancellationToken cancellationToken)
-        => RecordNativeCall(["version"]);
+        => RecordRuntimeCall(["version"]);
 
     public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
     {
@@ -421,16 +393,16 @@ internal abstract class RecordingCaiRuntimeBase : ICaiCommandRuntime
         return Task.FromResult(exitCodes.ExamplesExport);
     }
 
-    private Task<int> RecordNativeCall(IReadOnlyList<string> args)
+    private Task<int> RecordRuntimeCall(IReadOnlyList<string> args)
     {
-        NativeCalls.Add(args.ToArray());
-        return Task.FromResult(exitCodes.Native);
+        RuntimeCalls.Add(args.ToArray());
+        return Task.FromResult(exitCodes.Runtime);
     }
 
-    private Task<int> RecordNativeCall(IReadOnlyList<string> commandPath, List<string> args)
+    private Task<int> RecordRuntimeCall(IReadOnlyList<string> commandPath, List<string> args)
         => args.Count == 0
-            ? RecordNativeCall(commandPath)
-            : RecordNativeCall([.. commandPath, .. args]);
+            ? RecordRuntimeCall(commandPath)
+            : RecordRuntimeCall([.. commandPath, .. args]);
 
     private static void AppendFlag(List<string> args, string option, bool enabled)
     {

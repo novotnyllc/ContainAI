@@ -10,7 +10,7 @@ public sealed class ContainerRuntimeCommandTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(
             ["system", "devcontainer", "install", "--help"],
@@ -54,7 +54,7 @@ public sealed class ContainerRuntimeCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["system", "link-repair", "--check", "--builtin-spec", specPath, "--user-spec", Path.Combine(tempDir, "missing-user-spec.json"), "--checked-at-file", checkedAtPath],
@@ -104,7 +104,7 @@ public sealed class ContainerRuntimeCommandTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["system", "link-repair", "--fix", "--builtin-spec", specPath, "--user-spec", Path.Combine(tempDir, "missing-user-spec.json"), "--checked-at-file", checkedAtPath],

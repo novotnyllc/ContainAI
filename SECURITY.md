@@ -30,7 +30,7 @@ ContainAI uses a dedicated Docker daemon (`containai-docker`) with the Sysbox ru
 - Isolated data directory: `/var/lib/containai-docker/`
 - Default runtime: `sysbox-runc`
 
-Detection: [`src/cai/NativeLifecycleCommandRuntime.cs`](src/cai/NativeLifecycleCommandRuntime.cs) verifies runtime availability and [`src/cai/NativeSessionCommandRuntime.cs`](src/cai/NativeSessionCommandRuntime.cs) enforces `--runtime=sysbox-runc` for managed containers.
+Detection: [`src/cai/CaiOperationsService.CommandSurface.cs`](src/cai/CaiOperationsService.CommandSurface.cs) verifies runtime availability and [`src/cai/SessionCommandRuntime.cs`](src/cai/SessionCommandRuntime.cs) enforces `--runtime=sysbox-runc` for managed containers.
 
 ### Alternative Isolation Solutions
 
@@ -44,13 +44,13 @@ ContainAI enforces the following security measures:
 
 | Protection | Location | Description |
 |------------|----------|-------------|
-| Isolation availability check | `src/cai/NativeLifecycleCommandRuntime.cs` | Verifies Sysbox runtime is available before starting containers |
-| Fail-closed on unknown errors | `src/cai/NativeSessionCommandRuntime.cs` | Blocks execution rather than proceeding with unknown status |
+| Isolation availability check | `src/cai/CaiOperationsService.CommandSurface.cs` | Verifies Sysbox runtime is available before starting containers |
+| Fail-closed on unknown errors | `src/cai/SessionCommandRuntime.cs` | Blocks execution rather than proceeding with unknown status |
 | Symlink traversal defense | `src/cai/ContainerRuntimeCommandService.cs` | Path-root validation and symlink checks prevent path escape |
 | Volume mount TOCTOU protection | `src/cai/ContainerRuntimeCommandService.cs` | Validates paths before link/env operations |
 | Safe .env parsing | `src/cai/ContainerRuntimeCommandService.cs` | CRLF handling, key validation, no shell eval |
-| Credential isolation | `src/cai/NativeSessionCommandRuntime.cs` | Credentials stay inside container by default |
-| Docker socket access denied | `src/cai/NativeSessionCommandRuntime.cs` | Host Docker socket not mounted by default |
+| Credential isolation | `src/cai/SessionCommandRuntime.cs` | Credentials stay inside container by default |
+| Docker socket access denied | `src/cai/SessionCommandRuntime.cs` | Host Docker socket not mounted by default |
 
 **Note:** Isolation detection is best-effort and serves as a warning system. Use `--force` to bypass sandbox availability checks (not recommended for production use).
 
@@ -83,7 +83,7 @@ ContainAI applies iptables rules to block container access to sensitive network 
 
 **Allowed**: Host gateway (Docker bridge gateway) for host communication, and all public internet addresses.
 
-**Implementation**: Rules are applied to the `DOCKER-USER` iptables chain by native runtime network policy handling in [`src/cai/NativeLifecycleCommandRuntime.cs`](src/cai/NativeLifecycleCommandRuntime.cs). The `cai doctor` command verifies rules are in place.
+**Implementation**: Rules are applied to the `DOCKER-USER` iptables chain by native runtime network policy handling in [`src/cai/CaiOperationsService.CommandSurface.cs`](src/cai/CaiOperationsService.CommandSurface.cs). The `cai doctor` command verifies rules are in place.
 
 **Per-container policies**: Opt-in egress restrictions can be configured via `.containai/network.conf` - see [Configuration Reference](docs/configuration.md#network-policy-files-runtime-mounts).
 
@@ -156,7 +156,7 @@ For detailed technical information about ContainAI's security implementation, se
 - [Security Comparison](docs/security-comparison.md) - Compare with other sandboxing solutions
 - [Security Scenarios](docs/security-scenarios.md) - Real-world attack scenarios and how isolation helps
 - [Technical README](src/README.md#security) - Container isolation details
-- [`src/cai/NativeLifecycleCommandRuntime.cs`](src/cai/NativeLifecycleCommandRuntime.cs) - containai-docker context and daemon management
-- [`src/cai/NativeSessionCommandRuntime.cs`](src/cai/NativeSessionCommandRuntime.cs) - Container start with Sysbox runtime enforcement
+- [`src/cai/CaiOperationsService.CommandSurface.cs`](src/cai/CaiOperationsService.CommandSurface.cs) - containai-docker context and daemon management
+- [`src/cai/SessionCommandRuntime.cs`](src/cai/SessionCommandRuntime.cs) - Container start with Sysbox runtime enforcement
 - [`src/cai/ContainerRuntimeCommandService.cs`](src/cai/ContainerRuntimeCommandService.cs) - Runtime link and system hardening flow
 - [`src/cai/ContainerRuntimeCommandService.cs`](src/cai/ContainerRuntimeCommandService.cs) - Volume mount security, init flow, and .env parsing

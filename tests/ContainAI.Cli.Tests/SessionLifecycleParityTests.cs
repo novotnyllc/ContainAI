@@ -4,14 +4,14 @@ using Xunit;
 
 namespace ContainAI.Cli.Tests;
 
-public sealed class NativeLifecycleParityTests
+public sealed class SessionLifecycleParityTests
 {
     [Fact]
     public async Task DoctorFixWithoutTarget_ShowsAvailableTargets()
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["doctor", "fix"], TestContext.Current.CancellationToken);
 
@@ -29,7 +29,7 @@ public sealed class NativeLifecycleParityTests
 
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["doctor", "--reset-lima"], TestContext.Current.CancellationToken);
 
@@ -42,7 +42,7 @@ public sealed class NativeLifecycleParityTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["setup", "--dry-run"], TestContext.Current.CancellationToken);
 
@@ -55,7 +55,7 @@ public sealed class NativeLifecycleParityTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["setup", "--dry-run", "--skip-templates"], TestContext.Current.CancellationToken);
 
@@ -68,7 +68,7 @@ public sealed class NativeLifecycleParityTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["status", "--definitely-unknown"], TestContext.Current.CancellationToken);
 
@@ -81,7 +81,7 @@ public sealed class NativeLifecycleParityTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunAsync(["docker", "--help"], TestContext.Current.CancellationToken);
 
@@ -119,7 +119,7 @@ public sealed class NativeLifecycleParityTests
         {
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(["uninstall", "--dry-run"], TestContext.Current.CancellationToken);
 
@@ -139,7 +139,7 @@ public sealed class NativeLifecycleParityTests
     {
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
-        var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+        var runtime = new CaiCommandRuntime(stdout, stderr);
 
         var exitCode = await runtime.RunConfigGetAsync(
             new ConfigGetCommandOptions(false, null, false, string.Empty),

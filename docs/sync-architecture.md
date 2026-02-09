@@ -29,7 +29,7 @@ flowchart LR
 ```
 
 The import/sync system has three main components that must stay synchronized:
-1. **Host-side sync** (`src/cai/NativeLifecycleCommandRuntime.cs`): Uses manifest-driven native copy rules for source->target mappings
+1. **Host-side sync** (`src/cai/CaiImportService.ImportOrchestration.cs`): Uses manifest-driven native copy rules for source->target mappings
 2. **Container image symlinks** (`src/container/Dockerfile.agents`): Creates build-time symlinks from home directories to `/mnt/agent-data`
 3. **Runtime init** (`src/cai/ContainerRuntimeCommandService.cs`): Ensures volume directory structure exists on first boot
 
@@ -406,7 +406,7 @@ The `cai system link-repair` command reads both built-in and user link specs to 
 
 ## References
 
-- Import implementation: `src/cai/NativeLifecycleCommandRuntime.cs`
+- Import implementation: `src/cai/CaiImportService.ImportOrchestration.cs`
 - Container symlinks: `src/container/Dockerfile.agents`
 - Runtime init: `src/cai/ContainerRuntimeCommandService.cs`
 - Per-agent manifests: `src/manifests/*.toml` (single source of truth)

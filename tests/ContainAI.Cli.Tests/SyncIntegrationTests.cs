@@ -39,7 +39,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot],
@@ -103,7 +103,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -162,7 +162,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -230,7 +230,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -302,7 +302,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -359,7 +359,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot],
@@ -401,7 +401,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var defaultExitCode = await runtime.RunAsync(
                 ["import", "--data-volume", defaultVolume, "--from", sourceRoot],
@@ -473,7 +473,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath, "--no-secrets"],
@@ -527,7 +527,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -583,7 +583,7 @@ public sealed class SyncIntegrationTests
 
             using var stdout = new StringWriter();
             using var stderr = new StringWriter();
-            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var runtime = new CaiCommandRuntime(stdout, stderr);
 
             var exitCode = await runtime.RunAsync(
                 ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
@@ -605,10 +605,11 @@ public sealed class SyncIntegrationTests
     }
 
     [Fact]
-    public void NativeLifecycleSource_ContainsEnvGuardMessages()
+    public void ImportRuntimeSource_ContainsEnvGuardMessages()
     {
-        var sourcePath = LocateRepositoryPath("src", "cai", "NativeLifecycleCommandRuntime.cs");
-        var source = File.ReadAllText(sourcePath);
+        var importSourcePath = LocateRepositoryPath("src", "cai", "CaiImportService.ImportEnvironment.cs");
+        var utilitySourcePath = LocateRepositoryPath("src", "cai", "CaiRuntimeSupport.Utilities.cs");
+        var source = File.ReadAllText(importSourcePath) + Environment.NewLine + File.ReadAllText(utilitySourcePath);
 
         Assert.Contains(".env target is symlink", source, StringComparison.Ordinal);
         Assert.Contains("env_file path rejected: outside workspace boundary", source, StringComparison.Ordinal);

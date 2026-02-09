@@ -863,7 +863,7 @@ TOML syntax error in discovered config (using defaults).
 ## Implementation Details
 
 Configuration is implemented in:
-- [`NativeSessionCommandRuntime.cs`](../src/cai/NativeSessionCommandRuntime.cs) - Config discovery and workspace resolution
+- [`SessionCommandRuntime.cs`](../src/cai/SessionCommandRuntime.cs) - Config discovery and workspace resolution
 - [`TomlCommandProcessor.cs`](../src/cai/TomlCommandProcessor.cs) - TOML parsing and mutation logic
 
 Key functions:

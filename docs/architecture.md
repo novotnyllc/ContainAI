@@ -381,8 +381,8 @@ flowchart LR
 
     subgraph Lib["Library Layer"]
         direction TB
-        Runtime["NativeLifecycleCommandRuntime.cs<br/>(core command orchestration)"]
-        Session["NativeSessionCommandRuntime.cs<br/>(run/shell/exec lifecycle)"]
+        Runtime["CaiOperationsService.CommandSurface.cs<br/>(core command orchestration)"]
+        Session["SessionCommandRuntime.cs<br/>(run/shell/exec lifecycle)"]
         Container["ContainerRuntimeCommandService.cs<br/>(container-internal runtime)"]
         Manifest["ManifestTomlParser.cs<br/>(TOML parsing)"]
     end
@@ -413,8 +413,8 @@ The CLI is split into native C# runtime components:
 |--------|---------|-----------|
 | `src/cai/Program.cs` | Native host entrypoint | `Program` |
 | `src/ContainAI.Cli/` | Command parser/routing | `CaiCli`, `RootCommandBuilder` |
-| `src/cai/NativeLifecycleCommandRuntime.cs` | Host command orchestration | `NativeLifecycleCommandRuntime` |
-| `src/cai/NativeSessionCommandRuntime.cs` | Session lifecycle and SSH flow | `NativeSessionCommandRuntime` |
+| `src/cai/CaiOperationsService.CommandSurface.cs` | Host command orchestration | `CaiCommandRuntime` |
+| `src/cai/SessionCommandRuntime.cs` | Session lifecycle and SSH flow | `SessionCommandRuntime` |
 | `src/cai/ContainerRuntimeCommandService.cs` | Container-side init/link/runtime commands | `ContainerRuntimeCommandService` |
 | `src/cai/ManifestTomlParser.cs` | TOML manifest parsing | `ManifestTomlParser` |
 | `src/cai/ManifestGenerators.cs` | Derived artifact generation | `ManifestGenerators` |
@@ -428,8 +428,8 @@ The CLI is split into native C# runtime components:
 ```mermaid
 flowchart TD
     Main["Program.cs"] --> Cli["ContainAI.Cli (System.CommandLine)"]
-    Cli --> Runtime["NativeLifecycleCommandRuntime.cs"]
-    Runtime --> Session["NativeSessionCommandRuntime.cs"]
+    Cli --> Runtime["CaiOperationsService.CommandSurface.cs"]
+    Runtime --> Session["SessionCommandRuntime.cs"]
     Runtime --> Container["ContainerRuntimeCommandService.cs"]
     Runtime --> Manifest["ManifestTomlParser.cs / ManifestGenerators.cs"]
     Runtime --> DockerProxy["ContainAiDockerProxy.cs"]
@@ -446,8 +446,8 @@ flowchart TD
 sequenceDiagram
     participant User
     participant CLI as cai (Program.cs)
-    participant Runtime as NativeLifecycleCommandRuntime
-    participant Session as NativeSessionCommandRuntime
+    participant Runtime as CaiCommandRuntime
+    participant Session as SessionCommandRuntime
     participant Docker as ContainAI Docker
     participant SSHD as Container sshd
 

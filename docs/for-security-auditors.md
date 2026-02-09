@@ -50,8 +50,8 @@ flowchart TD
         BIC
     end
 
-    SM -.->|"What we protect"| SRC1["src/cai/NativeSessionCommandRuntime.cs"]
-    SM -.->|"Detection logic"| SRC2["src/cai/NativeLifecycleCommandRuntime.cs"]
+    SM -.->|"What we protect"| SRC1["src/cai/SessionCommandRuntime.cs"]
+    SM -.->|"Detection logic"| SRC2["src/cai/CaiOperationsService.CommandSurface.cs"]
     ARCH -.->|"Runtime init/link security"| SRC3["src/cai/ContainerRuntimeCommandService.cs"]
 ```
 
@@ -112,8 +112,8 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 
 | File | Security Role |
 |------|---------------|
-| [src/cai/NativeLifecycleCommandRuntime.cs](../src/cai/NativeLifecycleCommandRuntime.cs) | Isolation detection and verification |
-| [src/cai/NativeSessionCommandRuntime.cs](../src/cai/NativeSessionCommandRuntime.cs) | Container start with isolation checks |
+| [src/cai/CaiOperationsService.CommandSurface.cs](../src/cai/CaiOperationsService.CommandSurface.cs) | Isolation detection and verification |
+| [src/cai/SessionCommandRuntime.cs](../src/cai/SessionCommandRuntime.cs) | Container start with isolation checks |
 | [src/cai/ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Volume mount security, .env parsing |
 | [src/cai/TomlCommandProcessor.cs](../src/cai/TomlCommandProcessor.cs) | TOML parsing (no shell eval) |
 

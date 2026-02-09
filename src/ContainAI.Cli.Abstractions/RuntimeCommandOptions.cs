@@ -134,9 +134,6 @@ public sealed record TemplateUpgradeCommandOptions(
     string? Name,
     bool DryRun);
 
-public sealed record HelpCommandOptions(
-    string? Topic);
-
 public sealed record SystemInitCommandOptions(
     string? DataDir,
     string? HomeDir,

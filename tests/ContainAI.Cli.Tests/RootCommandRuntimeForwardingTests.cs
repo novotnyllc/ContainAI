@@ -4,18 +4,18 @@ using Xunit;
 
 namespace ContainAI.Cli.Tests;
 
-public sealed class RootCommandNativeForwardingTests
+public sealed class RootCommandRuntimeForwardingTests
 {
     [Theory]
-    [MemberData(nameof(NativeForwardingCases))]
+    [MemberData(nameof(RuntimeForwardingCases))]
     public async Task StaticCommands_ForwardExpectedArgs(string[] input, string[] expected)
     {
         var runtime = new RecordingRuntime();
         var exitCode = await CaiCli.RunAsync(input, runtime, TestContext.Current.CancellationToken);
 
-        Assert.Equal(RecordingRuntime.NativeExitCode, exitCode);
+        Assert.Equal(RecordingRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             args => Assert.Equal(expected, args));
     }
 
@@ -65,9 +65,9 @@ public sealed class RootCommandNativeForwardingTests
 
         var exitCode = await CaiCli.RunAsync(["import", "/tmp/source", "--dry-run"], runtime, TestContext.Current.CancellationToken);
 
-        Assert.Equal(RecordingRuntime.NativeExitCode, exitCode);
+        Assert.Equal(RecordingRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             args => Assert.Equal(["import", "--from", "/tmp/source", "--dry-run"], args));
     }
 
@@ -78,9 +78,9 @@ public sealed class RootCommandNativeForwardingTests
 
         var exitCode = await CaiCli.RunAsync(["links", "check", "/tmp/workspace", "--dry-run"], runtime, TestContext.Current.CancellationToken);
 
-        Assert.Equal(RecordingRuntime.NativeExitCode, exitCode);
+        Assert.Equal(RecordingRuntime.RuntimeExitCode, exitCode);
         Assert.Collection(
-            runtime.NativeCalls,
+            runtime.RuntimeCalls,
             args => Assert.Equal(["links", "check", "--workspace", "/tmp/workspace", "--dry-run"], args));
     }
 
@@ -95,7 +95,7 @@ public sealed class RootCommandNativeForwardingTests
             TestContext.Current.CancellationToken);
 
         Assert.Equal(RecordingRuntime.InstallExitCode, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Collection(
             runtime.InstallCalls,
             options =>
@@ -120,7 +120,7 @@ public sealed class RootCommandNativeForwardingTests
 
         Assert.Equal(RecordingRuntime.ExamplesListExitCode, listExitCode);
         Assert.Equal(RecordingRuntime.ExamplesExportExitCode, exportExitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
         Assert.Equal(1, runtime.ExamplesListCalls);
         Assert.Collection(
             runtime.ExamplesExportCalls,
@@ -139,7 +139,7 @@ public sealed class RootCommandNativeForwardingTests
         var exitCode = await CaiCli.RunAsync(["manifest", "generate", "invalid", "src/manifests"], runtime, TestContext.Current.CancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class RootCommandNativeForwardingTests
         var exitCode = await CaiCli.RunAsync(["doctor", "fix", "--all", "container"], runtime, TestContext.Current.CancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -161,7 +161,7 @@ public sealed class RootCommandNativeForwardingTests
         var exitCode = await CaiCli.RunAsync(["doctor", "fix", "sandbox-1"], runtime, TestContext.Current.CancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
     [Fact]
@@ -175,10 +175,10 @@ public sealed class RootCommandNativeForwardingTests
             TestContext.Current.CancellationToken);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(runtime.NativeCalls);
+        Assert.Empty(runtime.RuntimeCalls);
     }
 
-    public static TheoryData<string[], string[]> NativeForwardingCases()
+    public static TheoryData<string[], string[]> RuntimeForwardingCases()
     {
         return new TheoryData<string[], string[]>
         {
@@ -203,7 +203,6 @@ public sealed class RootCommandNativeForwardingTests
             { ["update", "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose"], ["update", "--dry-run", "--stop-containers", "--force", "--lima-recreate", "--verbose"] },
             { ["refresh", "--rebuild", "--verbose"], ["refresh", "--rebuild", "--verbose"] },
             { ["uninstall", "--dry-run", "--containers", "--volumes", "--force", "--verbose"], ["uninstall", "--dry-run", "--containers", "--volumes", "--force", "--verbose"] },
-            { ["help", "config"], ["help", "config"] },
             { ["system", "init", "--data-dir", "/mnt/agent-data", "--home-dir", "/home/agent", "--manifests-dir", "/opt/containai/manifests", "--template-hooks", "/etc/containai/template-hooks/startup.d", "--workspace-hooks", "/home/agent/workspace/.containai/hooks/startup.d", "--workspace-dir", "/home/agent/workspace", "--quiet"], ["system", "init", "--data-dir", "/mnt/agent-data", "--home-dir", "/home/agent", "--manifests-dir", "/opt/containai/manifests", "--template-hooks", "/etc/containai/template-hooks/startup.d", "--workspace-hooks", "/home/agent/workspace/.containai/hooks/startup.d", "--workspace-dir", "/home/agent/workspace", "--quiet"] },
             { ["system", "link-repair", "--check", "--dry-run", "--quiet", "--builtin-spec", "/tmp/builtin.json", "--user-spec", "/tmp/user.json", "--checked-at-file", "/tmp/checked"], ["system", "link-repair", "--check", "--dry-run", "--quiet", "--builtin-spec", "/tmp/builtin.json", "--user-spec", "/tmp/user.json", "--checked-at-file", "/tmp/checked"] },
             { ["system", "watch-links", "--poll-interval", "30", "--imported-at-file", "/tmp/imported", "--checked-at-file", "/tmp/checked", "--quiet"], ["system", "watch-links", "--poll-interval", "30", "--imported-at-file", "/tmp/imported", "--checked-at-file", "/tmp/checked", "--quiet"] },
@@ -221,7 +220,7 @@ public sealed class RootCommandNativeForwardingTests
         public const int ExecExitCode = 13;
         public const int DockerExitCode = 14;
         public const int StatusExitCode = 15;
-        public const int NativeExitCode = 16;
+        public const int RuntimeExitCode = 16;
         public const int AcpExitCode = 17;
         public const int InstallExitCode = 18;
         public const int ExamplesListExitCode = 19;
@@ -235,7 +234,7 @@ public sealed class RootCommandNativeForwardingTests
                     ExecExitCode,
                     DockerExitCode,
                     StatusExitCode,
-                    NativeExitCode,
+                    RuntimeExitCode,
                     AcpExitCode,
                     InstallExitCode,
                     ExamplesListExitCode,

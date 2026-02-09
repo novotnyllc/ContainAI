@@ -342,7 +342,6 @@ internal static partial class RootCommandBuilder
     private static Command CreateSshCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("ssh", "Manage SSH integration.");
-        command.SetAction((_, cancellationToken) => runtime.RunSshAsync(cancellationToken));
 
         var cleanup = new Command("cleanup", "Remove stale SSH host configs.");
         var dryRunOption = new Option<bool>("--dry-run");
@@ -360,7 +359,6 @@ internal static partial class RootCommandBuilder
     private static Command CreateLinksCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("links", "Check or repair container symlinks.");
-        command.SetAction((_, cancellationToken) => runtime.RunLinksAsync(cancellationToken));
 
         command.Subcommands.Add(CreateLinksSubcommand("check", runtime));
         command.Subcommands.Add(CreateLinksSubcommand("fix", runtime));
@@ -420,8 +418,6 @@ internal static partial class RootCommandBuilder
         command.Options.Add(globalOption);
         command.Options.Add(workspaceOption);
         command.Options.Add(verboseOption);
-        command.SetAction((_, cancellationToken) => runtime.RunConfigAsync(cancellationToken));
-
         var list = new Command("list");
         list.SetAction((parseResult, cancellationToken) =>
             runtime.RunConfigListAsync(
@@ -496,7 +492,6 @@ internal static partial class RootCommandBuilder
     private static Command CreateManifestCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("manifest", "Parse manifests and generate derived artifacts.");
-        command.SetAction((_, cancellationToken) => runtime.RunManifestAsync(cancellationToken));
 
         var parse = new Command("parse");
         var includeDisabledOption = new Option<bool>("--include-disabled");
@@ -594,7 +589,6 @@ internal static partial class RootCommandBuilder
     private static Command CreateTemplateCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("template", "Manage templates.");
-        command.SetAction((_, cancellationToken) => runtime.RunTemplateAsync(cancellationToken));
 
         var upgrade = new Command("upgrade");
         var templateName = new Argument<string?>("name")
@@ -687,28 +681,9 @@ internal static partial class RootCommandBuilder
         return command;
     }
 
-    private static Command CreateHelpCommand(ICaiCommandRuntime runtime)
-    {
-        var command = new Command("help", "Show help.");
-        var topic = new Argument<string?>("topic")
-        {
-            Arity = ArgumentArity.ZeroOrOne,
-        };
-
-        command.Arguments.Add(topic);
-        command.SetAction((parseResult, cancellationToken) =>
-            runtime.RunHelpAsync(
-                new HelpCommandOptions(
-                    Topic: parseResult.GetValue(topic)),
-                cancellationToken));
-
-        return command;
-    }
-
     private static Command CreateSystemCommand(ICaiCommandRuntime runtime)
     {
         var command = new Command("system", "Container-internal runtime commands.");
-        command.SetAction((_, cancellationToken) => runtime.RunSystemAsync(cancellationToken));
 
         var init = new Command("init");
         var dataDirOption = new Option<string?>("--data-dir");
@@ -783,7 +758,6 @@ internal static partial class RootCommandBuilder
                 cancellationToken));
 
         var devcontainer = new Command("devcontainer");
-        devcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerAsync(cancellationToken));
 
         var install = new Command("install");
         var featureDirOption = new Option<string?>("--feature-dir");

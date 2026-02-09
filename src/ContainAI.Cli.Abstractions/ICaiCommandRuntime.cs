@@ -30,17 +30,11 @@ public interface ICaiCommandRuntime
 
     Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken);
 
-    Task<int> RunSshAsync(CancellationToken cancellationToken);
-
     Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken);
-
-    Task<int> RunLinksAsync(CancellationToken cancellationToken);
 
     Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken);
 
     Task<int> RunLinksFixAsync(LinksSubcommandOptions options, CancellationToken cancellationToken);
-
-    Task<int> RunConfigAsync(CancellationToken cancellationToken);
 
     Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken);
 
@@ -52,8 +46,6 @@ public interface ICaiCommandRuntime
 
     Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken);
 
-    Task<int> RunManifestAsync(CancellationToken cancellationToken);
-
     Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken);
 
     Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken);
@@ -61,8 +53,6 @@ public interface ICaiCommandRuntime
     Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken);
 
     Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken);
-
-    Task<int> RunTemplateAsync(CancellationToken cancellationToken);
 
     Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken);
 
@@ -72,17 +62,11 @@ public interface ICaiCommandRuntime
 
     Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken);
 
-    Task<int> RunHelpAsync(HelpCommandOptions options, CancellationToken cancellationToken);
-
-    Task<int> RunSystemAsync(CancellationToken cancellationToken);
-
     Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken);
 
     Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken);
 
     Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken);
-
-    Task<int> RunSystemDevcontainerAsync(CancellationToken cancellationToken);
 
     Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken);
 

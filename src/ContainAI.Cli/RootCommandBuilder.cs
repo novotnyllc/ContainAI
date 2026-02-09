@@ -115,7 +115,6 @@ internal static partial class RootCommandBuilder
         root.Subcommands.Add(CreateUninstallCommand(runtime));
         root.Subcommands.Add(CreateCompletionCommand(root, console));
         root.Subcommands.Add(CreateVersionCommand(runtime, console));
-        root.Subcommands.Add(CreateHelpCommand(runtime));
         root.Subcommands.Add(CreateSystemCommand(runtime));
         root.Subcommands.Add(AcpCommandBuilder.Build(runtime));
 
@@ -678,6 +677,8 @@ internal static partial class RootCommandBuilder
 
         normalized = normalized switch
         {
+            ["help"] => ["--help"],
+            ["help", .. var helpArgs] when helpArgs.Length > 0 => [.. helpArgs, "--help"],
             ["--refresh", .. var refreshArgs] => ["refresh", .. refreshArgs],
             ["-v" or "--version", .. var versionArgs] => ["version", .. versionArgs],
             _ => normalized,
@@ -699,7 +700,7 @@ internal static partial class RootCommandBuilder
         }
 
         var firstToken = args[0];
-        if (firstToken is "help" or "--help" or "-h")
+        if (firstToken is "--help" or "-h")
         {
             return false;
         }
