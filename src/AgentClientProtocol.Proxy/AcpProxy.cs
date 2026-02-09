@@ -234,8 +234,8 @@ public sealed class AcpProxy : IDisposable
             var initParams = new InitializeRequestParams
             {
                 ProtocolVersion = cachedInitializeParams?.ProtocolVersion ?? "2025-01-01",
-                ClientInfo = cachedInitializeParams?.ClientInfo is { } clientInfo ? clientInfo.Clone() : null,
-                Capabilities = cachedInitializeParams?.Capabilities is { } capabilities ? capabilities.Clone() : null,
+                ClientInfo = cachedInitializeParams?.ClientInfo,
+                Capabilities = cachedInitializeParams?.Capabilities,
             };
             MergeExtensionData(initParams.ExtensionData, cachedInitializeParams?.ExtensionData);
 
@@ -275,7 +275,7 @@ public sealed class AcpProxy : IDisposable
             // Translate MCP server args if provided
             if (mcpServersNode is { } mcpServersValue)
             {
-                var translatedMcp = pathTranslator.TranslateMcpServers(mcpServersValue);
+                var translatedMcp = pathTranslator.TranslateMcpServers(mcpServersValue.Element);
                 sessionNewParams.McpServers = translatedMcp;
             }
 
@@ -315,12 +315,17 @@ public sealed class AcpProxy : IDisposable
             sessions[session.ProxySessionId] = session;
 
             // Respond to editor with proxy session ID
+            var responsePayload = new SessionNewResponsePayload
+            {
+                SessionId = session.ProxySessionId,
+            };
+            MergeExtensionData(responsePayload.ExtensionData, sessionNewResult?.ExtensionData);
+            CopySessionNewExtensions(sessionNewResponse.Result, responsePayload.ExtensionData);
+
             var response = new JsonRpcEnvelope
             {
                 Id = message.Id,
-                Result = SerializeElement(
-                    new SessionNewResponsePayload { SessionId = session.ProxySessionId },
-                    AcpJsonContext.Default.SessionNewResponsePayload),
+                Result = SerializeElement(responsePayload, AcpJsonContext.Default.SessionNewResponsePayload),
             };
             if (message.Id != null)
             {
@@ -546,15 +551,25 @@ public sealed class AcpProxy : IDisposable
         => JsonSerializer.SerializeToElement(value, typeInfo);
 
     private static void MergeExtensionData(Dictionary<string, JsonElement> destination, Dictionary<string, JsonElement>? source)
+        => AcpExtensionData.MergeInto(destination, source);
+
+    private static void CopySessionNewExtensions(JsonRpcData? result, Dictionary<string, JsonElement> destination)
     {
-        if (source is null || source.Count == 0)
+        ArgumentNullException.ThrowIfNull(destination);
+
+        if (result is not { } payload || payload.Element.ValueKind != JsonValueKind.Object)
         {
             return;
         }
 
-        foreach (var (key, value) in source)
+        foreach (var property in payload.Element.EnumerateObject())
         {
-            destination[key] = value.Clone();
+            if (string.Equals(property.Name, "sessionId", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            destination[property.Name] = property.Value.Clone();
         }
     }
 }

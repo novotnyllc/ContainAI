@@ -421,6 +421,30 @@ public sealed class AcpProxyLifecycleTests
     }
 
     [Fact]
+    public async Task RunAsync_SessionNew_PreservesAgentExtensionDataInResponse()
+    {
+        var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SessionNewWithExtensionData);
+        await using var spawnerScope = spawner.ConfigureAwait(false);
+        var harness = await ProxyHarness.StartAsync(spawner, TestContext.Current.CancellationToken).ConfigureAwait(true);
+        await using var harnessScope = harness.ConfigureAwait(false);
+
+        await harness.WriteAsync(new JsonRpcEnvelope
+        {
+            Id = "new-extension",
+            Method = "session/new",
+            Params = new JsonObject
+            {
+                ["cwd"] = Directory.GetCurrentDirectory(),
+            },
+        });
+
+        var response = await harness.ReadMessageAsync(TestContext.Current.CancellationToken);
+        Assert.Equal("new-extension", response.Id?.GetValue<string>());
+        Assert.NotNull(response.Result?["sessionId"]);
+        Assert.Equal("enabled", response.Result?["proxyMode"]?.GetValue<string>());
+    }
+
+    [Fact]
     public async Task RunAsync_SessionEnd_WhenAgentDoesNotExit_StillAcknowledgesAfterTimeout()
     {
         var spawner = new ScriptedAgentSpawner(ScriptedAgentMode.SlowSessionEnd);
@@ -494,6 +518,7 @@ public sealed class AcpProxyLifecycleTests
         SessionNewErrorWithoutMessage,
         PromptOutputIncludesBlankAndNull,
         SlowSessionEnd,
+        SessionNewWithExtensionData,
     }
 
     private sealed class ScriptedAgentSpawner : IAgentSpawner, IAsyncDisposable
@@ -601,6 +626,18 @@ public sealed class AcpProxyLifecycleTests
                             else if (mode == ScriptedAgentMode.NoSessionNewResponse)
                             {
                                 return;
+                            }
+                            else if (mode == ScriptedAgentMode.SessionNewWithExtensionData)
+                            {
+                                await WriteMessageAsync(output, new JsonRpcEnvelope
+                                {
+                                    Id = requestId ?? string.Empty,
+                                    Result = new JsonObject
+                                    {
+                                        ["sessionId"] = AgentSessionId,
+                                        ["proxyMode"] = "enabled",
+                                    },
+                                }, cancellationToken).ConfigureAwait(false);
                             }
                             else
                             {
