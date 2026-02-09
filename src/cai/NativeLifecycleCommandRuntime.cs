@@ -235,80 +235,46 @@ internal sealed partial class NativeLifecycleCommandRuntime
         => RunLinksSubcommandAsync("fix", options, cancellationToken);
 
     public Task<int> RunConfigCommandAsync(CancellationToken cancellationToken)
-        => RunConfigAsync(["config"], cancellationToken);
+        => WriteConfigUsageAsync();
 
     public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "config",
-        };
-        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
-        args.Add("list");
-        return RunConfigAsync(args, cancellationToken);
+        return RunParsedConfigCommandAsync(
+            new ParsedConfigCommand("list", null, null, options.Global, options.Workspace, null),
+            cancellationToken);
     }
 
     public Task<int> RunConfigGetAsync(ConfigGetCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "config",
-        };
-        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
-        args.Add("get");
-        args.Add(options.Key);
-        return RunConfigAsync(args, cancellationToken);
+        return RunParsedConfigCommandAsync(
+            new ParsedConfigCommand("get", options.Key, null, options.Global, options.Workspace, null),
+            cancellationToken);
     }
 
     public Task<int> RunConfigSetAsync(ConfigSetCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "config",
-        };
-        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
-        args.Add("set");
-        args.Add(options.Key);
-        args.Add(options.Value);
-        return RunConfigAsync(args, cancellationToken);
+        return RunParsedConfigCommandAsync(
+            new ParsedConfigCommand("set", options.Key, options.Value, options.Global, options.Workspace, null),
+            cancellationToken);
     }
 
     public Task<int> RunConfigUnsetAsync(ConfigUnsetCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "config",
-        };
-        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
-        args.Add("unset");
-        args.Add(options.Key);
-        return RunConfigAsync(args, cancellationToken);
+        return RunParsedConfigCommandAsync(
+            new ParsedConfigCommand("unset", options.Key, null, options.Global, options.Workspace, null),
+            cancellationToken);
     }
 
     public Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "config",
-        };
-        AppendConfigScopeArgs(args, options.Global, options.Workspace, options.Verbose);
-        args.Add("resolve-volume");
-        if (!string.IsNullOrWhiteSpace(options.ExplicitVolume))
-        {
-            args.Add(options.ExplicitVolume);
-        }
-
-        return RunConfigAsync(args, cancellationToken);
+        return RunParsedConfigCommandAsync(
+            new ParsedConfigCommand("resolve-volume", options.ExplicitVolume, null, false, options.Workspace, null),
+            cancellationToken);
     }
 
     public Task<int> RunManifestCommandAsync(CancellationToken cancellationToken)
@@ -317,83 +283,32 @@ internal sealed partial class NativeLifecycleCommandRuntime
     public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "manifest",
-            "parse",
-        };
-        if (options.IncludeDisabled)
-        {
-            args.Add("--include-disabled");
-        }
-
-        if (options.EmitSourceFile)
-        {
-            args.Add("--emit-source-file");
-        }
-
-        args.Add(options.ManifestPath);
-        return RunManifestAsync(args, cancellationToken);
+        return RunManifestParseCoreAsync(options.ManifestPath, options.IncludeDisabled, options.EmitSourceFile, cancellationToken);
     }
 
     public Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "manifest",
-            "generate",
-            options.Kind,
-            options.ManifestPath,
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.OutputPath))
-        {
-            args.Add(options.OutputPath);
-        }
-
-        return RunManifestAsync(args, cancellationToken);
+        return RunManifestGenerateCoreAsync(options.Kind, options.ManifestPath, options.OutputPath, cancellationToken);
     }
 
     public Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "manifest",
-            "apply",
+        return RunManifestApplyCoreAsync(
             options.Kind,
             options.ManifestPath,
-        };
-
-        AppendOption(args, "--data-dir", options.DataDir);
-        AppendOption(args, "--home-dir", options.HomeDir);
-        AppendOption(args, "--shim-dir", options.ShimDir);
-        AppendOption(args, "--cai-binary", options.CaiBinary);
-
-        return RunManifestAsync(args, cancellationToken);
+            dataDir: options.DataDir ?? "/mnt/agent-data",
+            homeDir: options.HomeDir ?? "/home/agent",
+            shimDir: options.ShimDir ?? "/opt/containai/user-agent-shims",
+            caiBinaryPath: options.CaiBinary ?? "/usr/local/bin/cai",
+            cancellationToken);
     }
 
     public Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-
-        var args = new List<string>
-        {
-            "manifest",
-            "check",
-        };
-
-        if (!string.IsNullOrWhiteSpace(options.ManifestDir))
-        {
-            args.Add("--manifest-dir");
-            args.Add(options.ManifestDir);
-        }
-
-        return RunManifestAsync(args, cancellationToken);
+        return RunManifestCheckCoreAsync(options.ManifestDir, cancellationToken);
     }
 
     public Task<int> RunTemplateCommandAsync(CancellationToken cancellationToken)
@@ -3365,8 +3280,7 @@ internal sealed partial class NativeLifecycleCommandRuntime
     {
         if (args.Count < 2)
         {
-            await stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
-            return 1;
+            return await WriteConfigUsageAsync().ConfigureAwait(false);
         }
 
         var parsed = ParseConfigOptions(args.Skip(1).ToArray());
@@ -3376,6 +3290,17 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        return await RunParsedConfigCommandAsync(parsed, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> WriteConfigUsageAsync()
+    {
+        await stderr.WriteLineAsync("Usage: cai config <list|get|set|unset|resolve-volume> [options]").ConfigureAwait(false);
+        return 1;
+    }
+
+    private async Task<int> RunParsedConfigCommandAsync(ParsedConfigCommand parsed, CancellationToken cancellationToken)
+    {
         if (string.Equals(parsed.Action, "resolve-volume", StringComparison.Ordinal))
         {
             return await ConfigResolveVolumeAsync(parsed, cancellationToken).ConfigureAwait(false);
@@ -3463,6 +3388,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        return await RunManifestParseCoreAsync(manifestPath, includeDisabled, emitSourceFile, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunManifestParseCoreAsync(
+        string manifestPath,
+        bool includeDisabled,
+        bool emitSourceFile,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var parsed = ManifestTomlParser.Parse(manifestPath, includeDisabled, emitSourceFile);
@@ -3503,6 +3437,15 @@ internal sealed partial class NativeLifecycleCommandRuntime
         var manifestPath = args[1];
         var outputPath = args.Length >= 3 ? args[2] : null;
 
+        return await RunManifestGenerateCoreAsync(kind, manifestPath, outputPath, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunManifestGenerateCoreAsync(
+        string kind,
+        string manifestPath,
+        string? outputPath,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var generated = kind switch
@@ -3645,6 +3588,18 @@ internal sealed partial class NativeLifecycleCommandRuntime
             return 1;
         }
 
+        return await RunManifestApplyCoreAsync(kind, manifestPath, dataDir, homeDir, shimDir, caiBinaryPath, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunManifestApplyCoreAsync(
+        string kind,
+        string manifestPath,
+        string dataDir,
+        string homeDir,
+        string shimDir,
+        string caiBinaryPath,
+        CancellationToken cancellationToken)
+    {
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -3722,6 +3677,11 @@ internal sealed partial class NativeLifecycleCommandRuntime
             }
         }
 
+        return await RunManifestCheckCoreAsync(manifestDirectory, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunManifestCheckCoreAsync(string? manifestDirectory, CancellationToken cancellationToken)
+    {
         manifestDirectory = ResolveManifestDirectory(manifestDirectory);
         if (!Directory.Exists(manifestDirectory))
         {
@@ -5034,13 +4994,6 @@ internal sealed partial class NativeLifecycleCommandRuntime
         {
             args.Add(value);
         }
-    }
-
-    private static void AppendConfigScopeArgs(List<string> args, bool global, string? workspace, bool verbose)
-    {
-        AppendFlag(args, "--global", global);
-        AppendOption(args, "--workspace", workspace);
-        AppendFlag(args, "--verbose", verbose);
     }
 
     private Task<int> RunLinksSubcommandAsync(string subcommand, LinksSubcommandOptions options, CancellationToken cancellationToken)
