@@ -1,9 +1,11 @@
 // JSON-RPC 2.0 message types with System.Text.Json source generation for AOT
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 namespace AgentClientProtocol.Proxy.Protocol;
 
@@ -62,20 +64,43 @@ internal sealed class JsonRpcIdConverter : JsonConverter<JsonRpcId>
     public override JsonRpcId Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.TokenType switch
     {
         JsonTokenType.String => JsonRpcId.FromString(reader.GetString() ?? string.Empty),
-        JsonTokenType.Number => JsonRpcId.FromNumber(reader.GetInt64()),
+        JsonTokenType.Number => new JsonRpcId(ReadNumberLiteral(ref reader), IsNumeric: true),
         _ => throw new JsonException("JSON-RPC id must be a string or integer."),
     };
 
     public override void Write(Utf8JsonWriter writer, JsonRpcId value, JsonSerializerOptions options)
     {
-        if (value.IsNumeric &&
-            long.TryParse(value.RawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericValue))
+        if (value.IsNumeric)
         {
-            writer.WriteNumberValue(numericValue);
-            return;
+            try
+            {
+                writer.WriteRawValue(value.RawValue, skipInputValidation: false);
+                return;
+            }
+            catch (Exception ex) when (ex is JsonException or ArgumentException)
+            {
+            }
         }
 
         writer.WriteStringValue(value.RawValue);
+    }
+
+    private static string ReadNumberLiteral(ref Utf8JsonReader reader)
+    {
+        if (reader.HasValueSequence)
+        {
+            var sequence = reader.ValueSequence;
+            var buffer = new byte[checked((int)sequence.Length)];
+            var offset = 0;
+            foreach (var segment in sequence)
+            {
+                segment.Span.CopyTo(buffer.AsSpan(offset));
+                offset += segment.Length;
+            }
+            return Encoding.UTF8.GetString(buffer);
+        }
+
+        return Encoding.UTF8.GetString(reader.ValueSpan);
     }
 }
 
@@ -138,14 +163,7 @@ public readonly record struct JsonRpcData
     {
         try
         {
-            var result = GetValue<T>();
-            if (result is null)
-            {
-                value = default!;
-                return false;
-            }
-
-            value = result;
+            value = GetValue<T>()!;
             return true;
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
@@ -240,13 +258,13 @@ public sealed class InitializeRequestParams
     public string? ProtocolVersion { get; set; }
 
     [JsonPropertyName("clientInfo")]
-    public JsonElement? ClientInfo { get; set; }
+    public JsonRpcData? ClientInfo { get; set; }
 
     [JsonPropertyName("capabilities")]
-    public JsonElement? Capabilities { get; set; }
+    public JsonRpcData? Capabilities { get; set; }
 
     [JsonExtensionData]
-    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+    public Dictionary<string, JsonElement> ExtensionData { get; } = new(StringComparer.Ordinal);
 }
 
 public sealed class InitializeResultPayload
@@ -282,10 +300,10 @@ public sealed class SessionNewRequestParams
     public string? Cwd { get; set; }
 
     [JsonPropertyName("mcpServers")]
-    public JsonElement? McpServers { get; set; }
+    public JsonRpcData? McpServers { get; set; }
 
     [JsonExtensionData]
-    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+    public Dictionary<string, JsonElement> ExtensionData { get; } = new(StringComparer.Ordinal);
 }
 
 public sealed class SessionNewResponsePayload
@@ -294,7 +312,7 @@ public sealed class SessionNewResponsePayload
     public string? SessionId { get; set; }
 
     [JsonExtensionData]
-    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+    public Dictionary<string, JsonElement> ExtensionData { get; } = new(StringComparer.Ordinal);
 }
 
 public sealed class SessionScopedParams
@@ -303,7 +321,67 @@ public sealed class SessionScopedParams
     public string? SessionId { get; set; }
 
     [JsonExtensionData]
-    public Dictionary<string, JsonElement> ExtensionData { get; } = [];
+    public Dictionary<string, JsonElement> ExtensionData { get; } = new(StringComparer.Ordinal);
+}
+
+internal static class AcpExtensionData
+{
+    public static void MergeInto(IDictionary<string, JsonElement> destination, IReadOnlyDictionary<string, JsonElement>? source)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        if (source is null || source.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (key, value) in source)
+        {
+            destination[key] = value.Clone();
+        }
+    }
+
+    public static bool TryGetValue<T>(
+        IReadOnlyDictionary<string, JsonElement> extensionData,
+        string key,
+        JsonTypeInfo<T> typeInfo,
+        [NotNullWhen(true)] out T? value)
+    {
+        ArgumentNullException.ThrowIfNull(extensionData);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+
+        if (!extensionData.TryGetValue(key, out var element) || element.ValueKind == JsonValueKind.Null)
+        {
+            value = default;
+            return false;
+        }
+
+        try
+        {
+            value = element.Deserialize(typeInfo);
+            return value is not null;
+        }
+        catch (JsonException)
+        {
+            value = default;
+            return false;
+        }
+    }
+
+    public static void SetValue<T>(
+        IDictionary<string, JsonElement> extensionData,
+        string key,
+        T value,
+        JsonTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(extensionData);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        ArgumentNullException.ThrowIfNull(value);
+
+        extensionData[key] = JsonSerializer.SerializeToElement(value, typeInfo);
+    }
 }
 
 /// <summary>

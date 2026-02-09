@@ -1,4 +1,7 @@
+using System.Buffers;
+using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using AgentClientProtocol.Proxy.Protocol;
 using Xunit;
 
@@ -60,6 +63,18 @@ public sealed class JsonRpcDataAndIdTests
         Assert.Equal(expectedNumeric, envelope.Id?.IsNumeric);
     }
 
+    [Theory]
+    [InlineData("{\"jsonrpc\":\"2.0\",\"id\":12.5,\"method\":\"m\"}", "12.5")]
+    [InlineData("{\"jsonrpc\":\"2.0\",\"id\":900719925474099312345,\"method\":\"m\"}", "900719925474099312345")]
+    public void JsonRpcIdConverter_DeserializesNonInt64NumericIds(string json, string expectedRawValue)
+    {
+        var envelope = JsonSerializer.Deserialize(json, AcpJsonContext.Default.JsonRpcEnvelope);
+
+        Assert.NotNull(envelope);
+        Assert.Equal(expectedRawValue, envelope.Id?.RawValue);
+        Assert.True(envelope.Id?.IsNumeric);
+    }
+
     [Fact]
     public void JsonRpcIdConverter_SerializesStringAndNumericIds()
     {
@@ -79,6 +94,20 @@ public sealed class JsonRpcDataAndIdTests
 
         Assert.Contains("\"id\":\"abc\"", stringJson, StringComparison.Ordinal);
         Assert.Contains("\"id\":12", numericJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void JsonRpcIdConverter_Read_WithMultiSegmentNumber_ParsesNumericId()
+    {
+        var converter = new JsonRpcIdConverter();
+        var sequence = CreateReadOnlySequence(Encoding.UTF8.GetBytes("12"), Encoding.UTF8.GetBytes("34"));
+        var reader = new Utf8JsonReader(sequence, isFinalBlock: true, state: default);
+        Assert.True(reader.Read());
+
+        var id = converter.Read(ref reader, typeof(JsonRpcId), new JsonSerializerOptions());
+
+        Assert.Equal("1234", id.RawValue);
+        Assert.True(id.IsNumeric);
     }
 
     [Fact]
@@ -175,6 +204,19 @@ public sealed class JsonRpcDataAndIdTests
     }
 
     [Fact]
+    public void JsonRpcIdConverter_SerializesNumericFlagWithDecimalValue_AsNumber()
+    {
+        var envelope = new JsonRpcEnvelope
+        {
+            Id = new JsonRpcId("12.5", IsNumeric: true),
+            Method = "m",
+        };
+
+        var json = JsonSerializer.Serialize(envelope, AcpJsonContext.Default.JsonRpcEnvelope);
+        Assert.Contains("\"id\":12.5", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void JsonRpcDataConverter_RoundTripsPayload()
     {
         var payload = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(new { sessionId = "s-1", ok = true }));
@@ -209,5 +251,66 @@ public sealed class JsonRpcDataAndIdTests
         using var document = JsonDocument.Parse("""{"name":"value"}""");
         var payload = JsonRpcData.FromJsonElement(document.RootElement);
         Assert.Equal("value", payload["name"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public void JsonRpcData_LongAndDecimalAccessors_Work()
+    {
+        var longPayload = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(1234567890123L));
+        var decimalPayload = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(12.34m));
+
+        Assert.Equal(1234567890123L, longPayload.GetValue<long>());
+        Assert.Equal(12.34m, decimalPayload.GetValue<decimal>());
+    }
+
+    [Fact]
+    public void JsonRpcData_ImplicitJsonElementConversion_Works()
+    {
+        var payload = JsonRpcData.FromJsonElement(JsonSerializer.SerializeToElement(new { name = "alpha" }));
+        JsonElement element = payload;
+
+        Assert.Equal(JsonValueKind.Object, element.ValueKind);
+        Assert.Equal("alpha", element.GetProperty("name").GetString());
+    }
+
+    [Fact]
+    public void JsonRpcData_FromJsonNode_AndImplicitNodeConversion_Work()
+    {
+        var node = JsonNode.Parse("""{"sessionId":"s-42","nested":{"ok":true}}""");
+        Assert.NotNull(node);
+
+        var explicitPayload = JsonRpcData.FromJsonNode(node!);
+        JsonRpcData implicitPayload = node!;
+
+        Assert.Equal("s-42", explicitPayload["sessionId"]?.GetValue<string>());
+        Assert.True(implicitPayload["nested"]?["ok"]?.GetValue<bool>());
+    }
+
+    [Fact]
+    public void JsonRpcData_FromJsonNode_WithNullNode_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() => JsonRpcData.FromJsonNode(node: null!));
+    }
+
+    private static ReadOnlySequence<byte> CreateReadOnlySequence(byte[] first, byte[] second)
+    {
+        var firstSegment = new BufferSegment(first);
+        var secondSegment = firstSegment.Append(second);
+        return new ReadOnlySequence<byte>(firstSegment, 0, secondSegment, second.Length);
+    }
+
+    private sealed class BufferSegment : ReadOnlySequenceSegment<byte>
+    {
+        public BufferSegment(ReadOnlyMemory<byte> memory) => Memory = memory;
+
+        public BufferSegment Append(ReadOnlyMemory<byte> nextMemory)
+        {
+            var next = new BufferSegment(nextMemory)
+            {
+                RunningIndex = RunningIndex + Memory.Length,
+            };
+            Next = next;
+            return next;
+        }
     }
 }
