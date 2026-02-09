@@ -1848,12 +1848,12 @@ internal sealed partial class NativeLifecycleCommandRuntime
             rsyncArgs.Add("--delete");
         }
 
-        if (entry.Flags.Contains('x', StringComparison.Ordinal))
+        if (!noExcludes && entry.Flags.Contains('x', StringComparison.Ordinal))
         {
             rsyncArgs.Add("--exclude=.system/");
         }
 
-        if (entry.Flags.Contains('p', StringComparison.Ordinal) && excludePriv)
+        if (!noExcludes && entry.Flags.Contains('p', StringComparison.Ordinal) && excludePriv)
         {
             rsyncArgs.Add("--exclude=*.priv.*");
         }

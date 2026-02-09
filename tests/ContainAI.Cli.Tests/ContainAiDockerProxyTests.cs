@@ -121,6 +121,27 @@ public sealed class ContainAiDockerProxyTests
         Assert.Equal("vscode", settings.RemoteUser);
     }
 
+    [Fact]
+    public void TryReadFeatureSettings_WithMalformedJson_ReturnsFalse()
+    {
+        using var temp = new TempDirectory();
+        var filePath = Path.Combine(temp.Path, "devcontainer.json");
+        File.WriteAllText(
+            filePath,
+            """
+            {
+              "features": {
+                "ghcr.io/novotnyllc/containai/feature:latest": {
+                  "dataVolume": "my-volume"
+                }
+              }
+            """);
+
+        var success = ContainAiDockerProxy.TryReadFeatureSettings(filePath, TextWriter.Null, out _);
+
+        Assert.False(success);
+    }
+
     [Theory]
     [InlineData("my-volume", true)]
     [InlineData("volume.with.dots", true)]

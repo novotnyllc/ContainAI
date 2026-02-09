@@ -5,9 +5,9 @@
 
 AI coding agents need to operate freely - but without risking your host system. ContainAI gives them VM-like isolation with your shell preferences synced in, and ephemeral or persistent environments based on Sysbox.
 ```bash
-# Install and run in 30 seconds
-curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
-# install.sh bootstraps cai and delegates to: cai install --local --yes
+# Install and run in 30 seconds (Linux standalone bootstrap)
+curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash -s -- --yes
+# install.sh bootstraps cai and delegates to: cai install --local [install-options]
 cai setup    # One-time isolation setup
 cd /path/to/project && cai   # Agent starts in isolated container
 ```

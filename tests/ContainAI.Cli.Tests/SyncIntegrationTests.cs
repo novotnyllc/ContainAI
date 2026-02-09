@@ -380,6 +380,231 @@ public sealed class SyncIntegrationTests
     }
 
     [Fact]
+    [Trait("Category", "SyncIntegration")]
+    public async Task Import_NoExcludes_ControlsManifestExcludeRules()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var defaultVolume = $"containai-test-noex-default-{Guid.NewGuid():N}";
+        var noExcludesVolume = $"containai-test-noex-all-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-noex-src-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".codex", "skills", ".system"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".codex", "skills", "user.md"), "user content\n", TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".codex", "skills", ".system", "internal.md"), "internal content\n", TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var defaultExitCode = await runtime.RunAsync(
+                ["import", "--data-volume", defaultVolume, "--from", sourceRoot],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, defaultExitCode);
+
+            var defaultVerify = await RunDockerAsync(
+                [
+                    "run", "--rm", "-v", $"{defaultVolume}:/data", AlpineImage, "sh", "-lc",
+                    "set -eu; test -f /data/codex/skills/user.md; test ! -f /data/codex/skills/.system/internal.md"
+                ],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, defaultVerify.ExitCode);
+
+            var noExcludesExitCode = await runtime.RunAsync(
+                ["import", "--data-volume", noExcludesVolume, "--from", sourceRoot, "--no-excludes"],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, noExcludesExitCode);
+
+            var noExcludesVerify = await RunDockerAsync(
+                [
+                    "run", "--rm", "-v", $"{noExcludesVolume}:/data", AlpineImage, "sh", "-lc",
+                    "set -eu; test -f /data/codex/skills/user.md; test -f /data/codex/skills/.system/internal.md"
+                ],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, noExcludesVerify.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", defaultVolume], TestContext.Current.CancellationToken);
+            _ = await RunDockerAsync(["volume", "rm", "-f", noExcludesVolume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SyncIntegration")]
+    public async Task Import_NoSecrets_SkipsSecretManifestEntries_ButStillCopiesAdditionalPaths()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var volume = $"containai-test-nosecrets-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-nosecrets-src-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(Path.GetTempPath(), $"cai-nosecrets-work-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".codex"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".codex", "auth.json"), """{"token":"secret"}""", TestContext.Current.CancellationToken);
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".extra"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".extra", "secret.txt"), "top secret\n", TestContext.Current.CancellationToken);
+
+            var configPath = Path.Combine(workspace, "containai.toml");
+            await File.WriteAllTextAsync(
+                configPath,
+                $$"""
+                [agent]
+                data_volume = "{{volume}}"
+
+                [import]
+                additional_paths = ["~/.extra/secret.txt"]
+                """,
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var exitCode = await runtime.RunAsync(
+                ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath, "--no-secrets"],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, exitCode);
+
+            var verify = await RunDockerAsync(
+                [
+                    "run", "--rm", "-v", $"{volume}:/data", AlpineImage, "sh", "-lc",
+                    "set -eu; test ! -f /data/codex/auth.json; test -f /data/extra/secret.txt"
+                ],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, verify.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+            Directory.Delete(workspace, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", volume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SyncIntegration")]
+    public async Task Import_InvalidTomlConfig_ReturnsParseError()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var volume = $"containai-test-badconfig-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-badcfg-src-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(Path.GetTempPath(), $"cai-badcfg-work-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".claude"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".claude", "settings.json"), "{}", TestContext.Current.CancellationToken);
+
+            var configPath = Path.Combine(workspace, "containai.toml");
+            await File.WriteAllTextAsync(
+                configPath,
+                $$"""
+                [agent
+                data_volume = "{{volume}}"
+                """,
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var exitCode = await runtime.RunAsync(
+                ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("Error: Invalid TOML", stderr.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+            Directory.Delete(workspace, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", volume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "SyncIntegration")]
+    public async Task Import_AdditionalPathWithSymlinkComponent_IsRejected()
+    {
+        if (!await DockerAvailableAsync(TestContext.Current.CancellationToken))
+        {
+            return;
+        }
+
+        var volume = $"containai-test-additional-symlink-{Guid.NewGuid():N}";
+        var sourceRoot = Path.Combine(Path.GetTempPath(), $"cai-additional-sym-src-{Guid.NewGuid():N}");
+        var workspace = Path.Combine(Path.GetTempPath(), $"cai-additional-sym-work-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(sourceRoot);
+        Directory.CreateDirectory(workspace);
+
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".claude"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".claude", "settings.json"), "{}", TestContext.Current.CancellationToken);
+            Directory.CreateDirectory(Path.Combine(sourceRoot, ".extra", "real"));
+            await File.WriteAllTextAsync(Path.Combine(sourceRoot, ".extra", "real", "file.txt"), "value\n", TestContext.Current.CancellationToken);
+            File.CreateSymbolicLink(
+                Path.Combine(sourceRoot, ".extra", "link"),
+                Path.Combine(sourceRoot, ".extra", "real"));
+
+            var configPath = Path.Combine(workspace, "containai.toml");
+            await File.WriteAllTextAsync(
+                configPath,
+                $$"""
+                [agent]
+                data_volume = "{{volume}}"
+
+                [import]
+                additional_paths = ["~/.extra/link"]
+                """,
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+
+            var exitCode = await runtime.RunAsync(
+                ["import", "--data-volume", volume, "--from", sourceRoot, "--workspace", workspace, "--config", configPath],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, exitCode);
+            Assert.Contains("contains symlink components", stderr.ToString(), StringComparison.Ordinal);
+
+            var verify = await RunDockerAsync(
+                ["run", "--rm", "-v", $"{volume}:/data", AlpineImage, "sh", "-lc", "set -eu; test ! -e /data/extra/link"],
+                TestContext.Current.CancellationToken);
+            Assert.Equal(0, verify.ExitCode);
+        }
+        finally
+        {
+            Directory.Delete(sourceRoot, recursive: true);
+            Directory.Delete(workspace, recursive: true);
+            _ = await RunDockerAsync(["volume", "rm", "-f", volume], TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public void NativeLifecycleSource_ContainsEnvGuardMessages()
     {
         var sourcePath = LocateRepositoryPath("src", "cai", "NativeLifecycleCommandRuntime.cs");

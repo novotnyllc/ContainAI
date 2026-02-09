@@ -1,4 +1,5 @@
 using CsToml;
+using CsToml.Error;
 
 namespace ContainAI.Cli.Host;
 
@@ -92,8 +93,15 @@ internal static class ManifestTomlParser
 
     private static ManifestTomlDocument? ParseManifestFile(string manifestFile)
     {
-        var bytes = File.ReadAllBytes(manifestFile);
-        return CsTomlSerializer.Deserialize<ManifestTomlDocument?>(bytes);
+        try
+        {
+            var bytes = File.ReadAllBytes(manifestFile);
+            return CsTomlSerializer.Deserialize<ManifestTomlDocument?>(bytes);
+        }
+        catch (CsTomlException ex)
+        {
+            throw new InvalidOperationException($"invalid TOML in manifest '{manifestFile}': {ex.Message}", ex);
+        }
     }
 
     private static void AddSectionEntries(

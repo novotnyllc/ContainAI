@@ -172,6 +172,37 @@ public sealed class ManifestCommandTests
     }
 
     [Fact]
+    public async Task ManifestParse_InvalidToml_ReturnsError()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var manifestPath = Path.Combine(tempDir, "broken.toml");
+            await File.WriteAllTextAsync(
+                manifestPath,
+                """
+                [agent
+                name = "broken"
+                """,
+                TestContext.Current.CancellationToken);
+
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var runtime = new NativeLifecycleCommandRuntime(stdout, stderr);
+            var exitCode = await runtime.RunAsync(["manifest", "parse", manifestPath], TestContext.Current.CancellationToken);
+
+            Assert.Equal(1, exitCode);
+            Assert.Contains("invalid TOML", stderr.ToString(), StringComparison.Ordinal);
+            Assert.Equal(string.Empty, stdout.ToString());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ManifestGenerate_ContainerLinkSpec_PrintsJsonToStdout()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-{Guid.NewGuid():N}");
