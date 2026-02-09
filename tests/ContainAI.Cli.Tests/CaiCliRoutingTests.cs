@@ -8,7 +8,7 @@ namespace ContainAI.Cli.Tests;
 public sealed class CaiCliRoutingTests
 {
     [Fact]
-    public async Task NoArgs_UsesNativeRunRuntime_DefaultRun()
+    public async Task NoArgs_UsesRunRuntime_DefaultRun()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -22,7 +22,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task RunCommand_UsesNativeLifecycleRouting()
+    public async Task RunCommand_UsesSessionRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -38,7 +38,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task ShellCommand_UsesNativeLifecycleRouting()
+    public async Task ShellCommand_UsesSessionRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -52,7 +52,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task ExecCommand_UsesNativeLifecycleRouting()
+    public async Task ExecCommand_UsesSessionRouting()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -66,7 +66,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task DockerCommand_UsesNativeDockerRuntime()
+    public async Task DockerCommand_UsesDockerRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -79,7 +79,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task StatusCommand_UsesNativeStatusRuntime()
+    public async Task StatusCommand_UsesStatusRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -404,7 +404,7 @@ public sealed class CaiCliRoutingTests
     }
 
     [Fact]
-    public async Task SystemCommand_UsesNativeLifecycleRuntime()
+    public async Task SystemCommand_UsesSessionRuntime()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -671,7 +671,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
     }
 
     [Fact]
-    public async Task VersionSubcommand_UsesNativeRuntime_WhenJsonNotRequested()
+    public async Task VersionSubcommand_UsesRuntime_WhenJsonNotRequested()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -686,7 +686,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
     }
 
     [Fact]
-    public async Task VersionWithJson_UsesNativePathDirectly()
+    public async Task VersionWithJson_UsesDirectJsonPath()
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -757,7 +757,7 @@ public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
     [Theory]
     [InlineData("--version")]
     [InlineData("-v")]
-    public async Task VersionFlags_WithJson_UseNativeVersionJson(string token)
+    public async Task VersionFlags_WithJson_UseRuntimeVersionJson(string token)
     {
         var runtime = new FakeRuntime();
         var cancellationToken = TestContext.Current.CancellationToken;
