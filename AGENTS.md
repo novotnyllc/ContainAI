@@ -8,6 +8,9 @@ Sandboxed container environment for AI coding agents. Native .NET 10 CLI with co
 # Verify environment
 cai doctor
 
+# Install/update local CLI paths and bundled defaults
+cai install --yes --no-setup
+
 # Build Docker images (all layers)
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 

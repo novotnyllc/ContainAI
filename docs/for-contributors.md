@@ -2,6 +2,8 @@
 
 **You want to improve ContainAI** - fix bugs, add features, or enhance documentation. This page guides you through the codebase and contribution workflow.
 
+Prerequisites: .NET SDK 10+, Docker CLI (`docker --version`), Bash 4.0+, and Git.
+
 ## Start Here
 
 1. **Fork and clone**:
@@ -14,15 +16,26 @@
    ```bash
    ./install.sh --local --yes --no-setup
    ```
+   `install.sh` delegates install operations to `cai install --local --yes --no-setup`.
 
 3. **Build the native CLI and test projects**:
    ```bash
    dotnet build ContainAI.slnx -c Release
    ```
 
-4. **Verify your environment**:
+4. **Run one-time runtime setup**:
+   ```bash
+   cai setup
+   ```
+
+5. **Verify your environment**:
    ```bash
    cai doctor
+   ```
+
+6. **Export sample configs when validating import/sync flows**:
+   ```bash
+   cai examples export --output-dir ./.containai/examples --force
    ```
 
 ## Build Container Images (When Required)
@@ -35,6 +48,12 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p
 
 # Build a single layer during iteration
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
+
+# Multi-arch build and push
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
+
+# Publish native AOT CLI binary
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
 ```
 
 For pure CLI/library/docs changes, image rebuilds are optional unless tests in your branch explicitly depend on freshly built images.

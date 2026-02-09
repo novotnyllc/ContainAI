@@ -4,16 +4,19 @@
 
 ## Start Here
 
+Prerequisites: Docker CLI (`docker --version`) and Bash 4.0+.
+
 1. **Install** - Clone the repo and install `cai`:
    ```bash
    git clone https://github.com/novotnyllc/containai.git
    cd containai
    ./install.sh --yes --no-setup
    ```
+   `install.sh` bootstraps the binary and delegates to `cai install --yes --no-setup`.
 
 2. **Setup isolation** (one-time):
-   - Linux (Ubuntu/Debian) and WSL2: Run `cai setup` (installs Sysbox via ContainAI-managed docker-ce)
-   - macOS: Run `cai setup` (uses Lima VM with Sysbox)
+   - Linux (Ubuntu/Debian) and WSL2: Run `cai setup` (installs a ContainAI-managed Docker daemon bundle and Sysbox)
+   - macOS: Run `cai setup` (configures a Lima VM with Sysbox runtime)
    - Other Linux distros: Follow [Setup Guide](setup-guide.md) for manual Sysbox installation
 
 3. **Launch your first sandbox** - Navigate to your project and run `cai`:

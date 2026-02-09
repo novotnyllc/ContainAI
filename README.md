@@ -7,6 +7,7 @@ AI coding agents need to operate freely - but without risking your host system. 
 ```bash
 # Install and run in 30 seconds
 curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
+# install.sh bootstraps cai and delegates to: cai install --yes
 cai setup    # One-time isolation setup
 cd /path/to/project && cai   # Agent starts in isolated container
 ```
@@ -35,7 +36,7 @@ See the [full security comparison](docs/security-comparison.md) for Docker ECI, 
 
 ## Quick Start
 
-After installation (see above), run `cai` in your project directory. First run? Authenticate inside the container with `claude login`.
+After installation and one-time `cai setup`, run `cai` in your project directory. First run? Authenticate inside the container with `claude login`.
 
 For detailed setup with environment checks, see the [Quickstart Guide](docs/quickstart.md).
 
@@ -95,9 +96,9 @@ Containers receive RFC 1123 compliant hostnames derived from their names. This e
 
 | Requirement | Version |
 |-------------|---------|
-| Docker | Engine 24.0+ |
+| Docker CLI | Any recent |
 | Bash | 4.0+ (macOS: `brew install bash`) |
-| Sysbox | Installed via `cai setup` |
+| Isolation runtime | Installed/configured via `cai setup` |
 
 ## Common Commands
 

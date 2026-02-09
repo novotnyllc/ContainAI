@@ -8,11 +8,12 @@ Before starting, ensure you have:
 
 | Requirement | Version | Check Command |
 |-------------|---------|---------------|
-| Docker | Desktop 4.50+ or Engine 24.0+ | `docker --version` |
+| Docker CLI | Any recent | `docker --version` |
 | Bash shell | 4.0+ | `echo "${BASH_VERSION}"` |
 | Git | Any | `git --version` |
 
 > **Shell note:** ContainAI requires **bash 4.0+**. If you use zsh, fish, or another shell, run `bash` first. macOS ships with bash 3.2; install a newer version via Homebrew (`brew install bash`).
+> **Runtime note:** `cai setup` provisions the isolation runtime (Linux/WSL2 installs a ContainAI-managed Docker daemon bundle and Sysbox on supported distros; macOS configures Lima).
 
 ## Step 1: Clone the Repository
 
@@ -27,6 +28,12 @@ cd containai
 ./install.sh --yes --no-setup
 ```
 
+`install.sh` bootstraps the `cai` binary and delegates installation to:
+
+```bash
+cai install --yes --no-setup
+```
+
 **Verify:**
 ```bash
 cai --help | head -3
@@ -35,7 +42,7 @@ cai --help | head -3
 # ...
 ```
 
-> **Note:** `install.sh` places `cai` in `~/.local/bin` by default. Ensure `~/.local/bin` is on your `PATH`.
+> **Note:** `cai install` writes `cai` into `~/.local/share/containai` and installs wrappers in `~/.local/bin` by default.
 
 ## CLI Output Behavior
 
@@ -73,7 +80,7 @@ cai doctor
 | Output | Meaning | Action |
 |--------|---------|--------|
 | `Sysbox: [OK]` | Sysbox runtime configured | Ready to go! |
-| `Sysbox: [ERROR]` | No isolation available | Install Sysbox (see below) |
+| `Sysbox: [ERROR]` | No isolation available | Run `cai setup` (see below) |
 
 ### Runtime Decision Tree
 
@@ -86,7 +93,7 @@ flowchart TD
     doctor -.->|not OK| install
 
     subgraph fallback["If Sysbox not available"]
-        install["Install Sysbox<br/>WSL2/macOS: Run 'cai setup'<br/>Native Linux: See Sysbox docs"]
+        install["Run 'cai setup'<br/>Linux (Ubuntu/Debian), WSL2, macOS<br/>Other Linux: see Setup Guide for manual Sysbox"]
     end
 ```
 
@@ -297,7 +304,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ### Minimum versions
 
-- Docker Engine: 24.0+ with Sysbox runtime
+- Docker CLI: any recent version
+- Isolation runtime: run `cai setup` (Linux/WSL2/macOS); for other Linux distros, follow the [Setup Guide](setup-guide.md)
 - Git: any recent version
 - Bash: 4.0+ (macOS default is 3.2; use `brew install bash`)
 

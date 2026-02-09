@@ -104,6 +104,8 @@ Release tarballs are produced automatically after `dotnet publish` (`AfterTarget
 - `install.sh`
 - `LICENSE`
 
+`install.sh` remains a bootstrap entrypoint. Installation behavior is implemented in native code via `cai install`.
+
 Tarball target:
 
 ```bash

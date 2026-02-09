@@ -26,6 +26,8 @@ Complete reference for the ContainAI CLI (`cai`/`containai` commands).
 | [`cai shell`](#cai-shell) | Open interactive shell via SSH | - |
 | [`cai exec`](#cai-exec) | Run command in container | - |
 | [`cai doctor`](#cai-doctor) | Check system capabilities | `fix` |
+| [`cai install`](#cai-install) | Install CLI and bundled assets locally | - |
+| [`cai examples`](#cai-examples) | List/export sample TOML files | `list`, `export` |
 | [`cai setup`](#cai-setup) | Configure secure isolation | - |
 | [`cai validate`](#cai-validate) | Validate Sysbox configuration | - |
 | [`cai docker`](#cai-docker) | Docker with ContainAI context | - |
@@ -99,6 +101,10 @@ flowchart TB
     end
 
     subgraph Maintenance["Maintenance"]
+        install[install]
+        examples[examples]
+        examples_list[list]
+        examples_export[export]
         setup[setup]
         update[update]
         refresh[refresh]
@@ -127,6 +133,9 @@ flowchart TB
     cai --> Other
 
     doctor --> doctor_fix
+    install --> setup
+    examples --> examples_list
+    examples --> examples_export
     links --> links_check
     links --> links_fix
     config --> config_list
@@ -167,7 +176,7 @@ containai [subcommand] [options]
 
 **Notes:**
 - `cai` and `containai` are aliases
-- **Installed usage:** The `install.sh` script installs `cai` to `~/.local/bin/cai`
+- **Installed usage:** `install.sh` bootstraps a `cai` binary and delegates to `cai install`
 - **Development usage:** Run directly with `dotnet run --project src/cai -- <command>`
 - Requires Bash 4.0+
 
@@ -456,6 +465,78 @@ cai doctor fix container myname
 - Docker context not configured
 - Kernel version incompatible
 - Docker daemon not running
+
+---
+
+### cai install
+
+Install ContainAI to local user directories and materialize bundled defaults.
+
+**Synopsis:**
+```bash
+cai install [options]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--local` | Require local payload mode (used by installer bootstrap) |
+| `--yes` | Auto-confirm non-interactive install actions |
+| `--no-setup` | Skip post-install `cai setup` |
+| `--install-dir <path>` | Override install root (default: `~/.local/share/containai`) |
+| `--bin-dir <path>` | Override wrapper directory (default: `~/.local/bin`) |
+| `--channel <stable|nightly>` | Optional channel hint for bootstrap workflows |
+| `--verbose` | Enable verbose installer output |
+
+**Behavior:**
+- Installs `cai` into install root.
+- Installs wrappers (`cai`, `containai-docker`) into bin dir.
+- Materializes bundled manifests, template-system Dockerfile, and example TOML files.
+- Writes default `~/.config/containai/config.toml` when missing.
+- Runs `cai setup` unless `--no-setup` is set.
+
+**Examples:**
+```bash
+# Install with defaults and run setup
+cai install --yes
+
+# Install without setup
+cai install --yes --no-setup
+
+# Custom install/bin paths
+cai install --install-dir /opt/containai --bin-dir /usr/local/bin --no-setup
+```
+
+---
+
+### cai examples
+
+List or export sample TOML configuration files.
+
+**Synopsis:**
+```bash
+cai examples [subcommand]
+```
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | List available sample TOML files |
+| `export` | Write sample TOML files to a target directory |
+
+**Examples:**
+```bash
+# List embedded examples
+cai examples list
+
+# Export examples to current directory
+cai examples export --output-dir .
+
+# Overwrite existing example files
+cai examples export --output-dir ~/.config/containai/examples --force
+```
 
 ---
 

@@ -30,20 +30,26 @@ Thank you for your interest in contributing to ContainAI! This guide covers deve
 ### Requirements
 
 - **.NET SDK 10.0+** - Required for native CLI build and test
-- **Docker Desktop 4.50+** with sandbox feature enabled, OR
-- **Sysbox runtime** installed (for Linux/WSL2/macOS via Lima)
+- **Docker CLI** - Any recent version (`docker --version`)
+- **Bash** 4.0+ (macOS: `brew install bash`)
 - **Git** for version control
 
 ### Setup
 
 ```bash
-# Restore local tools and build
+# Restore local tools and bootstrap cai
 dotnet tool restore
-dotnet build ContainAI.slnx -c Release
+./install.sh --local --yes --no-setup
 
-# Verify your environment
+# One-time runtime setup
+cai setup
+
+# Build and verify your environment
+dotnet build ContainAI.slnx -c Release
 cai doctor
 ```
+
+`install.sh` delegates install operations to `cai install`, and `cai setup` provisions platform runtime dependencies (Linux/WSL2 installs the ContainAI-managed dockerd bundle + Sysbox on supported distros; macOS configures Lima).
 
 ### Building Images (Buildx Preferred)
 
@@ -57,8 +63,8 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p
 # Build single layer
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -p:ContainAIImagePrefix=containai -p:ContainAIImageTag=latest
 
-# Build and tag for a registry (all layers)
-dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true
+# CI-style multi-arch build and push
+dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
 
 # Publish native AOT CLI (single RID)
 dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
@@ -286,7 +292,7 @@ test(sync): add credential isolation test
    - Test plan (how you verified the change)
    - Related issues (if any)
 3. **Address review feedback** promptly
-4. **Squash commits** if requested (keep history clean)
+4. **Squash commits** if requested (keep the commit set concise)
 
 ### Review Expectations
 
@@ -322,7 +328,7 @@ For a comprehensive understanding of the codebase:
 - [Technical README](src/README.md) - Image building and container internals
 
 Key concepts:
-- **Dual isolation paths**: Docker Desktop sandbox (ECI) or Sysbox runtime
+- **Isolated runtime provisioning**: `cai setup` configures the platform runtime (managed dockerd + Sysbox on Linux/WSL2, Lima on macOS)
 - **Native command runtime**: `.NET 10` CLI with `System.CommandLine` entrypoint
 - **Safe defaults**: Dangerous operations require explicit CLI flags
 - **Workspace-scoped config**: Per-project settings via TOML config files
