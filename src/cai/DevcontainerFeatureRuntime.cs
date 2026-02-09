@@ -2,6 +2,7 @@ using System.Net.NetworkInformation;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
@@ -36,17 +37,29 @@ internal sealed partial class DevcontainerFeatureRuntime
         stderr = standardError;
     }
 
+    public async Task<int> RunDevcontainerAsync(CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        await stderr.WriteLineAsync("Usage: cai system devcontainer <install|init|start|verify-sysbox>").ConfigureAwait(false);
+        return 1;
+    }
+
+    public Task<int> RunInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return RunInstallCoreAsync(options, cancellationToken);
+    }
+
     public async Task<int> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         if (args.Count == 0)
         {
-            await stderr.WriteLineAsync("Usage: cai system devcontainer <install|init|start|verify-sysbox>").ConfigureAwait(false);
-            return 1;
+            return await RunDevcontainerAsync(cancellationToken).ConfigureAwait(false);
         }
 
         return args[0] switch
         {
-            "install" => await RunInstallAsync(args.Skip(1).ToArray(), cancellationToken).ConfigureAwait(false),
+            "install" => await RunInstallLegacyAsync(args.Skip(1).ToArray(), cancellationToken).ConfigureAwait(false),
             "init" => await RunInitAsync(cancellationToken).ConfigureAwait(false),
             "start" => await RunStartAsync(cancellationToken).ConfigureAwait(false),
             "verify-sysbox" => await RunVerifySysboxAsync(cancellationToken).ConfigureAwait(false),
@@ -61,9 +74,9 @@ internal sealed partial class DevcontainerFeatureRuntime
         return 1;
     }
 
-    private async Task<int> RunInstallAsync(string[] args, CancellationToken cancellationToken)
+    private async Task<int> RunInstallLegacyAsync(string[] args, CancellationToken cancellationToken)
     {
-        string? featureDirectory = null;
+        var options = new SystemDevcontainerInstallCommandOptions(FeatureDir: null);
         for (var index = 0; index < args.Length; index++)
         {
             var token = args[index];
@@ -74,18 +87,26 @@ internal sealed partial class DevcontainerFeatureRuntime
                     await stdout.WriteLineAsync("Usage: cai system devcontainer install [--feature-dir <path>]").ConfigureAwait(false);
                     return 0;
                 case "--feature-dir":
-                    if (!TryReadValue(args, ref index, out featureDirectory))
+                    if (!TryReadValue(args, ref index, out var featureDirectory))
                     {
                         await stderr.WriteLineAsync("--feature-dir requires a value").ConfigureAwait(false);
                         return 1;
                     }
 
+                    options = options with { FeatureDir = featureDirectory };
                     break;
                 default:
                     await stderr.WriteLineAsync($"Unknown install option: {token}").ConfigureAwait(false);
                     return 1;
             }
         }
+
+        return await RunInstallCoreAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunInstallCoreAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    {
+        var featureDirectory = options.FeatureDir;
 
         if (!TryParseFeatureBoolean("ENABLECREDENTIALS", defaultValue: false, out var enableCredentials, out var enableCredentialsError))
         {
@@ -178,7 +199,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         return 0;
     }
 
-    private async Task<int> RunInitAsync(CancellationToken cancellationToken)
+    public async Task<int> RunInitAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(DefaultConfigPath))
         {
@@ -295,7 +316,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         return 0;
     }
 
-    private async Task<int> RunStartAsync(CancellationToken cancellationToken)
+    public async Task<int> RunStartAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(DefaultConfigPath))
         {
@@ -335,7 +356,7 @@ internal sealed partial class DevcontainerFeatureRuntime
         return 0;
     }
 
-    private async Task<int> RunVerifySysboxAsync(CancellationToken cancellationToken)
+    public async Task<int> RunVerifySysboxAsync(CancellationToken cancellationToken)
     {
         var passed = 0;
         var sysboxfsFound = false;
