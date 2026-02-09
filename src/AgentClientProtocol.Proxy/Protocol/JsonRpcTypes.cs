@@ -79,6 +79,8 @@ internal sealed class JsonRpcIdConverter : JsonConverter<JsonRpcId>
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException)
             {
+                writer.WriteStringValue(value.RawValue);
+                return;
             }
         }
 

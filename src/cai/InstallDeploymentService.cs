@@ -48,14 +48,9 @@ internal static class InstallDeploymentService
                 UnixFileMode.OtherRead |
                 UnixFileMode.OtherExecute);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-        catch (NotSupportedException)
-        {
+            return;
         }
     }
 
