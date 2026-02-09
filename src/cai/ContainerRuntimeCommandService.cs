@@ -16,11 +16,4 @@ internal sealed partial class ContainerRuntimeCommandService
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
     private readonly DevcontainerFeatureRuntime devcontainerRuntime;
-
-    public ContainerRuntimeCommandService(TextWriter standardOutput, TextWriter standardError)
-    {
-        stdout = standardOutput;
-        stderr = standardError;
-        devcontainerRuntime = new DevcontainerFeatureRuntime(stdout, stderr);
-    }
 }

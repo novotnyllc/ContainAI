@@ -7,13 +7,14 @@ internal sealed partial class ContainerRuntimeCommandService
 {
     private async Task<int> RunInitCoreAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
     {
-        var quiet = options.Quiet;
-        var dataDir = string.IsNullOrWhiteSpace(options.DataDir) ? DefaultDataDir : options.DataDir;
-        var homeDir = string.IsNullOrWhiteSpace(options.HomeDir) ? DefaultHomeDir : options.HomeDir;
-        var manifestsDir = string.IsNullOrWhiteSpace(options.ManifestsDir) ? DefaultBuiltinManifestsDir : options.ManifestsDir;
-        var templateHooksDir = string.IsNullOrWhiteSpace(options.TemplateHooks) ? DefaultTemplateHooksDir : options.TemplateHooks;
-        var workspaceHooksDir = string.IsNullOrWhiteSpace(options.WorkspaceHooks) ? DefaultWorkspaceHooksDir : options.WorkspaceHooks;
-        var workspaceDir = string.IsNullOrWhiteSpace(options.WorkspaceDir) ? DefaultWorkspaceDir : options.WorkspaceDir;
+        var parsed = ParseInitCommandOptions(options);
+        var quiet = parsed.Quiet;
+        var dataDir = parsed.DataDir;
+        var homeDir = parsed.HomeDir;
+        var manifestsDir = parsed.ManifestsDir;
+        var templateHooksDir = parsed.TemplateHooksDir;
+        var workspaceHooksDir = parsed.WorkspaceHooksDir;
+        var workspaceDir = parsed.WorkspaceDir;
 
         try
         {
@@ -61,11 +62,12 @@ internal sealed partial class ContainerRuntimeCommandService
 
     private async Task<int> RunLinkRepairCoreAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
     {
-        var mode = ResolveLinkRepairMode(options);
-        var quiet = options.Quiet;
-        var builtinSpecPath = string.IsNullOrWhiteSpace(options.BuiltinSpec) ? DefaultBuiltinLinkSpec : options.BuiltinSpec;
-        var userSpecPath = string.IsNullOrWhiteSpace(options.UserSpec) ? DefaultUserLinkSpec : options.UserSpec;
-        var checkedAtFilePath = string.IsNullOrWhiteSpace(options.CheckedAtFile) ? DefaultCheckedAtFile : options.CheckedAtFile;
+        var parsed = ParseLinkRepairCommandOptions(options);
+        var mode = parsed.Mode;
+        var quiet = parsed.Quiet;
+        var builtinSpecPath = parsed.BuiltinSpecPath;
+        var userSpecPath = parsed.UserSpecPath;
+        var checkedAtFilePath = parsed.CheckedAtFilePath;
 
         if (!File.Exists(builtinSpecPath))
         {
@@ -156,17 +158,17 @@ internal sealed partial class ContainerRuntimeCommandService
 
     private async Task<int> RunLinkWatcherCoreAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
     {
-        var pollIntervalSeconds = 60;
-        if (!string.IsNullOrWhiteSpace(options.PollInterval) &&
-            (!int.TryParse(options.PollInterval, out pollIntervalSeconds) || pollIntervalSeconds < 1))
+        var parsed = ParseWatchLinksCommandOptions(options);
+        if (!parsed.IsValid)
         {
-            await stderr.WriteLineAsync("--poll-interval requires a positive integer value").ConfigureAwait(false);
+            await stderr.WriteLineAsync(parsed.ErrorMessage).ConfigureAwait(false);
             return 1;
         }
 
-        var importedAtPath = string.IsNullOrWhiteSpace(options.ImportedAtFile) ? DefaultImportedAtFile : options.ImportedAtFile;
-        var checkedAtPath = string.IsNullOrWhiteSpace(options.CheckedAtFile) ? DefaultCheckedAtFile : options.CheckedAtFile;
-        var quiet = options.Quiet;
+        var pollIntervalSeconds = parsed.PollIntervalSeconds;
+        var importedAtPath = parsed.ImportedAtPath;
+        var checkedAtPath = parsed.CheckedAtPath;
+        var quiet = parsed.Quiet;
 
         await LogInfoAsync(quiet, $"Link watcher started (poll interval: {pollIntervalSeconds}s)").ConfigureAwait(false);
         await LogInfoAsync(quiet, $"Watching: {importedAtPath} vs {checkedAtPath}").ConfigureAwait(false);
