@@ -50,127 +50,127 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
     }
 
     public Task<int> RunDoctorAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["doctor"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunDoctorCommandAsync(args, cancellationToken);
 
     public Task<int> RunDoctorFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["doctor", "fix"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunDoctorFixCommandAsync(args, cancellationToken);
 
     public Task<int> RunValidateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["validate"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunValidateCommandAsync(args, cancellationToken);
 
     public Task<int> RunSetupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["setup"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSetupCommandAsync(args, cancellationToken);
 
     public Task<int> RunImportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["import"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunImportCommandAsync(args, cancellationToken);
 
     public Task<int> RunExportAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["export"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunExportCommandAsync(args, cancellationToken);
 
     public Task<int> RunSyncAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["sync"], cancellationToken);
+        => nativeLifecycleRuntime.RunSyncCommandAsync(cancellationToken);
 
     public Task<int> RunStopAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["stop"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunStopCommandAsync(args, cancellationToken);
 
     public Task<int> RunGcAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["gc"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunGcCommandAsync(args, cancellationToken);
 
     public Task<int> RunSshAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["ssh"], cancellationToken);
+        => nativeLifecycleRuntime.RunSshCommandAsync(cancellationToken);
 
     public Task<int> RunSshCleanupAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["ssh", "cleanup"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSshCleanupCommandAsync(args, cancellationToken);
 
     public Task<int> RunLinksAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["links"], cancellationToken);
+        => nativeLifecycleRuntime.RunLinksCommandAsync(cancellationToken);
 
     public Task<int> RunLinksCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["links", "check"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunLinksCheckCommandAsync(args, cancellationToken);
 
     public Task<int> RunLinksFixAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["links", "fix"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunLinksFixCommandAsync(args, cancellationToken);
 
     public Task<int> RunConfigAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], cancellationToken);
+        => nativeLifecycleRuntime.RunConfigCommandAsync(cancellationToken);
 
     public Task<int> RunConfigListAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunConfigListCommandAsync(args, cancellationToken);
 
     public Task<int> RunConfigGetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunConfigGetCommandAsync(args, cancellationToken);
 
     public Task<int> RunConfigSetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunConfigSetCommandAsync(args, cancellationToken);
 
     public Task<int> RunConfigUnsetAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunConfigUnsetCommandAsync(args, cancellationToken);
 
     public Task<int> RunConfigResolveVolumeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["config"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunConfigResolveVolumeCommandAsync(args, cancellationToken);
 
     public Task<int> RunManifestAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["manifest"], cancellationToken);
+        => nativeLifecycleRuntime.RunManifestCommandAsync(cancellationToken);
 
     public Task<int> RunManifestParseAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["manifest", "parse"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunManifestParseCommandAsync(args, cancellationToken);
 
     public Task<int> RunManifestGenerateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["manifest", "generate"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunManifestGenerateCommandAsync(args, cancellationToken);
 
     public Task<int> RunManifestApplyAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["manifest", "apply"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunManifestApplyCommandAsync(args, cancellationToken);
 
     public Task<int> RunManifestCheckAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["manifest", "check"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunManifestCheckCommandAsync(args, cancellationToken);
 
     public Task<int> RunTemplateAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["template"], cancellationToken);
+        => nativeLifecycleRuntime.RunTemplateCommandAsync(cancellationToken);
 
     public Task<int> RunTemplateUpgradeAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["template", "upgrade"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunTemplateUpgradeCommandAsync(args, cancellationToken);
 
     public Task<int> RunUpdateAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["update"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunUpdateCommandAsync(args, cancellationToken);
 
     public Task<int> RunRefreshAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["refresh"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunRefreshCommandAsync(args, cancellationToken);
 
     public Task<int> RunUninstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["uninstall"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunUninstallCommandAsync(args, cancellationToken);
 
     public Task<int> RunHelpAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["help"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunHelpCommandAsync(args, cancellationToken);
 
     public Task<int> RunSystemAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system"], cancellationToken);
+        => nativeLifecycleRuntime.RunSystemCommandAsync(cancellationToken);
 
     public Task<int> RunSystemInitAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "init"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSystemInitCommandAsync(args, cancellationToken);
 
     public Task<int> RunSystemLinkRepairAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "link-repair"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSystemLinkRepairCommandAsync(args, cancellationToken);
 
     public Task<int> RunSystemWatchLinksAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "watch-links"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSystemWatchLinksCommandAsync(args, cancellationToken);
 
     public Task<int> RunSystemDevcontainerAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "devcontainer"], cancellationToken);
+        => nativeLifecycleRuntime.RunSystemDevcontainerCommandAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerInstallAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "devcontainer", "install"], args, cancellationToken);
+        => nativeLifecycleRuntime.RunSystemDevcontainerInstallCommandAsync(args, cancellationToken);
 
     public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "devcontainer", "init"], cancellationToken);
+        => nativeLifecycleRuntime.RunSystemDevcontainerInitCommandAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerStartAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "devcontainer", "start"], cancellationToken);
+        => nativeLifecycleRuntime.RunSystemDevcontainerStartCommandAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["system", "devcontainer", "verify-sysbox"], cancellationToken);
+        => nativeLifecycleRuntime.RunSystemDevcontainerVerifySysboxCommandAsync(cancellationToken);
 
     public Task<int> RunVersionAsync(CancellationToken cancellationToken)
-        => RunNativeCommandAsync(["version"], cancellationToken);
+        => nativeLifecycleRuntime.RunVersionCommandAsync(cancellationToken);
 
     public Task<int> RunAcpProxyAsync(string agent, CancellationToken cancellationToken)
         => acpProxyRunner.RunAsync(agent, cancellationToken);
@@ -188,19 +188,6 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
         return examplesRuntime.RunExportAsync(options, cancellationToken);
-    }
-
-    private Task<int> RunNativeCommandAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
-        => nativeLifecycleRuntime.RunAsync(args, cancellationToken);
-
-    private Task<int> RunNativeCommandAsync(IReadOnlyList<string> commandPath, IReadOnlyList<string> args, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(commandPath);
-        ArgumentNullException.ThrowIfNull(args);
-
-        return args.Count == 0
-            ? RunNativeCommandAsync(commandPath, cancellationToken)
-            : RunNativeCommandAsync([.. commandPath, .. args], cancellationToken);
     }
 
 }
