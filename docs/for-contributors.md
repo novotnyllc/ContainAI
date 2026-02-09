@@ -53,7 +53,7 @@ dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=base -
 dotnet build src/cai/cai.csproj -t:BuildContainAIImages -p:ContainAILayer=all -p:ContainAIPlatforms=linux/amd64,linux/arm64 -p:ContainAIPush=true -p:ContainAIBuildSetup=true -p:ContainAIImagePrefix=ghcr.io/ORG/containai -p:ContainAIImageTag=nightly
 
 # Publish native AOT CLI binary
-dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -p:PublishAot=true -p:PublishTrimmed=true
+dotnet publish src/cai/cai.csproj -c Release -r linux-x64 -warnaserror -p:PublishAot=true -p:PublishTrimmed=true -p:TrimmerSingleWarn=false
 ```
 
 For pure CLI/library/docs changes, image rebuilds are optional unless tests in your branch explicitly depend on freshly built images.
@@ -169,7 +169,7 @@ See [SECURITY.md](../SECURITY.md) for the threat model.
 | Linting | CI | None (shellcheck on installer script) |
 | Integration | `tests/ContainAI.Cli.Tests/` | Docker |
 | ACP | `tests/AgentClientProtocol.Proxy.Tests/` | None |
-| E2E | Manual | Sysbox runtime |
+| E2E | CI + Local | Sysbox runtime |
 
 ### Running Tests
 

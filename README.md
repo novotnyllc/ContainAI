@@ -7,7 +7,7 @@ AI coding agents need to operate freely - but without risking your host system. 
 ```bash
 # Install and run in 30 seconds
 curl -fsSL https://raw.githubusercontent.com/novotnyllc/containai/main/install.sh | bash
-# install.sh bootstraps cai and delegates to: cai install --yes
+# install.sh bootstraps cai and delegates to: cai install --local --yes
 cai setup    # One-time isolation setup
 cd /path/to/project && cai   # Agent starts in isolated container
 ```

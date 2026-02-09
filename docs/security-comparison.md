@@ -58,10 +58,6 @@ flowchart TB
     L2 --> L3
     L3 --> L4
 
-    style L1 fill:#e94560,stroke:#16213e,color:#fff
-    style L2 fill:#0f3460,stroke:#16213e,color:#fff
-    style L3 fill:#1a1a2e,stroke:#16213e,color:#fff
-    style L4 fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### Layer Explanations
@@ -116,8 +112,6 @@ flowchart LR
     DD -->|"standard runc"| Sandbox
     DD -.->|"userns off by default"| Sandbox
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Sandbox fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 | Aspect | Details |
@@ -156,8 +150,6 @@ flowchart LR
     Sysbox -->|"user namespaces"| Container
     Sysbox -->|"procfs virtualization"| Container
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Container fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 | Aspect | Details |
@@ -201,8 +193,6 @@ flowchart LR
     Sysbox -->|"user namespaces"| Container
     Sysbox -->|"procfs/sysfs virtualization"| Container
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Container fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 | Aspect | Details |
@@ -241,8 +231,6 @@ flowchart LR
     SRT -->|"bubblewrap (Linux)"| Sandbox
     SRT -->|"sandbox-exec (macOS)"| Sandbox
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Sandbox fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 | Aspect | Details |
@@ -305,9 +293,6 @@ flowchart TB
     Sentry --> Gofer
     Gofer -->|"file I/O"| Kernel
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style gVisor fill:#0f3460,stroke:#16213e,color:#fff
-    style Container fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 | Aspect | Details |
@@ -343,8 +328,6 @@ flowchart TB
 
     KVM -->|"hardware isolation"| MicroVM
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style MicroVM fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 | Aspect | Details |
@@ -447,12 +430,6 @@ flowchart TD
     NoDinD -->|"Yes"| SRT["Anthropic SRT<br/>or Bubblewrap"]
     NoDinD -->|"No, security first"| gVisor["gVisor"]
 
-    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
-    style ContainAI fill:#0f3460,stroke:#16213e,color:#fff
-    style ECI fill:#0f3460,stroke:#16213e,color:#fff
-    style MicroVM fill:#16213e,stroke:#0f3460,color:#fff
-    style SRT fill:#e94560,stroke:#16213e,color:#fff
-    style gVisor fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### Quick Recommendations

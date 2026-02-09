@@ -18,7 +18,7 @@ flowchart TB
         Docker["Standard Docker runtime"]
     end
 
-    subgraph T3["Tier 3: E2E (Manual)"]
+    subgraph T3["Tier 3: E2E (CI + Manual)"]
         Smoke["docker run ... cai version"]
         System["docker run ... cai system init --help"]
         Sysbox["Requires Sysbox"]
@@ -26,10 +26,6 @@ flowchart TB
 
     Manifest -->|"Pass"| Sync
     Docker -->|"Pass"| Smoke
-
-    style T1 fill:#0f3460,stroke:#16213e,color:#fff
-    style T2 fill:#1a1a2e,stroke:#16213e,color:#fff
-    style T3 fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### Tier 1: Linting (CI - ubuntu-24.04)
@@ -65,9 +61,9 @@ These tests cover:
 - Environment variable import
 - Hot-reload and data persistence scenarios
 
-### Tier 3: E2E Smoke Tests (Manual - requires sysbox)
+### Tier 3: E2E Smoke Tests (CI + Manual, requires sysbox)
 
-Full system container tests require sysbox runtime for systemd support. These are not run automatically in CI due to infrastructure requirements.
+Full system container tests require sysbox runtime for systemd support. These are executed in CI on Linux and macOS runners and can also be run manually.
 
 **Prerequisites:**
 - Linux host with sysbox installed
@@ -101,8 +97,7 @@ The GitHub Actions workflow (`docker.yml`) runs:
 1. **lint job**: shellcheck + manifest consistency (always)
 2. **build job**: Build Docker images (after lint)
 3. **test job**: Integration tests, ACP .NET tests, and runtime smoke checks against built images
-
-E2E tests are documented for manual execution on self-hosted infrastructure.
+4. **e2e-test jobs**: Linux and macOS end-to-end smoke validation using sysbox
 
 ## Coverage Gate Policy
 
@@ -120,7 +115,7 @@ Example local proxy coverage check (MTP v2 style):
 
 ```bash
 dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj -c Release -- --coverage --coverage-output-format cobertura --coverage-output artifacts/TestResults/proxy-only.cobertura.xml
-reportgenerator "-reports:artifacts/bin/AgentClientProtocol.Proxy.Tests/release/TestResults/artifacts/TestResults/proxy-only.cobertura.xml" "-targetdir:artifacts/TestResults/ProxyOnlyCoverage" "-reporttypes:TextSummary"
+reportgenerator "-reports:artifacts/bin/AgentClientProtocol.Proxy.Tests/Release/TestResults/proxy-only.cobertura.xml" "-targetdir:artifacts/TestResults/ProxyOnlyCoverage" "-reporttypes:TextSummary"
 ```
 
 ## Test Resource Cleanup

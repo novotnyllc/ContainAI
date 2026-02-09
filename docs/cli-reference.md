@@ -165,7 +165,6 @@ Main entry point. Running `cai` without arguments is equivalent to `cai run`.
 **Synopsis:**
 ```bash
 cai [subcommand] [options]
-containai [subcommand] [options]
 ```
 
 **Global Options:**
@@ -175,8 +174,7 @@ containai [subcommand] [options]
 | `-h`, `--help` | Show help (use with subcommand for subcommand help) |
 
 **Notes:**
-- `cai` and `containai` are aliases
-- **Installed usage:** `install.sh` bootstraps a `cai` binary and delegates to `cai install`
+- **Installed usage:** `install.sh` bootstraps a `cai` binary and delegates to `cai install --local` (plus any `install.sh` options)
 - **Development usage:** Run directly with `dotnet run --project src/cai -- <command>`
 - Requires Bash 4.0+
 
@@ -226,9 +224,9 @@ cai [path] [options] [-- <agent-args>]
 
 | Flag | Behavior |
 |------|----------|
-| `--allow-host-credentials` | Errors at runtime (unsupported with Sysbox) |
-| `--allow-host-docker-socket` | Errors at runtime (unsupported with Sysbox) |
-| `--mount-docker-socket` | Errors at runtime (unsupported with Sysbox) |
+| `--allow-host-credentials` | Rejected by parser (unsupported with Sysbox) |
+| `--allow-host-docker-socket` | Rejected by parser (unsupported with Sysbox) |
+| `--mount-docker-socket` | Rejected by parser (unsupported with Sysbox) |
 | `--i-understand-this-exposes-host-credentials` | Rejected by parser (unsupported unsafe flag) |
 | `--i-understand-this-grants-root-access` | Rejected by parser (unsupported unsafe flag) |
 | `--please-root-my-host` | Rejected by parser (unsupported unsafe flag) |
@@ -495,7 +493,7 @@ cai install [options]
 - Materializes bundled manifests, template-system Dockerfile, and example TOML files.
 - Writes default `~/.config/containai/config.toml` when missing.
 - Writes `~/.config/containai/profile.d/containai.sh` and hooks it from your shell profile when `--yes` is provided.
-- Shell integration enables PATH setup plus command completion for `cai` and `containai-docker`.
+- Shell integration enables PATH setup plus command completion for `cai`, `containai-docker`, and `docker-containai`.
 - Runs `cai setup` unless `--no-setup` is set.
 
 **Examples:**
@@ -564,23 +562,15 @@ cai setup [options]
 
 | Platform | Action |
 |----------|--------|
-| Linux (Ubuntu/Debian) | Installs Sysbox, creates isolated Docker daemon |
-| Linux (other distros) | Manual setup required |
-| WSL2 | Same as Linux, with seccomp warning |
-| macOS | Creates Lima VM with Docker + Sysbox |
+| Linux/WSL2 | Requires Docker CLI; ensures local config/SSH keys, starts `containai-docker.service` if present, creates `containai-docker` context when the socket exists, installs templates unless `--skip-templates`, runs `cai doctor` |
+| macOS | Same as Linux/WSL2, and starts the `containai` Lima VM when the socket is missing |
 
 **What It Does (Linux):**
-1. Detects distribution
-2. Cleans up existing ContainAI paths
-3. Downloads and installs Sysbox
-4. Creates isolated Docker daemon:
-   - Config: `/etc/containai/docker/daemon.json`
-   - Socket: `/var/run/containai-docker.sock`
-   - Data: `/var/lib/containai-docker/`
-   - Service: `containai-docker.service`
-5. Creates `containai-docker` Docker context
-6. Verifies installation with test container
-7. Installs shell completions
+1. Ensures `~/.config/containai` and `~/.ssh/containai.d` exist
+2. Generates `~/.config/containai/id_containai` if missing
+3. Starts `containai-docker.service` if present and `/var/run/containai-docker.sock` is missing
+4. Creates `containai-docker` context when the socket exists
+5. Installs templates unless `--skip-templates`, then runs `cai doctor`
 
 **Examples:**
 ```bash
@@ -1138,7 +1128,7 @@ Parse manifests and generate/apply derived artifacts.
 ```bash
 cai manifest parse [options] <manifest-path>
 cai manifest generate <container-link-spec> <manifest-path> [output-path]
-cai manifest apply <container-links|init-dirs> <manifest-path> [--data-dir <path>] [--home-dir <path>]
+cai manifest apply <container-links|init-dirs|agent-shims> <manifest-path> [--data-dir <path>] [--home-dir <path>] [--shim-dir <path>] [--cai-binary <path>]
 cai manifest check [--manifest-dir <path> | <manifest-dir>]
 ```
 
@@ -1148,7 +1138,7 @@ cai manifest check [--manifest-dir <path> | <manifest-dir>]
 |------------|-------------------|---------|
 | `parse` | `--include-disabled`, `--emit-source-file`, `<manifest-path>` | Parse manifests and emit normalized JSON |
 | `generate` | `container-link-spec`, `<manifest-path>`, `[output-path]` | Generate JSON link specification from manifests |
-| `apply` | `<kind>`, `<manifest-path>`, `--data-dir`, `--home-dir` | Apply generated artifacts to runtime paths |
+| `apply` | `<kind>`, `<manifest-path>`, `--data-dir`, `--home-dir`, `--shim-dir`, `--cai-binary` | Apply generated artifacts to runtime paths |
 | `check` | `--manifest-dir` or positional `<manifest-dir>` | Validate manifest consistency |
 
 **Examples:**
@@ -1260,7 +1250,7 @@ cai completion suggest --line "cai man" --position 7
 **Notes:**
 - `cai completion suggest` is provided by the CLI itself; `dotnet-suggest` is not required.
 - Shell integrations should call `cai completion suggest` directly from shell completion functions.
-- `cai install --yes` wires the completion hook for both `cai` and `containai-docker`.
+- `cai install --yes` wires the completion hook for `cai`, `containai-docker`, and `docker-containai`.
 - The completion protocol follows the .NET tab-completion guidance: <https://learn.microsoft.com/en-us/dotnet/standard/commandline/how-to-enable-tab-completion>.
 
 ---
@@ -1395,7 +1385,7 @@ cai uninstall [options]
 | `--dry-run` | Show what would be removed |
 | `--containers` | Stop and remove all ContainAI containers |
 | `--volumes` | Also remove volumes (requires `--containers`) |
-| `--force` | Skip confirmation prompts |
+| `--force` | Accepted but currently has no effect (no confirmation prompts are shown) |
 | `--verbose` | Enable verbose output |
 
 **What Gets Removed:**

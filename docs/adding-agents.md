@@ -21,11 +21,6 @@ flowchart LR
     S3 --> S4
     S4 --> S5
 
-    style S1 fill:#1a1a2e,stroke:#16213e,color:#fff
-    style S2 fill:#0f3460,stroke:#16213e,color:#fff
-    style S3 fill:#1a1a2e,stroke:#16213e,color:#fff
-    style S4 fill:#0f3460,stroke:#16213e,color:#fff
-    style S5 fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 1. **Research** - Understand the agent's installation and configuration

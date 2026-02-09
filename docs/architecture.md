@@ -67,9 +67,6 @@ flowchart LR
     Userns -->|"unprivileged"| HRoot
     Userns -->|"unprivileged"| HAgent
 
-    style Container fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Sysbox fill:#0f3460,stroke:#16213e,color:#fff
-    style Host fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### Procfs/Sysfs Virtualization
@@ -115,9 +112,6 @@ flowchart TB
     Systemd --> Init
     Dockerd --> Inner
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style SysContainer fill:#0f3460,stroke:#16213e,color:#fff
-    style Inner fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### Why Separate docker-ce?
@@ -308,8 +302,6 @@ flowchart TD
     SSH --> MultiUser
     DockerSvc --> MultiUser
 
-    style Targets fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Services fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Service Details
@@ -353,9 +345,6 @@ flowchart TB
     HostSocket -.->|"NOT mounted"| SysContainer
     InnerDocker --> InnerContainers
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style SysContainer fill:#0f3460,stroke:#16213e,color:#fff
-    style InnerContainers fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### How DinD Works with Sysbox
@@ -400,7 +389,7 @@ flowchart LR
 
     subgraph Runtime["Container Runtime"]
         direction TB
-        Entry["entrypoint.sh"]
+        Entry["/sbin/init (systemd PID 1)"]
         Services["systemd services"]
         Dockerfile["Dockerfile layers"]
     end
@@ -408,10 +397,6 @@ flowchart LR
     Main --> Lib
     Container --> SSH
     Container --> Entry
-
-    style CLI fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Lib fill:#0f3460,stroke:#16213e,color:#fff
-    style Runtime fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ### CLI Command Surface
@@ -451,9 +436,6 @@ flowchart TD
     Cli --> AcpRunner["AcpProxyRunner.cs"]
     AcpRunner --> AcpLib["AgentClientProtocol.Proxy"]
 
-    style Main fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Runtime fill:#e94560,stroke:#16213e,color:#fff
-    style AcpLib fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ## Data Flow
@@ -511,9 +493,6 @@ flowchart LR
     DataMount --> DataStructure
     HostConfigs -.->|"cai import"| DataVol
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Volumes fill:#16213e,stroke:#0f3460,color:#fff
-    style Container fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Volume Types
@@ -574,9 +553,6 @@ flowchart TB
     SysboxFS -->|"virtualizes"| ContainerProc
     SysboxFS -->|"virtualizes"| ContainerSys
 
-    style Host fill:#16213e,stroke:#16213e,color:#fff
-    style IsolationLayer fill:#0f3460,stroke:#16213e,color:#fff
-    style Container fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ### Security Guarantees

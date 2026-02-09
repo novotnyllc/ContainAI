@@ -80,7 +80,6 @@ Validation and generation commands:
 dotnet run --project src/cai -- manifest check src/manifests
 
 # generate derived artifacts from manifests
-cai manifest generate import-map src/manifests
 cai manifest generate container-link-spec src/manifests /tmp/link-spec.json
 ```
 

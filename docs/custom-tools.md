@@ -18,11 +18,6 @@ flowchart TD
     Q2 -->|Yes| UseManifest["Create a manifest file"]
     Q2 -->|No| UseAdditional
 
-    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Q1 fill:#0f3460,stroke:#16213e,color:#fff
-    style Q2 fill:#0f3460,stroke:#16213e,color:#fff
-    style UseAdditional fill:#16213e,stroke:#0f3460,color:#fff
-    style UseManifest fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 **Use `additional_paths`** (simpler) when you:

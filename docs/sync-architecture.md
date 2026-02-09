@@ -26,10 +26,6 @@ flowchart LR
     SyncMap -->|"to volume"| VolData
     VolData -->|"symlinks"| Symlinks
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Sync fill:#0f3460,stroke:#16213e,color:#fff
-    style Volume fill:#16213e,stroke:#0f3460,color:#fff
-    style Container fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 The import/sync system has three main components that must stay synchronized:
@@ -49,15 +45,11 @@ flowchart TB
     end
 
     subgraph Artifacts["Container Artifacts"]
-        LinkSpec["generated/link-spec.json"]
+        LinkSpec["/usr/local/lib/containai/link-spec.json"]
     end
 
     Manifests -->|"cai manifest generate container-link-spec"| LinkSpec
     LinkSpec --> Init
-
-    style Source fill:#e94560,stroke:#16213e,color:#fff
-    style Components fill:#0f3460,stroke:#16213e,color:#fff
-    style Artifacts fill:#16213e,stroke:#0f3460,color:#fff
 ```
 
 ## Per-Agent Manifest Structure
@@ -371,11 +363,6 @@ flowchart LR
     ManifestRuntime --> Symlinks
     ManifestRuntime --> LinkSpec
 
-    style Host fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Import fill:#0f3460,stroke:#16213e,color:#fff
-    style Volume fill:#16213e,stroke:#0f3460,color:#fff
-    style Container fill:#0f3460,stroke:#16213e,color:#fff
-    style Runtime fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 1. User creates `~/.config/containai/manifests/mytool.toml`

@@ -115,11 +115,6 @@ flowchart TB
     Ctx --> Key
     Key --> Config
 
-    style Docker fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Sysbox fill:#0f3460,stroke:#16213e,color:#fff
-    style Context fill:#16213e,stroke:#0f3460,color:#fff
-    style SSH fill:#0f3460,stroke:#16213e,color:#fff
-    style User fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 ### Platform Comparison
@@ -193,9 +188,6 @@ flowchart TD
     Native --> Setup
     Mac --> Setup
 
-    style Start fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Setup fill:#0f3460,stroke:#16213e,color:#fff
-    style Manual fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ## Platform-Specific Setup

@@ -43,8 +43,6 @@ flowchart LR
     D -->|No| E["Root on host"]
     D -->|Yes| F["Unprivileged on host"]
 
-    style E fill:#e94560,stroke:#16213e,color:#fff
-    style F fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Without Proper Isolation
@@ -131,8 +129,6 @@ flowchart TD
     D -->|No| E["Reads host /etc/shadow<br/>Exfiltrates to attacker"]
     D -->|Yes| F["Reads container's /etc/shadow<br/>No sensitive data exists"]
 
-    style E fill:#e94560,stroke:#16213e,color:#fff
-    style F fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Without Proper Isolation
@@ -202,8 +198,6 @@ flowchart LR
     D -->|No| E["Full host root access"]
     D -->|Yes| F["Process is unprivileged<br/>Cannot read protected files"]
 
-    style E fill:#e94560,stroke:#16213e,color:#fff
-    style F fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 ### Without User Namespaces
@@ -282,10 +276,6 @@ flowchart TD
     B --> C["Full host filesystem access"]
     C --> D["Modify /etc/sudoers<br/>Install backdoor<br/>Steal everything"]
 
-    style A fill:#e94560,stroke:#16213e,color:#fff
-    style B fill:#e94560,stroke:#16213e,color:#fff
-    style C fill:#e94560,stroke:#16213e,color:#fff
-    style D fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ### The Inevitable Attack
@@ -363,8 +353,6 @@ flowchart LR
     B --> C["chroot /host"]
     C --> D["Root on host"]
 
-    style A fill:#e94560,stroke:#16213e,color:#fff
-    style D fill:#e94560,stroke:#16213e,color:#fff
 ```
 
 ### The One-Liner Attack
@@ -439,8 +427,6 @@ flowchart TD
     L4 -->|"10% get through"| L5
     L5 -->|"0.001% get through"| Host["Host System"]
 
-    style Attack fill:#e94560,stroke:#16213e,color:#fff
-    style Host fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 If each layer blocks 90% of attacks, five layers block 99.999% (1 in 100,000 gets through).

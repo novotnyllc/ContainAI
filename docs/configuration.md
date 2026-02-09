@@ -36,9 +36,6 @@ flowchart TD
     Fallback -->|Found| UseUser["Use user config"]
     Fallback -->|Not found| Defaults["Use built-in defaults"]
 
-    style Use fill:#0f3460,stroke:#16213e,color:#fff
-    style UseUser fill:#0f3460,stroke:#16213e,color:#fff
-    style Defaults fill:#1a1a2e,stroke:#16213e,color:#fff
 ```
 
 ```
@@ -67,11 +64,6 @@ flowchart TB
     Workspace -->|overrides| Global
     Global -->|overrides| Default
 
-    style CLI fill:#e94560,stroke:#16213e,color:#fff
-    style ENV fill:#0f3460,stroke:#16213e,color:#fff
-    style Workspace fill:#1a1a2e,stroke:#16213e,color:#fff
-    style Global fill:#16213e,stroke:#0f3460,color:#fff
-    style Default fill:#0f3460,stroke:#16213e,color:#fff
 ```
 
 1. **CLI flags** - `--data-volume`, `--agent`, `--credentials`, `--config`
