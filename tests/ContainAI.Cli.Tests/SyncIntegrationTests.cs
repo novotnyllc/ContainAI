@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using ContainAI.Cli.Host;
 using Xunit;
 
@@ -608,8 +609,16 @@ public sealed class SyncIntegrationTests
     public void ImportRuntimeSource_ContainsEnvGuardMessages()
     {
         var importSourcePath = LocateRepositoryPath("src", "cai", "CaiImportService.ImportEnvironment.cs");
-        var utilitySourcePath = LocateRepositoryPath("src", "cai", "CaiRuntimeSupport.Utilities.cs");
-        var source = File.ReadAllText(importSourcePath) + Environment.NewLine + File.ReadAllText(utilitySourcePath);
+        var caiSourceDir = LocateRepositoryPath("src", "cai");
+        var sourceBuilder = new StringBuilder(File.ReadAllText(importSourcePath));
+
+        foreach (var utilitySourcePath in Directory.GetFiles(caiSourceDir, "CaiRuntimeSupport.Utilities*.cs", SearchOption.TopDirectoryOnly))
+        {
+            sourceBuilder.AppendLine();
+            sourceBuilder.Append(File.ReadAllText(utilitySourcePath));
+        }
+
+        var source = sourceBuilder.ToString();
 
         Assert.Contains(".env target is symlink", source, StringComparison.Ordinal);
         Assert.Contains("env_file path rejected: outside workspace boundary", source, StringComparison.Ordinal);
