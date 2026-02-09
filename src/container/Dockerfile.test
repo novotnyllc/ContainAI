@@ -89,9 +89,43 @@ COPY configs/daemon-test.json /etc/docker/daemon.json
 # Set default Docker host to test socket
 ENV DOCKER_HOST=unix:///var/run/docker-test.sock
 
-# Copy startup and test scripts
-COPY --chmod=0755 scripts/start-dockerd.sh /usr/local/bin/start-dockerd.sh
-COPY --chmod=0755 scripts/test-dind.sh /usr/local/bin/test-dind.sh
+# Create startup and test scripts in-image (no repo-level shell script dependency)
+RUN cat <<'EOF' > /usr/local/bin/start-dockerd.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+dockerd \
+  --host=unix:///var/run/docker-test.sock \
+  --pidfile=/var/run/docker-test.pid \
+  --log-level=error \
+  >/var/log/dockerd-test.log 2>&1 &
+
+for i in $(seq 1 60); do
+  if docker info >/dev/null 2>&1; then
+    exec "$@"
+  fi
+  sleep 1
+done
+
+echo "dockerd did not become ready in time" >&2
+cat /var/log/dockerd-test.log >&2 || true
+exit 1
+EOF
+
+RUN cat <<'EOF' > /usr/local/bin/test-dind.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+docker info >/dev/null
+docker run --rm hello-world >/tmp/hello-world.log 2>&1 || {
+  cat /tmp/hello-world.log >&2 || true
+  exit 1
+}
+
+echo "DinD smoke test succeeded."
+EOF
+
+RUN chmod 0755 /usr/local/bin/start-dockerd.sh /usr/local/bin/test-dind.sh
 
 # Clean up apt cache to reduce image size
 RUN apt-get clean && \
