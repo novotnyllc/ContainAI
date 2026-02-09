@@ -43,60 +43,19 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
             return 0;
         }
 
-        if (!await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false))
+        if (!await EnsureDockerCliAvailableForSetupAsync(cancellationToken).ConfigureAwait(false))
         {
-            await stderr.WriteLineAsync("Docker CLI is required for setup.").ConfigureAwait(false);
             return 1;
         }
 
-        Directory.CreateDirectory(containAiDir);
-        Directory.CreateDirectory(sshDir);
-
-        if (!File.Exists(sshKeyPath))
+        EnsureSetupDirectories(containAiDir, sshDir);
+        if (await EnsureSetupSshKeyAsync(sshKeyPath, cancellationToken).ConfigureAwait(false) != 0)
         {
-            var keygen = await RunProcessCaptureAsync(
-                "ssh-keygen",
-                ["-t", "ed25519", "-N", string.Empty, "-f", sshKeyPath, "-C", "containai"],
-                cancellationToken).ConfigureAwait(false);
-            if (keygen.ExitCode != 0)
-            {
-                await stderr.WriteLineAsync(keygen.StandardError.Trim()).ConfigureAwait(false);
-                return 1;
-            }
+            return 1;
         }
 
-        if (!File.Exists(socketPath))
-        {
-            if (await CommandSucceedsAsync("systemctl", ["cat", "containai-docker.service"], cancellationToken).ConfigureAwait(false))
-            {
-                await RunProcessCaptureAsync("systemctl", ["start", "containai-docker.service"], cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        if (!File.Exists(socketPath) && OperatingSystem.IsMacOS())
-        {
-            await RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
-        }
-
-        if (File.Exists(socketPath))
-        {
-            var createContext = await RunProcessCaptureAsync(
-                "docker",
-                ["context", "create", "containai-docker", "--docker", $"host=unix://{socketPath}"],
-                cancellationToken).ConfigureAwait(false);
-            if (createContext.ExitCode != 0 && verbose)
-            {
-                var error = createContext.StandardError.Trim();
-                if (!string.IsNullOrWhiteSpace(error))
-                {
-                    await stderr.WriteLineAsync(error).ConfigureAwait(false);
-                }
-            }
-        }
-        else
-        {
-            await stderr.WriteLineAsync($"Setup warning: runtime socket not found at {socketPath}.").ConfigureAwait(false);
-        }
+        await EnsureRuntimeSocketForSetupAsync(socketPath, cancellationToken).ConfigureAwait(false);
+        await EnsureSetupDockerContextAsync(socketPath, verbose, cancellationToken).ConfigureAwait(false);
 
         if (!skipTemplates)
         {
