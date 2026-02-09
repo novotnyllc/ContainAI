@@ -1,8 +1,39 @@
 namespace ContainAI.Cli.Host;
 
-internal static class SessionTargetDockerLookupService
+internal interface ISessionTargetDockerLookupService
 {
-    public static async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
+    Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken);
+
+    Task<FindContainerByNameResult> FindContainerByNameAcrossContextsAsync(
+        string containerName,
+        string? explicitConfig,
+        string? workspace,
+        CancellationToken cancellationToken);
+
+    Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken);
+
+    Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLookupService
+{
+    private readonly ISessionTargetWorkspaceDiscoveryService workspaceDiscoveryService;
+    private readonly ISessionTargetParsingValidationService parsingValidationService;
+
+    public SessionTargetDockerLookupService()
+        : this(new SessionTargetWorkspaceDiscoveryService(), new SessionTargetParsingValidationService())
+    {
+    }
+
+    internal SessionTargetDockerLookupService(
+        ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService,
+        ISessionTargetParsingValidationService sessionTargetParsingValidationService)
+    {
+        workspaceDiscoveryService = sessionTargetWorkspaceDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDiscoveryService));
+        parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+    }
+
+    public async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
     {
         var inspect = await SessionRuntimeInfrastructure.DockerCaptureAsync(
             context,
@@ -38,13 +69,13 @@ internal static class SessionTargetDockerLookupService
             State: SessionRuntimeInfrastructure.NormalizeNoValue(parts[5]));
     }
 
-    public static async Task<FindContainerByNameResult> FindContainerByNameAcrossContextsAsync(
+    public async Task<FindContainerByNameResult> FindContainerByNameAcrossContextsAsync(
         string containerName,
         string? explicitConfig,
         string? workspace,
         CancellationToken cancellationToken)
     {
-        var contexts = await SessionTargetWorkspaceDiscoveryService.BuildCandidateContextsAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
+        var contexts = await workspaceDiscoveryService.BuildCandidateContextsAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
         var found = new List<string>();
         foreach (var context in contexts)
         {
@@ -71,7 +102,7 @@ internal static class SessionTargetDockerLookupService
         return new FindContainerByNameResult(true, found[0], null, 1);
     }
 
-    public static async Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken)
+    public async Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken)
     {
         var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
         if (File.Exists(configPath))
@@ -81,7 +112,7 @@ internal static class SessionTargetDockerLookupService
                 cancellationToken).ConfigureAwait(false);
             if (ws.ExitCode == 0 && !string.IsNullOrWhiteSpace(ws.StandardOutput))
             {
-                var configuredName = SessionTargetParsingValidationService.TryReadWorkspaceStringProperty(ws.StandardOutput, "container_name");
+                var configuredName = parsingValidationService.TryReadWorkspaceStringProperty(ws.StandardOutput, "container_name");
                 if (!string.IsNullOrWhiteSpace(configuredName))
                 {
                     var inspect = await SessionRuntimeInfrastructure.DockerCaptureAsync(
@@ -127,7 +158,7 @@ internal static class SessionTargetDockerLookupService
             }
         }
 
-        var generated = await SessionTargetWorkspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
+        var generated = await workspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
         var generatedExists = await SessionRuntimeInfrastructure.DockerCaptureAsync(
             context,
             ["inspect", "--type", "container", generated],
@@ -140,9 +171,9 @@ internal static class SessionTargetDockerLookupService
         return ContainerLookupResult.Empty();
     }
 
-    public static async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)
+    public async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)
     {
-        var baseName = await SessionTargetWorkspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
+        var baseName = await workspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
         var candidate = baseName;
 
         for (var suffix = 1; suffix <= 99; suffix++)

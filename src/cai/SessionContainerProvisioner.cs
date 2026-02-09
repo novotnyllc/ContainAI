@@ -3,8 +3,21 @@ namespace ContainAI.Cli.Host;
 internal sealed partial class SessionContainerProvisioner
 {
     private readonly TextWriter stderr;
+    private readonly ISessionTargetResolver targetResolver;
 
-    public SessionContainerProvisioner(TextWriter standardError) => stderr = standardError;
+    public SessionContainerProvisioner(TextWriter standardError)
+        : this(standardError, new SessionTargetResolver())
+    {
+    }
+
+    internal SessionContainerProvisioner(TextWriter standardError, ISessionTargetResolver sessionTargetResolver)
+    {
+        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(sessionTargetResolver);
+
+        stderr = standardError;
+        targetResolver = sessionTargetResolver;
+    }
 
     public async Task<EnsuredSession> EnsureAsync(
         SessionCommandOptions options,

@@ -1,10 +1,37 @@
 namespace ContainAI.Cli.Host;
 
-internal static class SessionTargetResolutionPipeline
+internal interface ISessionTargetResolutionPipeline
 {
-    public static async Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+    Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetResolutionPipeline : ISessionTargetResolutionPipeline
+{
+    private readonly ISessionTargetParsingValidationService parsingValidationService;
+    private readonly ISessionTargetDockerLookupService dockerLookupService;
+    private readonly ISessionTargetWorkspaceDiscoveryService workspaceDiscoveryService;
+
+    public SessionTargetResolutionPipeline()
+        : this(
+            new SessionTargetParsingValidationService(),
+            new SessionTargetDockerLookupService(),
+            new SessionTargetWorkspaceDiscoveryService())
     {
-        var validationError = SessionTargetParsingValidationService.ValidateOptions(options);
+    }
+
+    internal SessionTargetResolutionPipeline(
+        ISessionTargetParsingValidationService sessionTargetParsingValidationService,
+        ISessionTargetDockerLookupService sessionTargetDockerLookupService,
+        ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService)
+    {
+        parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        dockerLookupService = sessionTargetDockerLookupService ?? throw new ArgumentNullException(nameof(sessionTargetDockerLookupService));
+        workspaceDiscoveryService = sessionTargetWorkspaceDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDiscoveryService));
+    }
+
+    public async Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+    {
+        var validationError = parsingValidationService.ValidateOptions(options);
         if (validationError is not null)
         {
             return validationError;
@@ -18,9 +45,9 @@ internal static class SessionTargetResolutionPipeline
         return await ResolveWorkspaceTargetAsync(options, cancellationToken).ConfigureAwait(false);
     }
 
-    private static async Task<ResolvedTarget> ResolveExplicitContainerTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+    private async Task<ResolvedTarget> ResolveExplicitContainerTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
     {
-        var found = await SessionTargetDockerLookupService.FindContainerByNameAcrossContextsAsync(
+        var found = await dockerLookupService.FindContainerByNameAcrossContextsAsync(
             options.Container!,
             options.ExplicitConfig,
             options.Workspace,
@@ -32,7 +59,7 @@ internal static class SessionTargetResolutionPipeline
 
         if (found.Exists)
         {
-            var labels = await SessionTargetDockerLookupService.ReadContainerLabelsAsync(options.Container!, found.Context!, cancellationToken).ConfigureAwait(false);
+            var labels = await dockerLookupService.ReadContainerLabelsAsync(options.Container!, found.Context!, cancellationToken).ConfigureAwait(false);
             if (!labels.IsOwned)
             {
                 var code = options.Mode == SessionMode.Run ? 1 : 15;
@@ -61,14 +88,14 @@ internal static class SessionTargetResolutionPipeline
                 ErrorCode: 1);
         }
 
-        var workspaceInput = SessionTargetParsingValidationService.ResolveWorkspaceInput(options.Workspace);
-        var workspace = SessionTargetParsingValidationService.NormalizeWorkspacePath(workspaceInput);
+        var workspaceInput = parsingValidationService.ResolveWorkspaceInput(options.Workspace);
+        var workspace = parsingValidationService.NormalizeWorkspacePath(workspaceInput);
         if (!workspace.Success)
         {
             return ResolvedTarget.ErrorResult(workspace.Error!, workspace.ErrorCode);
         }
 
-        var contextSelection = await SessionTargetWorkspaceDiscoveryService.ResolveContextForWorkspaceAsync(
+        var contextSelection = await workspaceDiscoveryService.ResolveContextForWorkspaceAsync(
             workspace.Value!,
             options.ExplicitConfig,
             options.Force,
@@ -78,7 +105,7 @@ internal static class SessionTargetResolutionPipeline
             return ResolvedTarget.ErrorResult(contextSelection.Error!, contextSelection.ErrorCode);
         }
 
-        var volume = await SessionTargetWorkspaceDiscoveryService.ResolveDataVolumeAsync(
+        var volume = await workspaceDiscoveryService.ResolveDataVolumeAsync(
             workspace.Value!,
             options.DataVolume,
             options.ExplicitConfig,
@@ -100,16 +127,16 @@ internal static class SessionTargetResolutionPipeline
             ErrorCode: 1);
     }
 
-    private static async Task<ResolvedTarget> ResolveWorkspaceTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+    private async Task<ResolvedTarget> ResolveWorkspaceTargetAsync(SessionCommandOptions options, CancellationToken cancellationToken)
     {
-        var workspacePathInput = SessionTargetParsingValidationService.ResolveWorkspaceInput(options.Workspace);
-        var normalizedWorkspace = SessionTargetParsingValidationService.NormalizeWorkspacePath(workspacePathInput);
+        var workspacePathInput = parsingValidationService.ResolveWorkspaceInput(options.Workspace);
+        var normalizedWorkspace = parsingValidationService.NormalizeWorkspacePath(workspacePathInput);
         if (!normalizedWorkspace.Success)
         {
             return ResolvedTarget.ErrorResult(normalizedWorkspace.Error!, normalizedWorkspace.ErrorCode);
         }
 
-        var resolvedVolume = await SessionTargetWorkspaceDiscoveryService.ResolveDataVolumeAsync(
+        var resolvedVolume = await workspaceDiscoveryService.ResolveDataVolumeAsync(
             normalizedWorkspace.Value!,
             options.DataVolume,
             options.ExplicitConfig,
@@ -127,7 +154,7 @@ internal static class SessionTargetResolutionPipeline
             generatedFromReset = true;
         }
 
-        var contextResolved = await SessionTargetWorkspaceDiscoveryService.ResolveContextForWorkspaceAsync(
+        var contextResolved = await workspaceDiscoveryService.ResolveContextForWorkspaceAsync(
             normalizedWorkspace.Value!,
             options.ExplicitConfig,
             options.Force,
@@ -137,7 +164,7 @@ internal static class SessionTargetResolutionPipeline
             return ResolvedTarget.ErrorResult(contextResolved.Error!, contextResolved.ErrorCode);
         }
 
-        var existing = await SessionTargetDockerLookupService.FindWorkspaceContainerAsync(
+        var existing = await dockerLookupService.FindWorkspaceContainerAsync(
             normalizedWorkspace.Value!,
             contextResolved.Context!,
             cancellationToken).ConfigureAwait(false);
@@ -150,7 +177,7 @@ internal static class SessionTargetResolutionPipeline
         var createdByInvocation = false;
         if (string.IsNullOrWhiteSpace(containerName))
         {
-            var generated = await SessionTargetDockerLookupService.ResolveContainerNameForCreationAsync(
+            var generated = await dockerLookupService.ResolveContainerNameForCreationAsync(
                 normalizedWorkspace.Value!,
                 contextResolved.Context!,
                 cancellationToken).ConfigureAwait(false);

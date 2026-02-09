@@ -1,10 +1,33 @@
 namespace ContainAI.Cli.Host;
 
-internal static partial class SessionTargetResolver
+internal interface ISessionTargetResolver
 {
-    public static Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken)
-        => SessionTargetResolutionPipeline.ResolveAsync(options, cancellationToken);
+    Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken);
 
-    public static Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
-        => SessionTargetDockerLookupService.ReadContainerLabelsAsync(containerName, context, cancellationToken);
+    Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetResolver : ISessionTargetResolver
+{
+    private readonly ISessionTargetResolutionPipeline resolutionPipeline;
+    private readonly ISessionTargetDockerLookupService dockerLookupService;
+
+    public SessionTargetResolver()
+        : this(new SessionTargetResolutionPipeline(), new SessionTargetDockerLookupService())
+    {
+    }
+
+    internal SessionTargetResolver(
+        ISessionTargetResolutionPipeline sessionTargetResolutionPipeline,
+        ISessionTargetDockerLookupService sessionTargetDockerLookupService)
+    {
+        resolutionPipeline = sessionTargetResolutionPipeline ?? throw new ArgumentNullException(nameof(sessionTargetResolutionPipeline));
+        dockerLookupService = sessionTargetDockerLookupService ?? throw new ArgumentNullException(nameof(sessionTargetDockerLookupService));
+    }
+
+    public Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken)
+        => resolutionPipeline.ResolveAsync(options, cancellationToken);
+
+    public Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
+        => dockerLookupService.ReadContainerLabelsAsync(containerName, context, cancellationToken);
 }

@@ -2,12 +2,12 @@ namespace ContainAI.Cli.Host;
 
 internal sealed partial class SessionContainerProvisioner
 {
-    private static async Task<ResolutionResult<ExistingContainerAttachment>> FindAttachableContainerAsync(
+    private async Task<ResolutionResult<ExistingContainerAttachment>> FindAttachableContainerAsync(
         SessionCommandOptions options,
         ResolvedTarget resolved,
         CancellationToken cancellationToken)
     {
-        var labelState = await SessionTargetResolver.ReadContainerLabelsAsync(
+        var labelState = await targetResolver.ReadContainerLabelsAsync(
             resolved.ContainerName,
             resolved.Context,
             cancellationToken).ConfigureAwait(false);

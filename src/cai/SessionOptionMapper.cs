@@ -2,9 +2,18 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal static class SessionOptionMapper
+internal interface ISessionOptionMapper
 {
-    public static SessionCommandOptions FromRun(RunCommandOptions options)
+    SessionCommandOptions FromRun(RunCommandOptions options);
+
+    SessionCommandOptions FromShell(ShellCommandOptions options);
+
+    SessionCommandOptions FromExec(ExecCommandOptions options);
+}
+
+internal sealed class SessionOptionMapper : ISessionOptionMapper
+{
+    public SessionCommandOptions FromRun(RunCommandOptions options)
         => SessionCommandOptions.Create(SessionMode.Run) with
         {
             Workspace = options.Workspace,
@@ -29,7 +38,7 @@ internal static class SessionOptionMapper
             EnvVars = [.. options.Env],
         };
 
-    public static SessionCommandOptions FromShell(ShellCommandOptions options)
+    public SessionCommandOptions FromShell(ShellCommandOptions options)
         => SessionCommandOptions.Create(SessionMode.Shell) with
         {
             Workspace = options.Workspace,
@@ -52,7 +61,7 @@ internal static class SessionOptionMapper
             EnvVars = [],
         };
 
-    public static SessionCommandOptions FromExec(ExecCommandOptions options)
+    public SessionCommandOptions FromExec(ExecCommandOptions options)
         => SessionCommandOptions.Create(SessionMode.Exec) with
         {
             Workspace = options.Workspace,

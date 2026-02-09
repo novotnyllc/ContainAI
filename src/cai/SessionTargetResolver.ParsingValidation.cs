@@ -2,9 +2,22 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host;
 
-internal static class SessionTargetParsingValidationService
+internal interface ISessionTargetParsingValidationService
 {
-    public static ResolvedTarget? ValidateOptions(SessionCommandOptions options)
+    ResolvedTarget? ValidateOptions(SessionCommandOptions options);
+
+    string ResolveWorkspaceInput(string? workspace);
+
+    ResolutionResult<string> NormalizeWorkspacePath(string workspacePathInput);
+
+    ResolutionResult<string> ValidateVolumeName(string volume, string errorPrefix);
+
+    string? TryReadWorkspaceStringProperty(string workspaceStateJson, string propertyName);
+}
+
+internal sealed class SessionTargetParsingValidationService : ISessionTargetParsingValidationService
+{
+    public ResolvedTarget? ValidateOptions(SessionCommandOptions options)
     {
         if (!string.IsNullOrWhiteSpace(options.Container))
         {
@@ -40,10 +53,10 @@ internal static class SessionTargetParsingValidationService
         return null;
     }
 
-    public static string ResolveWorkspaceInput(string? workspace)
+    public string ResolveWorkspaceInput(string? workspace)
         => workspace ?? Directory.GetCurrentDirectory();
 
-    public static ResolutionResult<string> NormalizeWorkspacePath(string workspacePathInput)
+    public ResolutionResult<string> NormalizeWorkspacePath(string workspacePathInput)
     {
         var normalizedWorkspace = SessionRuntimeInfrastructure.NormalizeWorkspacePath(workspacePathInput);
         if (!Directory.Exists(normalizedWorkspace))
@@ -54,12 +67,12 @@ internal static class SessionTargetParsingValidationService
         return ResolutionResult<string>.SuccessResult(normalizedWorkspace);
     }
 
-    public static ResolutionResult<string> ValidateVolumeName(string volume, string errorPrefix)
+    public ResolutionResult<string> ValidateVolumeName(string volume, string errorPrefix)
         => SessionRuntimeInfrastructure.IsValidVolumeName(volume)
             ? ResolutionResult<string>.SuccessResult(volume)
             : ResolutionResult<string>.ErrorResult($"{errorPrefix}{volume}");
 
-    public static string? TryReadWorkspaceStringProperty(string workspaceStateJson, string propertyName)
+    public string? TryReadWorkspaceStringProperty(string workspaceStateJson, string propertyName)
     {
         using var json = JsonDocument.Parse(workspaceStateJson);
         if (json.RootElement.ValueKind != JsonValueKind.Object ||

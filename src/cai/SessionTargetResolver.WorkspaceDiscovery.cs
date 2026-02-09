@@ -1,8 +1,29 @@
 namespace ContainAI.Cli.Host;
 
-internal static class SessionTargetWorkspaceDiscoveryService
+internal interface ISessionTargetWorkspaceDiscoveryService
 {
-    public static async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
+    Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken);
+
+    Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken);
+
+    Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken);
+
+    Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWorkspaceDiscoveryService
+{
+    private readonly ISessionTargetParsingValidationService parsingValidationService;
+
+    public SessionTargetWorkspaceDiscoveryService()
+        : this(new SessionTargetParsingValidationService())
+    {
+    }
+
+    internal SessionTargetWorkspaceDiscoveryService(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
+        => parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+
+    public async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
     {
         var configContext = await ResolveConfiguredContextAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(configContext))
@@ -30,7 +51,7 @@ internal static class SessionTargetWorkspaceDiscoveryService
         return ContextSelectionResult.FromError("No isolation context available. Run 'cai setup' or use --force.");
     }
 
-    public static async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
+    public async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         var configured = await ResolveConfiguredContextAsync(
@@ -79,17 +100,17 @@ internal static class SessionTargetWorkspaceDiscoveryService
         return string.IsNullOrWhiteSpace(context) ? null : context;
     }
 
-    public static async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
+    public async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {
-            return SessionTargetParsingValidationService.ValidateVolumeName(explicitVolume, "Invalid volume name: ");
+            return parsingValidationService.ValidateVolumeName(explicitVolume, "Invalid volume name: ");
         }
 
         var envVolume = Environment.GetEnvironmentVariable("CONTAINAI_DATA_VOLUME");
         if (!string.IsNullOrWhiteSpace(envVolume))
         {
-            return SessionTargetParsingValidationService.ValidateVolumeName(envVolume, "Invalid volume name in CONTAINAI_DATA_VOLUME: ");
+            return parsingValidationService.ValidateVolumeName(envVolume, "Invalid volume name in CONTAINAI_DATA_VOLUME: ");
         }
 
         var userConfig = SessionRuntimeInfrastructure.ResolveUserConfigPath();
@@ -100,7 +121,7 @@ internal static class SessionTargetWorkspaceDiscoveryService
                 cancellationToken).ConfigureAwait(false);
             if (state.ExitCode == 0 && !string.IsNullOrWhiteSpace(state.StandardOutput))
             {
-                var value = SessionTargetParsingValidationService.TryReadWorkspaceStringProperty(state.StandardOutput, "data_volume");
+                var value = parsingValidationService.TryReadWorkspaceStringProperty(state.StandardOutput, "data_volume");
                 if (!string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value))
                 {
                     return ResolutionResult<string>.SuccessResult(value);
@@ -116,7 +137,7 @@ internal static class SessionTargetWorkspaceDiscoveryService
                 cancellationToken).ConfigureAwait(false);
             if (localWorkspace.ExitCode == 0 && !string.IsNullOrWhiteSpace(localWorkspace.StandardOutput))
             {
-                var value = SessionTargetParsingValidationService.TryReadWorkspaceStringProperty(localWorkspace.StandardOutput, "data_volume");
+                var value = parsingValidationService.TryReadWorkspaceStringProperty(localWorkspace.StandardOutput, "data_volume");
                 if (!string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value))
                 {
                     return ResolutionResult<string>.SuccessResult(value);
@@ -139,7 +160,7 @@ internal static class SessionTargetWorkspaceDiscoveryService
         return ResolutionResult<string>.SuccessResult(SessionRuntimeConstants.DefaultVolume);
     }
 
-    public static async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
+    public async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
         var repoName = Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace));
         if (string.IsNullOrWhiteSpace(repoName))
