@@ -348,11 +348,10 @@ internal static partial class RootCommandBuilder
         var dryRunOption = new Option<bool>("--dry-run");
         cleanup.Options.Add(dryRunOption);
         cleanup.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            return runtime.RunSshCleanupAsync(args, cancellationToken);
-        });
+            runtime.RunSshCleanupAsync(
+                new SshCleanupCommandOptions(
+                    DryRun: parseResult.GetValue(dryRunOption)),
+                cancellationToken));
 
         command.Subcommands.Add(cleanup);
         return command;
@@ -395,17 +394,17 @@ internal static partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string>();
-            AppendOption(args, "--name", parseResult.GetValue(nameOption));
-            AppendOption(args, "--container", parseResult.GetValue(containerOption));
-            AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption) ?? parseResult.GetValue(workspaceArgument));
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--quiet", parseResult.GetValue(quietOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            AppendOption(args, "--config", parseResult.GetValue(configOption));
+            var options = new LinksSubcommandOptions(
+                Name: parseResult.GetValue(nameOption),
+                Container: parseResult.GetValue(containerOption),
+                Workspace: parseResult.GetValue(workspaceOption) ?? parseResult.GetValue(workspaceArgument),
+                DryRun: parseResult.GetValue(dryRunOption),
+                Quiet: parseResult.GetValue(quietOption),
+                Verbose: parseResult.GetValue(verboseOption),
+                Config: parseResult.GetValue(configOption));
             return name == "check"
-                ? runtime.RunLinksCheckAsync(args, cancellationToken)
-                : runtime.RunLinksFixAsync(args, cancellationToken);
+                ? runtime.RunLinksCheckAsync(options, cancellationToken)
+                : runtime.RunLinksFixAsync(options, cancellationToken);
         });
 
         return command;
@@ -424,19 +423,25 @@ internal static partial class RootCommandBuilder
         command.SetAction((_, cancellationToken) => runtime.RunConfigAsync(cancellationToken));
 
         var list = new Command("list");
-        list.SetAction((parseResult, cancellationToken) => runtime.RunConfigListAsync(
-            BuildConfigArgs("list", parseResult, globalOption, workspaceOption, verboseOption),
-            cancellationToken));
+        list.SetAction((parseResult, cancellationToken) =>
+            runtime.RunConfigListAsync(
+                new ConfigListCommandOptions(
+                    Global: parseResult.GetValue(globalOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
 
         var get = new Command("get");
         var getKey = new Argument<string>("key");
         get.Arguments.Add(getKey);
         get.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = BuildConfigArgs("get", parseResult, globalOption, workspaceOption, verboseOption);
-            args.Add(parseResult.GetValue(getKey)!);
-            return runtime.RunConfigGetAsync(args, cancellationToken);
-        });
+            runtime.RunConfigGetAsync(
+                new ConfigGetCommandOptions(
+                    Global: parseResult.GetValue(globalOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    Key: parseResult.GetValue(getKey)!),
+                cancellationToken));
 
         var set = new Command("set");
         var setKey = new Argument<string>("key");
@@ -444,22 +449,26 @@ internal static partial class RootCommandBuilder
         set.Arguments.Add(setKey);
         set.Arguments.Add(setValue);
         set.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = BuildConfigArgs("set", parseResult, globalOption, workspaceOption, verboseOption);
-            args.Add(parseResult.GetValue(setKey)!);
-            args.Add(parseResult.GetValue(setValue)!);
-            return runtime.RunConfigSetAsync(args, cancellationToken);
-        });
+            runtime.RunConfigSetAsync(
+                new ConfigSetCommandOptions(
+                    Global: parseResult.GetValue(globalOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    Key: parseResult.GetValue(setKey)!,
+                    Value: parseResult.GetValue(setValue)!),
+                cancellationToken));
 
         var unset = new Command("unset");
         var unsetKey = new Argument<string>("key");
         unset.Arguments.Add(unsetKey);
         unset.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = BuildConfigArgs("unset", parseResult, globalOption, workspaceOption, verboseOption);
-            args.Add(parseResult.GetValue(unsetKey)!);
-            return runtime.RunConfigUnsetAsync(args, cancellationToken);
-        });
+            runtime.RunConfigUnsetAsync(
+                new ConfigUnsetCommandOptions(
+                    Global: parseResult.GetValue(globalOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    Key: parseResult.GetValue(unsetKey)!),
+                cancellationToken));
 
         var resolveVolume = new Command("resolve-volume");
         var explicitVolume = new Argument<string?>("explicit-volume")
@@ -468,11 +477,13 @@ internal static partial class RootCommandBuilder
         };
         resolveVolume.Arguments.Add(explicitVolume);
         resolveVolume.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = BuildConfigArgs("resolve-volume", parseResult, globalOption, workspaceOption, verboseOption);
-            AppendArgument(args, parseResult.GetValue(explicitVolume));
-            return runtime.RunConfigResolveVolumeAsync(args, cancellationToken);
-        });
+            runtime.RunConfigResolveVolumeAsync(
+                new ConfigResolveVolumeCommandOptions(
+                    Global: parseResult.GetValue(globalOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    ExplicitVolume: parseResult.GetValue(explicitVolume)),
+                cancellationToken));
 
         command.Subcommands.Add(list);
         command.Subcommands.Add(get);
@@ -480,21 +491,6 @@ internal static partial class RootCommandBuilder
         command.Subcommands.Add(unset);
         command.Subcommands.Add(resolveVolume);
         return command;
-    }
-
-    private static List<string> BuildConfigArgs(
-        string action,
-        ParseResult parseResult,
-        Option<bool> globalOption,
-        Option<string?> workspaceOption,
-        Option<bool> verboseOption)
-    {
-        var args = new List<string>();
-        AppendFlag(args, "--global", parseResult.GetValue(globalOption));
-        AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption));
-        AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-        args.Add(action);
-        return args;
     }
 
     private static Command CreateManifestCommand(ICaiCommandRuntime runtime)
@@ -510,13 +506,12 @@ internal static partial class RootCommandBuilder
         parse.Options.Add(emitSourceFileOption);
         parse.Arguments.Add(parsePathArgument);
         parse.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--include-disabled", parseResult.GetValue(includeDisabledOption));
-            AppendFlag(args, "--emit-source-file", parseResult.GetValue(emitSourceFileOption));
-            args.Add(parseResult.GetValue(parsePathArgument)!);
-            return runtime.RunManifestParseAsync(args, cancellationToken);
-        });
+            runtime.RunManifestParseAsync(
+                new ManifestParseCommandOptions(
+                    IncludeDisabled: parseResult.GetValue(includeDisabledOption),
+                    EmitSourceFile: parseResult.GetValue(emitSourceFileOption),
+                    ManifestPath: parseResult.GetValue(parsePathArgument)!),
+                cancellationToken));
 
         var generate = new Command("generate");
         var kindArgument = new Argument<string>("kind");
@@ -530,15 +525,12 @@ internal static partial class RootCommandBuilder
         generate.Arguments.Add(generateManifestPathArgument);
         generate.Arguments.Add(outputPathArgument);
         generate.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>
-            {
-                parseResult.GetValue(kindArgument)!,
-                parseResult.GetValue(generateManifestPathArgument)!,
-            };
-            AppendArgument(args, parseResult.GetValue(outputPathArgument));
-            return runtime.RunManifestGenerateAsync(args, cancellationToken);
-        });
+            runtime.RunManifestGenerateAsync(
+                new ManifestGenerateCommandOptions(
+                    Kind: parseResult.GetValue(kindArgument)!,
+                    ManifestPath: parseResult.GetValue(generateManifestPathArgument)!,
+                    OutputPath: parseResult.GetValue(outputPathArgument)),
+                cancellationToken));
 
         var apply = new Command("apply");
         var applyKindArgument = new Argument<string>("kind");
@@ -555,18 +547,15 @@ internal static partial class RootCommandBuilder
         apply.Options.Add(shimDirOption);
         apply.Options.Add(caiBinaryOption);
         apply.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>
-            {
-                parseResult.GetValue(applyKindArgument)!,
-                parseResult.GetValue(applyManifestPathArgument)!,
-            };
-            AppendOption(args, "--data-dir", parseResult.GetValue(dataDirOption));
-            AppendOption(args, "--home-dir", parseResult.GetValue(homeDirOption));
-            AppendOption(args, "--shim-dir", parseResult.GetValue(shimDirOption));
-            AppendOption(args, "--cai-binary", parseResult.GetValue(caiBinaryOption));
-            return runtime.RunManifestApplyAsync(args, cancellationToken);
-        });
+            runtime.RunManifestApplyAsync(
+                new ManifestApplyCommandOptions(
+                    Kind: parseResult.GetValue(applyKindArgument)!,
+                    ManifestPath: parseResult.GetValue(applyManifestPathArgument)!,
+                    DataDir: parseResult.GetValue(dataDirOption),
+                    HomeDir: parseResult.GetValue(homeDirOption),
+                    ShimDir: parseResult.GetValue(shimDirOption),
+                    CaiBinary: parseResult.GetValue(caiBinaryOption)),
+                cancellationToken));
 
         var check = new Command("check");
         var manifestDirOption = new Option<string?>("--manifest-dir");
@@ -587,16 +576,12 @@ internal static partial class RootCommandBuilder
         });
         check.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string>();
             var fromOption = parseResult.GetValue(manifestDirOption);
             var fromArgument = parseResult.GetValue(manifestDirArgument);
-            AppendOption(args, "--manifest-dir", fromOption);
-            if (string.IsNullOrWhiteSpace(fromOption))
-            {
-                AppendArgument(args, fromArgument);
-            }
-
-            return runtime.RunManifestCheckAsync(args, cancellationToken);
+            return runtime.RunManifestCheckAsync(
+                new ManifestCheckCommandOptions(
+                    ManifestDir: string.IsNullOrWhiteSpace(fromOption) ? fromArgument : fromOption),
+                cancellationToken);
         });
 
         command.Subcommands.Add(parse);
@@ -620,12 +605,11 @@ internal static partial class RootCommandBuilder
         upgrade.Arguments.Add(templateName);
         upgrade.Options.Add(dryRunOption);
         upgrade.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendArgument(args, parseResult.GetValue(templateName));
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            return runtime.RunTemplateUpgradeAsync(args, cancellationToken);
-        });
+            runtime.RunTemplateUpgradeAsync(
+                new TemplateUpgradeCommandOptions(
+                    Name: parseResult.GetValue(templateName),
+                    DryRun: parseResult.GetValue(dryRunOption)),
+                cancellationToken));
 
         command.Subcommands.Add(upgrade);
         return command;
@@ -713,11 +697,10 @@ internal static partial class RootCommandBuilder
 
         command.Arguments.Add(topic);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendArgument(args, parseResult.GetValue(topic));
-            return runtime.RunHelpAsync(args, cancellationToken);
-        });
+            runtime.RunHelpAsync(
+                new HelpCommandOptions(
+                    Topic: parseResult.GetValue(topic)),
+                cancellationToken));
 
         return command;
     }
@@ -743,17 +726,16 @@ internal static partial class RootCommandBuilder
         init.Options.Add(workspaceDirOption);
         init.Options.Add(quietOption);
         init.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendOption(args, "--data-dir", parseResult.GetValue(dataDirOption));
-            AppendOption(args, "--home-dir", parseResult.GetValue(homeDirOption));
-            AppendOption(args, "--manifests-dir", parseResult.GetValue(manifestsDirOption));
-            AppendOption(args, "--template-hooks", parseResult.GetValue(templateHooksOption));
-            AppendOption(args, "--workspace-hooks", parseResult.GetValue(workspaceHooksOption));
-            AppendOption(args, "--workspace-dir", parseResult.GetValue(workspaceDirOption));
-            AppendFlag(args, "--quiet", parseResult.GetValue(quietOption));
-            return runtime.RunSystemInitAsync(args, cancellationToken);
-        });
+            runtime.RunSystemInitAsync(
+                new SystemInitCommandOptions(
+                    DataDir: parseResult.GetValue(dataDirOption),
+                    HomeDir: parseResult.GetValue(homeDirOption),
+                    ManifestsDir: parseResult.GetValue(manifestsDirOption),
+                    TemplateHooks: parseResult.GetValue(templateHooksOption),
+                    WorkspaceHooks: parseResult.GetValue(workspaceHooksOption),
+                    WorkspaceDir: parseResult.GetValue(workspaceDirOption),
+                    Quiet: parseResult.GetValue(quietOption)),
+                cancellationToken));
 
         var linkRepair = new Command("link-repair");
         var checkOption = new Option<bool>("--check");
@@ -771,17 +753,16 @@ internal static partial class RootCommandBuilder
         linkRepair.Options.Add(userSpecOption);
         linkRepair.Options.Add(checkedAtFileOption);
         linkRepair.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--check", parseResult.GetValue(checkOption));
-            AppendFlag(args, "--fix", parseResult.GetValue(fixOption));
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--quiet", parseResult.GetValue(linkQuietOption));
-            AppendOption(args, "--builtin-spec", parseResult.GetValue(builtinSpecOption));
-            AppendOption(args, "--user-spec", parseResult.GetValue(userSpecOption));
-            AppendOption(args, "--checked-at-file", parseResult.GetValue(checkedAtFileOption));
-            return runtime.RunSystemLinkRepairAsync(args, cancellationToken);
-        });
+            runtime.RunSystemLinkRepairAsync(
+                new SystemLinkRepairCommandOptions(
+                    Check: parseResult.GetValue(checkOption),
+                    Fix: parseResult.GetValue(fixOption),
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    Quiet: parseResult.GetValue(linkQuietOption),
+                    BuiltinSpec: parseResult.GetValue(builtinSpecOption),
+                    UserSpec: parseResult.GetValue(userSpecOption),
+                    CheckedAtFile: parseResult.GetValue(checkedAtFileOption)),
+                cancellationToken));
 
         var watchLinks = new Command("watch-links");
         var pollIntervalOption = new Option<string?>("--poll-interval");
@@ -793,14 +774,13 @@ internal static partial class RootCommandBuilder
         watchLinks.Options.Add(watchCheckedAtFileOption);
         watchLinks.Options.Add(watchQuietOption);
         watchLinks.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendOption(args, "--poll-interval", parseResult.GetValue(pollIntervalOption));
-            AppendOption(args, "--imported-at-file", parseResult.GetValue(importedAtFileOption));
-            AppendOption(args, "--checked-at-file", parseResult.GetValue(watchCheckedAtFileOption));
-            AppendFlag(args, "--quiet", parseResult.GetValue(watchQuietOption));
-            return runtime.RunSystemWatchLinksAsync(args, cancellationToken);
-        });
+            runtime.RunSystemWatchLinksAsync(
+                new SystemWatchLinksCommandOptions(
+                    PollInterval: parseResult.GetValue(pollIntervalOption),
+                    ImportedAtFile: parseResult.GetValue(importedAtFileOption),
+                    CheckedAtFile: parseResult.GetValue(watchCheckedAtFileOption),
+                    Quiet: parseResult.GetValue(watchQuietOption)),
+                cancellationToken));
 
         var devcontainer = new Command("devcontainer");
         devcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerAsync(cancellationToken));
@@ -809,11 +789,10 @@ internal static partial class RootCommandBuilder
         var featureDirOption = new Option<string?>("--feature-dir");
         install.Options.Add(featureDirOption);
         install.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendOption(args, "--feature-dir", parseResult.GetValue(featureDirOption));
-            return runtime.RunSystemDevcontainerInstallAsync(args, cancellationToken);
-        });
+            runtime.RunSystemDevcontainerInstallAsync(
+                new SystemDevcontainerInstallCommandOptions(
+                    FeatureDir: parseResult.GetValue(featureDirOption)),
+                cancellationToken));
 
         var initDevcontainer = new Command("init");
         initDevcontainer.SetAction((_, cancellationToken) => runtime.RunSystemDevcontainerInitAsync(cancellationToken));

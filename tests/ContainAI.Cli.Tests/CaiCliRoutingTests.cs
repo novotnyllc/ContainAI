@@ -475,19 +475,19 @@ public sealed class CaiCliRoutingTests
             call => Assert.Equal(["manifest"], call));
     }
 
-    [Fact]
-    public async Task ManifestCheck_UsesPositionalDirectoryWhenOptionNotProvided()
-    {
-        var runtime = new FakeRuntime();
-        var cancellationToken = TestContext.Current.CancellationToken;
+[Fact]
+public async Task ManifestCheck_ForwardsCanonicalManifestDirOption()
+{
+    var runtime = new FakeRuntime();
+    var cancellationToken = TestContext.Current.CancellationToken;
 
         var exitCode = await CaiCli.RunAsync(["manifest", "check", "src/manifests"], runtime, cancellationToken);
 
-        Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
-        Assert.Collection(
-            runtime.NativeCalls,
-            call => Assert.Equal(["manifest", "check", "src/manifests"], call));
-    }
+    Assert.Equal(FakeRuntime.NativeExitCode, exitCode);
+    Assert.Collection(
+        runtime.NativeCalls,
+        call => Assert.Equal(["manifest", "check", "--manifest-dir", "src/manifests"], call));
+}
 
     [Fact]
     public async Task TemplateCommand_Root_UsesNativeRuntime()
