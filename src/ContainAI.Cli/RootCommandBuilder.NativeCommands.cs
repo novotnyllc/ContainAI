@@ -16,13 +16,12 @@ internal static partial class RootCommandBuilder
         command.Options.Add(buildTemplatesOption);
         command.Options.Add(resetLimaOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--json", parseResult.GetValue(jsonOption));
-            AppendFlag(args, "--build-templates", parseResult.GetValue(buildTemplatesOption));
-            AppendFlag(args, "--reset-lima", parseResult.GetValue(resetLimaOption));
-            return runtime.RunDoctorAsync(args, cancellationToken);
-        });
+            runtime.RunDoctorAsync(
+                new DoctorCommandOptions(
+                    Json: parseResult.GetValue(jsonOption),
+                    BuildTemplates: parseResult.GetValue(buildTemplatesOption),
+                    ResetLima: parseResult.GetValue(resetLimaOption)),
+                cancellationToken));
 
         var fixCommand = new Command("fix", "Run doctor remediation routines.");
         var allOption = new Option<bool>("--all");
@@ -65,14 +64,13 @@ internal static partial class RootCommandBuilder
             }
         });
         fixCommand.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--all", parseResult.GetValue(allOption));
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendArgument(args, parseResult.GetValue(targetArgument));
-            AppendArgument(args, parseResult.GetValue(targetArgArgument));
-            return runtime.RunDoctorFixAsync(args, cancellationToken);
-        });
+            runtime.RunDoctorFixAsync(
+                new DoctorFixCommandOptions(
+                    All: parseResult.GetValue(allOption),
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    Target: parseResult.GetValue(targetArgument),
+                    TargetArg: parseResult.GetValue(targetArgArgument)),
+                cancellationToken));
 
         command.Subcommands.Add(fixCommand);
         return command;
@@ -84,11 +82,10 @@ internal static partial class RootCommandBuilder
         var jsonOption = new Option<bool>("--json");
         command.Options.Add(jsonOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--json", parseResult.GetValue(jsonOption));
-            return runtime.RunValidateAsync(args, cancellationToken);
-        });
+            runtime.RunValidateAsync(
+                new ValidateCommandOptions(
+                    Json: parseResult.GetValue(jsonOption)),
+                cancellationToken));
 
         return command;
     }
@@ -104,13 +101,12 @@ internal static partial class RootCommandBuilder
         command.Options.Add(verboseOption);
         command.Options.Add(skipTemplatesOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            AppendFlag(args, "--skip-templates", parseResult.GetValue(skipTemplatesOption));
-            return runtime.RunSetupAsync(args, cancellationToken);
-        });
+            runtime.RunSetupAsync(
+                new SetupCommandOptions(
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    Verbose: parseResult.GetValue(verboseOption),
+                    SkipTemplates: parseResult.GetValue(skipTemplatesOption)),
+                cancellationToken));
 
         return command;
     }
@@ -240,18 +236,19 @@ internal static partial class RootCommandBuilder
 
         command.SetAction((parseResult, cancellationToken) =>
         {
-            var args = new List<string>();
             var sourcePath = parseResult.GetValue(sourcePathArgument);
             var from = parseResult.GetValue(fromOption);
-            AppendOption(args, "--from", from ?? sourcePath);
-            AppendOption(args, "--data-volume", parseResult.GetValue(dataVolumeOption));
-            AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption));
-            AppendOption(args, "--config", parseResult.GetValue(configOption));
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--no-excludes", parseResult.GetValue(noExcludesOption));
-            AppendFlag(args, "--no-secrets", parseResult.GetValue(noSecretsOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunImportAsync(args, cancellationToken);
+            return runtime.RunImportAsync(
+                new ImportCommandOptions(
+                    From: from ?? sourcePath,
+                    DataVolume: parseResult.GetValue(dataVolumeOption),
+                    Workspace: parseResult.GetValue(workspaceOption),
+                    Config: parseResult.GetValue(configOption),
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    NoExcludes: parseResult.GetValue(noExcludesOption),
+                    NoSecrets: parseResult.GetValue(noSecretsOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken);
         });
 
         return command;
@@ -270,14 +267,13 @@ internal static partial class RootCommandBuilder
         command.Options.Add(containerOption);
         command.Options.Add(workspaceOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendOption(args, "--output", parseResult.GetValue(outputOption));
-            AppendOption(args, "--data-volume", parseResult.GetValue(dataVolumeOption));
-            AppendOption(args, "--container", parseResult.GetValue(containerOption));
-            AppendOption(args, "--workspace", parseResult.GetValue(workspaceOption));
-            return runtime.RunExportAsync(args, cancellationToken);
-        });
+            runtime.RunExportAsync(
+                new ExportCommandOptions(
+                    Output: parseResult.GetValue(outputOption),
+                    DataVolume: parseResult.GetValue(dataVolumeOption),
+                    Container: parseResult.GetValue(containerOption),
+                    Workspace: parseResult.GetValue(workspaceOption)),
+                cancellationToken));
 
         return command;
     }
@@ -306,16 +302,15 @@ internal static partial class RootCommandBuilder
         command.Options.Add(exportOption);
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--all", parseResult.GetValue(allOption));
-            AppendOption(args, "--container", parseResult.GetValue(containerOption));
-            AppendFlag(args, "--remove", parseResult.GetValue(removeOption));
-            AppendFlag(args, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(args, "--export", parseResult.GetValue(exportOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunStopAsync(args, cancellationToken);
-        });
+            runtime.RunStopAsync(
+                new StopCommandOptions(
+                    All: parseResult.GetValue(allOption),
+                    Container: parseResult.GetValue(containerOption),
+                    Remove: parseResult.GetValue(removeOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Export: parseResult.GetValue(exportOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
 
         return command;
     }
@@ -333,14 +328,13 @@ internal static partial class RootCommandBuilder
         command.Options.Add(imagesOption);
         command.Options.Add(ageOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(args, "--images", parseResult.GetValue(imagesOption));
-            AppendOption(args, "--age", parseResult.GetValue(ageOption));
-            return runtime.RunGcAsync(args, cancellationToken);
-        });
+            runtime.RunGcAsync(
+                new GcCommandOptions(
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Images: parseResult.GetValue(imagesOption),
+                    Age: parseResult.GetValue(ageOption)),
+                cancellationToken));
 
         return command;
     }
@@ -652,15 +646,14 @@ internal static partial class RootCommandBuilder
         command.Options.Add(limaRecreateOption);
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--stop-containers", parseResult.GetValue(stopContainersOption));
-            AppendFlag(args, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(args, "--lima-recreate", parseResult.GetValue(limaRecreateOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunUpdateAsync(args, cancellationToken);
-        });
+            runtime.RunUpdateAsync(
+                new UpdateCommandOptions(
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    StopContainers: parseResult.GetValue(stopContainersOption),
+                    Force: parseResult.GetValue(forceOption),
+                    LimaRecreate: parseResult.GetValue(limaRecreateOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
 
         return command;
     }
@@ -674,12 +667,11 @@ internal static partial class RootCommandBuilder
         command.Options.Add(rebuildOption);
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--rebuild", parseResult.GetValue(rebuildOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunRefreshAsync(args, cancellationToken);
-        });
+            runtime.RunRefreshAsync(
+                new RefreshCommandOptions(
+                    Rebuild: parseResult.GetValue(rebuildOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
 
         return command;
     }
@@ -699,15 +691,14 @@ internal static partial class RootCommandBuilder
         command.Options.Add(forceOption);
         command.Options.Add(verboseOption);
         command.SetAction((parseResult, cancellationToken) =>
-        {
-            var args = new List<string>();
-            AppendFlag(args, "--dry-run", parseResult.GetValue(dryRunOption));
-            AppendFlag(args, "--containers", parseResult.GetValue(containersOption));
-            AppendFlag(args, "--volumes", parseResult.GetValue(volumesOption));
-            AppendFlag(args, "--force", parseResult.GetValue(forceOption));
-            AppendFlag(args, "--verbose", parseResult.GetValue(verboseOption));
-            return runtime.RunUninstallAsync(args, cancellationToken);
-        });
+            runtime.RunUninstallAsync(
+                new UninstallCommandOptions(
+                    DryRun: parseResult.GetValue(dryRunOption),
+                    Containers: parseResult.GetValue(containersOption),
+                    Volumes: parseResult.GetValue(volumesOption),
+                    Force: parseResult.GetValue(forceOption),
+                    Verbose: parseResult.GetValue(verboseOption)),
+                cancellationToken));
 
         return command;
     }
