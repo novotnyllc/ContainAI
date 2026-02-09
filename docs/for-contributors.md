@@ -194,7 +194,7 @@ dotnet test --project tests/ContainAI.Cli.Tests/ContainAI.Cli.Tests.csproj --con
 dotnet test --project tests/AgentClientProtocol.Proxy.Tests/AgentClientProtocol.Proxy.Tests.csproj --configuration Release -- --xunit-info
 
 # E2E smoke checks (requires sysbox)
-docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai version
+docker --context containai-docker run --rm --runtime=sysbox-runc --entrypoint cai ghcr.io/novotnyllc/containai/base:latest version
 ```
 
 ### Coverage Gate Policy

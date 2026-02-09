@@ -77,8 +77,8 @@ docker info --format '{{json .Runtimes}}' | grep -q sysbox-runc
 
 # Run smoke checks against the base image (requires sysbox)
 docker --context containai-docker pull ghcr.io/novotnyllc/containai/base:latest
-docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai version
-docker --context containai-docker run --rm --runtime=sysbox-runc ghcr.io/novotnyllc/containai/base:latest cai system init --help
+docker --context containai-docker run --rm --runtime=sysbox-runc --entrypoint cai ghcr.io/novotnyllc/containai/base:latest version
+docker --context containai-docker run --rm --runtime=sysbox-runc --entrypoint cai ghcr.io/novotnyllc/containai/base:latest system init --help
 ```
 
 **Why sysbox is required:**
