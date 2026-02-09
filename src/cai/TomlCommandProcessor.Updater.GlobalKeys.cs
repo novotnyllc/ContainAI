@@ -1,0 +1,192 @@
+namespace ContainAI.Cli.Host;
+
+internal sealed partial class TomlCommandUpdater
+{
+    public string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
+    {
+        var lines = SplitLines(content);
+        var newLines = new List<string>(lines.Count + 3);
+        var keyLine = $"{keyParts[^1]} = {formattedValue}";
+
+        if (keyParts.Length == 1)
+        {
+            var keyUpdated = false;
+            var inTable = false;
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (IsAnyTableHeader(trimmed))
+                {
+                    inTable = true;
+                    if (!keyUpdated)
+                    {
+                        newLines.Add(keyLine);
+                        keyUpdated = true;
+                    }
+
+                    newLines.Add(line);
+                    continue;
+                }
+
+                if (!inTable && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
+                {
+                    newLines.Add(keyLine);
+                    keyUpdated = true;
+                    continue;
+                }
+
+                newLines.Add(line);
+            }
+
+            if (!keyUpdated)
+            {
+                if (inTable)
+                {
+                    var insertAt = newLines.FindIndex(static line => IsAnyTableHeader(line.Trim()));
+                    if (insertAt >= 0)
+                    {
+                        newLines.Insert(insertAt, keyLine);
+                    }
+                    else
+                    {
+                        newLines.Add(keyLine);
+                    }
+                }
+                else
+                {
+                    newLines.Add(keyLine);
+                }
+            }
+
+            return NormalizeOutputContent(newLines);
+        }
+
+        var sectionHeader = $"[{keyParts[0]}]";
+        var inTargetSection = false;
+        var foundSection = false;
+        var keyUpdatedNested = false;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            if (IsTargetHeader(trimmed, sectionHeader))
+            {
+                inTargetSection = true;
+                foundSection = true;
+                newLines.Add(line);
+                continue;
+            }
+
+            if (inTargetSection && IsAnyTableHeader(trimmed))
+            {
+                if (!keyUpdatedNested)
+                {
+                    newLines.Add(keyLine);
+                    keyUpdatedNested = true;
+                }
+
+                inTargetSection = false;
+            }
+
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
+            {
+                newLines.Add(keyLine);
+                keyUpdatedNested = true;
+                continue;
+            }
+
+            newLines.Add(line);
+        }
+
+        if (inTargetSection && !keyUpdatedNested)
+        {
+            newLines.Add(keyLine);
+        }
+
+        if (!foundSection)
+        {
+            if (newLines.Count > 0 && newLines.Any(static line => !string.IsNullOrWhiteSpace(line)))
+            {
+                newLines.Add(string.Empty);
+            }
+
+            newLines.Add(sectionHeader);
+            newLines.Add(keyLine);
+        }
+
+        return NormalizeOutputContent(newLines);
+    }
+
+    public string RemoveGlobalKey(string content, string[] keyParts)
+    {
+        var lines = SplitLines(content);
+        var newLines = new List<string>(lines.Count);
+
+        if (keyParts.Length == 1)
+        {
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (!IsAnyTableHeader(trimmed) && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
+                {
+                    continue;
+                }
+
+                newLines.Add(line);
+            }
+
+            return NormalizeOutputContent(newLines);
+        }
+
+        var sectionHeader = $"[{keyParts[0]}]";
+        var inTargetSection = false;
+        var sectionStart = -1;
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+
+            if (IsTargetHeader(trimmed, sectionHeader))
+            {
+                inTargetSection = true;
+                sectionStart = newLines.Count;
+                newLines.Add(line);
+                continue;
+            }
+
+            if (inTargetSection && IsAnyTableHeader(trimmed))
+            {
+                inTargetSection = false;
+            }
+
+            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
+            {
+                continue;
+            }
+
+            newLines.Add(line);
+        }
+
+        if (sectionStart >= 0)
+        {
+            var sectionEnd = newLines.Count;
+            for (var index = sectionStart + 1; index < newLines.Count; index++)
+            {
+                if (IsAnyTableHeader(newLines[index].Trim()))
+                {
+                    sectionEnd = index;
+                    break;
+                }
+            }
+
+            if (!SectionHasContent(newLines, sectionStart + 1, sectionEnd))
+            {
+                newLines.RemoveRange(sectionStart, sectionEnd - sectionStart);
+            }
+        }
+
+        return NormalizeOutputContent(newLines);
+    }
+}
