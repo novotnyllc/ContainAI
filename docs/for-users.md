@@ -13,7 +13,7 @@ Prerequisites: Docker CLI (`docker --version`) and Bash 4.0+.
    ./install.sh --yes --no-setup
    ```
    `install.sh` bootstraps the binary and delegates to `cai install --local` with the same options (`--yes --no-setup` here).
-   `cai install --yes` wires shell integration using `~/.config/containai/profile.d/containai.sh`, including completion for `cai`, `containai-docker`, and `docker-containai` if you create that alias.
+   `cai install --yes` writes `~/.config/containai/profile.d/containai.sh` and adds a shell-profile hook (`~/.bash_profile`, `~/.bashrc`, or `~/.zshrc`) that sources profile.d scripts automatically, including completion for `cai`, `containai-docker`, and `docker-containai` if you create that alias.
 
 2. **Setup isolation** (one-time):
    - Linux (Ubuntu/Debian) and WSL2: Run `cai setup` (installs a ContainAI-managed Docker daemon bundle and Sysbox)

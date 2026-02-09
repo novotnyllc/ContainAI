@@ -43,7 +43,7 @@ cai --help | head -3
 ```
 
 > **Note:** `cai install` writes `cai` into `~/.local/share/containai` and installs wrappers in `~/.local/bin` by default.
-> **Note:** `cai install --yes` also wires shell integration via `~/.config/containai/profile.d/containai.sh` for PATH and completion (`cai`, `containai-docker`, and `docker-containai` if you create that alias).
+> **Note:** `cai install --yes` writes `~/.config/containai/profile.d/containai.sh` and adds a hook block in your shell profile (`~/.bash_profile`, `~/.bashrc`, or `~/.zshrc`) so profile.d scripts are sourced automatically. This enables PATH and completion for `cai`, `containai-docker`, and `docker-containai` if you create that alias.
 
 ## CLI Output Behavior
 

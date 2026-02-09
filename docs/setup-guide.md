@@ -839,12 +839,23 @@ check_interval = "never"
 
 ## Uninstalling
 
-To remove ContainAI components, follow the manual cleanup steps below for your platform.
-
-### Remove Docker Context
+### Recommended Cleanup Command
 
 ```bash
-docker context rm containai-docker
+cai uninstall --yes --force
+```
+
+This removes:
+- Container helper data under `~/.containai*`
+- `containai-docker`, `containai-secure`, and `docker-containai` Docker contexts (when present)
+- ContainAI shell integration hook block and `~/.config/containai/profile.d/containai.sh`
+- Generated SSH include files and host entries
+- Optional images/volumes when corresponding flags are provided
+
+### Manual Docker Context Cleanup
+
+```bash
+docker context rm containai-docker containai-secure docker-containai
 ```
 
 ### WSL2/Linux - Remove Isolated Docker Service
