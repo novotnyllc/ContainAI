@@ -1,97 +1,36 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ShellProfileIntegrationService
+internal interface IShellProfileHookBlockManager
 {
-    public async Task<bool> EnsureProfileScriptAsync(string homeDirectory, string binDirectory, CancellationToken cancellationToken)
+    bool HasHookBlock(string content);
+
+    string BuildHookBlock();
+
+    bool TryRemoveHookBlock(string content, out string updated);
+}
+
+internal sealed class ShellProfileHookBlockManager : IShellProfileHookBlockManager
+{
+    public bool HasHookBlock(string content)
+        => content.Contains(ShellProfileIntegrationConstants.ShellIntegrationStartMarker, StringComparison.Ordinal)
+           && content.Contains(ShellProfileIntegrationConstants.ShellIntegrationEndMarker, StringComparison.Ordinal);
+
+    public string BuildHookBlock()
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        ArgumentException.ThrowIfNullOrWhiteSpace(binDirectory);
-
-        var profileScriptPath = GetProfileScriptPath(homeDirectory);
-        Directory.CreateDirectory(Path.GetDirectoryName(profileScriptPath)!);
-
-        var script = BuildProfileScript(homeDirectory, binDirectory);
-        if (File.Exists(profileScriptPath))
-        {
-            var existing = await File.ReadAllTextAsync(profileScriptPath, cancellationToken).ConfigureAwait(false);
-            if (string.Equals(existing, script, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        await File.WriteAllTextAsync(profileScriptPath, script, cancellationToken).ConfigureAwait(false);
-        return true;
+        var profileDirectory = "$HOME/" + ShellProfileIntegrationConstants.ProfileDirectoryRelativePath;
+        return string.Join(
+            Environment.NewLine,
+            ShellProfileIntegrationConstants.ShellIntegrationStartMarker,
+            $"if [ -d \"{profileDirectory}\" ]; then",
+            $"  for _cai_profile in \"{profileDirectory}/\"*.sh; do",
+            "    [ -r \"$_cai_profile\" ] && . \"$_cai_profile\"",
+            "  done",
+            "  unset _cai_profile",
+            "fi",
+            ShellProfileIntegrationConstants.ShellIntegrationEndMarker);
     }
 
-    public async Task<bool> EnsureHookInShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
-
-        var shellProfileDirectory = Path.GetDirectoryName(shellProfilePath);
-        if (!string.IsNullOrWhiteSpace(shellProfileDirectory))
-        {
-            Directory.CreateDirectory(shellProfileDirectory);
-        }
-
-        var existing = File.Exists(shellProfilePath)
-            ? await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false)
-            : string.Empty;
-        if (HasHookBlock(existing))
-        {
-            return false;
-        }
-
-        var hookBlock = BuildHookBlock();
-        var updated = string.IsNullOrWhiteSpace(existing)
-            ? hookBlock + Environment.NewLine
-            : existing.TrimEnd() + Environment.NewLine + Environment.NewLine + hookBlock + Environment.NewLine;
-        await File.WriteAllTextAsync(shellProfilePath, updated, cancellationToken).ConfigureAwait(false);
-        return true;
-    }
-
-    public async Task<bool> RemoveHookFromShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
-
-        if (!File.Exists(shellProfilePath))
-        {
-            return false;
-        }
-
-        var existing = await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false);
-        if (!TryRemoveHookBlock(existing, out var updated))
-        {
-            return false;
-        }
-
-        await File.WriteAllTextAsync(shellProfilePath, updated, cancellationToken).ConfigureAwait(false);
-        return true;
-    }
-
-    public Task<bool> RemoveProfileScriptAsync(string homeDirectory, CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var profileScriptPath = GetProfileScriptPath(homeDirectory);
-        if (!File.Exists(profileScriptPath))
-        {
-            return Task.FromResult(false);
-        }
-
-        File.Delete(profileScriptPath);
-
-        var profileDirectory = GetProfileDirectoryPath(homeDirectory);
-        if (Directory.Exists(profileDirectory) && !Directory.EnumerateFileSystemEntries(profileDirectory).Any())
-        {
-            Directory.Delete(profileDirectory);
-        }
-
-        return Task.FromResult(true);
-    }
-
-    private static bool TryRemoveHookBlock(string content, out string updated)
+    public bool TryRemoveHookBlock(string content, out string updated)
     {
         updated = content;
         var removed = false;
@@ -117,7 +56,7 @@ internal sealed partial class ShellProfileIntegrationService
 
     private static bool TryFindHookRange(string content, out int startIndex, out int endIndex)
     {
-        startIndex = content.IndexOf(ShellIntegrationStartMarker, StringComparison.Ordinal);
+        startIndex = content.IndexOf(ShellProfileIntegrationConstants.ShellIntegrationStartMarker, StringComparison.Ordinal);
         if (startIndex < 0)
         {
             endIndex = -1;
@@ -127,7 +66,7 @@ internal sealed partial class ShellProfileIntegrationService
         var lineStart = content.LastIndexOf('\n', Math.Max(startIndex - 1, 0));
         startIndex = lineStart < 0 ? 0 : lineStart + 1;
 
-        var endMarkerIndex = content.IndexOf(ShellIntegrationEndMarker, startIndex, StringComparison.Ordinal);
+        var endMarkerIndex = content.IndexOf(ShellProfileIntegrationConstants.ShellIntegrationEndMarker, startIndex, StringComparison.Ordinal);
         if (endMarkerIndex < 0)
         {
             endIndex = -1;

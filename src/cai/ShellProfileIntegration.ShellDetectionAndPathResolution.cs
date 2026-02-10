@@ -1,6 +1,17 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ShellProfileIntegrationService
+internal interface IShellProfilePathResolver
+{
+    string GetProfileDirectoryPath(string homeDirectory);
+
+    string GetProfileScriptPath(string homeDirectory);
+
+    string ResolvePreferredShellProfilePath(string homeDirectory, string? shellPath);
+
+    IReadOnlyList<string> GetCandidateShellProfilePaths(string homeDirectory, string? shellPath);
+}
+
+internal sealed class ShellProfilePathResolver : IShellProfilePathResolver
 {
     public string GetProfileDirectoryPath(string homeDirectory)
     {
@@ -9,7 +20,7 @@ internal sealed partial class ShellProfileIntegrationService
     }
 
     public string GetProfileScriptPath(string homeDirectory)
-        => Path.Combine(GetProfileDirectoryPath(homeDirectory), ProfileScriptFileName);
+        => Path.Combine(GetProfileDirectoryPath(homeDirectory), ShellProfileIntegrationConstants.ProfileScriptFileName);
 
     public string ResolvePreferredShellProfilePath(string homeDirectory, string? shellPath)
     {
@@ -40,27 +51,5 @@ internal sealed partial class ShellProfileIntegrationService
         return candidates
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-    }
-
-    private static string NormalizePathForShell(string homeDirectory, string path)
-    {
-        var normalizedHome = Path.GetFullPath(homeDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Replace('\\', '/');
-        var normalizedPath = Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Replace('\\', '/');
-
-        if (string.Equals(normalizedPath, normalizedHome, StringComparison.Ordinal))
-        {
-            return "$HOME";
-        }
-
-        if (normalizedPath.StartsWith(normalizedHome + "/", StringComparison.Ordinal))
-        {
-            return "$HOME/" + normalizedPath[(normalizedHome.Length + 1)..];
-        }
-
-        return normalizedPath;
     }
 }

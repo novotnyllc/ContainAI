@@ -1,28 +1,17 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ShellProfileIntegrationService
+internal interface IShellProfileScriptContentGenerator
 {
-    public bool HasHookBlock(string content)
-        => content.Contains(ShellIntegrationStartMarker, StringComparison.Ordinal)
-           && content.Contains(ShellIntegrationEndMarker, StringComparison.Ordinal);
+    string BuildProfileScript(string homeDirectory, string binDirectory);
+}
 
-    private static string BuildHookBlock()
+internal sealed class ShellProfileScriptContentGenerator : IShellProfileScriptContentGenerator
+{
+    public string BuildProfileScript(string homeDirectory, string binDirectory)
     {
-        var profileDirectory = "$HOME/" + ProfileDirectoryRelativePath;
-        return string.Join(
-            Environment.NewLine,
-            ShellIntegrationStartMarker,
-            $"if [ -d \"{profileDirectory}\" ]; then",
-            $"  for _cai_profile in \"{profileDirectory}/\"*.sh; do",
-            "    [ -r \"$_cai_profile\" ] && . \"$_cai_profile\"",
-            "  done",
-            "  unset _cai_profile",
-            "fi",
-            ShellIntegrationEndMarker);
-    }
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(binDirectory);
 
-    private static string BuildProfileScript(string homeDirectory, string binDirectory)
-    {
         var pathSegment = NormalizePathForShell(homeDirectory, binDirectory);
         return string.Join(
             Environment.NewLine,
@@ -47,5 +36,27 @@ internal sealed partial class ShellProfileIntegrationService
             "  complete -o default -F _cai_complete docker-containai",
             "fi",
             string.Empty);
+    }
+
+    private static string NormalizePathForShell(string homeDirectory, string path)
+    {
+        var normalizedHome = Path.GetFullPath(homeDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Replace('\\', '/');
+        var normalizedPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Replace('\\', '/');
+
+        if (string.Equals(normalizedPath, normalizedHome, StringComparison.Ordinal))
+        {
+            return "$HOME";
+        }
+
+        if (normalizedPath.StartsWith(normalizedHome + "/", StringComparison.Ordinal))
+        {
+            return "$HOME/" + normalizedPath[(normalizedHome.Length + 1)..];
+        }
+
+        return normalizedPath;
     }
 }
