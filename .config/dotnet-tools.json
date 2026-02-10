@@ -6,7 +6,15 @@
       "version": "3.9.50",
       "commands": [
         "nbgv"
-      ]
+      ],
+      "rollForward": false
+    },
+    "slopwatch.cmd": {
+      "version": "0.2.0",
+      "commands": [
+        "slopwatch"
+      ],
+      "rollForward": false
     }
   }
 }

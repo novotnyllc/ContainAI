@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "createdAt": "2026-02-10T05:05:51.9171303+00:00",
+  "updatedAt": "2026-02-10T05:05:51.9277876+00:00",
+  "description": "Initial baseline created by \u0027slopwatch init\u0027 on 2026-02-10 05:05:51 UTC",
+  "entries": [
+    {
+      "hash": "de745b0683617e32",
+      "ruleId": "SW003",
+      "filePath": "tests/AgentClientProtocol.Proxy.Tests/AcpProxyLifecycleTests.cs",
+      "lineNumber": 808,
+      "codeSnippet": "catch (IOException ex)\n            {\n                System.Diagnostics.Debug.WriteLine(ex);\n            }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9276993+00:00"
+    },
+    {
+      "hash": "90b964f0faef9b77",
+      "ruleId": "SW003",
+      "filePath": "tests/AgentClientProtocol.Proxy.Tests/AcpProxyLifecycleTests.cs",
+      "lineNumber": 812,
+      "codeSnippet": "catch (ObjectDisposedException ex)\n            {\n                System.Diagnostics.Debug.WriteLine(ex);\n            }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277648+00:00"
+    },
+    {
+      "hash": "d675c0585adde893",
+      "ruleId": "SW003",
+      "filePath": "tests/AgentClientProtocol.Proxy.Tests/AcpProxyLifecycleTests.cs",
+      "lineNumber": 816,
+      "codeSnippet": "catch (InvalidOperationException ex)\n            {\n                System.Diagnostics.Debug.WriteLine(ex);\n            }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277681+00:00"
+    },
+    {
+      "hash": "19172b9ccae405ea",
+      "ruleId": "SW003",
+      "filePath": "src/cai/ContainAiDockerProxy.PortAllocation.cs",
+      "lineNumber": 107,
+      "codeSnippet": "catch (IOException)\n            {\n                // Ignore stale files and continue allocation.\n            }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277708+00:00"
+    },
+    {
+      "hash": "858b8788e60aeb6a",
+      "ruleId": "SW003",
+      "filePath": "src/cai/ContainAiDockerProxy.PortAllocation.cs",
+      "lineNumber": 111,
+      "codeSnippet": "catch (UnauthorizedAccessException)\n            {\n                // Ignore stale files and continue allocation.\n            }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277754+00:00"
+    },
+    {
+      "hash": "72c0d76fb3001e98",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 71,
+      "codeSnippet": "catch (IOException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read file symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277779+00:00"
+    },
+    {
+      "hash": "9dba35b1995ebdcd",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 75,
+      "codeSnippet": "catch (NotSupportedException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read file symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277797+00:00"
+    },
+    {
+      "hash": "6b3651d9ab0665f8",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 79,
+      "codeSnippet": "catch (ArgumentException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read file symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277817+00:00"
+    },
+    {
+      "hash": "e317f84516ed1202",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 92,
+      "codeSnippet": "catch (IOException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read directory symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277836+00:00"
+    },
+    {
+      "hash": "a1ee8cf398b62360",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 96,
+      "codeSnippet": "catch (NotSupportedException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read directory symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277859+00:00"
+    },
+    {
+      "hash": "d0fbb34ce5f99a1e",
+      "ruleId": "SW003",
+      "filePath": "src/cai/Importing/Symlinks/ImportSymlinkScanner.cs",
+      "lineNumber": 100,
+      "codeSnippet": "catch (ArgumentException ex)\n        {\n            Debug.WriteLine($\u0022Failed to read directory symlink target for \u0027{path}\u0027: {ex.Message}\u0022);\n        }",
+      "message": "Catch block only logs exception without rethrowing or handling",
+      "baselinedAt": "2026-02-10T05:05:51.9277876+00:00"
+    }
+  ]
+}

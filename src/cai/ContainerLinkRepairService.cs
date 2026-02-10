@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Text.Json.Serialization;
 
 namespace ContainAI.Cli.Host;
@@ -11,9 +10,9 @@ internal sealed class ContainerLinkRepairService
 
     private readonly TextWriter stderr;
     private readonly ContainerLinkSpecReader specReader;
-    private readonly ContainerLinkEntryInspector entryInspector;
     private readonly ContainerLinkRepairOperations repairOperations;
     private readonly ContainerLinkRepairReporter reporter;
+    private readonly ContainerLinkEntryProcessor entryProcessor;
 
     public ContainerLinkRepairService(
         TextWriter standardOutput,
@@ -28,9 +27,9 @@ internal sealed class ContainerLinkRepairService
 
         var commandClient = new ContainerLinkCommandClient(dockerExecutor);
         specReader = new ContainerLinkSpecReader(commandClient);
-        entryInspector = new ContainerLinkEntryInspector(commandClient);
         repairOperations = new ContainerLinkRepairOperations(commandClient);
         reporter = new ContainerLinkRepairReporter(standardOutput);
+        entryProcessor = new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), repairOperations, reporter);
     }
 
     public async Task<int> RunAsync(
@@ -55,8 +54,8 @@ internal sealed class ContainerLinkRepairService
             await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {user.Error}").ConfigureAwait(false);
         }
 
-        await ProcessEntriesAsync(containerName, builtin.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
-        await ProcessEntriesAsync(containerName, user.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await entryProcessor.ProcessEntriesAsync(containerName, builtin.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await entryProcessor.ProcessEntriesAsync(containerName, user.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
 
         if (mode == ContainerLinkRepairMode.Fix && stats.Errors == 0)
         {
@@ -84,101 +83,6 @@ internal sealed class ContainerLinkRepairService
         }
 
         return 0;
-    }
-
-    private async Task ProcessEntriesAsync(
-        string containerName,
-        IReadOnlyList<ContainerLinkSpecEntry> entries,
-        ContainerLinkRepairMode mode,
-        bool quiet,
-        ContainerLinkRepairStats stats,
-        CancellationToken cancellationToken)
-    {
-        foreach (var entry in entries)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(entry.Link) || string.IsNullOrWhiteSpace(entry.Target))
-            {
-                stats.Errors++;
-                await stderr.WriteLineAsync("[WARN] Skipping invalid link spec entry").ConfigureAwait(false);
-                continue;
-            }
-
-            await ProcessEntryAsync(containerName, entry, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task ProcessEntryAsync(
-        string containerName,
-        ContainerLinkSpecEntry entry,
-        ContainerLinkRepairMode mode,
-        bool quiet,
-        ContainerLinkRepairStats stats,
-        CancellationToken cancellationToken)
-    {
-        var state = await entryInspector.GetEntryStateAsync(containerName, entry, cancellationToken).ConfigureAwait(false);
-        switch (state.Kind)
-        {
-            case EntryStateKind.Ok:
-                stats.Ok++;
-                return;
-            case EntryStateKind.Missing:
-                stats.Missing++;
-                await reporter.LogInfoAsync(quiet, $"[MISSING] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
-                break;
-            case EntryStateKind.DirectoryConflict when !entry.RemoveFirst:
-                stats.Errors++;
-                await stderr.WriteLineAsync($"[CONFLICT] {entry.Link} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
-                return;
-            case EntryStateKind.DirectoryConflict:
-                stats.Broken++;
-                await reporter.LogInfoAsync(quiet, $"[EXISTS_DIR] {entry.Link} is a directory (will remove with R flag)").ConfigureAwait(false);
-                break;
-            case EntryStateKind.FileConflict:
-                stats.Broken++;
-                await reporter.LogInfoAsync(quiet, $"[EXISTS_FILE] {entry.Link} is a regular file (will replace)").ConfigureAwait(false);
-                break;
-            case EntryStateKind.DanglingSymlink:
-                stats.Broken++;
-                await reporter.LogInfoAsync(quiet, $"[BROKEN] {entry.Link} -> {entry.Target} (dangling symlink)").ConfigureAwait(false);
-                break;
-            case EntryStateKind.WrongTarget:
-                stats.Broken++;
-                await reporter.LogInfoAsync(
-                        quiet,
-                        $"[WRONG_TARGET] {entry.Link} -> {state.CurrentTarget ?? "<unknown>"} (expected: {entry.Target})")
-                    .ConfigureAwait(false);
-                break;
-            case EntryStateKind.Error:
-                stats.Errors++;
-                await stderr.WriteLineAsync($"[ERROR] {state.Error ?? "Unknown link inspection error"}").ConfigureAwait(false);
-                return;
-            default:
-                throw new InvalidEnumArgumentException(nameof(state.Kind), (int)state.Kind, typeof(EntryStateKind));
-        }
-
-        if (mode == ContainerLinkRepairMode.Check)
-        {
-            return;
-        }
-
-        if (mode == ContainerLinkRepairMode.DryRun)
-        {
-            await reporter.LogInfoAsync(quiet, $"[WOULD] Create symlink: {entry.Link} -> {entry.Target}").ConfigureAwait(false);
-            stats.Fixed++;
-            return;
-        }
-
-        var repair = await repairOperations.RepairEntryAsync(containerName, entry, state, cancellationToken).ConfigureAwait(false);
-        if (!repair.Success)
-        {
-            stats.Errors++;
-            await stderr.WriteLineAsync($"ERROR: {repair.Error}").ConfigureAwait(false);
-            return;
-        }
-
-        stats.Fixed++;
-        await reporter.LogInfoAsync(quiet, $"[FIXED] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
     }
 }
 
