@@ -2,7 +2,7 @@ using ContainAI.Cli.Host.Importing.Symlinks;
 
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
+internal sealed partial class ImportManifestTransferOperations : CaiRuntimeSupport
     , IImportManifestTransferOperations
 {
     private readonly IImportPostCopyOperations postCopyOperations;
@@ -57,87 +57,6 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
             importManifestPlanBuilder ?? throw new ArgumentNullException(nameof(importManifestPlanBuilder)),
             importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)),
             importManifestPostCopyTransferOperations ?? throw new ArgumentNullException(nameof(importManifestPostCopyTransferOperations)));
-
-    public async Task<int> InitializeImportTargetsAsync(
-        string volume,
-        string sourceRoot,
-        IReadOnlyList<ManifestEntry> entries,
-        bool noSecrets,
-        CancellationToken cancellationToken)
-    {
-        foreach (var entry in entries)
-        {
-            var ensureCode = await targetInitializer.EnsureEntryTargetAsync(
-                volume,
-                sourceRoot,
-                entry,
-                noSecrets,
-                cancellationToken).ConfigureAwait(false);
-            if (ensureCode != 0)
-            {
-                return ensureCode;
-            }
-        }
-
-        return 0;
-    }
-
-    public async Task<int> ImportManifestEntryAsync(
-        string volume,
-        string sourceRoot,
-        ManifestEntry entry,
-        bool excludePriv,
-        bool noExcludes,
-        bool dryRun,
-        bool verbose,
-        CancellationToken cancellationToken)
-    {
-        var importPlan = planBuilder.Create(sourceRoot, entry);
-        if (!importPlan.SourceExists)
-        {
-            if (verbose && !entry.Optional)
-            {
-                await stderr.WriteLineAsync($"Source not found: {entry.Source}").ConfigureAwait(false);
-            }
-
-            return 0;
-        }
-
-        if (dryRun)
-        {
-            await stdout.WriteLineAsync($"[DRY-RUN] Would sync {entry.Source} -> {entry.Target}").ConfigureAwait(false);
-            return 0;
-        }
-
-        var copyCode = await copyOperations.CopyManifestEntryAsync(
-            volume,
-            sourceRoot,
-            entry,
-            excludePriv,
-            noExcludes,
-            importPlan,
-            cancellationToken).ConfigureAwait(false);
-        if (copyCode != 0)
-        {
-            return copyCode;
-        }
-
-        return await postCopyTransferOperations.ApplyManifestPostCopyAsync(
-            volume,
-            entry,
-            importPlan,
-            dryRun,
-            verbose,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    public Task<int> EnforceSecretPathPermissionsAsync(
-        string volume,
-        IReadOnlyList<ManifestEntry> manifestEntries,
-        bool noSecrets,
-        bool verbose,
-        CancellationToken cancellationToken)
-        => postCopyOperations.EnforceSecretPathPermissionsAsync(volume, manifestEntries, noSecrets, verbose, cancellationToken);
 
     private static ImportManifestPostCopyTransferOperations CreatePostCopyTransferOperations(
         IImportPostCopyOperations importPostCopyOperations,
