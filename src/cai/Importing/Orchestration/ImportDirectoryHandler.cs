@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class ImportDirectoryHandler : CaiRuntimeSupport
+internal sealed partial class ImportDirectoryHandler : CaiRuntimeSupport
 {
     private readonly IImportPathOperations pathOperations;
     private readonly IImportTransferOperations transferOperations;
@@ -39,74 +39,28 @@ internal sealed class ImportDirectoryHandler : CaiRuntimeSupport
             options.Verbose,
             cancellationToken).ConfigureAwait(false);
 
-        if (!options.DryRun)
+        var initCode = await InitializeTargetsIfNeededAsync(options, volume, sourcePath, manifestEntries, cancellationToken).ConfigureAwait(false);
+        if (initCode != 0)
         {
-            var initCode = await transferOperations.InitializeImportTargetsAsync(
-                volume,
-                sourcePath,
-                manifestEntries,
-                options.NoSecrets,
-                cancellationToken).ConfigureAwait(false);
-            if (initCode != 0)
-            {
-                return initCode;
-            }
+            return initCode;
         }
 
-        foreach (var entry in manifestEntries)
+        var manifestImportCode = await ImportManifestEntriesAsync(options, volume, sourcePath, excludePriv, manifestEntries, cancellationToken).ConfigureAwait(false);
+        if (manifestImportCode != 0)
         {
-            if (options.NoSecrets && entry.Flags.Contains('s', StringComparison.Ordinal))
-            {
-                if (options.Verbose)
-                {
-                    await stderr.WriteLineAsync($"Skipping secret entry: {entry.Source}").ConfigureAwait(false);
-                }
-
-                continue;
-            }
-
-            var copyCode = await transferOperations.ImportManifestEntryAsync(
-                volume,
-                sourcePath,
-                entry,
-                excludePriv,
-                options.NoExcludes,
-                options.DryRun,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (copyCode != 0)
-            {
-                return copyCode;
-            }
+            return manifestImportCode;
         }
 
-        if (!options.DryRun)
+        var secretPermissionsCode = await EnforceSecretPermissionsIfNeededAsync(options, volume, manifestEntries, cancellationToken).ConfigureAwait(false);
+        if (secretPermissionsCode != 0)
         {
-            var secretPermissionsCode = await transferOperations.EnforceSecretPathPermissionsAsync(
-                volume,
-                manifestEntries,
-                options.NoSecrets,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (secretPermissionsCode != 0)
-            {
-                return secretPermissionsCode;
-            }
+            return secretPermissionsCode;
         }
 
-        foreach (var additionalPath in additionalImportPaths)
+        var additionalPathImportCode = await ImportAdditionalPathsAsync(options, volume, additionalImportPaths, cancellationToken).ConfigureAwait(false);
+        if (additionalPathImportCode != 0)
         {
-            var copyCode = await pathOperations.ImportAdditionalPathAsync(
-                volume,
-                additionalPath,
-                options.NoExcludes,
-                options.DryRun,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (copyCode != 0)
-            {
-                return copyCode;
-            }
+            return additionalPathImportCode;
         }
 
         var environmentCode = await environmentOperations.ImportEnvironmentVariablesAsync(
