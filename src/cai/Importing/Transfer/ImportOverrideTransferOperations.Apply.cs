@@ -16,69 +16,38 @@ internal sealed partial class ImportOverrideTransferOperations
             return 0;
         }
 
-        var overrideFiles = Directory.EnumerateFiles(overridesDirectory, "*", SearchOption.AllDirectories)
-            .OrderBy(static path => path, StringComparer.Ordinal)
-            .ToArray();
+        var overrideFiles = GetOverrideFiles(overridesDirectory);
         foreach (var file in overrideFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (IsSymbolicLinkPath(file))
+            var preparedOverride = await PrepareOverrideFileAsync(
+                overridesDirectory,
+                file,
+                manifestEntries,
+                noSecrets,
+                verbose).ConfigureAwait(false);
+            if (preparedOverride is null)
             {
-                await stderr.WriteLineAsync($"Skipping override symlink: {file}").ConfigureAwait(false);
-                continue;
-            }
-
-            var relative = Path.GetRelativePath(overridesDirectory, file).Replace("\\", "/", StringComparison.Ordinal);
-            if (!relative.StartsWith('.'))
-            {
-                relative = "." + relative;
-            }
-
-            if (!TryMapSourcePathToTarget(relative, manifestEntries, out var mappedTarget, out var mappedFlags))
-            {
-                if (verbose)
-                {
-                    await stderr.WriteLineAsync($"Skipping unmapped override path: {relative}").ConfigureAwait(false);
-                }
-
-                continue;
-            }
-
-            if (ShouldSkipOverrideForNoSecrets(mappedFlags, noSecrets))
-            {
-                if (verbose)
-                {
-                    await stderr.WriteLineAsync($"Skipping secret override due to --no-secrets: {relative}").ConfigureAwait(false);
-                }
-
                 continue;
             }
 
             if (dryRun)
             {
-                await stdout.WriteLineAsync($"[DRY-RUN] Would apply override {relative} -> {mappedTarget}").ConfigureAwait(false);
+                await stdout.WriteLineAsync(
+                    $"[DRY-RUN] Would apply override {preparedOverride.Value.RelativePath} -> {preparedOverride.Value.MappedTargetPath}")
+                    .ConfigureAwait(false);
                 continue;
             }
 
-            var copy = await DockerCaptureAsync(
-                [
-                    "run",
-                    "--rm",
-                    "-v",
-                    $"{volume}:/target",
-                    "-v",
-                    $"{overridesDirectory}:/override:ro",
-                    "alpine:3.20",
-                    "sh",
-                    "-lc",
-                    BuildOverrideCopyCommand(relative, mappedTarget),
-                ],
+            var copyCode = await CopyPreparedOverrideAsync(
+                volume,
+                overridesDirectory,
+                preparedOverride.Value,
                 cancellationToken).ConfigureAwait(false);
-            if (copy.ExitCode != 0)
+            if (copyCode != 0)
             {
-                await stderr.WriteLineAsync(copy.StandardError.Trim()).ConfigureAwait(false);
-                return 1;
+                return copyCode;
             }
         }
 

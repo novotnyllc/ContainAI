@@ -1,0 +1,50 @@
+namespace ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+
+using ContainAI.Cli.Host.ContainerRuntime.Models;
+
+internal sealed partial class ContainerRuntimePrivilegedCommandService
+{
+    public Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments)
+        => RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None);
+
+    public async Task<ProcessCaptureResult> RunAsRootCaptureAsync(
+        string executable,
+        IReadOnlyList<string> arguments,
+        string? standardInput,
+        CancellationToken cancellationToken)
+    {
+        if (IsRunningAsRoot())
+        {
+            var direct = await processExecutor
+                .RunCaptureAsync(executable, arguments, null, cancellationToken, standardInput)
+                .ConfigureAwait(false);
+            if (direct.ExitCode != 0)
+            {
+                throw new InvalidOperationException($"Command failed: {executable} {string.Join(' ', arguments)}: {direct.StandardError.Trim()}");
+            }
+
+            return direct;
+        }
+
+        var sudoArguments = new List<string>(capacity: arguments.Count + 2)
+        {
+            "-n",
+            executable,
+        };
+
+        foreach (var argument in arguments)
+        {
+            sudoArguments.Add(argument);
+        }
+
+        var sudo = await processExecutor
+            .RunCaptureAsync("sudo", sudoArguments, null, cancellationToken, standardInput)
+            .ConfigureAwait(false);
+        if (sudo.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"sudo command failed for {executable}: {sudo.StandardError.Trim()}");
+        }
+
+        return sudo;
+    }
+}
