@@ -1,8 +1,32 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class SessionContainerProvisioner
+internal interface ISessionContainerAttachmentService
 {
-    private async Task<ResolutionResult<ExistingContainerAttachment>> FindAttachableContainerAsync(
+    Task<ResolutionResult<ExistingContainerAttachment>> FindAttachableContainerAsync(
+        SessionCommandOptions options,
+        ResolvedTarget resolved,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class SessionContainerAttachmentService : ISessionContainerAttachmentService
+{
+    private readonly ISessionTargetResolver targetResolver;
+    private readonly ISessionContainerLifecycleService lifecycleService;
+
+    public SessionContainerAttachmentService()
+        : this(new SessionTargetResolver(), new SessionContainerLifecycleService())
+    {
+    }
+
+    internal SessionContainerAttachmentService(
+        ISessionTargetResolver sessionTargetResolver,
+        ISessionContainerLifecycleService sessionContainerLifecycleService)
+    {
+        targetResolver = sessionTargetResolver ?? throw new ArgumentNullException(nameof(sessionTargetResolver));
+        lifecycleService = sessionContainerLifecycleService ?? throw new ArgumentNullException(nameof(sessionContainerLifecycleService));
+    }
+
+    public async Task<ResolutionResult<ExistingContainerAttachment>> FindAttachableContainerAsync(
         SessionCommandOptions options,
         ResolvedTarget resolved,
         CancellationToken cancellationToken)
@@ -16,14 +40,14 @@ internal sealed partial class SessionContainerProvisioner
         if (exists && !labelState.IsOwned)
         {
             var code = options.Mode == SessionMode.Run ? 1 : 15;
-            return ErrorResult<ExistingContainerAttachment>(
+            return ResolutionResult<ExistingContainerAttachment>.ErrorResult(
                 $"Container '{resolved.ContainerName}' exists but was not created by ContainAI",
                 code);
         }
 
         if (options.Fresh && exists)
         {
-            await RemoveContainerAsync(resolved.Context, resolved.ContainerName, cancellationToken).ConfigureAwait(false);
+            await lifecycleService.RemoveContainerAsync(resolved.Context, resolved.ContainerName, cancellationToken).ConfigureAwait(false);
             exists = false;
         }
 
@@ -31,7 +55,7 @@ internal sealed partial class SessionContainerProvisioner
             !string.IsNullOrWhiteSpace(options.DataVolume) &&
             !string.Equals(labelState.DataVolume, resolved.DataVolume, StringComparison.Ordinal))
         {
-            return ErrorResult<ExistingContainerAttachment>(
+            return ResolutionResult<ExistingContainerAttachment>.ErrorResult(
                 $"Container '{resolved.ContainerName}' already uses volume '{labelState.DataVolume}'. Use --fresh to recreate with a different volume.");
         }
 
@@ -45,16 +69,5 @@ internal sealed partial class SessionContainerProvisioner
                 Exists: true,
                 State: labelState.State,
                 SshPort: labelState.SshPort));
-    }
-
-    private sealed record ExistingContainerAttachment(
-        bool Exists,
-        string? State,
-        string? SshPort)
-    {
-        internal static readonly ExistingContainerAttachment NotFound = new(
-            Exists: false,
-            State: null,
-            SshPort: null);
     }
 }

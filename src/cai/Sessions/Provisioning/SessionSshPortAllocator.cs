@@ -2,9 +2,14 @@ using System.Net.NetworkInformation;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class SessionContainerProvisioner
+internal interface ISessionSshPortAllocator
 {
-    private static async Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken)
+    Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionSshPortAllocator : ISessionSshPortAllocator
+{
+    public async Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken)
     {
         var reservedPorts = new HashSet<int>();
 
@@ -36,7 +41,7 @@ internal sealed partial class SessionContainerProvisioner
             }
         }
 
-        return ErrorResult<string>(
+        return ResolutionResult<string>.ErrorResult(
             $"No SSH ports available in range {SessionRuntimeConstants.SshPortRangeStart}-{SessionRuntimeConstants.SshPortRangeEnd}.");
     }
 

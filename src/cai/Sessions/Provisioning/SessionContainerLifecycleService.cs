@@ -1,8 +1,35 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class SessionContainerProvisioner
+internal interface ISessionContainerLifecycleService
 {
-    private async Task<ResolutionResult<string>> CreateOrStartContainerAsync(
+    Task<ResolutionResult<string>> CreateOrStartContainerAsync(
+        SessionCommandOptions options,
+        ResolvedTarget resolved,
+        ExistingContainerAttachment attachment,
+        CancellationToken cancellationToken);
+
+    Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionContainerLifecycleService : ISessionContainerLifecycleService
+{
+    private readonly TextWriter stderr;
+    private readonly ISessionSshPortAllocator sshPortAllocator;
+
+    public SessionContainerLifecycleService()
+        : this(TextWriter.Null, new SessionSshPortAllocator())
+    {
+    }
+
+    internal SessionContainerLifecycleService(
+        TextWriter standardError,
+        ISessionSshPortAllocator sessionSshPortAllocator)
+    {
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        sshPortAllocator = sessionSshPortAllocator ?? throw new ArgumentNullException(nameof(sessionSshPortAllocator));
+    }
+
+    public async Task<ResolutionResult<string>> CreateOrStartContainerAsync(
         SessionCommandOptions options,
         ResolvedTarget resolved,
         ExistingContainerAttachment attachment,
@@ -13,7 +40,7 @@ internal sealed partial class SessionContainerProvisioner
             var created = await CreateContainerAsync(options, resolved, cancellationToken).ConfigureAwait(false);
             if (!created.Success)
             {
-                return ErrorFrom<CreateContainerResult, string>(created);
+                return ResolutionResult<string>.ErrorResult(created.Error!, created.ErrorCode);
             }
 
             return ResolutionResult<string>.SuccessResult(created.Value!.SshPort);
@@ -22,7 +49,7 @@ internal sealed partial class SessionContainerProvisioner
         var sshPort = attachment.SshPort ?? string.Empty;
         if (string.IsNullOrWhiteSpace(sshPort))
         {
-            var allocated = await AllocateSshPortAsync(resolved.Context, cancellationToken).ConfigureAwait(false);
+            var allocated = await sshPortAllocator.AllocateSshPortAsync(resolved.Context, cancellationToken).ConfigureAwait(false);
             if (!allocated.Success)
             {
                 return allocated;
@@ -36,11 +63,17 @@ internal sealed partial class SessionContainerProvisioner
             var start = await StartContainerAsync(resolved.Context, resolved.ContainerName, cancellationToken).ConfigureAwait(false);
             if (!start.Success)
             {
-                return ErrorFrom<bool, string>(start);
+                return ResolutionResult<string>.ErrorResult(start.Error!, start.ErrorCode);
             }
         }
 
         return ResolutionResult<string>.SuccessResult(sshPort);
+    }
+
+    public async Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken)
+    {
+        await SessionRuntimeInfrastructure.DockerCaptureAsync(context, ["stop", containerName], cancellationToken).ConfigureAwait(false);
+        await SessionRuntimeInfrastructure.DockerCaptureAsync(context, ["rm", "-f", containerName], cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ResolutionResult<CreateContainerResult>> CreateContainerAsync(
@@ -48,10 +81,10 @@ internal sealed partial class SessionContainerProvisioner
         ResolvedTarget resolved,
         CancellationToken cancellationToken)
     {
-        var sshPortResolution = await AllocateSshPortAsync(resolved.Context, cancellationToken).ConfigureAwait(false);
+        var sshPortResolution = await sshPortAllocator.AllocateSshPortAsync(resolved.Context, cancellationToken).ConfigureAwait(false);
         if (!sshPortResolution.Success)
         {
-            return ErrorFrom<string, CreateContainerResult>(sshPortResolution);
+            return ResolutionResult<CreateContainerResult>.ErrorResult(sshPortResolution.Error!, sshPortResolution.ErrorCode);
         }
 
         var sshPort = sshPortResolution.Value!;
@@ -106,7 +139,7 @@ internal sealed partial class SessionContainerProvisioner
             cancellationToken).ConfigureAwait(false);
         if (create.ExitCode != 0)
         {
-            return ErrorResult<CreateContainerResult>(
+            return ResolutionResult<CreateContainerResult>.ErrorResult(
                 $"Failed to create container: {SessionRuntimeInfrastructure.TrimOrFallback(create.StandardError, "docker run failed")}");
         }
 
@@ -118,7 +151,7 @@ internal sealed partial class SessionContainerProvisioner
             cancellationToken).ConfigureAwait(false);
         if (!waitRunning)
         {
-            return ErrorResult<CreateContainerResult>($"Container '{resolved.ContainerName}' failed to start.");
+            return ResolutionResult<CreateContainerResult>.ErrorResult($"Container '{resolved.ContainerName}' failed to start.");
         }
 
         return ResolutionResult<CreateContainerResult>.SuccessResult(new CreateContainerResult(sshPort));
@@ -135,7 +168,7 @@ internal sealed partial class SessionContainerProvisioner
             cancellationToken).ConfigureAwait(false);
         if (start.ExitCode != 0)
         {
-            return ErrorResult<bool>(
+            return ResolutionResult<bool>.ErrorResult(
                 $"Failed to start container '{containerName}': {SessionRuntimeInfrastructure.TrimOrFallback(start.StandardError, "docker start failed")}");
         }
 
@@ -166,11 +199,5 @@ internal sealed partial class SessionContainerProvisioner
         }
 
         return false;
-    }
-
-    private static async Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken)
-    {
-        await SessionRuntimeInfrastructure.DockerCaptureAsync(context, ["stop", containerName], cancellationToken).ConfigureAwait(false);
-        await SessionRuntimeInfrastructure.DockerCaptureAsync(context, ["rm", "-f", containerName], cancellationToken).ConfigureAwait(false);
     }
 }
