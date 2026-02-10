@@ -1,6 +1,6 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed class SessionContainerProvisioner
+internal sealed partial class SessionContainerProvisioner
 {
     private readonly ISessionContainerAttachmentService attachmentService;
     private readonly ISessionContainerLifecycleService lifecycleService;
@@ -51,46 +51,4 @@ internal sealed class SessionContainerProvisioner
         lifecycleService = sessionContainerLifecycleService;
         sshBootstrapService = sessionSshBootstrapService;
     }
-
-    public async Task<EnsuredSession> EnsureAsync(
-        SessionCommandOptions options,
-        ResolvedTarget resolved,
-        CancellationToken cancellationToken)
-    {
-        var attachment = await attachmentService.FindAttachableContainerAsync(options, resolved, cancellationToken).ConfigureAwait(false);
-        if (!attachment.Success)
-        {
-            return EnsureError(attachment);
-        }
-
-        var runningContainer = await lifecycleService.CreateOrStartContainerAsync(
-            options,
-            resolved,
-            attachment.Value!,
-            cancellationToken).ConfigureAwait(false);
-        if (!runningContainer.Success)
-        {
-            return EnsureError(runningContainer);
-        }
-
-        var sshPort = runningContainer.Value!;
-
-        var sshBootstrap = await sshBootstrapService.EnsureSshBootstrapAsync(resolved, sshPort, cancellationToken).ConfigureAwait(false);
-        if (!sshBootstrap.Success)
-        {
-            return EnsureError(sshBootstrap);
-        }
-
-        return new EnsuredSession(
-            ContainerName: resolved.ContainerName,
-            Workspace: resolved.Workspace,
-            DataVolume: resolved.DataVolume,
-            Context: resolved.Context,
-            SshPort: sshPort,
-            Error: null,
-            ErrorCode: 1);
-    }
-
-    private static EnsuredSession EnsureError<T>(ResolutionResult<T> result) =>
-        EnsuredSession.ErrorResult(result.Error!, result.ErrorCode);
 }
