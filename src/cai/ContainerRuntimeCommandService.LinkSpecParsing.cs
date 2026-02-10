@@ -22,13 +22,17 @@ internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkS
     private readonly IContainerRuntimeLinkSpecFileReader linkSpecFileReader;
     private readonly IContainerRuntimeLinkSpecParser linkSpecParser;
     private readonly IContainerRuntimeLinkSpecEntryValidator linkSpecEntryValidator;
+    private readonly IContainerRuntimeLinkEntryInspector linkEntryInspector;
+    private readonly IContainerRuntimeLinkEntryRepairer linkEntryRepairer;
 
     public ContainerRuntimeLinkSpecProcessor(IContainerRuntimeExecutionContext context)
         : this(
             context,
             new ContainerRuntimeLinkSpecFileReader(),
             new ContainerRuntimeLinkSpecParser(),
-            new ContainerRuntimeLinkSpecEntryValidator())
+            new ContainerRuntimeLinkSpecEntryValidator(),
+            new ContainerRuntimeLinkEntryInspector(context),
+            new ContainerRuntimeLinkEntryRepairer(context))
     {
     }
 
@@ -36,12 +40,16 @@ internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkS
         IContainerRuntimeExecutionContext context,
         IContainerRuntimeLinkSpecFileReader linkSpecFileReader,
         IContainerRuntimeLinkSpecParser linkSpecParser,
-        IContainerRuntimeLinkSpecEntryValidator linkSpecEntryValidator)
+        IContainerRuntimeLinkSpecEntryValidator linkSpecEntryValidator,
+        IContainerRuntimeLinkEntryInspector linkEntryInspector,
+        IContainerRuntimeLinkEntryRepairer linkEntryRepairer)
     {
         this.context = context ?? throw new ArgumentNullException(nameof(context));
         this.linkSpecFileReader = linkSpecFileReader ?? throw new ArgumentNullException(nameof(linkSpecFileReader));
         this.linkSpecParser = linkSpecParser ?? throw new ArgumentNullException(nameof(linkSpecParser));
         this.linkSpecEntryValidator = linkSpecEntryValidator ?? throw new ArgumentNullException(nameof(linkSpecEntryValidator));
+        this.linkEntryInspector = linkEntryInspector ?? throw new ArgumentNullException(nameof(linkEntryInspector));
+        this.linkEntryRepairer = linkEntryRepairer ?? throw new ArgumentNullException(nameof(linkEntryRepairer));
     }
 
     public async Task ProcessLinkSpecAsync(
@@ -67,7 +75,17 @@ internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkS
                 continue;
             }
 
-            await ProcessLinkEntryAsync(validatedEntry.LinkPath, validatedEntry.TargetPath, validatedEntry.RemoveFirst, mode, quiet, stats).ConfigureAwait(false);
+            var inspection = await linkEntryInspector
+                .InspectAsync(validatedEntry.LinkPath, validatedEntry.TargetPath, validatedEntry.RemoveFirst, quiet, stats)
+                .ConfigureAwait(false);
+            if (!inspection.RequiresRepair)
+            {
+                continue;
+            }
+
+            await linkEntryRepairer
+                .RepairAsync(inspection.LinkPath, inspection.TargetPath, inspection.RemoveFirst, mode, quiet, stats)
+                .ConfigureAwait(false);
         }
     }
 
@@ -93,121 +111,5 @@ internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkS
         }
 
         await context.StandardOutput.WriteLineAsync($"  Errors:  {stats.Errors}").ConfigureAwait(false);
-    }
-
-    private async Task ProcessLinkEntryAsync(
-        string linkPath,
-        string targetPath,
-        bool removeFirst,
-        LinkRepairMode mode,
-        bool quiet,
-        LinkRepairStats stats)
-    {
-        var isSymlink = await context.IsSymlinkAsync(linkPath).ConfigureAwait(false);
-        if (isSymlink)
-        {
-            var currentTarget = await context.ReadLinkTargetAsync(linkPath).ConfigureAwait(false);
-            if (string.Equals(currentTarget, targetPath, StringComparison.Ordinal))
-            {
-                if (!File.Exists(linkPath) && !Directory.Exists(linkPath))
-                {
-                    stats.Broken++;
-                    await context.LogInfoAsync(quiet, $"[BROKEN] {linkPath} -> {targetPath} (dangling symlink)").ConfigureAwait(false);
-                }
-                else
-                {
-                    stats.Ok++;
-                    return;
-                }
-            }
-            else
-            {
-                stats.Broken++;
-                await context.LogInfoAsync(quiet, $"[WRONG_TARGET] {linkPath} -> {currentTarget} (expected: {targetPath})").ConfigureAwait(false);
-            }
-        }
-        else if (Directory.Exists(linkPath))
-        {
-            if (removeFirst)
-            {
-                stats.Broken++;
-                await context.LogInfoAsync(quiet, $"[EXISTS_DIR] {linkPath} is a directory (will remove with R flag)").ConfigureAwait(false);
-            }
-            else
-            {
-                stats.Errors++;
-                await context.StandardError.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
-                return;
-            }
-        }
-        else if (File.Exists(linkPath))
-        {
-            stats.Broken++;
-            await context.LogInfoAsync(quiet, $"[EXISTS_FILE] {linkPath} is a regular file (will replace)").ConfigureAwait(false);
-        }
-        else
-        {
-            stats.Missing++;
-            await context.LogInfoAsync(quiet, $"[MISSING] {linkPath} -> {targetPath}").ConfigureAwait(false);
-        }
-
-        if (mode == LinkRepairMode.Check)
-        {
-            return;
-        }
-
-        var parent = Path.GetDirectoryName(linkPath);
-        if (!string.IsNullOrWhiteSpace(parent) && !Directory.Exists(parent))
-        {
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Create parent directory: {parent}").ConfigureAwait(false);
-            }
-            else
-            {
-                Directory.CreateDirectory(parent);
-            }
-        }
-
-        if (Directory.Exists(linkPath) && !await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
-        {
-            if (!removeFirst)
-            {
-                stats.Errors++;
-                await context.StandardError.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
-                return;
-            }
-
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Remove directory: {linkPath}").ConfigureAwait(false);
-            }
-            else
-            {
-                Directory.Delete(linkPath, recursive: true);
-            }
-        }
-        else if (File.Exists(linkPath) || await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
-        {
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Replace path: {linkPath}").ConfigureAwait(false);
-            }
-            else
-            {
-                File.Delete(linkPath);
-            }
-        }
-
-        if (mode == LinkRepairMode.DryRun)
-        {
-            await context.LogInfoAsync(quiet, $"[WOULD] Create symlink: {linkPath} -> {targetPath}").ConfigureAwait(false);
-            stats.Fixed++;
-            return;
-        }
-
-        File.CreateSymbolicLink(linkPath, targetPath);
-        await context.LogInfoAsync(quiet, $"[FIXED] {linkPath} -> {targetPath}").ConfigureAwait(false);
-        stats.Fixed++;
     }
 }
