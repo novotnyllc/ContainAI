@@ -608,9 +608,14 @@ public sealed class SyncIntegrationTests
     [Fact]
     public void ImportRuntimeSource_ContainsEnvGuardMessages()
     {
-        var importSourcePath = LocateRepositoryPath("src", "cai", "CaiImportService.ImportEnvironment.cs");
         var caiSourceDir = LocateRepositoryPath("src", "cai");
-        var sourceBuilder = new StringBuilder(File.ReadAllText(importSourcePath));
+        var sourceBuilder = new StringBuilder();
+
+        foreach (var importSourcePath in Directory.GetFiles(caiSourceDir, "CaiImportService.ImportEnvironment*.cs", SearchOption.TopDirectoryOnly))
+        {
+            sourceBuilder.AppendLine();
+            sourceBuilder.Append(File.ReadAllText(importSourcePath));
+        }
 
         foreach (var utilitySourcePath in Directory.GetFiles(caiSourceDir, "CaiRuntimeSupport.Utilities*.cs", SearchOption.TopDirectoryOnly))
         {
