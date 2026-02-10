@@ -9,7 +9,7 @@ internal interface ISessionSshCommandBuilder
     string BuildForegroundRemoteCommand(IReadOnlyList<string> commandArgs, bool loginShell);
 }
 
-internal sealed class SessionSshCommandBuilder : ISessionSshCommandBuilder
+internal sealed partial class SessionSshCommandBuilder : ISessionSshCommandBuilder
 {
     public List<string> BuildSshArguments(SessionCommandOptions options, string sshPort, string remoteCommand, bool forceTty)
     {
@@ -49,42 +49,4 @@ internal sealed class SessionSshCommandBuilder : ISessionSshCommandBuilder
         return args;
     }
 
-    public string BuildDetachedRemoteCommand(IReadOnlyList<string> commandArgs)
-    {
-        var inner = JoinForShell(commandArgs);
-        return $"cd /home/agent/workspace && nohup {inner} </dev/null >/dev/null 2>&1 & echo $!";
-    }
-
-    public string BuildForegroundRemoteCommand(IReadOnlyList<string> commandArgs, bool loginShell)
-    {
-        if (!loginShell)
-        {
-            return $"cd /home/agent/workspace && {JoinForShell(commandArgs)}";
-        }
-
-        var inner = JoinForShell(commandArgs);
-        var escaped = SessionRuntimeInfrastructure.EscapeForSingleQuotedShell(inner);
-        return $"cd /home/agent/workspace && bash -lc '{escaped}'";
-    }
-
-    private static string JoinForShell(IReadOnlyList<string> args)
-    {
-        if (args.Count == 0)
-        {
-            return "true";
-        }
-
-        var escaped = new string[args.Count];
-        for (var index = 0; index < args.Count; index++)
-        {
-            escaped[index] = QuoteBash(args[index]);
-        }
-
-        return string.Join(" ", escaped);
-    }
-
-    private static string QuoteBash(string value)
-        => string.IsNullOrEmpty(value)
-            ? "''"
-            : $"'{SessionRuntimeInfrastructure.EscapeForSingleQuotedShell(value)}'";
 }
