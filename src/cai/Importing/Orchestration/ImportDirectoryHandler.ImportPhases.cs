@@ -4,26 +4,6 @@ namespace ContainAI.Cli.Host;
 
 internal sealed partial class ImportDirectoryHandler
 {
-    private async Task<int> InitializeTargetsIfNeededAsync(
-        ImportCommandOptions options,
-        string volume,
-        string sourcePath,
-        ManifestEntry[] manifestEntries,
-        CancellationToken cancellationToken)
-    {
-        if (options.DryRun)
-        {
-            return 0;
-        }
-
-        return await transferOperations.InitializeImportTargetsAsync(
-            volume,
-            sourcePath,
-            manifestEntries,
-            options.NoSecrets,
-            cancellationToken).ConfigureAwait(false);
-    }
-
     private async Task<int> ImportManifestEntriesAsync(
         ImportCommandOptions options,
         string volume,
@@ -79,29 +59,5 @@ internal sealed partial class ImportDirectoryHandler
             options.NoSecrets,
             options.Verbose,
             cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<int> ImportAdditionalPathsAsync(
-        ImportCommandOptions options,
-        string volume,
-        IReadOnlyList<ImportAdditionalPath> additionalImportPaths,
-        CancellationToken cancellationToken)
-    {
-        foreach (var additionalPath in additionalImportPaths)
-        {
-            var copyCode = await pathOperations.ImportAdditionalPathAsync(
-                volume,
-                additionalPath,
-                options.NoExcludes,
-                options.DryRun,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (copyCode != 0)
-            {
-                return copyCode;
-            }
-        }
-
-        return 0;
     }
 }
