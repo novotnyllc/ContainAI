@@ -5,7 +5,7 @@ internal interface ISessionTargetDataVolumeResolutionService
     Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken);
 }
 
-internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetDataVolumeResolutionService
+internal sealed partial class SessionTargetDataVolumeResolutionService : ISessionTargetDataVolumeResolutionService
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;
 
@@ -49,45 +49,4 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
 
         return ResolutionResult<string>.SuccessResult(SessionRuntimeConstants.DefaultVolume);
     }
-
-    private async Task<string?> TryResolveWorkspaceVolumeAsync(string? configPath, string workspace, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
-        {
-            return null;
-        }
-
-        var workspaceResult = await SessionRuntimeInfrastructure.RunTomlAsync(
-            () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
-            cancellationToken).ConfigureAwait(false);
-        if (workspaceResult.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceResult.StandardOutput))
-        {
-            return null;
-        }
-
-        var value = parsingValidationService.TryReadWorkspaceStringProperty(workspaceResult.StandardOutput, "data_volume");
-        return IsValidVolume(value) ? value : null;
-    }
-
-    private static async Task<string?> TryResolveGlobalVolumeAsync(string? configPath, CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
-        {
-            return null;
-        }
-
-        var globalResult = await SessionRuntimeInfrastructure.RunTomlAsync(
-            () => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"),
-            cancellationToken).ConfigureAwait(false);
-        if (globalResult.ExitCode != 0)
-        {
-            return null;
-        }
-
-        var value = globalResult.StandardOutput.Trim();
-        return IsValidVolume(value) ? value : null;
-    }
-
-    private static bool IsValidVolume(string? value)
-        => !string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value);
 }

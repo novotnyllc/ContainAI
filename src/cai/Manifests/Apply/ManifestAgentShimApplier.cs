@@ -1,6 +1,6 @@
 namespace ContainAI.Cli.Host.Manifests.Apply;
 
-internal sealed class ManifestAgentShimApplier : IManifestAgentShimApplier
+internal sealed partial class ManifestAgentShimApplier : IManifestAgentShimApplier
 {
     private readonly IManifestTomlParser manifestTomlParser;
     private readonly IManifestAgentShimBinaryResolver binaryResolver;
@@ -51,43 +51,5 @@ internal sealed class ManifestAgentShimApplier : IManifestAgentShimApplier
         }
 
         return applied;
-    }
-
-    private static (string ShimRoot, string CaiPath) ValidateAndResolvePaths(string shimDirectory, string caiExecutablePath)
-    {
-        if (!Path.IsPathRooted(shimDirectory))
-        {
-            throw new InvalidOperationException($"shim directory must be absolute: {shimDirectory}");
-        }
-
-        if (!Path.IsPathRooted(caiExecutablePath))
-        {
-            throw new InvalidOperationException($"cai executable path must be absolute: {caiExecutablePath}");
-        }
-
-        return (Path.GetFullPath(shimDirectory), Path.GetFullPath(caiExecutablePath));
-    }
-
-    private static HashSet<string> BuildCommandNames(ManifestAgentEntry agent)
-    {
-        var names = new HashSet<string>(StringComparer.Ordinal)
-        {
-            agent.Name,
-            agent.Binary,
-        };
-        foreach (var alias in agent.Aliases)
-        {
-            names.Add(alias);
-        }
-
-        return names;
-    }
-
-    private static void ValidateCommandName(string commandName, string sourceFile)
-    {
-        if (!ManifestAgentShimRegex.CommandName().IsMatch(commandName))
-        {
-            throw new InvalidOperationException($"invalid agent command name '{commandName}' in {sourceFile}");
-        }
     }
 }
