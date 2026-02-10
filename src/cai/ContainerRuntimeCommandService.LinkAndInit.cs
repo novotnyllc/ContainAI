@@ -42,11 +42,18 @@ internal interface IContainerRuntimeExecutionContext
 
 internal sealed class ContainerRuntimeExecutionContext : IContainerRuntimeExecutionContext
 {
+    private readonly ContainerRuntimeProcessExecutor processExecutor;
+    private readonly ContainerRuntimePrivilegedCommandService privilegedCommandService;
+    private readonly ContainerRuntimeFileSystemService fileSystemService;
+
     public ContainerRuntimeExecutionContext(TextWriter standardOutput, TextWriter standardError, IManifestTomlParser manifestTomlParser)
     {
         StandardOutput = standardOutput;
         StandardError = standardError;
         ManifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+        processExecutor = new ContainerRuntimeProcessExecutor();
+        privilegedCommandService = new ContainerRuntimePrivilegedCommandService(processExecutor);
+        fileSystemService = new ContainerRuntimeFileSystemService(processExecutor);
     }
 
     public TextWriter StandardOutput { get; }
@@ -66,183 +73,38 @@ internal sealed class ContainerRuntimeExecutionContext : IContainerRuntimeExecut
     }
 
     public Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments)
-        => RunAsRootCaptureAsync(executable, arguments, null, CancellationToken.None);
+        => privilegedCommandService.RunAsRootAsync(executable, arguments);
 
-    public async Task<ProcessCaptureResult> RunAsRootCaptureAsync(
+    public Task<ProcessCaptureResult> RunAsRootCaptureAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? standardInput,
         CancellationToken cancellationToken)
-    {
-        if (IsRunningAsRoot())
-        {
-            var direct = await RunProcessCaptureAsync(executable, arguments, null, cancellationToken, standardInput).ConfigureAwait(false);
-            if (direct.ExitCode != 0)
-            {
-                throw new InvalidOperationException($"Command failed: {executable} {string.Join(' ', arguments)}: {direct.StandardError.Trim()}");
-            }
+        => privilegedCommandService.RunAsRootCaptureAsync(executable, arguments, standardInput, cancellationToken);
 
-            return direct;
-        }
-
-        var sudoArguments = new List<string>(capacity: arguments.Count + 2)
-        {
-            "-n",
-            executable,
-        };
-
-        foreach (var argument in arguments)
-        {
-            sudoArguments.Add(argument);
-        }
-
-        var sudo = await RunProcessCaptureAsync("sudo", sudoArguments, null, cancellationToken, standardInput).ConfigureAwait(false);
-        if (sudo.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"sudo command failed for {executable}: {sudo.StandardError.Trim()}");
-        }
-
-        return sudo;
-    }
-
-    public async Task<ProcessCaptureResult> RunProcessCaptureAsync(
+    public Task<ProcessCaptureResult> RunProcessCaptureAsync(
         string executable,
         IReadOnlyList<string> arguments,
         string? workingDirectory,
         CancellationToken cancellationToken,
         string? standardInput = null)
-    {
-        var result = await CliWrapProcessRunner
-            .RunCaptureAsync(executable, arguments, cancellationToken, workingDirectory, standardInput)
-            .ConfigureAwait(false);
+        => processExecutor.RunCaptureAsync(executable, arguments, workingDirectory, cancellationToken, standardInput);
 
-        return new ProcessCaptureResult(result.ExitCode, result.StandardOutput, result.StandardError);
-    }
+    public Task<bool> IsSymlinkAsync(string path)
+        => fileSystemService.IsSymlinkAsync(path);
 
-    public async Task<bool> IsSymlinkAsync(string path)
-    {
-        var result = await RunProcessCaptureAsync("test", ["-L", path], null, CancellationToken.None).ConfigureAwait(false);
-        return result.ExitCode == 0;
-    }
+    public Task<string?> ReadLinkTargetAsync(string path)
+        => fileSystemService.ReadLinkTargetAsync(path);
 
-    public async Task<string?> ReadLinkTargetAsync(string path)
-    {
-        var result = await RunProcessCaptureAsync("readlink", [path], null, CancellationToken.None).ConfigureAwait(false);
-        if (result.ExitCode != 0)
-        {
-            return null;
-        }
+    public Task<string?> TryReadTrimmedTextAsync(string path)
+        => fileSystemService.TryReadTrimmedTextAsync(path);
 
-        return result.StandardOutput.Trim();
-    }
-
-    public async Task<string?> TryReadTrimmedTextAsync(string path)
-    {
-        try
-        {
-            return (await File.ReadAllTextAsync(path).ConfigureAwait(false)).Trim();
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    public async Task WriteTimestampAsync(string path)
-    {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        var temporaryPath = $"{path}.tmp.{Environment.ProcessId}";
-        var timestamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine;
-        await File.WriteAllTextAsync(temporaryPath, timestamp).ConfigureAwait(false);
-        File.Move(temporaryPath, path, overwrite: true);
-    }
+    public Task WriteTimestampAsync(string path)
+        => fileSystemService.WriteTimestampAsync(path);
 
     public void EnsureFileWithContent(string path, string? content)
-    {
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        if (!File.Exists(path))
-        {
-            using (File.Create(path))
-            {
-            }
-        }
-
-        if (content is not null && new FileInfo(path).Length == 0)
-        {
-            File.WriteAllText(path, content);
-        }
-    }
+        => fileSystemService.EnsureFileWithContent(path, content);
 
     public bool IsExecutable(string path)
-    {
-        try
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                var extension = Path.GetExtension(path);
-                return extension.Equals(".exe", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".com", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase);
-            }
-
-            var mode = File.GetUnixFileMode(path);
-            return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
-        }
-    }
-
-    private static bool IsRunningAsRoot()
-    {
-        try
-        {
-            return string.Equals(Environment.UserName, "root", StringComparison.Ordinal);
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
-        }
-    }
+        => fileSystemService.IsExecutable(path);
 }
