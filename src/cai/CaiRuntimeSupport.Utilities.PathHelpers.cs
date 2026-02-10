@@ -2,32 +2,8 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal static class CaiRuntimePathHelpers
+internal static partial class CaiRuntimePathHelpers
 {
-    internal static bool IsSymbolicLinkPath(string path)
-    {
-        try
-        {
-            return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
-
     internal static bool TryMapSourcePathToTarget(
         string sourceRelativePath,
         IReadOnlyList<ManifestEntry> entries,
@@ -99,7 +75,4 @@ internal static class CaiRuntimePathHelpers
             : $"{match.Value.Target.TrimEnd('/')}/{suffix}";
         return true;
     }
-
-    internal static string EscapeForSingleQuotedShell(string value)
-        => value.Replace("'", "'\"'\"'", StringComparison.Ordinal);
 }
