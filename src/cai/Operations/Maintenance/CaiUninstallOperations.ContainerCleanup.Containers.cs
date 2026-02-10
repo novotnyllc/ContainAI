@@ -4,21 +4,6 @@ internal sealed partial class CaiUninstallOperations
 {
     private readonly record struct UninstallContainerRemovalResult(int ExitCode, HashSet<string> VolumeNames);
 
-    private async Task RemoveDockerContextsAsync(bool dryRun, CancellationToken cancellationToken)
-    {
-        var contextsToRemove = new[] { "containai-docker", "containai-secure", "docker-containai" };
-        foreach (var context in contextsToRemove)
-        {
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove Docker context: {context}").ConfigureAwait(false);
-                continue;
-            }
-
-            await DockerCaptureAsync(["context", "rm", "-f", context], cancellationToken).ConfigureAwait(false);
-        }
-    }
-
     private async Task<UninstallContainerRemovalResult> RemoveManagedContainersAndCollectVolumesAsync(
         bool dryRun,
         bool removeVolumes,
@@ -63,19 +48,5 @@ internal sealed partial class CaiUninstallOperations
         }
 
         return new UninstallContainerRemovalResult(0, volumeNames);
-    }
-
-    private async Task RemoveVolumesAsync(IReadOnlyCollection<string> volumeNames, bool dryRun, CancellationToken cancellationToken)
-    {
-        foreach (var volume in volumeNames)
-        {
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove volume {volume}").ConfigureAwait(false);
-                continue;
-            }
-
-            await DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
-        }
     }
 }
