@@ -1,14 +1,14 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Manifests.Apply;
 
-internal static partial class ManifestApplier
+internal sealed class ManifestInitDirectoryApplier : IManifestInitDirectoryApplier
 {
-    public static int ApplyInitDirs(string manifestPath, string dataDirectory)
-        => ApplyInitDirs(manifestPath, dataDirectory, new ManifestTomlParser());
+    private readonly IManifestTomlParser manifestTomlParser;
 
-    public static int ApplyInitDirs(string manifestPath, string dataDirectory, IManifestTomlParser manifestTomlParser)
+    public ManifestInitDirectoryApplier(IManifestTomlParser manifestTomlParser)
+        => this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+
+    public int Apply(string manifestPath, string dataDirectory)
     {
-        ArgumentNullException.ThrowIfNull(manifestTomlParser);
-
         var dataRoot = Path.GetFullPath(dataDirectory);
         Directory.CreateDirectory(dataRoot);
 
@@ -27,13 +27,15 @@ internal static partial class ManifestApplier
                 continue;
             }
 
-            var fullPath = CombineUnderRoot(dataRoot, entry.Target, "target");
+            var fullPath = ManifestApplyPathOperations.CombineUnderRoot(dataRoot, entry.Target, "target");
             if (entry.Flags.Contains('d', StringComparison.Ordinal))
             {
-                EnsureDirectory(fullPath);
+                ManifestApplyPathOperations.EnsureDirectory(fullPath);
                 if (entry.Flags.Contains('s', StringComparison.Ordinal))
                 {
-                    SetUnixModeIfSupported(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                    ManifestApplyPathOperations.SetUnixModeIfSupported(
+                        fullPath,
+                        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 }
 
                 applied++;
@@ -45,10 +47,10 @@ internal static partial class ManifestApplier
                 continue;
             }
 
-            EnsureFile(fullPath, initializeJson: entry.Flags.Contains('j', StringComparison.Ordinal));
+            ManifestApplyPathOperations.EnsureFile(fullPath, initializeJson: entry.Flags.Contains('j', StringComparison.Ordinal));
             if (entry.Flags.Contains('s', StringComparison.Ordinal))
             {
-                SetUnixModeIfSupported(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                ManifestApplyPathOperations.SetUnixModeIfSupported(fullPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             }
 
             applied++;
@@ -61,8 +63,8 @@ internal static partial class ManifestApplier
                 continue;
             }
 
-            var fullPath = CombineUnderRoot(dataRoot, entry.Target, "target");
-            EnsureFile(fullPath, initializeJson: entry.Flags.Contains('j', StringComparison.Ordinal));
+            var fullPath = ManifestApplyPathOperations.CombineUnderRoot(dataRoot, entry.Target, "target");
+            ManifestApplyPathOperations.EnsureFile(fullPath, initializeJson: entry.Flags.Contains('j', StringComparison.Ordinal));
             applied++;
         }
 

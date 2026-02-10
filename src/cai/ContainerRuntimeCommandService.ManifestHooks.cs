@@ -1,74 +1,63 @@
-using System.Text.Json;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+using ContainAI.Cli.Host.Manifests.Apply;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal interface IContainerRuntimeManifestBootstrapService
 {
-    private async Task EnsureVolumeStructureAsync(string dataDir, string manifestsDir, bool quiet)
+    Task EnsureVolumeStructureAsync(string dataDir, string manifestsDir, bool quiet);
+
+    Task ProcessUserManifestsAsync(string dataDir, string homeDir, bool quiet);
+
+    Task RunHooksAsync(string hooksDirectory, string workspaceDirectory, string homeDirectory, bool quiet, CancellationToken cancellationToken);
+}
+
+internal sealed class ContainerRuntimeManifestBootstrapService : IContainerRuntimeManifestBootstrapService
+{
+    private readonly IContainerRuntimeExecutionContext context;
+    private readonly IManifestApplier manifestApplier;
+
+    public ContainerRuntimeManifestBootstrapService(IContainerRuntimeExecutionContext context)
+        : this(context, new ManifestApplier(context?.ManifestTomlParser ?? throw new ArgumentNullException(nameof(context))))
     {
-        await RunAsRootAsync("mkdir", ["-p", dataDir]).ConfigureAwait(false);
-        await RunAsRootAsync("chown", ["-R", "--no-dereference", "1000:1000", dataDir]).ConfigureAwait(false);
+    }
+
+    internal ContainerRuntimeManifestBootstrapService(
+        IContainerRuntimeExecutionContext context,
+        IManifestApplier manifestApplier)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.manifestApplier = manifestApplier ?? throw new ArgumentNullException(nameof(manifestApplier));
+    }
+
+    public async Task EnsureVolumeStructureAsync(string dataDir, string manifestsDir, bool quiet)
+    {
+        await context.RunAsRootAsync("mkdir", ["-p", dataDir]).ConfigureAwait(false);
+        await context.RunAsRootAsync("chown", ["-R", "--no-dereference", "1000:1000", dataDir]).ConfigureAwait(false);
 
         if (Directory.Exists(manifestsDir))
         {
-            await LogInfoAsync(quiet, "Applying init directory policy from manifests").ConfigureAwait(false);
+            await context.LogInfoAsync(quiet, "Applying init directory policy from manifests").ConfigureAwait(false);
             try
             {
-                _ = ManifestApplier.ApplyInitDirs(manifestsDir, dataDir, manifestTomlParser);
+                _ = manifestApplier.ApplyInitDirs(manifestsDir, dataDir);
             }
-            catch (InvalidOperationException ex)
+            catch (Exception ex) when (ContainerRuntimeExceptionHandling.IsHandled(ex))
             {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
-                EnsureFallbackVolumeStructure(dataDir);
-            }
-            catch (IOException ex)
-            {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
-                EnsureFallbackVolumeStructure(dataDir);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
-                EnsureFallbackVolumeStructure(dataDir);
-            }
-            catch (JsonException ex)
-            {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
-                EnsureFallbackVolumeStructure(dataDir);
-            }
-            catch (ArgumentException ex)
-            {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
-                EnsureFallbackVolumeStructure(dataDir);
-            }
-            catch (NotSupportedException ex)
-            {
-                await stderr.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"[WARN] Host init-dir apply failed, using fallback: {ex.Message}").ConfigureAwait(false);
                 EnsureFallbackVolumeStructure(dataDir);
             }
         }
         else
         {
-            await stderr.WriteLineAsync("[WARN] Built-in manifests not found, using fallback volume structure").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync("[WARN] Built-in manifests not found, using fallback volume structure").ConfigureAwait(false);
             EnsureFallbackVolumeStructure(dataDir);
         }
 
-        await RunAsRootAsync("chown", ["-R", "--no-dereference", "1000:1000", dataDir]).ConfigureAwait(false);
+        await context.RunAsRootAsync("chown", ["-R", "--no-dereference", "1000:1000", dataDir]).ConfigureAwait(false);
     }
 
-    private static void EnsureFallbackVolumeStructure(string dataDir)
-    {
-        Directory.CreateDirectory(Path.Combine(dataDir, "claude"));
-        Directory.CreateDirectory(Path.Combine(dataDir, "config", "gh"));
-        Directory.CreateDirectory(Path.Combine(dataDir, "git"));
-        EnsureFileWithContent(Path.Combine(dataDir, "git", "gitconfig"), null);
-        EnsureFileWithContent(Path.Combine(dataDir, "git", "gitignore_global"), null);
-        Directory.CreateDirectory(Path.Combine(dataDir, "shell"));
-        Directory.CreateDirectory(Path.Combine(dataDir, "editors"));
-        Directory.CreateDirectory(Path.Combine(dataDir, "config"));
-    }
-
-    private async Task ProcessUserManifestsAsync(string dataDir, string homeDir, bool quiet)
+    public async Task ProcessUserManifestsAsync(string dataDir, string homeDir, bool quiet)
     {
         var userManifestDirectory = Path.Combine(dataDir, "containai", "manifests");
         if (!Directory.Exists(userManifestDirectory))
@@ -82,45 +71,25 @@ internal sealed partial class ContainerRuntimeCommandService
             return;
         }
 
-        await LogInfoAsync(quiet, $"Found {manifestFiles.Length} user manifest(s), generating runtime configuration...").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"Found {manifestFiles.Length} user manifest(s), generating runtime configuration...").ConfigureAwait(false);
         try
         {
-            _ = ManifestApplier.ApplyInitDirs(userManifestDirectory, dataDir, manifestTomlParser);
-            _ = ManifestApplier.ApplyContainerLinks(userManifestDirectory, homeDir, dataDir, manifestTomlParser);
-            _ = ManifestApplier.ApplyAgentShims(userManifestDirectory, "/opt/containai/user-agent-shims", "/usr/local/bin/cai", manifestTomlParser);
+            _ = manifestApplier.ApplyInitDirs(userManifestDirectory, dataDir);
+            _ = manifestApplier.ApplyContainerLinks(userManifestDirectory, homeDir, dataDir);
+            _ = manifestApplier.ApplyAgentShims(userManifestDirectory, "/opt/containai/user-agent-shims", "/usr/local/bin/cai");
 
-            var userSpec = ManifestGenerators.GenerateContainerLinkSpec(userManifestDirectory, manifestTomlParser);
+            var userSpec = ManifestGenerators.GenerateContainerLinkSpec(userManifestDirectory, context.ManifestTomlParser);
             var userSpecPath = Path.Combine(dataDir, "containai", "user-link-spec.json");
             Directory.CreateDirectory(Path.GetDirectoryName(userSpecPath)!);
             await File.WriteAllTextAsync(userSpecPath, userSpec.Content).ConfigureAwait(false);
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ContainerRuntimeExceptionHandling.IsHandled(ex))
         {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (IOException ex)
-        {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (JsonException ex)
-        {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (ArgumentException ex)
-        {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
-        }
-        catch (NotSupportedException ex)
-        {
-            await stderr.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"[WARN] User manifest processing failed: {ex.Message}").ConfigureAwait(false);
         }
     }
 
-    private async Task RunHooksAsync(
+    public async Task RunHooksAsync(
         string hooksDirectory,
         string workspaceDirectory,
         string homeDirectory,
@@ -144,14 +113,14 @@ internal sealed partial class ContainerRuntimeCommandService
         foreach (var hook in hooks)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!IsExecutable(hook))
+            if (!context.IsExecutable(hook))
             {
-                await stderr.WriteLineAsync($"[WARN] Skipping non-executable hook: {hook}").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"[WARN] Skipping non-executable hook: {hook}").ConfigureAwait(false);
                 continue;
             }
 
-            await LogInfoAsync(quiet, $"Running startup hook: {hook}").ConfigureAwait(false);
-            var result = await RunProcessCaptureAsync(
+            await context.LogInfoAsync(quiet, $"Running startup hook: {hook}").ConfigureAwait(false);
+            var result = await context.RunProcessCaptureAsync(
                 hook,
                 [],
                 workingDirectory,
@@ -162,45 +131,18 @@ internal sealed partial class ContainerRuntimeCommandService
             }
         }
 
-        await LogInfoAsync(quiet, $"Completed hooks from: {hooksDirectory}").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"Completed hooks from: {hooksDirectory}").ConfigureAwait(false);
     }
 
-    private static bool IsExecutable(string path)
+    private void EnsureFallbackVolumeStructure(string dataDir)
     {
-        try
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                var extension = Path.GetExtension(path);
-                return extension.Equals(".exe", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".cmd", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".bat", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".com", StringComparison.OrdinalIgnoreCase)
-                    || extension.Equals(".ps1", StringComparison.OrdinalIgnoreCase);
-            }
-
-            var mode = File.GetUnixFileMode(path);
-            return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
-        }
+        Directory.CreateDirectory(Path.Combine(dataDir, "claude"));
+        Directory.CreateDirectory(Path.Combine(dataDir, "config", "gh"));
+        Directory.CreateDirectory(Path.Combine(dataDir, "git"));
+        context.EnsureFileWithContent(Path.Combine(dataDir, "git", "gitconfig"), null);
+        context.EnsureFileWithContent(Path.Combine(dataDir, "git", "gitignore_global"), null);
+        Directory.CreateDirectory(Path.Combine(dataDir, "shell"));
+        Directory.CreateDirectory(Path.Combine(dataDir, "editors"));
+        Directory.CreateDirectory(Path.Combine(dataDir, "config"));
     }
 }

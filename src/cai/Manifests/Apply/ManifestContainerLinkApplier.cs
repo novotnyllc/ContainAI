@@ -1,18 +1,14 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Manifests.Apply;
 
-internal static partial class ManifestApplier
+internal sealed class ManifestContainerLinkApplier : IManifestContainerLinkApplier
 {
-    public static int ApplyContainerLinks(string manifestPath, string homeDirectory, string dataDirectory)
-        => ApplyContainerLinks(manifestPath, homeDirectory, dataDirectory, new ManifestTomlParser());
+    private readonly IManifestTomlParser manifestTomlParser;
 
-    public static int ApplyContainerLinks(
-        string manifestPath,
-        string homeDirectory,
-        string dataDirectory,
-        IManifestTomlParser manifestTomlParser)
+    public ManifestContainerLinkApplier(IManifestTomlParser manifestTomlParser)
+        => this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+
+    public int Apply(string manifestPath, string homeDirectory, string dataDirectory)
     {
-        ArgumentNullException.ThrowIfNull(manifestTomlParser);
-
         var homeRoot = Path.GetFullPath(homeDirectory);
         var dataRoot = Path.GetFullPath(dataDirectory);
 
@@ -24,8 +20,8 @@ internal static partial class ManifestApplier
         var applied = 0;
         foreach (var entry in entries)
         {
-            var linkPath = CombineUnderRoot(homeRoot, entry.ContainerLink, "container_link");
-            var targetPath = CombineUnderRoot(dataRoot, entry.Target, "target");
+            var linkPath = ManifestApplyPathOperations.CombineUnderRoot(homeRoot, entry.ContainerLink, "container_link");
+            var targetPath = ManifestApplyPathOperations.CombineUnderRoot(dataRoot, entry.Target, "target");
             ApplyLink(linkPath, targetPath, entry.Flags.Contains('R', StringComparison.Ordinal));
             applied++;
         }
@@ -41,9 +37,9 @@ internal static partial class ManifestApplier
             Directory.CreateDirectory(parent);
         }
 
-        if (IsSymbolicLink(linkPath))
+        if (ManifestApplyPathOperations.IsSymbolicLink(linkPath))
         {
-            var currentTarget = ResolveLinkTarget(linkPath);
+            var currentTarget = ManifestApplyPathOperations.ResolveLinkTarget(linkPath);
             if (string.Equals(currentTarget, targetPath, StringComparison.Ordinal))
             {
                 return;

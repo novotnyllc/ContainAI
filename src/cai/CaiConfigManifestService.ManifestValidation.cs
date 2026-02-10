@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.Manifests.Apply;
 
 namespace ContainAI.Cli.Host;
 
@@ -27,7 +28,7 @@ internal sealed partial class CaiConfigManifestService
         }
 
         var linkSpec = GenerateManifest("container-link-spec", manifestDirectory);
-        var initApplied = ApplyInitDirsProbe(manifestDirectory, manifestTomlParser);
+        var initApplied = ApplyInitDirsProbe(manifestDirectory, manifestApplier);
         if (initApplied <= 0)
         {
             await stderr.WriteLineAsync("ERROR: init-dir apply produced no operations").ConfigureAwait(false);
@@ -51,12 +52,12 @@ internal sealed partial class CaiConfigManifestService
             .OrderBy(static path => path, StringComparer.Ordinal)
             .ToArray();
 
-    private static int ApplyInitDirsProbe(string manifestDirectory, IManifestTomlParser manifestTomlParser)
+    private static int ApplyInitDirsProbe(string manifestDirectory, IManifestApplier manifestApplier)
     {
         var initProbeDir = Path.Combine(Path.GetTempPath(), $"cai-manifest-check-{Guid.NewGuid():N}");
         try
         {
-            return ManifestApplier.ApplyInitDirs(manifestDirectory, initProbeDir, manifestTomlParser);
+            return manifestApplier.ApplyInitDirs(manifestDirectory, initProbeDir);
         }
         finally
         {

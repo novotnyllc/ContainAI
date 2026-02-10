@@ -1,22 +1,14 @@
-using System.Text.RegularExpressions;
+namespace ContainAI.Cli.Host.Manifests.Apply;
 
-namespace ContainAI.Cli.Host;
-
-internal static partial class ManifestApplier
+internal sealed class ManifestAgentShimApplier : IManifestAgentShimApplier
 {
-    private static readonly Regex CommandNameRegex = CommandNameRegexFactory();
+    private readonly IManifestTomlParser manifestTomlParser;
 
-    public static int ApplyAgentShims(string manifestPath, string shimDirectory, string caiExecutablePath)
-        => ApplyAgentShims(manifestPath, shimDirectory, caiExecutablePath, new ManifestTomlParser());
+    public ManifestAgentShimApplier(IManifestTomlParser manifestTomlParser)
+        => this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
 
-    public static int ApplyAgentShims(
-        string manifestPath,
-        string shimDirectory,
-        string caiExecutablePath,
-        IManifestTomlParser manifestTomlParser)
+    public int Apply(string manifestPath, string shimDirectory, string caiExecutablePath)
     {
-        ArgumentNullException.ThrowIfNull(manifestTomlParser);
-
         if (!Path.IsPathRooted(shimDirectory))
         {
             throw new InvalidOperationException($"shim directory must be absolute: {shimDirectory}");
@@ -69,7 +61,7 @@ internal static partial class ManifestApplier
 
     private static void ValidateCommandName(string commandName, string sourceFile)
     {
-        if (!CommandNameRegex.IsMatch(commandName))
+        if (!ManifestAgentShimRegex.CommandName().IsMatch(commandName))
         {
             throw new InvalidOperationException($"invalid agent command name '{commandName}' in {sourceFile}");
         }
@@ -83,19 +75,18 @@ internal static partial class ManifestApplier
             Directory.CreateDirectory(parent);
         }
 
-        if (IsSymbolicLink(shimPath))
+        if (ManifestApplyPathOperations.IsSymbolicLink(shimPath))
         {
-            var currentTarget = ResolveLinkTarget(shimPath);
+            var currentTarget = ManifestApplyPathOperations.ResolveLinkTarget(shimPath);
             if (string.Equals(currentTarget, caiPath, StringComparison.Ordinal))
             {
                 return false;
             }
 
-            RemovePath(shimPath);
+            ManifestApplyPathOperations.RemovePath(shimPath);
         }
         else if (File.Exists(shimPath) || Directory.Exists(shimPath))
         {
-            // Never overwrite non-symlink paths.
             return false;
         }
 
@@ -111,8 +102,7 @@ internal static partial class ManifestApplier
             return null;
         }
 
-        var separator = Path.PathSeparator;
-        foreach (var rawDirectory in pathValue.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var rawDirectory in pathValue.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var directory = rawDirectory.Trim();
             if (directory.Length == 0)
@@ -172,7 +162,4 @@ internal static partial class ManifestApplier
             : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path) ?? "/", linkTarget));
         return string.Equals(resolved, expectedPath, StringComparison.Ordinal);
     }
-
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex CommandNameRegexFactory();
 }

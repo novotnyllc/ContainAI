@@ -91,9 +91,9 @@ internal sealed partial class CaiConfigManifestService
         string caiBinaryPath) =>
         kind switch
         {
-            "container-links" => ManifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir, manifestTomlParser),
-            "init-dirs" => ManifestApplier.ApplyInitDirs(manifestPath, dataDir, manifestTomlParser),
-            "agent-shims" => ManifestApplier.ApplyAgentShims(manifestPath, shimDir, caiBinaryPath, manifestTomlParser),
+            "container-links" => manifestApplier.ApplyContainerLinks(manifestPath, homeDir, dataDir),
+            "init-dirs" => manifestApplier.ApplyInitDirs(manifestPath, dataDir),
+            "agent-shims" => manifestApplier.ApplyAgentShims(manifestPath, shimDir, caiBinaryPath),
             _ => throw new InvalidOperationException($"unknown apply kind: {kind}"),
         };
 

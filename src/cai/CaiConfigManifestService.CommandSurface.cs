@@ -1,10 +1,12 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.Manifests.Apply;
 
 namespace ContainAI.Cli.Host;
 
 internal sealed partial class CaiConfigManifestService : CaiRuntimeSupport
 {
     private readonly IManifestTomlParser manifestTomlParser;
+    private readonly IManifestApplier manifestApplier;
 
     public CaiConfigManifestService(TextWriter standardOutput, TextWriter standardError)
         : this(standardOutput, standardError, new ManifestTomlParser())
@@ -15,8 +17,20 @@ internal sealed partial class CaiConfigManifestService : CaiRuntimeSupport
         TextWriter standardOutput,
         TextWriter standardError,
         IManifestTomlParser manifestTomlParser)
+        : this(standardOutput, standardError, manifestTomlParser, new ManifestApplier(manifestTomlParser))
+    {
+    }
+
+    internal CaiConfigManifestService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IManifestTomlParser manifestTomlParser,
+        IManifestApplier manifestApplier)
         : base(standardOutput, standardError)
-        => this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+    {
+        this.manifestTomlParser = manifestTomlParser ?? throw new ArgumentNullException(nameof(manifestTomlParser));
+        this.manifestApplier = manifestApplier ?? throw new ArgumentNullException(nameof(manifestApplier));
+    }
 
     public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
     {

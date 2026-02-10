@@ -1,10 +1,10 @@
 using CliWrap;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.AgentShims;
 
-internal static partial class AgentShimDispatcher
+internal sealed class AgentShimCommandLauncher : IAgentShimCommandLauncher
 {
-    private static async Task<int> ExecuteCommandAsync(string binaryPath, IReadOnlyList<string> commandArgs, CancellationToken cancellationToken)
+    public async Task<int> ExecuteAsync(string binaryPath, IReadOnlyList<string> commandArgs, CancellationToken cancellationToken)
     {
         using var standardInput = Console.OpenStandardInput();
         using var standardOutput = Console.OpenStandardOutput();

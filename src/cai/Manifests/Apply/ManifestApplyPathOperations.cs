@@ -1,10 +1,31 @@
 using System.Runtime.InteropServices;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Manifests.Apply;
 
-internal static partial class ManifestApplier
+internal static class ManifestApplyPathOperations
 {
-    private static void EnsureDirectory(string path)
+    public static string CombineUnderRoot(string root, string relativePath, string fieldName)
+    {
+        if (Path.IsPathRooted(relativePath))
+        {
+            throw new InvalidOperationException($"{fieldName} must be relative: {relativePath}");
+        }
+
+        var combined = Path.GetFullPath(Path.Combine(root, relativePath));
+        if (string.Equals(combined, root, StringComparison.Ordinal))
+        {
+            return combined;
+        }
+
+        if (!combined.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"{fieldName} escapes root: {relativePath}");
+        }
+
+        return combined;
+    }
+
+    public static void EnsureDirectory(string path)
     {
         RejectSymlink(path);
         if (File.Exists(path))
@@ -15,7 +36,7 @@ internal static partial class ManifestApplier
         Directory.CreateDirectory(path);
     }
 
-    private static void EnsureFile(string path, bool initializeJson)
+    public static void EnsureFile(string path, bool initializeJson)
     {
         RejectSymlink(path);
 
@@ -44,7 +65,7 @@ internal static partial class ManifestApplier
         }
     }
 
-    private static void SetUnixModeIfSupported(string path, UnixFileMode mode)
+    public static void SetUnixModeIfSupported(string path, UnixFileMode mode)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -54,28 +75,7 @@ internal static partial class ManifestApplier
         File.SetUnixFileMode(path, mode);
     }
 
-    private static string CombineUnderRoot(string root, string relativePath, string fieldName)
-    {
-        if (Path.IsPathRooted(relativePath))
-        {
-            throw new InvalidOperationException($"{fieldName} must be relative: {relativePath}");
-        }
-
-        var combined = Path.GetFullPath(Path.Combine(root, relativePath));
-        if (string.Equals(combined, root, StringComparison.Ordinal))
-        {
-            return combined;
-        }
-
-        if (!combined.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException($"{fieldName} escapes root: {relativePath}");
-        }
-
-        return combined;
-    }
-
-    private static bool IsSymbolicLink(string path)
+    public static bool IsSymbolicLink(string path)
     {
         if (!File.Exists(path) && !Directory.Exists(path))
         {
@@ -85,7 +85,7 @@ internal static partial class ManifestApplier
         return (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
     }
 
-    private static string? ResolveLinkTarget(string path)
+    public static string? ResolveLinkTarget(string path)
     {
         var info = new FileInfo(path);
         if (string.IsNullOrWhiteSpace(info.LinkTarget))
@@ -98,17 +98,7 @@ internal static partial class ManifestApplier
             : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path) ?? "/", info.LinkTarget));
     }
 
-    private static void RejectSymlink(string path)
-    {
-        if (!IsSymbolicLink(path))
-        {
-            return;
-        }
-
-        throw new InvalidOperationException($"symlink is not allowed for this operation: {path}");
-    }
-
-    private static void RemovePath(string path)
+    public static void RemovePath(string path)
     {
         if (Directory.Exists(path) && !File.Exists(path))
         {
@@ -120,5 +110,15 @@ internal static partial class ManifestApplier
         {
             File.Delete(path);
         }
+    }
+
+    private static void RejectSymlink(string path)
+    {
+        if (!IsSymbolicLink(path))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"symlink is not allowed for this operation: {path}");
     }
 }
