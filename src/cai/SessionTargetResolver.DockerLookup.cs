@@ -104,46 +104,79 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
 
     public async Task<ContainerLookupResult> FindWorkspaceContainerAsync(string workspace, string context, CancellationToken cancellationToken)
     {
-        var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
-        if (File.Exists(configPath))
+        var configuredContainer = await TryResolveConfiguredWorkspaceContainerAsync(workspace, context, cancellationToken).ConfigureAwait(false);
+        if (configuredContainer is not null)
         {
-            var ws = await SessionRuntimeInfrastructure.RunTomlAsync(
-                () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
-                cancellationToken).ConfigureAwait(false);
-            if (ws.ExitCode == 0 && !string.IsNullOrWhiteSpace(ws.StandardOutput))
-            {
-                var configuredName = parsingValidationService.TryReadWorkspaceStringProperty(ws.StandardOutput, "container_name");
-                if (!string.IsNullOrWhiteSpace(configuredName))
-                {
-                    var inspect = await SessionRuntimeInfrastructure.DockerCaptureAsync(
-                        context,
-                        ["inspect", "--type", "container", configuredName],
-                        cancellationToken).ConfigureAwait(false);
-                    if (inspect.ExitCode == 0)
-                    {
-                        var labels = await ReadContainerLabelsAsync(configuredName, context, cancellationToken).ConfigureAwait(false);
-                        if (string.Equals(labels.Workspace, workspace, StringComparison.Ordinal))
-                        {
-                            return ContainerLookupResult.Success(configuredName);
-                        }
-                    }
-                }
-            }
+            return configuredContainer;
         }
 
+        var (continueSearch, byLabel) = await TryResolveWorkspaceContainerByLabelAsync(workspace, context, cancellationToken).ConfigureAwait(false);
+        if (!continueSearch)
+        {
+            return byLabel;
+        }
+
+        return await TryResolveGeneratedWorkspaceContainerAsync(workspace, context, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ContainerLookupResult?> TryResolveConfiguredWorkspaceContainerAsync(
+        string workspace,
+        string context,
+        CancellationToken cancellationToken)
+    {
+        var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
+        if (!File.Exists(configPath))
+        {
+            return null;
+        }
+
+        var workspaceState = await SessionRuntimeInfrastructure.RunTomlAsync(
+            () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
+            cancellationToken).ConfigureAwait(false);
+        if (workspaceState.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceState.StandardOutput))
+        {
+            return null;
+        }
+
+        var configuredName = parsingValidationService.TryReadWorkspaceStringProperty(workspaceState.StandardOutput, "container_name");
+        if (string.IsNullOrWhiteSpace(configuredName))
+        {
+            return null;
+        }
+
+        var inspect = await SessionRuntimeInfrastructure.DockerCaptureAsync(
+            context,
+            ["inspect", "--type", "container", configuredName],
+            cancellationToken).ConfigureAwait(false);
+        if (inspect.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var labels = await ReadContainerLabelsAsync(configuredName, context, cancellationToken).ConfigureAwait(false);
+        return string.Equals(labels.Workspace, workspace, StringComparison.Ordinal)
+            ? ContainerLookupResult.Success(configuredName)
+            : null;
+    }
+
+    private static async Task<(bool ContinueSearch, ContainerLookupResult Result)> TryResolveWorkspaceContainerByLabelAsync(
+        string workspace,
+        string context,
+        CancellationToken cancellationToken)
+    {
         var byLabel = await SessionRuntimeInfrastructure.DockerCaptureAsync(
             context,
             ["ps", "-aq", "--filter", $"label={SessionRuntimeConstants.WorkspaceLabelKey}={workspace}"],
             cancellationToken).ConfigureAwait(false);
         if (byLabel.ExitCode != 0)
         {
-            return ContainerLookupResult.Empty();
+            return (false, ContainerLookupResult.Empty());
         }
 
         var ids = byLabel.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (ids.Length > 1)
         {
-            return ContainerLookupResult.FromError($"Multiple containers found for workspace: {workspace}");
+            return (false, ContainerLookupResult.FromError($"Multiple containers found for workspace: {workspace}"));
         }
 
         if (ids.Length == 1)
@@ -154,21 +187,27 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
                 cancellationToken).ConfigureAwait(false);
             if (nameResult.ExitCode == 0)
             {
-                return ContainerLookupResult.Success(nameResult.StandardOutput.Trim().TrimStart('/'));
+                return (false, ContainerLookupResult.Success(nameResult.StandardOutput.Trim().TrimStart('/')));
             }
         }
 
+        return (true, ContainerLookupResult.Empty());
+    }
+
+    private async Task<ContainerLookupResult> TryResolveGeneratedWorkspaceContainerAsync(
+        string workspace,
+        string context,
+        CancellationToken cancellationToken)
+    {
         var generated = await workspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
         var generatedExists = await SessionRuntimeInfrastructure.DockerCaptureAsync(
             context,
             ["inspect", "--type", "container", generated],
             cancellationToken).ConfigureAwait(false);
-        if (generatedExists.ExitCode == 0)
-        {
-            return ContainerLookupResult.Success(generated);
-        }
 
-        return ContainerLookupResult.Empty();
+        return generatedExists.ExitCode == 0
+            ? ContainerLookupResult.Success(generated)
+            : ContainerLookupResult.Empty();
     }
 
     public async Task<ResolutionResult<string>> ResolveContainerNameForCreationAsync(string workspace, string context, CancellationToken cancellationToken)

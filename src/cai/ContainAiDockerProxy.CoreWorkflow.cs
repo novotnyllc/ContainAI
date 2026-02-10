@@ -41,12 +41,7 @@ internal sealed class ContainAiDockerProxyService : IContainAiDockerProxyService
     {
         _ = stdout;
 
-        var contextName = environment.GetEnvironmentVariable("CONTAINAI_DOCKER_CONTEXT");
-        if (string.IsNullOrWhiteSpace(contextName))
-        {
-            contextName = options.DefaultContext;
-        }
-
+        var contextName = ResolveContextName();
         var wrapperFlags = argumentParser.ParseWrapperFlags(args);
         var dockerArgs = wrapperFlags.DockerArgs;
 
@@ -59,104 +54,74 @@ internal sealed class ContainAiDockerProxyService : IContainAiDockerProxyService
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var labels = argumentParser.ExtractDevcontainerLabels(dockerArgs);
-        if (string.IsNullOrWhiteSpace(labels.ConfigFile) || !featureSettingsParser.TryReadFeatureSettings(labels.ConfigFile!, stderr, out var settings))
+        var createParseResult = await DockerProxyCreateCommandRequestParser.ParseAsync(
+            dockerArgs,
+            contextName,
+            argumentParser,
+            featureSettingsParser,
+            commandExecutor,
+            environment,
+            stderr,
+            cancellationToken).ConfigureAwait(false);
+
+        if (createParseResult.Status == DockerProxyCreateCommandParseStatus.Passthrough)
         {
             return await commandExecutor.RunInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
         }
 
-        if (!settings.HasContainAiFeature)
+        if (createParseResult.Status == DockerProxyCreateCommandParseStatus.SetupMissing)
         {
-            return await commandExecutor.RunInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
-        }
-
-        var contextProbe = await commandExecutor.RunCaptureAsync(["context", "inspect", contextName], cancellationToken).ConfigureAwait(false);
-        if (contextProbe.ExitCode != 0)
-        {
-            await stderr.WriteLineAsync("ContainAI: Not set up. Run: cai setup").ConfigureAwait(false);
             return 1;
         }
 
-        var workspaceName = Path.GetFileName(labels.LocalFolder ?? "workspace");
-        if (string.IsNullOrWhiteSpace(workspaceName))
-        {
-            workspaceName = "workspace";
-        }
-
-        var workspaceNameSanitized = argumentParser.SanitizeWorkspaceName(workspaceName);
-        var containAiConfigDir = Path.Combine(environment.ResolveHomeDirectory(), ".config", "containai");
-        var lockPath = Path.Combine(containAiConfigDir, ".ssh-port.lock");
+        var request = createParseResult.Request!;
 
         var sshPort = await portAllocator.AllocateSshPortAsync(
-            lockPath,
-            containAiConfigDir,
+            request.LockPath,
+            request.ContainAiConfigDir,
             contextName,
-            workspaceName,
-            workspaceNameSanitized,
+            request.Workspace.Name,
+            request.Workspace.SanitizedName,
             cancellationToken).ConfigureAwait(false);
 
         var mountVolume = await volumeCredentialValidator.ValidateAsync(
             contextName,
-            settings.DataVolume,
-            settings.EnableCredentials,
+            request.Settings.DataVolume,
+            request.Settings.EnableCredentials,
             wrapperFlags.Quiet,
             stderr,
             cancellationToken).ConfigureAwait(false);
 
-        var modifiedArgs = new List<string>(dockerArgs.Count + 24);
-        foreach (var token in dockerArgs)
-        {
-            modifiedArgs.Add(token);
-            if (!string.Equals(token, "run", StringComparison.Ordinal) && !string.Equals(token, "create", StringComparison.Ordinal))
-            {
-                continue;
-            }
+        var modifiedArgs = await DockerProxyCreateCommandOutputBuilder.BuildManagedCreateArgumentsAsync(
+            dockerArgs,
+            contextName,
+            request.Workspace.Name,
+            request.Settings,
+            sshPort,
+            mountVolume,
+            wrapperFlags.Quiet,
+            commandExecutor,
+            clock,
+            stderr,
+            cancellationToken).ConfigureAwait(false);
 
-            modifiedArgs.Add("--runtime=sysbox-runc");
-
-            if (mountVolume)
-            {
-                var volumeExists = await commandExecutor.RunCaptureAsync(
-                    ["--context", contextName, "volume", "inspect", settings.DataVolume],
-                    cancellationToken).ConfigureAwait(false);
-
-                if (volumeExists.ExitCode == 0)
-                {
-                    modifiedArgs.Add("--mount");
-                    modifiedArgs.Add($"type=volume,src={settings.DataVolume},dst=/mnt/agent-data,readonly=false");
-                }
-                else if (!wrapperFlags.Quiet)
-                {
-                    await stderr.WriteLineAsync($"[cai-docker] Warning: Data volume {settings.DataVolume} not found - skipping mount").ConfigureAwait(false);
-                }
-            }
-
-            modifiedArgs.Add("-e");
-            modifiedArgs.Add($"CONTAINAI_SSH_PORT={sshPort}");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add("containai.managed=true");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add("containai.type=devcontainer");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add($"containai.devcontainer.workspace={workspaceName}");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add($"containai.data-volume={settings.DataVolume}");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add($"containai.ssh-port={sshPort}");
-            modifiedArgs.Add("--label");
-            modifiedArgs.Add($"containai.created={clock.UtcNow:yyyy-MM-ddTHH:mm:ssZ}");
-        }
-
-        await sshConfigUpdater.UpdateAsync(workspaceNameSanitized, sshPort, settings.RemoteUser, stderr, cancellationToken).ConfigureAwait(false);
-
-        if (wrapperFlags.Verbose && !wrapperFlags.Quiet)
-        {
-            await stderr.WriteLineAsync($"[cai-docker] Executing: docker --context {contextName} {string.Join(' ', modifiedArgs)}").ConfigureAwait(false);
-        }
+        await sshConfigUpdater.UpdateAsync(request.Workspace.SanitizedName, sshPort, request.Settings.RemoteUser, stderr, cancellationToken).ConfigureAwait(false);
+        await DockerProxyCreateCommandOutputBuilder.WriteVerboseExecutionAsync(wrapperFlags.Verbose, wrapperFlags.Quiet, contextName, modifiedArgs, stderr).ConfigureAwait(false);
 
         return await commandExecutor.RunInteractiveAsync(
             argumentParser.PrependContext(contextName, modifiedArgs),
             stderr,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    private string ResolveContextName()
+    {
+        var contextName = environment.GetEnvironmentVariable("CONTAINAI_DOCKER_CONTEXT");
+        if (string.IsNullOrWhiteSpace(contextName))
+        {
+            contextName = options.DefaultContext;
+        }
+
+        return contextName;
     }
 }

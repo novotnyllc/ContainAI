@@ -15,16 +15,24 @@ internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
 {
     private readonly ContainAiDockerProxyOptions options;
     private readonly IContainAiSystemEnvironment environment;
-    private readonly IDockerProxyCommandExecutor commandExecutor;
+    private readonly IDockerProxyPortAllocationStateReader stateReader;
 
     public DockerProxyPortAllocator(
         ContainAiDockerProxyOptions options,
         IContainAiSystemEnvironment environment,
         IDockerProxyCommandExecutor commandExecutor)
+        : this(options, environment, new DockerProxyPortAllocationStateReader(commandExecutor))
+    {
+    }
+
+    internal DockerProxyPortAllocator(
+        ContainAiDockerProxyOptions options,
+        IContainAiSystemEnvironment environment,
+        IDockerProxyPortAllocationStateReader stateReader)
     {
         this.options = options;
         this.environment = environment;
-        this.commandExecutor = commandExecutor;
+        this.stateReader = stateReader;
     }
 
     public Task<string> AllocateSshPortAsync(
@@ -34,7 +42,7 @@ internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
         string workspaceName,
         string workspaceSafe,
         CancellationToken cancellationToken)
-        => WithPortLockAsync(
+        => DockerProxyPortLock.WithPortLockAsync(
             lockPath,
             () => AllocateUnlockedSshPortAsync(containAiConfigDir, contextName, workspaceName, workspaceSafe, cancellationToken),
             cancellationToken);
@@ -50,69 +58,28 @@ internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
         Directory.CreateDirectory(portDir);
 
         var portFile = Path.Combine(portDir, $"devcontainer-{workspaceSafe}");
-        if (File.Exists(portFile))
+        var existingPort = await stateReader.TryReadPortFromFileAsync(portFile, cancellationToken).ConfigureAwait(false);
+        if (existingPort is int parsedExistingPort)
         {
-            var content = (await File.ReadAllTextAsync(portFile, cancellationToken).ConfigureAwait(false)).Trim();
-            if (int.TryParse(content, out var existingPort))
+            if (!environment.IsPortInUse(parsedExistingPort))
             {
-                if (!environment.IsPortInUse(existingPort))
-                {
-                    return existingPort.ToString();
-                }
+                return parsedExistingPort.ToString();
+            }
 
-                var existingContainerPort = await commandExecutor.RunCaptureAsync(
-                    [
-                        "--context", contextName,
-                        "ps", "-a",
-                        "--filter", $"label=containai.devcontainer.workspace={workspaceName}",
-                        "--filter", "label=containai.ssh-port",
-                        "--format", "{{.Label \"containai.ssh-port\"}}",
-                    ],
-                    cancellationToken).ConfigureAwait(false);
+            var existingPortText = parsedExistingPort.ToString();
+            var existingContainerPortMatch = await stateReader.IsWorkspacePortMatchAsync(
+                contextName,
+                workspaceName,
+                existingPortText,
+                cancellationToken).ConfigureAwait(false);
 
-                if (existingContainerPort.ExitCode == 0 &&
-                    string.Equals(existingContainerPort.StandardOutput.Trim(), content, StringComparison.Ordinal))
-                {
-                    return content;
-                }
+            if (existingContainerPortMatch)
+            {
+                return existingPortText;
             }
         }
 
-        var reservedPorts = new HashSet<int>();
-        var labelPorts = await commandExecutor.RunCaptureAsync(
-            ["--context", contextName, "ps", "-a", "--filter", "label=containai.ssh-port", "--format", "{{.Label \"containai.ssh-port\"}}"],
-            cancellationToken).ConfigureAwait(false);
-
-        if (labelPorts.ExitCode == 0)
-        {
-            foreach (var line in SplitLines(labelPorts.StandardOutput))
-            {
-                if (int.TryParse(line, out var parsedPort))
-                {
-                    reservedPorts.Add(parsedPort);
-                }
-            }
-        }
-
-        foreach (var file in Directory.EnumerateFiles(portDir))
-        {
-            try
-            {
-                var fileText = (await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false)).Trim();
-                if (int.TryParse(fileText, out var parsedPort))
-                {
-                    reservedPorts.Add(parsedPort);
-                }
-            }
-            catch (IOException)
-            {
-                // Ignore stale files and continue allocation.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Ignore stale files and continue allocation.
-            }
-        }
+        var reservedPorts = await stateReader.ReadReservedPortsAsync(portDir, contextName, cancellationToken).ConfigureAwait(false);
 
         for (var port = options.SshPortRangeStart; port <= options.SshPortRangeEnd; port++)
         {
@@ -127,29 +94,4 @@ internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
 
         return "2322";
     }
-
-    private static async Task<T> WithPortLockAsync<T>(string lockPath, Func<Task<T>> action, CancellationToken cancellationToken)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
-
-        for (var attempt = 0; attempt < 100; attempt++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                await using var stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None).ConfigureAwait(false);
-                return await action().ConfigureAwait(false);
-            }
-            catch (IOException)
-            {
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        return await action().ConfigureAwait(false);
-    }
-
-    private static IEnumerable<string> SplitLines(string text) => text
-        .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        .Where(static value => !string.IsNullOrWhiteSpace(value));
 }
