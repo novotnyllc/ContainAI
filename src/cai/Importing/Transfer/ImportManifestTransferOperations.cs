@@ -6,10 +6,10 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
     , IImportManifestTransferOperations
 {
     private readonly IImportPostCopyOperations postCopyOperations;
-    private readonly IImportSymlinkRelinker symlinkRelinker;
     private readonly IImportManifestTargetInitializer targetInitializer;
     private readonly IImportManifestPlanBuilder planBuilder;
     private readonly IImportManifestCopyOperations copyOperations;
+    private readonly IImportManifestPostCopyTransferOperations postCopyTransferOperations;
 
     public ImportManifestTransferOperations(TextWriter standardOutput, TextWriter standardError)
         : this(
@@ -31,13 +31,32 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
         IImportManifestTargetInitializer importManifestTargetInitializer,
         IImportManifestPlanBuilder importManifestPlanBuilder,
         IImportManifestCopyOperations importManifestCopyOperations)
+        : this(
+            standardOutput,
+            standardError,
+            importPostCopyOperations,
+            importManifestTargetInitializer,
+            importManifestPlanBuilder,
+            importManifestCopyOperations,
+            CreatePostCopyTransferOperations(importPostCopyOperations, importSymlinkRelinker))
+    {
+    }
+
+    internal ImportManifestTransferOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportPostCopyOperations importPostCopyOperations,
+        IImportManifestTargetInitializer importManifestTargetInitializer,
+        IImportManifestPlanBuilder importManifestPlanBuilder,
+        IImportManifestCopyOperations importManifestCopyOperations,
+        IImportManifestPostCopyTransferOperations importManifestPostCopyTransferOperations)
         : base(standardOutput, standardError)
-        => (postCopyOperations, symlinkRelinker, targetInitializer, planBuilder, copyOperations) = (
+        => (postCopyOperations, targetInitializer, planBuilder, copyOperations, postCopyTransferOperations) = (
             importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
-            importSymlinkRelinker ?? throw new ArgumentNullException(nameof(importSymlinkRelinker)),
             importManifestTargetInitializer ?? throw new ArgumentNullException(nameof(importManifestTargetInitializer)),
             importManifestPlanBuilder ?? throw new ArgumentNullException(nameof(importManifestPlanBuilder)),
-            importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)));
+            importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)),
+            importManifestPostCopyTransferOperations ?? throw new ArgumentNullException(nameof(importManifestPostCopyTransferOperations)));
 
     public async Task<int> InitializeImportTargetsAsync(
         string volume,
@@ -103,7 +122,13 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
             return copyCode;
         }
 
-        return await ApplyManifestPostCopyAsync(volume, entry, importPlan, dryRun, verbose, cancellationToken).ConfigureAwait(false);
+        return await postCopyTransferOperations.ApplyManifestPostCopyAsync(
+            volume,
+            entry,
+            importPlan,
+            dryRun,
+            verbose,
+            cancellationToken).ConfigureAwait(false);
     }
 
     public Task<int> EnforceSecretPathPermissionsAsync(
@@ -114,34 +139,10 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
         CancellationToken cancellationToken)
         => postCopyOperations.EnforceSecretPathPermissionsAsync(volume, manifestEntries, noSecrets, verbose, cancellationToken);
 
-    private async Task<int> ApplyManifestPostCopyAsync(
-        string volume,
-        ManifestEntry entry,
-        ManifestImportPlan importPlan,
-        bool dryRun,
-        bool verbose,
-        CancellationToken cancellationToken)
-    {
-        var postCopyCode = await postCopyOperations.ApplyManifestPostCopyRulesAsync(
-            volume,
-            entry,
-            dryRun,
-            verbose,
-            cancellationToken).ConfigureAwait(false);
-        if (postCopyCode != 0)
-        {
-            return postCopyCode;
-        }
-
-        if (!importPlan.IsDirectory)
-        {
-            return 0;
-        }
-
-        return await symlinkRelinker.RelinkImportedDirectorySymlinksAsync(
-            volume,
-            importPlan.SourceAbsolutePath,
-            importPlan.NormalizedTarget,
-            cancellationToken).ConfigureAwait(false);
-    }
+    private static ImportManifestPostCopyTransferOperations CreatePostCopyTransferOperations(
+        IImportPostCopyOperations importPostCopyOperations,
+        IImportSymlinkRelinker importSymlinkRelinker)
+        => new ImportManifestPostCopyTransferOperations(
+            importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
+            importSymlinkRelinker ?? throw new ArgumentNullException(nameof(importSymlinkRelinker)));
 }
