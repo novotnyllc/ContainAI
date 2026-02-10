@@ -1,13 +1,10 @@
+using ContainAI.Cli.Abstractions;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class InstallCommandRuntime
+internal sealed class InstallCommandRuntime
 {
-    private readonly IInstallPathResolver pathResolver;
-    private readonly IInstallDeploymentService deploymentService;
-    private readonly IInstallAssetMaterializer assetMaterializer;
-    private readonly IShellProfileIntegration shellProfileIntegration;
-    private readonly TextWriter stderr;
-    private readonly TextWriter stdout;
+    private readonly IInstallCommandExecution commandExecution;
 
     public InstallCommandRuntime(
         IInstallPathResolver? pathResolver = null,
@@ -16,12 +13,47 @@ internal sealed partial class InstallCommandRuntime
         IShellProfileIntegration? shellProfileIntegration = null,
         TextWriter? standardOutput = null,
         TextWriter? standardError = null)
+        : this(
+            pathResolver ?? new InstallPathResolver(),
+            deploymentService ?? new InstallDeploymentService(),
+            assetMaterializer ?? new InstallAssetMaterializer(),
+            shellProfileIntegration ?? new ShellProfileIntegrationService(),
+            new InstallCommandOutput(
+                standardOutput ?? Console.Out,
+                standardError ?? Console.Error))
     {
-        this.pathResolver = pathResolver ?? new InstallPathResolver();
-        this.deploymentService = deploymentService ?? new InstallDeploymentService();
-        this.assetMaterializer = assetMaterializer ?? new InstallAssetMaterializer();
-        this.shellProfileIntegration = shellProfileIntegration ?? new ShellProfileIntegrationService();
-        stdout = standardOutput ?? Console.Out;
-        stderr = standardError ?? Console.Error;
     }
+
+    internal InstallCommandRuntime(
+        IInstallPathResolver pathResolver,
+        IInstallDeploymentService deploymentService,
+        IInstallAssetMaterializer assetMaterializer,
+        IShellProfileIntegration shellProfileIntegration,
+        IInstallCommandOutput output,
+        IInstallShellIntegrationUpdater? shellIntegrationUpdater = null,
+        IInstallSetupRunner? setupRunner = null,
+        IInstallCommandExecution? commandExecution = null)
+    {
+        ArgumentNullException.ThrowIfNull(pathResolver);
+        ArgumentNullException.ThrowIfNull(deploymentService);
+        ArgumentNullException.ThrowIfNull(assetMaterializer);
+        ArgumentNullException.ThrowIfNull(shellProfileIntegration);
+        ArgumentNullException.ThrowIfNull(output);
+
+        var effectiveShellIntegrationUpdater = shellIntegrationUpdater
+            ?? new InstallShellIntegrationUpdater(pathResolver, shellProfileIntegration, output);
+        var effectiveSetupRunner = setupRunner ?? new InstallSetupRunner(output);
+
+        this.commandExecution = commandExecution
+            ?? new InstallCommandExecution(
+                pathResolver,
+                deploymentService,
+                assetMaterializer,
+                output,
+                effectiveShellIntegrationUpdater,
+                effectiveSetupRunner);
+    }
+
+    public Task<int> RunAsync(InstallCommandOptions options, CancellationToken cancellationToken)
+        => commandExecution.RunAsync(options, cancellationToken);
 }
