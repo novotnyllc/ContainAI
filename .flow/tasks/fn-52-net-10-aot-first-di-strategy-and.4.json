@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-10T23:52:25.774762Z",
+  "depends_on": [
+    "fn-52-net-10-aot-first-di-strategy-and.3"
+  ],
+  "epic": "fn-52-net-10-aot-first-di-strategy-and",
+  "id": "fn-52-net-10-aot-first-di-strategy-and.4",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-52-net-10-aot-first-di-strategy-and.4.md",
+  "status": "todo",
+  "title": "Incremental implementation plan and migration gates",
+  "updated_at": "2026-02-10T23:52:25.774784Z"
+}

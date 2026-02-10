@@ -1,0 +1,13 @@
+{
+  "branch_name": "fn-52-net-10-aot-first-di-strategy-and",
+  "created_at": "2026-02-10T23:51:30.977205Z",
+  "depends_on_epics": [],
+  "id": "fn-52-net-10-aot-first-di-strategy-and",
+  "next_task": 1,
+  "plan_review_status": "unknown",
+  "plan_reviewed_at": null,
+  "spec_path": ".flow/specs/fn-52-net-10-aot-first-di-strategy-and.md",
+  "status": "open",
+  "title": ".NET 10 AOT-first DI Strategy and Architecture Decision",
+  "updated_at": "2026-02-10T23:52:02.580243Z"
+}

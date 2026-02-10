@@ -1,0 +1,16 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-10T23:52:14.302176Z",
+  "depends_on": [
+    "fn-52-net-10-aot-first-di-strategy-and.1"
+  ],
+  "epic": "fn-52-net-10-aot-first-di-strategy-and",
+  "id": "fn-52-net-10-aot-first-di-strategy-and.2",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-52-net-10-aot-first-di-strategy-and.2.md",
+  "status": "todo",
+  "title": "Source-generated DI and alternative composition spikes",
+  "updated_at": "2026-02-10T23:52:14.302192Z"
+}
