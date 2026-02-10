@@ -1,7 +1,27 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerProcessHelpers
+internal interface IDevcontainerFileAndProcessInspection
 {
+    bool IsSymlink(string path);
+
+    Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken);
+
+    Task<bool> IsSysboxFsMountedAsync(CancellationToken cancellationToken);
+
+    Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken);
+}
+
+internal sealed class DevcontainerFileAndProcessInspection : IDevcontainerFileAndProcessInspection
+{
+    private readonly DevcontainerFileSystem fileSystem;
+    private readonly IDevcontainerProcessExecution processExecution;
+
+    public DevcontainerFileAndProcessInspection(DevcontainerFileSystem fileSystem, IDevcontainerProcessExecution processExecution)
+    {
+        this.fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+        this.processExecution = processExecution ?? throw new ArgumentNullException(nameof(processExecution));
+    }
+
     public bool IsSymlink(string path)
     {
         try
@@ -52,7 +72,7 @@ internal sealed partial class DevcontainerProcessHelpers
             return string.Equals(comm, "sshd", StringComparison.Ordinal);
         }
 
-        return IsProcessAlive(pid);
+        return processExecution.IsProcessAlive(pid);
     }
 
     public async Task<bool> IsSysboxFsMountedAsync(CancellationToken cancellationToken)

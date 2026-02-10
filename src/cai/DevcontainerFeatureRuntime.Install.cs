@@ -3,13 +3,34 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerFeatureRuntime
+internal sealed class DevcontainerFeatureInstallWorkflow : IDevcontainerFeatureInstallWorkflow
 {
-    private async Task<int> RunInstallCoreAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+    private readonly IDevcontainerProcessHelpers processHelpers;
+    private readonly IDevcontainerUserEnvironmentSetup userEnvironmentSetup;
+    private readonly IDevcontainerFeatureSettingsFactory settingsFactory;
+
+    public DevcontainerFeatureInstallWorkflow(
+        TextWriter stdout,
+        TextWriter stderr,
+        IDevcontainerProcessHelpers processHelpers,
+        IDevcontainerUserEnvironmentSetup userEnvironmentSetup,
+        IDevcontainerFeatureSettingsFactory settingsFactory)
     {
+        this.stdout = stdout ?? throw new ArgumentNullException(nameof(stdout));
+        this.stderr = stderr ?? throw new ArgumentNullException(nameof(stderr));
+        this.processHelpers = processHelpers ?? throw new ArgumentNullException(nameof(processHelpers));
+        this.userEnvironmentSetup = userEnvironmentSetup ?? throw new ArgumentNullException(nameof(userEnvironmentSetup));
+        this.settingsFactory = settingsFactory ?? throw new ArgumentNullException(nameof(settingsFactory));
+    }
+
+    public async Task<int> RunInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         var featureDirectory = options.FeatureDir;
 
-        if (!TryCreateFeatureConfig(out var settings, out var featureConfigError))
+        if (!settingsFactory.TryCreateFeatureConfig(out var settings, out var featureConfigError))
         {
             await stderr.WriteLineAsync(featureConfigError).ConfigureAwait(false);
             return 1;

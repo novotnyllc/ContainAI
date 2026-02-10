@@ -23,12 +23,11 @@ internal interface IDevcontainerProcessHelpers
     Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken);
 }
 
-internal sealed partial class DevcontainerProcessHelpers : IDevcontainerProcessHelpers
+internal sealed class DevcontainerProcessHelpers : IDevcontainerProcessHelpers
 {
-    private readonly DevcontainerFileSystem fileSystem;
-    private readonly DevcontainerPortInspector portInspector;
-    private readonly DevcontainerProcessCaptureRunner processCaptureRunner;
-    private readonly Func<string> userNameProvider;
+    private readonly IDevcontainerProcessExecution processExecution;
+    private readonly IDevcontainerFileAndProcessInspection fileAndProcessInspection;
+    private readonly IDevcontainerPortUsageInspection portUsageInspection;
 
     public DevcontainerProcessHelpers()
         : this(
@@ -45,11 +44,55 @@ internal sealed partial class DevcontainerProcessHelpers : IDevcontainerProcessH
         DevcontainerProcessCaptureRunner processCaptureRunner,
         Func<string> userNameProvider)
     {
-        this.fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
-        this.portInspector = portInspector ?? throw new ArgumentNullException(nameof(portInspector));
-        this.processCaptureRunner = processCaptureRunner ?? throw new ArgumentNullException(nameof(processCaptureRunner));
-        this.userNameProvider = userNameProvider ?? throw new ArgumentNullException(nameof(userNameProvider));
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(portInspector);
+        ArgumentNullException.ThrowIfNull(processCaptureRunner);
+        ArgumentNullException.ThrowIfNull(userNameProvider);
+
+        var processExecution = new DevcontainerProcessExecution(fileSystem, processCaptureRunner, userNameProvider);
+        this.processExecution = processExecution;
+        fileAndProcessInspection = new DevcontainerFileAndProcessInspection(fileSystem, processExecution);
+        portUsageInspection = new DevcontainerPortUsageInspection(portInspector);
     }
+
+    internal DevcontainerProcessHelpers(
+        IDevcontainerProcessExecution processExecution,
+        IDevcontainerFileAndProcessInspection fileAndProcessInspection,
+        IDevcontainerPortUsageInspection portUsageInspection)
+    {
+        this.processExecution = processExecution ?? throw new ArgumentNullException(nameof(processExecution));
+        this.fileAndProcessInspection = fileAndProcessInspection ?? throw new ArgumentNullException(nameof(fileAndProcessInspection));
+        this.portUsageInspection = portUsageInspection ?? throw new ArgumentNullException(nameof(portUsageInspection));
+    }
+
+    public bool IsProcessAlive(int processId) => processExecution.IsProcessAlive(processId);
+
+    public Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
+        => processExecution.CommandExistsAsync(command, cancellationToken);
+
+    public Task<bool> CommandSucceedsAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        => processExecution.CommandSucceedsAsync(executable, arguments, cancellationToken);
+
+    public Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        => processExecution.RunAsRootAsync(executable, arguments, cancellationToken);
+
+    public Task<DevcontainerProcessResult> RunProcessCaptureAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        => processExecution.RunProcessCaptureAsync(executable, arguments, cancellationToken);
+
+    public bool IsPortInUse(string portValue)
+        => portUsageInspection.IsPortInUse(portValue);
+
+    public bool IsSymlink(string path)
+        => fileAndProcessInspection.IsSymlink(path);
+
+    public Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken)
+        => fileAndProcessInspection.IsSshdRunningFromPidFileAsync(pidFilePath, cancellationToken);
+
+    public Task<bool> IsSysboxFsMountedAsync(CancellationToken cancellationToken)
+        => fileAndProcessInspection.IsSysboxFsMountedAsync(cancellationToken);
+
+    public Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken)
+        => fileAndProcessInspection.HasUidMappingIsolationAsync(cancellationToken);
 }
 
 internal readonly record struct DevcontainerProcessResult(int ExitCode, string StandardOutput, string StandardError);

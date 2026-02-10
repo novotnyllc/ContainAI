@@ -1,8 +1,19 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerFeatureRuntime
+internal sealed class DevcontainerFeatureSettingsFactory : IDevcontainerFeatureSettingsFactory
 {
-    private bool TryCreateFeatureConfig(out FeatureConfig settings, out string error)
+    private readonly IDevcontainerFeatureConfigService configService;
+    private readonly Func<string, string?> environmentVariableReader;
+
+    public DevcontainerFeatureSettingsFactory(
+        IDevcontainerFeatureConfigService configService,
+        Func<string, string?> environmentVariableReader)
+    {
+        this.configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        this.environmentVariableReader = environmentVariableReader ?? throw new ArgumentNullException(nameof(environmentVariableReader));
+    }
+
+    public bool TryCreateFeatureConfig(out FeatureConfig settings, out string error)
     {
         if (!configService.TryParseFeatureBoolean("ENABLECREDENTIALS", defaultValue: false, out var enableCredentials, out var enableCredentialsError))
         {

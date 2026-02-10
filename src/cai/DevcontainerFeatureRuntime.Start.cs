@@ -1,10 +1,27 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerFeatureRuntime
+internal sealed class DevcontainerFeatureStartWorkflow : IDevcontainerFeatureStartWorkflow
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+    private readonly IDevcontainerServiceBootstrap serviceBootstrap;
+    private readonly IDevcontainerFeatureConfigLoader configLoader;
+
+    public DevcontainerFeatureStartWorkflow(
+        TextWriter stdout,
+        TextWriter stderr,
+        IDevcontainerServiceBootstrap serviceBootstrap,
+        IDevcontainerFeatureConfigLoader configLoader)
+    {
+        this.stdout = stdout ?? throw new ArgumentNullException(nameof(stdout));
+        this.stderr = stderr ?? throw new ArgumentNullException(nameof(stderr));
+        this.serviceBootstrap = serviceBootstrap ?? throw new ArgumentNullException(nameof(serviceBootstrap));
+        this.configLoader = configLoader ?? throw new ArgumentNullException(nameof(configLoader));
+    }
+
     public async Task<int> RunStartAsync(CancellationToken cancellationToken)
     {
-        var settings = await LoadFeatureConfigOrWriteErrorAsync(cancellationToken).ConfigureAwait(false);
+        var settings = await configLoader.LoadFeatureConfigOrWriteErrorAsync(cancellationToken).ConfigureAwait(false);
         if (settings is null)
         {
             return 1;

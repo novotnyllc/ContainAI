@@ -2,18 +2,29 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerFeatureRuntime
+internal interface IDevcontainerFeatureInstallWorkflow
 {
-    public async Task<int> RunDevcontainerAsync(CancellationToken cancellationToken)
-    {
-        _ = cancellationToken;
-        await stderr.WriteLineAsync("Usage: cai system devcontainer <install|init|start|verify-sysbox>").ConfigureAwait(false);
-        return 1;
-    }
+    Task<int> RunInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken);
+}
 
-    public Task<int> RunInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return RunInstallCoreAsync(options, cancellationToken);
-    }
+internal interface IDevcontainerFeatureInitWorkflow
+{
+    Task<int> RunInitAsync(CancellationToken cancellationToken);
+}
+
+internal interface IDevcontainerFeatureStartWorkflow
+{
+    Task<int> RunStartAsync(CancellationToken cancellationToken);
+
+    Task<int> RunVerifySysboxAsync(CancellationToken cancellationToken);
+}
+
+internal interface IDevcontainerFeatureSettingsFactory
+{
+    bool TryCreateFeatureConfig(out FeatureConfig settings, out string error);
+}
+
+internal interface IDevcontainerFeatureConfigLoader
+{
+    Task<FeatureConfig?> LoadFeatureConfigOrWriteErrorAsync(CancellationToken cancellationToken);
 }

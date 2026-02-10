@@ -1,7 +1,17 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class DevcontainerProcessHelpers
+internal interface IDevcontainerPortUsageInspection
 {
+    bool IsPortInUse(string portValue);
+}
+
+internal sealed class DevcontainerPortUsageInspection : IDevcontainerPortUsageInspection
+{
+    private readonly DevcontainerPortInspector portInspector;
+
+    public DevcontainerPortUsageInspection(DevcontainerPortInspector portInspector)
+        => this.portInspector = portInspector ?? throw new ArgumentNullException(nameof(portInspector));
+
     public bool IsPortInUse(string portValue)
     {
         if (!int.TryParse(portValue, out var port))
