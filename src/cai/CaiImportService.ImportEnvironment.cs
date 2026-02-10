@@ -14,7 +14,7 @@ internal interface IImportEnvironmentOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
+internal sealed partial class CaiImportEnvironmentOperations : CaiRuntimeSupport
     , IImportEnvironmentOperations
 {
     internal const string EnvTargetSymlinkGuardMessage = ".env target is symlink";
@@ -41,37 +41,20 @@ internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var configPath = !string.IsNullOrWhiteSpace(explicitConfigPath)
-            ? explicitConfigPath
-            : ResolveConfigPath(workspace);
+        var configPath = ResolveEnvironmentConfigPath(workspace, explicitConfigPath);
         if (!File.Exists(configPath))
         {
             return 0;
         }
 
-        var configResult = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
-        if (configResult.ExitCode != 0)
+        var envParseResult = await TryLoadEnvironmentSectionAsync(configPath, cancellationToken).ConfigureAwait(false);
+        if (!envParseResult.Success)
         {
-            if (!string.IsNullOrWhiteSpace(configResult.StandardError))
-            {
-                await stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
-            }
-
-            return 1;
+            return envParseResult.ExitCode;
         }
 
-        if (!string.IsNullOrWhiteSpace(configResult.StandardError))
-        {
-            await stderr.WriteLineAsync(configResult.StandardError.Trim()).ConfigureAwait(false);
-        }
-
-        using var configDocument = JsonDocument.Parse(configResult.StandardOutput);
-        if (configDocument.RootElement.ValueKind != JsonValueKind.Object ||
-            !configDocument.RootElement.TryGetProperty("env", out var envSection))
-        {
-            return 0;
-        }
-
+        using var configDocument = envParseResult.Document!;
+        var envSection = envParseResult.Section;
         if (envSection.ValueKind != JsonValueKind.Object)
         {
             await stderr.WriteLineAsync("[WARN] [env] section must be a table; skipping env import").ConfigureAwait(false);
