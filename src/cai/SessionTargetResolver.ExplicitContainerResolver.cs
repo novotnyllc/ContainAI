@@ -5,7 +5,7 @@ internal interface ISessionTargetExplicitContainerResolver
     Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken);
 }
 
-internal sealed class SessionTargetExplicitContainerResolver : ISessionTargetExplicitContainerResolver
+internal sealed partial class SessionTargetExplicitContainerResolver : ISessionTargetExplicitContainerResolver
 {
     private readonly ISessionTargetDockerLookupService dockerLookupService;
     private readonly ISessionTargetWorkspacePathOptionResolver workspacePathOptionResolver;
@@ -54,54 +54,9 @@ internal sealed class SessionTargetExplicitContainerResolver : ISessionTargetExp
 
         if (found.Exists)
         {
-            var labels = await dockerLookupService.ReadContainerLabelsAsync(options.Container!, found.Context!, cancellationToken).ConfigureAwait(false);
-            var existingContainerTarget = explicitContainerTargetFactory.CreateFromExistingContainer(
-                options,
-                options.Container!,
-                found.Context!,
-                labels);
-            if (!existingContainerTarget.Success)
-            {
-                return ResolvedTarget.ErrorResult(existingContainerTarget.Error!, existingContainerTarget.ErrorCode);
-            }
-
-            return existingContainerTarget.Value!;
+            return await ResolveExistingContainerAsync(options, found.Context!, cancellationToken).ConfigureAwait(false);
         }
 
-        var workspace = workspacePathOptionResolver.ResolveWorkspace(options);
-        if (!workspace.Success)
-        {
-            return ResolvedTarget.ErrorResult(workspace.Error!, workspace.ErrorCode);
-        }
-
-        var contextSelection = await workspaceContextSelectionService.ResolveContextAsync(
-            workspace.Value!,
-            options,
-            cancellationToken).ConfigureAwait(false);
-        if (!contextSelection.Success)
-        {
-            return ResolvedTarget.ErrorResult(contextSelection.Error!, contextSelection.ErrorCode);
-        }
-
-        var volume = await workspaceDataVolumeSelectionService.ResolveVolumeAsync(
-            workspace.Value!,
-            options,
-            allowResetVolume: false,
-            cancellationToken).ConfigureAwait(false);
-        if (!volume.Success)
-        {
-            return ResolvedTarget.ErrorResult(volume.Error!, volume.ErrorCode);
-        }
-
-        return new ResolvedTarget(
-            ContainerName: options.Container!,
-            Workspace: workspace.Value!,
-            DataVolume: volume.Value!.DataVolume,
-            Context: contextSelection.Context!,
-            ShouldPersistState: true,
-            CreatedByThisInvocation: true,
-            GeneratedFromReset: false,
-            Error: null,
-            ErrorCode: 1);
+        return await ResolveWorkspaceDerivedAsync(options, cancellationToken).ConfigureAwait(false);
     }
 }
