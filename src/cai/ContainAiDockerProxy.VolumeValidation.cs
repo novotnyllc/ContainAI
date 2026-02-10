@@ -1,8 +1,24 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainAiDockerProxyService
+internal interface IDockerProxyVolumeCredentialValidator
 {
-    private async Task<bool> ValidateVolumeCredentialsAsync(
+    Task<bool> ValidateAsync(
+        string contextName,
+        string dataVolume,
+        bool enableCredentials,
+        bool quiet,
+        TextWriter stderr,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class DockerProxyVolumeCredentialValidator : IDockerProxyVolumeCredentialValidator
+{
+    private readonly IDockerProxyCommandExecutor commandExecutor;
+
+    public DockerProxyVolumeCredentialValidator(IDockerProxyCommandExecutor commandExecutor)
+        => this.commandExecutor = commandExecutor;
+
+    public async Task<bool> ValidateAsync(
         string contextName,
         string dataVolume,
         bool enableCredentials,
@@ -15,7 +31,7 @@ internal sealed partial class ContainAiDockerProxyService
             return true;
         }
 
-        var marker = await RunDockerCaptureAsync(
+        var marker = await commandExecutor.RunCaptureAsync(
             ["--context", contextName, "run", "--rm", "-v", $"{dataVolume}:/vol:ro", "alpine", "test", "-f", "/vol/.containai-no-secrets"],
             cancellationToken).ConfigureAwait(false);
 

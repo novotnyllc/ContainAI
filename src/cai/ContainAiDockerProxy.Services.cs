@@ -14,6 +14,13 @@ internal interface IDockerProxyProcessRunner
     Task<DockerProxyProcessResult> RunCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken);
 }
 
+internal interface IDockerProxyCommandExecutor
+{
+    Task<int> RunInteractiveAsync(IReadOnlyList<string> args, TextWriter stderr, CancellationToken cancellationToken);
+
+    Task<DockerProxyProcessResult> RunCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken);
+}
+
 internal interface IContainAiSystemEnvironment
 {
     string? GetEnvironmentVariable(string variableName);
@@ -28,49 +35,6 @@ internal interface IUtcClock
     DateTime UtcNow { get; }
 }
 
-internal sealed partial class ContainAiDockerProxyService : IContainAiDockerProxyService
-{
-    private static readonly HashSet<string> ContainerTargetingSubcommands =
-    [
-        "exec",
-        "inspect",
-        "start",
-        "stop",
-        "rm",
-        "logs",
-        "restart",
-        "kill",
-        "pause",
-        "unpause",
-        "port",
-        "stats",
-        "top",
-    ];
-
-    private readonly ContainAiDockerProxyOptions options;
-    private readonly IDockerProxyArgumentParser argumentParser;
-    private readonly IDevcontainerFeatureSettingsParser featureSettingsParser;
-    private readonly IDockerProxyProcessRunner processRunner;
-    private readonly IContainAiSystemEnvironment environment;
-    private readonly IUtcClock clock;
-
-    public ContainAiDockerProxyService(
-        ContainAiDockerProxyOptions options,
-        IDockerProxyArgumentParser argumentParser,
-        IDevcontainerFeatureSettingsParser featureSettingsParser,
-        IDockerProxyProcessRunner processRunner,
-        IContainAiSystemEnvironment environment,
-        IUtcClock clock)
-    {
-        this.options = options;
-        this.argumentParser = argumentParser;
-        this.featureSettingsParser = featureSettingsParser;
-        this.processRunner = processRunner;
-        this.environment = environment;
-        this.clock = clock;
-    }
-}
-
 internal sealed class DockerProxyProcessRunner : IDockerProxyProcessRunner
 {
     public Task<int> RunInteractiveAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
@@ -80,6 +44,60 @@ internal sealed class DockerProxyProcessRunner : IDockerProxyProcessRunner
     {
         var result = await CliWrapProcessRunner.RunCaptureAsync("docker", args, cancellationToken).ConfigureAwait(false);
         return new DockerProxyProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+    }
+}
+
+internal sealed class DockerProxyCommandExecutor : IDockerProxyCommandExecutor
+{
+    private readonly IDockerProxyProcessRunner processRunner;
+
+    public DockerProxyCommandExecutor(IDockerProxyProcessRunner processRunner) => this.processRunner = processRunner;
+
+    public async Task<int> RunInteractiveAsync(IReadOnlyList<string> args, TextWriter stderr, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await processRunner.RunInteractiveAsync(args, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
+            return 127;
+        }
+    }
+
+    public async Task<DockerProxyProcessResult> RunCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await processRunner.RunCaptureAsync(args, cancellationToken).ConfigureAwait(false);
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+        }
+        catch (NotSupportedException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+        }
     }
 }
 

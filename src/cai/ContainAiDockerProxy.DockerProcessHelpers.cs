@@ -1,51 +1,68 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainAiDockerProxyService
+internal interface IDockerProxyContextSelector
 {
-    private async Task<int> RunDockerInteractiveAsync(IReadOnlyList<string> args, TextWriter stderr, CancellationToken cancellationToken)
+    Task<bool> ShouldUseContainAiContextAsync(IReadOnlyList<string> args, string contextName, CancellationToken cancellationToken);
+}
+
+internal sealed class DockerProxyContextSelector : IDockerProxyContextSelector
+{
+    private static readonly HashSet<string> ContainerTargetingSubcommands =
+    [
+        "exec",
+        "inspect",
+        "start",
+        "stop",
+        "rm",
+        "logs",
+        "restart",
+        "kill",
+        "pause",
+        "unpause",
+        "port",
+        "stats",
+        "top",
+    ];
+
+    private readonly IDockerProxyArgumentParser argumentParser;
+    private readonly IDockerProxyCommandExecutor commandExecutor;
+
+    public DockerProxyContextSelector(IDockerProxyArgumentParser argumentParser, IDockerProxyCommandExecutor commandExecutor)
     {
-        try
-        {
-            return await processRunner.RunInteractiveAsync(args, cancellationToken).ConfigureAwait(false);
-        }
-        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
-            return 127;
-        }
-        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
-            return 127;
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
-            return 127;
-        }
+        this.argumentParser = argumentParser;
+        this.commandExecutor = commandExecutor;
     }
 
-    private async Task<DockerProxyProcessResult> RunDockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    public async Task<bool> ShouldUseContainAiContextAsync(IReadOnlyList<string> args, string contextName, CancellationToken cancellationToken)
     {
-        try
+        foreach (var arg in args)
         {
-            return await processRunner.RunCaptureAsync(args, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(arg, "--context", StringComparison.Ordinal) || arg.StartsWith("--context=", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            if (arg.Contains("devcontainer.", StringComparison.Ordinal) || arg.Contains("containai.", StringComparison.Ordinal))
+            {
+                return true;
+            }
         }
-        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+
+        var subcommand = argumentParser.GetFirstSubcommand(args);
+        if (string.IsNullOrWhiteSpace(subcommand) || !ContainerTargetingSubcommands.Contains(subcommand))
         {
-            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+            return false;
         }
-        catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
+
+        var containerName = argumentParser.GetContainerNameArg(args, subcommand);
+        if (string.IsNullOrWhiteSpace(containerName))
         {
-            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
+            return false;
         }
-        catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
-        }
-        catch (NotSupportedException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            return new DockerProxyProcessResult(127, string.Empty, ex.Message);
-        }
+
+        var probe = await commandExecutor.RunCaptureAsync(
+            ["--context", contextName, "inspect", containerName],
+            cancellationToken).ConfigureAwait(false);
+        return probe.ExitCode == 0;
     }
 }

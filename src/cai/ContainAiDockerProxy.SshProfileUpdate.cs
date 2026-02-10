@@ -3,9 +3,23 @@ using System.Text.RegularExpressions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainAiDockerProxyService
+internal interface IDockerProxySshConfigUpdater
 {
-    private async Task UpdateSshConfigAsync(string workspaceName, string sshPort, string remoteUser, TextWriter stderr, CancellationToken cancellationToken)
+    Task UpdateAsync(string workspaceName, string sshPort, string remoteUser, TextWriter stderr, CancellationToken cancellationToken);
+}
+
+internal sealed class DockerProxySshConfigUpdater : IDockerProxySshConfigUpdater
+{
+    private readonly IContainAiSystemEnvironment environment;
+    private readonly IUtcClock clock;
+
+    public DockerProxySshConfigUpdater(IContainAiSystemEnvironment environment, IUtcClock clock)
+    {
+        this.environment = environment;
+        this.clock = clock;
+    }
+
+    public async Task UpdateAsync(string workspaceName, string sshPort, string remoteUser, TextWriter stderr, CancellationToken cancellationToken)
     {
         var sshRoot = Path.Combine(environment.ResolveHomeDirectory(), ".ssh");
         var containAiSshDir = Path.Combine(sshRoot, "containai.d");
@@ -24,7 +38,7 @@ internal sealed partial class ContainAiDockerProxyService
             var existing = await File.ReadAllTextAsync(userConfigPath, cancellationToken).ConfigureAwait(false);
             var filtered = existing
                 .Split('\n')
-                .Where(line => !ContainAiIncludeRegex().IsMatch(line))
+                .Where(line => !DockerProxySshConfigRegex.ContainAiIncludeRegex().IsMatch(line))
                 .ToArray();
 
             var merged = includeLine + Environment.NewLine + Environment.NewLine + string.Join(Environment.NewLine, filtered).TrimStart();
@@ -53,7 +67,10 @@ internal sealed partial class ContainAiDockerProxyService
         await File.WriteAllTextAsync(configFile, builder.ToString(), cancellationToken).ConfigureAwait(false);
         await stderr.WriteLineAsync($"SSH: ssh {hostAlias}").ConfigureAwait(false);
     }
+}
 
+internal static partial class DockerProxySshConfigRegex
+{
     [GeneratedRegex("^[\\s]*[Ii][Nn][Cc][Ll][Uu][Dd][Ee][\\s]+[^#]*containai\\.d/", RegexOptions.Compiled)]
-    private static partial Regex ContainAiIncludeRegex();
+    public static partial Regex ContainAiIncludeRegex();
 }

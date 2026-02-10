@@ -1,8 +1,45 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainAiDockerProxyService
+internal interface IDockerProxyPortAllocator
 {
-    private async Task<string> AllocateSshPortAsync(
+    Task<string> AllocateSshPortAsync(
+        string lockPath,
+        string containAiConfigDir,
+        string contextName,
+        string workspaceName,
+        string workspaceSafe,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
+{
+    private readonly ContainAiDockerProxyOptions options;
+    private readonly IContainAiSystemEnvironment environment;
+    private readonly IDockerProxyCommandExecutor commandExecutor;
+
+    public DockerProxyPortAllocator(
+        ContainAiDockerProxyOptions options,
+        IContainAiSystemEnvironment environment,
+        IDockerProxyCommandExecutor commandExecutor)
+    {
+        this.options = options;
+        this.environment = environment;
+        this.commandExecutor = commandExecutor;
+    }
+
+    public Task<string> AllocateSshPortAsync(
+        string lockPath,
+        string containAiConfigDir,
+        string contextName,
+        string workspaceName,
+        string workspaceSafe,
+        CancellationToken cancellationToken)
+        => WithPortLockAsync(
+            lockPath,
+            () => AllocateUnlockedSshPortAsync(containAiConfigDir, contextName, workspaceName, workspaceSafe, cancellationToken),
+            cancellationToken);
+
+    private async Task<string> AllocateUnlockedSshPortAsync(
         string containAiConfigDir,
         string contextName,
         string workspaceName,
@@ -23,7 +60,7 @@ internal sealed partial class ContainAiDockerProxyService
                     return existingPort.ToString();
                 }
 
-                var existingContainerPort = await RunDockerCaptureAsync(
+                var existingContainerPort = await commandExecutor.RunCaptureAsync(
                     [
                         "--context", contextName,
                         "ps", "-a",
@@ -42,7 +79,7 @@ internal sealed partial class ContainAiDockerProxyService
         }
 
         var reservedPorts = new HashSet<int>();
-        var labelPorts = await RunDockerCaptureAsync(
+        var labelPorts = await commandExecutor.RunCaptureAsync(
             ["--context", contextName, "ps", "-a", "--filter", "label=containai.ssh-port", "--format", "{{.Label \"containai.ssh-port\"}}"],
             cancellationToken).ConfigureAwait(false);
 

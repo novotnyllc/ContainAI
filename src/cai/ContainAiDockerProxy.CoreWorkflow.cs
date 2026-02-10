@@ -1,7 +1,42 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainAiDockerProxyService
+internal sealed class ContainAiDockerProxyService : IContainAiDockerProxyService
 {
+    private readonly ContainAiDockerProxyOptions options;
+    private readonly IDockerProxyArgumentParser argumentParser;
+    private readonly IDevcontainerFeatureSettingsParser featureSettingsParser;
+    private readonly IDockerProxyCommandExecutor commandExecutor;
+    private readonly IDockerProxyContextSelector contextSelector;
+    private readonly IDockerProxyPortAllocator portAllocator;
+    private readonly IDockerProxyVolumeCredentialValidator volumeCredentialValidator;
+    private readonly IDockerProxySshConfigUpdater sshConfigUpdater;
+    private readonly IContainAiSystemEnvironment environment;
+    private readonly IUtcClock clock;
+
+    public ContainAiDockerProxyService(
+        ContainAiDockerProxyOptions options,
+        IDockerProxyArgumentParser argumentParser,
+        IDevcontainerFeatureSettingsParser featureSettingsParser,
+        IDockerProxyCommandExecutor commandExecutor,
+        IDockerProxyContextSelector contextSelector,
+        IDockerProxyPortAllocator portAllocator,
+        IDockerProxyVolumeCredentialValidator volumeCredentialValidator,
+        IDockerProxySshConfigUpdater sshConfigUpdater,
+        IContainAiSystemEnvironment environment,
+        IUtcClock clock)
+    {
+        this.options = options;
+        this.argumentParser = argumentParser;
+        this.featureSettingsParser = featureSettingsParser;
+        this.commandExecutor = commandExecutor;
+        this.contextSelector = contextSelector;
+        this.portAllocator = portAllocator;
+        this.volumeCredentialValidator = volumeCredentialValidator;
+        this.sshConfigUpdater = sshConfigUpdater;
+        this.environment = environment;
+        this.clock = clock;
+    }
+
     public async Task<int> RunAsync(IReadOnlyList<string> args, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken)
     {
         _ = stdout;
@@ -17,8 +52,8 @@ internal sealed partial class ContainAiDockerProxyService
 
         if (!argumentParser.IsContainerCreateCommand(dockerArgs))
         {
-            var useContainAiContext = await ShouldUseContainAiContextAsync(dockerArgs, contextName, cancellationToken).ConfigureAwait(false);
-            return await RunDockerInteractiveAsync(
+            var useContainAiContext = await contextSelector.ShouldUseContainAiContextAsync(dockerArgs, contextName, cancellationToken).ConfigureAwait(false);
+            return await commandExecutor.RunInteractiveAsync(
                 useContainAiContext ? argumentParser.PrependContext(contextName, dockerArgs) : dockerArgs,
                 stderr,
                 cancellationToken).ConfigureAwait(false);
@@ -27,15 +62,15 @@ internal sealed partial class ContainAiDockerProxyService
         var labels = argumentParser.ExtractDevcontainerLabels(dockerArgs);
         if (string.IsNullOrWhiteSpace(labels.ConfigFile) || !featureSettingsParser.TryReadFeatureSettings(labels.ConfigFile!, stderr, out var settings))
         {
-            return await RunDockerInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
+            return await commandExecutor.RunInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
         }
 
         if (!settings.HasContainAiFeature)
         {
-            return await RunDockerInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
+            return await commandExecutor.RunInteractiveAsync(dockerArgs, stderr, cancellationToken).ConfigureAwait(false);
         }
 
-        var contextProbe = await RunDockerCaptureAsync(["context", "inspect", contextName], cancellationToken).ConfigureAwait(false);
+        var contextProbe = await commandExecutor.RunCaptureAsync(["context", "inspect", contextName], cancellationToken).ConfigureAwait(false);
         if (contextProbe.ExitCode != 0)
         {
             await stderr.WriteLineAsync("ContainAI: Not set up. Run: cai setup").ConfigureAwait(false);
@@ -52,10 +87,15 @@ internal sealed partial class ContainAiDockerProxyService
         var containAiConfigDir = Path.Combine(environment.ResolveHomeDirectory(), ".config", "containai");
         var lockPath = Path.Combine(containAiConfigDir, ".ssh-port.lock");
 
-        var sshPort = await WithPortLockAsync(lockPath, () =>
-            AllocateSshPortAsync(containAiConfigDir, contextName, workspaceName, workspaceNameSanitized, cancellationToken), cancellationToken).ConfigureAwait(false);
+        var sshPort = await portAllocator.AllocateSshPortAsync(
+            lockPath,
+            containAiConfigDir,
+            contextName,
+            workspaceName,
+            workspaceNameSanitized,
+            cancellationToken).ConfigureAwait(false);
 
-        var mountVolume = await ValidateVolumeCredentialsAsync(
+        var mountVolume = await volumeCredentialValidator.ValidateAsync(
             contextName,
             settings.DataVolume,
             settings.EnableCredentials,
@@ -76,7 +116,7 @@ internal sealed partial class ContainAiDockerProxyService
 
             if (mountVolume)
             {
-                var volumeExists = await RunDockerCaptureAsync(
+                var volumeExists = await commandExecutor.RunCaptureAsync(
                     ["--context", contextName, "volume", "inspect", settings.DataVolume],
                     cancellationToken).ConfigureAwait(false);
 
@@ -107,52 +147,16 @@ internal sealed partial class ContainAiDockerProxyService
             modifiedArgs.Add($"containai.created={clock.UtcNow:yyyy-MM-ddTHH:mm:ssZ}");
         }
 
-        await UpdateSshConfigAsync(workspaceNameSanitized, sshPort, settings.RemoteUser, stderr, cancellationToken).ConfigureAwait(false);
+        await sshConfigUpdater.UpdateAsync(workspaceNameSanitized, sshPort, settings.RemoteUser, stderr, cancellationToken).ConfigureAwait(false);
 
         if (wrapperFlags.Verbose && !wrapperFlags.Quiet)
         {
             await stderr.WriteLineAsync($"[cai-docker] Executing: docker --context {contextName} {string.Join(' ', modifiedArgs)}").ConfigureAwait(false);
         }
 
-        return await RunDockerInteractiveAsync(
+        return await commandExecutor.RunInteractiveAsync(
             argumentParser.PrependContext(contextName, modifiedArgs),
             stderr,
             cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<bool> ShouldUseContainAiContextAsync(IReadOnlyList<string> args, string contextName, CancellationToken cancellationToken)
-    {
-        foreach (var arg in args)
-        {
-            if (string.Equals(arg, "--context", StringComparison.Ordinal) || arg.StartsWith("--context=", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (arg.Contains("devcontainer.", StringComparison.Ordinal) || arg.Contains("containai.", StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        var subcommand = argumentParser.GetFirstSubcommand(args);
-        if (string.IsNullOrWhiteSpace(subcommand))
-        {
-            return false;
-        }
-
-        if (!ContainerTargetingSubcommands.Contains(subcommand))
-        {
-            return false;
-        }
-
-        var containerName = argumentParser.GetContainerNameArg(args, subcommand);
-        if (string.IsNullOrWhiteSpace(containerName))
-        {
-            return false;
-        }
-
-        var probe = await RunDockerCaptureAsync(["--context", contextName, "inspect", containerName], cancellationToken).ConfigureAwait(false);
-        return probe.ExitCode == 0;
     }
 }
