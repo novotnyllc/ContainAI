@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class CaiOperationsService : CaiRuntimeSupport
+internal sealed class CaiOperationsService : CaiRuntimeSupport
 {
     private static readonly string[] ContainAiImagePrefixes =
     [
@@ -13,6 +13,9 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
 
     private readonly ContainerRuntimeCommandService containerRuntimeCommandService;
     private readonly ContainerLinkRepairService containerLinkRepairService;
+    private readonly CaiDiagnosticsAndSetupOperations diagnosticsAndSetupOperations;
+    private readonly CaiMaintenanceOperations maintenanceOperations;
+    private readonly CaiTemplateSshAndGcOperations templateSshAndGcOperations;
 
     public CaiOperationsService(TextWriter standardOutput, TextWriter standardError)
         : this(standardOutput, standardError, new ManifestTomlParser())
@@ -33,42 +36,67 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
             manifestTomlParser,
             new ContainerRuntimeOptionParser());
         containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, ExecuteDockerCommandAsync);
+
+        CaiDiagnosticsAndSetupOperations diagnostics = null!;
+        CaiMaintenanceOperations maintenance = null!;
+        CaiTemplateSshAndGcOperations templateSshAndGc = null!;
+
+        maintenance = new CaiMaintenanceOperations(
+            stdout,
+            stderr,
+            containerLinkRepairService,
+            (outputJson, buildTemplates, resetLima, cancellationToken) => diagnostics.RunDoctorAsync(outputJson, buildTemplates, resetLima, cancellationToken));
+
+        templateSshAndGc = new CaiTemplateSshAndGcOperations(
+            stdout,
+            stderr,
+            ContainAiImagePrefixes,
+            (output, explicitVolume, container, workspace, cancellationToken) => maintenance.RunExportAsync(output, explicitVolume, container, workspace, cancellationToken));
+
+        diagnostics = new CaiDiagnosticsAndSetupOperations(
+            stdout,
+            stderr,
+            (dryRun, cancellationToken) => templateSshAndGc.RunSshCleanupAsync(dryRun, cancellationToken));
+
+        diagnosticsAndSetupOperations = diagnostics;
+        maintenanceOperations = maintenance;
+        templateSshAndGcOperations = templateSshAndGc;
     }
 
     public static Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunDockerCoreAsync(options.DockerArgs, cancellationToken);
+        return CaiDiagnosticsAndSetupOperations.RunDockerAsync(options.DockerArgs, cancellationToken);
     }
 
     public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunStatusCoreAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
+        return diagnosticsAndSetupOperations.RunStatusAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
     }
 
     public Task<int> RunDoctorAsync(DoctorCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunDoctorCoreAsync(options.Json, options.BuildTemplates, options.ResetLima, cancellationToken);
+        return diagnosticsAndSetupOperations.RunDoctorAsync(options.Json, options.BuildTemplates, options.ResetLima, cancellationToken);
     }
 
     public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunDoctorFixCoreAsync(options.All, options.DryRun, options.Target, options.TargetArg, cancellationToken);
+        return diagnosticsAndSetupOperations.RunDoctorFixAsync(options.All, options.DryRun, options.Target, options.TargetArg, cancellationToken);
     }
 
     public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunDoctorCoreAsync(options.Json, buildTemplates: false, resetLima: false, cancellationToken);
+        return diagnosticsAndSetupOperations.RunDoctorAsync(options.Json, buildTemplates: false, resetLima: false, cancellationToken);
     }
 
     public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunSetupCoreAsync(
+        return diagnosticsAndSetupOperations.RunSetupAsync(
             dryRun: options.DryRun,
             verbose: options.Verbose,
             skipTemplates: options.SkipTemplates,
@@ -79,16 +107,16 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunExportCoreAsync(options.Output, options.DataVolume, options.Container, options.Workspace, cancellationToken);
+        return maintenanceOperations.RunExportAsync(options.Output, options.DataVolume, options.Container, options.Workspace, cancellationToken);
     }
 
     public Task<int> RunSyncAsync(CancellationToken cancellationToken)
-        => RunSyncCoreAsync(cancellationToken);
+        => maintenanceOperations.RunSyncAsync(cancellationToken);
 
     public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunStopCoreAsync(
+        return templateSshAndGcOperations.RunStopAsync(
             containerName: options.Container,
             stopAll: options.All,
             remove: options.Remove,
@@ -100,7 +128,7 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunGcCoreAsync(
+        return templateSshAndGcOperations.RunGcAsync(
             dryRun: options.DryRun,
             force: options.Force,
             includeImages: options.Images,
@@ -111,7 +139,7 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunSshCleanupCoreAsync(options.DryRun, cancellationToken);
+        return templateSshAndGcOperations.RunSshCleanupAsync(options.DryRun, cancellationToken);
     }
 
     public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
@@ -123,13 +151,13 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunTemplateUpgradeCoreAsync(options.Name, options.DryRun, cancellationToken);
+        return templateSshAndGcOperations.RunTemplateUpgradeAsync(options.Name, options.DryRun, cancellationToken);
     }
 
     public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunUpdateCoreAsync(
+        return maintenanceOperations.RunUpdateAsync(
             dryRun: options.DryRun,
             stopContainers: options.StopContainers || options.Force,
             limaRecreate: options.LimaRecreate,
@@ -140,7 +168,7 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunRefreshCoreAsync(
+        return maintenanceOperations.RunRefreshAsync(
             rebuild: options.Rebuild,
             showHelp: false,
             cancellationToken);
@@ -149,7 +177,7 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return RunUninstallCoreAsync(
+        return maintenanceOperations.RunUninstallAsync(
             dryRun: options.DryRun,
             removeContainers: options.Containers,
             removeVolumes: options.Volumes,
@@ -158,7 +186,7 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     }
 
     public Task<int> RunVersionAsync(CancellationToken cancellationToken)
-        => RunVersionCoreAsync(json: false, cancellationToken);
+        => diagnosticsAndSetupOperations.RunVersionAsync(json: false, cancellationToken);
 
     public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
     {
@@ -197,6 +225,6 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     {
         ArgumentNullException.ThrowIfNull(options);
         var containerName = string.IsNullOrWhiteSpace(options.Container) ? options.Name : options.Container;
-        return RunLinksCoreAsync(subcommand, containerName, options.Workspace, options.DryRun, options.Quiet, cancellationToken);
+        return maintenanceOperations.RunLinksAsync(subcommand, containerName, options.Workspace, options.DryRun, options.Quiet, cancellationToken);
     }
 }
