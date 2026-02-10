@@ -39,47 +39,4 @@ internal sealed partial class AgentShimBinaryResolver
 
         return null;
     }
-
-    private static bool IsInShimDirectory(string candidate, IReadOnlyList<string> shimDirectories)
-    {
-        foreach (var shimDirectory in shimDirectories)
-        {
-            if (string.Equals(candidate, shimDirectory, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            if (candidate.StartsWith(shimDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool PointsToPath(string path, string expectedPath)
-    {
-        if (string.IsNullOrWhiteSpace(expectedPath))
-        {
-            return false;
-        }
-
-        if (string.Equals(path, expectedPath, StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        var info = new FileInfo(path);
-        if (string.IsNullOrWhiteSpace(info.LinkTarget))
-        {
-            return false;
-        }
-
-        var linkTarget = info.LinkTarget;
-        var resolved = Path.IsPathRooted(linkTarget)
-            ? Path.GetFullPath(linkTarget)
-            : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path) ?? "/", linkTarget));
-        return string.Equals(resolved, expectedPath, StringComparison.Ordinal);
-    }
 }
