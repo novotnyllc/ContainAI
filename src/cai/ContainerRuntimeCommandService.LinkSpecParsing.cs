@@ -1,10 +1,30 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+using ContainAI.Cli.Host.ContainerRuntime.Models;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal interface IContainerRuntimeLinkSpecProcessor
 {
-    private async Task ProcessLinkSpecAsync(
+    Task ProcessLinkSpecAsync(
+        string specPath,
+        LinkRepairMode mode,
+        bool quiet,
+        string specName,
+        LinkRepairStats stats,
+        CancellationToken cancellationToken);
+
+    Task WriteSummaryAsync(LinkRepairMode mode, LinkRepairStats stats, bool quiet);
+}
+
+internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkSpecProcessor
+{
+    private readonly IContainerRuntimeExecutionContext context;
+
+    public ContainerRuntimeLinkSpecProcessor(IContainerRuntimeExecutionContext context)
+        => this.context = context ?? throw new ArgumentNullException(nameof(context));
+
+    public async Task ProcessLinkSpecAsync(
         string specPath,
         LinkRepairMode mode,
         bool quiet,
@@ -19,7 +39,7 @@ internal sealed partial class ContainerRuntimeCommandService
             throw new InvalidOperationException($"Invalid link spec format: {specPath}");
         }
 
-        await LogInfoAsync(quiet, $"Processing {specName} ({linksElement.GetArrayLength()} links)").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"Processing {specName} ({linksElement.GetArrayLength()} links)").ConfigureAwait(false);
 
         foreach (var linkElement in linksElement.EnumerateArray())
         {
@@ -30,12 +50,36 @@ internal sealed partial class ContainerRuntimeCommandService
             if (string.IsNullOrWhiteSpace(linkPath) || string.IsNullOrWhiteSpace(targetPath))
             {
                 stats.Errors++;
-                await stderr.WriteLineAsync($"[WARN] Skipping invalid link spec entry in {specPath}").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"[WARN] Skipping invalid link spec entry in {specPath}").ConfigureAwait(false);
                 continue;
             }
 
             await ProcessLinkEntryAsync(linkPath!, targetPath!, removeFirst, mode, quiet, stats).ConfigureAwait(false);
         }
+    }
+
+    public async Task WriteSummaryAsync(LinkRepairMode mode, LinkRepairStats stats, bool quiet)
+    {
+        if (quiet)
+        {
+            return;
+        }
+
+        await context.StandardOutput.WriteLineAsync().ConfigureAwait(false);
+        await context.StandardOutput.WriteLineAsync(mode == LinkRepairMode.DryRun ? "=== Dry-Run Summary ===" : "=== Link Status Summary ===").ConfigureAwait(false);
+        await context.StandardOutput.WriteLineAsync($"  OK:      {stats.Ok}").ConfigureAwait(false);
+        await context.StandardOutput.WriteLineAsync($"  Broken:  {stats.Broken}").ConfigureAwait(false);
+        await context.StandardOutput.WriteLineAsync($"  Missing: {stats.Missing}").ConfigureAwait(false);
+        if (mode == LinkRepairMode.Fix)
+        {
+            await context.StandardOutput.WriteLineAsync($"  Fixed:   {stats.Fixed}").ConfigureAwait(false);
+        }
+        else if (mode == LinkRepairMode.DryRun)
+        {
+            await context.StandardOutput.WriteLineAsync($"  Would fix: {stats.Fixed}").ConfigureAwait(false);
+        }
+
+        await context.StandardOutput.WriteLineAsync($"  Errors:  {stats.Errors}").ConfigureAwait(false);
     }
 
     private async Task ProcessLinkEntryAsync(
@@ -46,16 +90,16 @@ internal sealed partial class ContainerRuntimeCommandService
         bool quiet,
         LinkRepairStats stats)
     {
-        var isSymlink = await IsSymlinkAsync(linkPath).ConfigureAwait(false);
+        var isSymlink = await context.IsSymlinkAsync(linkPath).ConfigureAwait(false);
         if (isSymlink)
         {
-            var currentTarget = await ReadLinkTargetAsync(linkPath).ConfigureAwait(false);
+            var currentTarget = await context.ReadLinkTargetAsync(linkPath).ConfigureAwait(false);
             if (string.Equals(currentTarget, targetPath, StringComparison.Ordinal))
             {
                 if (!File.Exists(linkPath) && !Directory.Exists(linkPath))
                 {
                     stats.Broken++;
-                    await LogInfoAsync(quiet, $"[BROKEN] {linkPath} -> {targetPath} (dangling symlink)").ConfigureAwait(false);
+                    await context.LogInfoAsync(quiet, $"[BROKEN] {linkPath} -> {targetPath} (dangling symlink)").ConfigureAwait(false);
                 }
                 else
                 {
@@ -66,7 +110,7 @@ internal sealed partial class ContainerRuntimeCommandService
             else
             {
                 stats.Broken++;
-                await LogInfoAsync(quiet, $"[WRONG_TARGET] {linkPath} -> {currentTarget} (expected: {targetPath})").ConfigureAwait(false);
+                await context.LogInfoAsync(quiet, $"[WRONG_TARGET] {linkPath} -> {currentTarget} (expected: {targetPath})").ConfigureAwait(false);
             }
         }
         else if (Directory.Exists(linkPath))
@@ -74,24 +118,24 @@ internal sealed partial class ContainerRuntimeCommandService
             if (removeFirst)
             {
                 stats.Broken++;
-                await LogInfoAsync(quiet, $"[EXISTS_DIR] {linkPath} is a directory (will remove with R flag)").ConfigureAwait(false);
+                await context.LogInfoAsync(quiet, $"[EXISTS_DIR] {linkPath} is a directory (will remove with R flag)").ConfigureAwait(false);
             }
             else
             {
                 stats.Errors++;
-                await stderr.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
                 return;
             }
         }
         else if (File.Exists(linkPath))
         {
             stats.Broken++;
-            await LogInfoAsync(quiet, $"[EXISTS_FILE] {linkPath} is a regular file (will replace)").ConfigureAwait(false);
+            await context.LogInfoAsync(quiet, $"[EXISTS_FILE] {linkPath} is a regular file (will replace)").ConfigureAwait(false);
         }
         else
         {
             stats.Missing++;
-            await LogInfoAsync(quiet, $"[MISSING] {linkPath} -> {targetPath}").ConfigureAwait(false);
+            await context.LogInfoAsync(quiet, $"[MISSING] {linkPath} -> {targetPath}").ConfigureAwait(false);
         }
 
         if (mode == LinkRepairMode.Check)
@@ -104,7 +148,7 @@ internal sealed partial class ContainerRuntimeCommandService
         {
             if (mode == LinkRepairMode.DryRun)
             {
-                await LogInfoAsync(quiet, $"[WOULD] Create parent directory: {parent}").ConfigureAwait(false);
+                await context.LogInfoAsync(quiet, $"[WOULD] Create parent directory: {parent}").ConfigureAwait(false);
             }
             else
             {
@@ -112,29 +156,29 @@ internal sealed partial class ContainerRuntimeCommandService
             }
         }
 
-        if (Directory.Exists(linkPath) && !await IsSymlinkAsync(linkPath).ConfigureAwait(false))
+        if (Directory.Exists(linkPath) && !await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
         {
             if (!removeFirst)
             {
                 stats.Errors++;
-                await stderr.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
                 return;
             }
 
             if (mode == LinkRepairMode.DryRun)
             {
-                await LogInfoAsync(quiet, $"[WOULD] Remove directory: {linkPath}").ConfigureAwait(false);
+                await context.LogInfoAsync(quiet, $"[WOULD] Remove directory: {linkPath}").ConfigureAwait(false);
             }
             else
             {
                 Directory.Delete(linkPath, recursive: true);
             }
         }
-        else if (File.Exists(linkPath) || await IsSymlinkAsync(linkPath).ConfigureAwait(false))
+        else if (File.Exists(linkPath) || await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
         {
             if (mode == LinkRepairMode.DryRun)
             {
-                await LogInfoAsync(quiet, $"[WOULD] Replace path: {linkPath}").ConfigureAwait(false);
+                await context.LogInfoAsync(quiet, $"[WOULD] Replace path: {linkPath}").ConfigureAwait(false);
             }
             else
             {
@@ -144,37 +188,13 @@ internal sealed partial class ContainerRuntimeCommandService
 
         if (mode == LinkRepairMode.DryRun)
         {
-            await LogInfoAsync(quiet, $"[WOULD] Create symlink: {linkPath} -> {targetPath}").ConfigureAwait(false);
+            await context.LogInfoAsync(quiet, $"[WOULD] Create symlink: {linkPath} -> {targetPath}").ConfigureAwait(false);
             stats.Fixed++;
             return;
         }
 
         File.CreateSymbolicLink(linkPath, targetPath);
-        await LogInfoAsync(quiet, $"[FIXED] {linkPath} -> {targetPath}").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"[FIXED] {linkPath} -> {targetPath}").ConfigureAwait(false);
         stats.Fixed++;
-    }
-
-    private async Task WriteLinkRepairSummaryAsync(LinkRepairMode mode, LinkRepairStats stats, bool quiet)
-    {
-        if (quiet)
-        {
-            return;
-        }
-
-        await stdout.WriteLineAsync().ConfigureAwait(false);
-        await stdout.WriteLineAsync(mode == LinkRepairMode.DryRun ? "=== Dry-Run Summary ===" : "=== Link Status Summary ===").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"  OK:      {stats.Ok}").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"  Broken:  {stats.Broken}").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"  Missing: {stats.Missing}").ConfigureAwait(false);
-        if (mode == LinkRepairMode.Fix)
-        {
-            await stdout.WriteLineAsync($"  Fixed:   {stats.Fixed}").ConfigureAwait(false);
-        }
-        else if (mode == LinkRepairMode.DryRun)
-        {
-            await stdout.WriteLineAsync($"  Would fix: {stats.Fixed}").ConfigureAwait(false);
-        }
-
-        await stdout.WriteLineAsync($"  Errors:  {stats.Errors}").ConfigureAwait(false);
     }
 }

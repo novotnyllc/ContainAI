@@ -1,18 +1,23 @@
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal sealed class ContainerRuntimeDevcontainerCommandHandler : IContainerRuntimeDevcontainerCommandHandler
 {
-    private Task<int> RunSystemDevcontainerInstallCoreAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
+    private readonly DevcontainerFeatureRuntime devcontainerRuntime;
+
+    public ContainerRuntimeDevcontainerCommandHandler(DevcontainerFeatureRuntime devcontainerRuntime)
+        => this.devcontainerRuntime = devcontainerRuntime ?? throw new ArgumentNullException(nameof(devcontainerRuntime));
+
+    public Task<int> InstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
         => devcontainerRuntime.RunInstallAsync(options, cancellationToken);
 
-    private Task<int> RunSystemDevcontainerInitCoreAsync(CancellationToken cancellationToken)
+    public Task<int> InitAsync(CancellationToken cancellationToken)
         => devcontainerRuntime.RunInitAsync(cancellationToken);
 
-    private Task<int> RunSystemDevcontainerStartCoreAsync(CancellationToken cancellationToken)
+    public Task<int> StartAsync(CancellationToken cancellationToken)
         => devcontainerRuntime.RunStartAsync(cancellationToken);
 
-    private Task<int> RunSystemDevcontainerVerifySysboxCoreAsync(CancellationToken cancellationToken)
+    public Task<int> VerifySysboxAsync(CancellationToken cancellationToken)
         => devcontainerRuntime.RunVerifySysboxAsync(cancellationToken);
 }

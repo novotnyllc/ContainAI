@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class CaiImportService : CaiRuntimeSupport
+internal sealed class CaiImportService : CaiRuntimeSupport
 {
     private readonly IImportOrchestrationOperations orchestrationOperations;
 

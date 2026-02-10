@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.Importing.Environment;
 
 namespace ContainAI.Cli.Host;
 
@@ -13,13 +14,24 @@ internal interface IImportEnvironmentOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed partial class CaiImportEnvironmentOperations : CaiRuntimeSupport
+internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
     , IImportEnvironmentOperations
 {
+    internal const string EnvTargetSymlinkGuardMessage = ".env target is symlink";
+
+    private readonly IImportEnvironmentValueOperations environmentValueOperations;
+
     public CaiImportEnvironmentOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
+        : this(standardOutput, standardError, new ImportEnvironmentValueOperations(standardOutput, standardError))
     {
     }
+
+    internal CaiImportEnvironmentOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportEnvironmentValueOperations importEnvironmentValueOperations)
+        : base(standardOutput, standardError)
+        => environmentValueOperations = importEnvironmentValueOperations ?? throw new ArgumentNullException(nameof(importEnvironmentValueOperations));
 
     public async Task<int> ImportEnvironmentVariablesAsync(
         string volume,
@@ -66,21 +78,21 @@ internal sealed partial class CaiImportEnvironmentOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var validatedKeys = await ResolveValidatedImportKeysAsync(envSection, verbose, cancellationToken).ConfigureAwait(false);
+        var validatedKeys = await environmentValueOperations.ResolveValidatedImportKeysAsync(envSection, verbose, cancellationToken).ConfigureAwait(false);
         if (validatedKeys.Count == 0)
         {
             return 0;
         }
 
         var workspaceRoot = Path.GetFullPath(ExpandHomePath(workspace));
-        var fileVariables = await ResolveFileVariablesAsync(envSection, workspaceRoot, validatedKeys, cancellationToken).ConfigureAwait(false);
+        var fileVariables = await environmentValueOperations.ResolveFileVariablesAsync(envSection, workspaceRoot, validatedKeys, cancellationToken).ConfigureAwait(false);
         if (fileVariables is null)
         {
             return 1;
         }
 
-        var fromHost = await ResolveFromHostFlagAsync(envSection, cancellationToken).ConfigureAwait(false);
-        var merged = await MergeVariablesWithHostValuesAsync(fileVariables, validatedKeys, fromHost, cancellationToken).ConfigureAwait(false);
+        var fromHost = await environmentValueOperations.ResolveFromHostFlagAsync(envSection, cancellationToken).ConfigureAwait(false);
+        var merged = await environmentValueOperations.MergeVariablesWithHostValuesAsync(fileVariables, validatedKeys, fromHost, cancellationToken).ConfigureAwait(false);
 
         if (merged.Count == 0)
         {
@@ -97,6 +109,6 @@ internal sealed partial class CaiImportEnvironmentOperations : CaiRuntimeSupport
             return 0;
         }
 
-        return await PersistMergedEnvironmentAsync(volume, validatedKeys, merged, cancellationToken).ConfigureAwait(false);
+        return await environmentValueOperations.PersistMergedEnvironmentAsync(volume, validatedKeys, merged, cancellationToken).ConfigureAwait(false);
     }
 }

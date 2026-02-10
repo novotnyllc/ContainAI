@@ -1,11 +1,17 @@
 using System.Text;
 using System.Text.Json;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Importing.Environment;
 
-internal sealed partial class CaiImportEnvironmentOperations
+internal sealed class ImportEnvironmentValueOperations : CaiRuntimeSupport
+    , IImportEnvironmentValueOperations
 {
-    private async Task<List<string>> ResolveValidatedImportKeysAsync(JsonElement envSection, bool verbose, CancellationToken cancellationToken)
+    public ImportEnvironmentValueOperations(TextWriter standardOutput, TextWriter standardError)
+        : base(standardOutput, standardError)
+    {
+    }
+
+    public async Task<List<string>> ResolveValidatedImportKeysAsync(JsonElement envSection, bool verbose, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -75,7 +81,7 @@ internal sealed partial class CaiImportEnvironmentOperations
         return validatedKeys;
     }
 
-    private async Task<Dictionary<string, string>?> ResolveFileVariablesAsync(
+    public async Task<Dictionary<string, string>?> ResolveFileVariablesAsync(
         JsonElement envSection,
         string workspaceRoot,
         IReadOnlyCollection<string> validatedKeys,
@@ -118,7 +124,7 @@ internal sealed partial class CaiImportEnvironmentOperations
         return fileVariables;
     }
 
-    private async Task<bool> ResolveFromHostFlagAsync(JsonElement envSection, CancellationToken cancellationToken)
+    public async Task<bool> ResolveFromHostFlagAsync(JsonElement envSection, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -138,7 +144,7 @@ internal sealed partial class CaiImportEnvironmentOperations
         return false;
     }
 
-    private async Task<Dictionary<string, string>> MergeVariablesWithHostValuesAsync(
+    public async Task<Dictionary<string, string>> MergeVariablesWithHostValuesAsync(
         Dictionary<string, string> fileVariables,
         IReadOnlyList<string> validatedKeys,
         bool fromHost,
@@ -159,7 +165,7 @@ internal sealed partial class CaiImportEnvironmentOperations
 
         foreach (var key in validatedKeys)
         {
-            var envValue = Environment.GetEnvironmentVariable(key);
+            var envValue = System.Environment.GetEnvironmentVariable(key);
             if (envValue is null)
             {
                 await stderr.WriteLineAsync($"[WARN] Missing host env var: {key}").ConfigureAwait(false);
@@ -178,7 +184,7 @@ internal sealed partial class CaiImportEnvironmentOperations
         return merged;
     }
 
-    private async Task<int> PersistMergedEnvironmentAsync(
+    public async Task<int> PersistMergedEnvironmentAsync(
         string volume,
         IReadOnlyList<string> validatedKeys,
         Dictionary<string, string> merged,
@@ -198,7 +204,7 @@ internal sealed partial class CaiImportEnvironmentOperations
             builder.Append('\n');
         }
 
-        var writeCommand = "set -e; target='/mnt/agent-data/.env'; if [ -L \"$target\" ]; then echo '.env target is symlink' >&2; exit 1; fi; " +
+        var writeCommand = $"set -e; target='/mnt/agent-data/.env'; if [ -L \"$target\" ]; then echo '{EscapeForSingleQuotedShell(CaiImportEnvironmentOperations.EnvTargetSymlinkGuardMessage)}' >&2; exit 1; fi; " +
                            "tmp='/mnt/agent-data/.env.tmp'; cat > \"$tmp\"; chmod 600 \"$tmp\"; chown 1000:1000 \"$tmp\" || true; mv -f \"$tmp\" \"$target\"";
         var write = await DockerCaptureAsync(
             ["run", "--rm", "-i", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", writeCommand],

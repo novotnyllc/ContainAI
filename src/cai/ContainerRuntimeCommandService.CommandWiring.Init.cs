@@ -1,62 +1,32 @@
-using System.Text.Json;
-using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+using ContainAI.Cli.Host;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal sealed class ContainerRuntimeInitCommandHandler : IContainerRuntimeInitCommandHandler
 {
-    private async Task<int> RunInitCoreAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
-    {
-        var parsed = optionParser.ParseInitCommandOptions(options);
-        var quiet = parsed.Quiet;
-        var dataDir = parsed.DataDir;
-        var homeDir = parsed.HomeDir;
-        var manifestsDir = parsed.ManifestsDir;
-        var templateHooksDir = parsed.TemplateHooksDir;
-        var workspaceHooksDir = parsed.WorkspaceHooksDir;
-        var workspaceDir = parsed.WorkspaceDir;
+    private readonly IContainerRuntimeExecutionContext context;
+    private readonly IContainerRuntimeInitializationWorkflow workflow;
 
+    public ContainerRuntimeInitCommandHandler(
+        IContainerRuntimeExecutionContext context,
+        IContainerRuntimeInitializationWorkflow workflow)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.workflow = workflow ?? throw new ArgumentNullException(nameof(workflow));
+    }
+
+    public async Task<int> HandleAsync(InitCommandParsing options, CancellationToken cancellationToken)
+    {
         try
         {
-            await LogInfoAsync(quiet, "ContainAI initialization starting...").ConfigureAwait(false);
-
-            await UpdateAgentPasswordAsync().ConfigureAwait(false);
-            await EnsureVolumeStructureAsync(dataDir, manifestsDir, quiet).ConfigureAwait(false);
-            await LoadEnvFileAsync(Path.Combine(dataDir, ".env"), quiet).ConfigureAwait(false);
-            await MigrateGitConfigAsync(dataDir, quiet).ConfigureAwait(false);
-            await SetupGitConfigAsync(dataDir, homeDir, quiet).ConfigureAwait(false);
-            await SetupWorkspaceSymlinkAsync(workspaceDir, quiet).ConfigureAwait(false);
-            await ProcessUserManifestsAsync(dataDir, homeDir, quiet).ConfigureAwait(false);
-
-            await RunHooksAsync(templateHooksDir, workspaceDir, homeDir, quiet, cancellationToken).ConfigureAwait(false);
-            await RunHooksAsync(workspaceHooksDir, workspaceDir, homeDir, quiet, cancellationToken).ConfigureAwait(false);
-
-            await LogInfoAsync(quiet, "ContainAI initialization complete").ConfigureAwait(false);
+            await workflow.RunAsync(options, cancellationToken).ConfigureAwait(false);
             return 0;
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ContainerRuntimeExceptionHandling.IsHandled(ex))
         {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (IOException ex)
-        {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (JsonException ex)
-        {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (ArgumentException ex)
-        {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (NotSupportedException ex)
-        {
-            return await WriteInitErrorAsync(ex).ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"[ERROR] {ex.Message}").ConfigureAwait(false);
+            return 1;
         }
     }
 }

@@ -1,12 +1,24 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
-internal sealed partial class ContainerRuntimeCommandService
+namespace ContainAI.Cli.Host.ContainerRuntime.Services;
+
+internal interface IContainerRuntimeEnvironmentFileLoader
 {
-    private async Task LoadEnvFileAsync(string envFilePath, bool quiet)
+    Task LoadEnvFileAsync(string envFilePath, bool quiet);
+}
+
+internal sealed class ContainerRuntimeEnvironmentFileLoader : IContainerRuntimeEnvironmentFileLoader
+{
+    private readonly IContainerRuntimeExecutionContext context;
+
+    public ContainerRuntimeEnvironmentFileLoader(IContainerRuntimeExecutionContext context)
+        => this.context = context ?? throw new ArgumentNullException(nameof(context));
+
+    public async Task LoadEnvFileAsync(string envFilePath, bool quiet)
     {
-        if (await IsSymlinkAsync(envFilePath).ConfigureAwait(false))
+        if (await context.IsSymlinkAsync(envFilePath).ConfigureAwait(false))
         {
-            await stderr.WriteLineAsync("[WARN] .env is symlink - skipping").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync("[WARN] .env is symlink - skipping").ConfigureAwait(false);
             return;
         }
 
@@ -21,16 +33,16 @@ internal sealed partial class ContainerRuntimeCommandService
         }
         catch (IOException)
         {
-            await stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
             return;
         }
         catch (UnauthorizedAccessException)
         {
-            await stderr.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync("[WARN] .env unreadable - skipping").ConfigureAwait(false);
             return;
         }
 
-        await LogInfoAsync(quiet, "Loading environment from .env").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, "Loading environment from .env").ConfigureAwait(false);
 
         var lines = await File.ReadAllLinesAsync(envFilePath).ConfigureAwait(false);
         for (var index = 0; index < lines.Length; index++)
@@ -61,7 +73,7 @@ internal sealed partial class ContainerRuntimeCommandService
             var value = line[(separator + 1)..];
             if (!IsValidEnvKey(key))
             {
-                await stderr.WriteLineAsync($"[WARN] line {index + 1}: invalid key '{key}' - skipping").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync($"[WARN] line {index + 1}: invalid key '{key}' - skipping").ConfigureAwait(false);
                 continue;
             }
 

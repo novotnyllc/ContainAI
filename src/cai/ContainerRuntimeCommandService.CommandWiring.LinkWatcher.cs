@@ -1,72 +1,80 @@
-using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.ContainerRuntime.Configuration;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+using ContainAI.Cli.Host.ContainerRuntime.Models;
+using ContainAI.Cli.Host;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal sealed class ContainerRuntimeWatchLinksCommandHandler : IContainerRuntimeWatchLinksCommandHandler
 {
-    private async Task<int> RunLinkWatcherCoreAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
+    private readonly IContainerRuntimeExecutionContext context;
+    private readonly IContainerRuntimeLinkRepairCommandHandler linkRepairCommandHandler;
+
+    public ContainerRuntimeWatchLinksCommandHandler(
+        IContainerRuntimeExecutionContext context,
+        IContainerRuntimeLinkRepairCommandHandler linkRepairCommandHandler)
     {
-        var parsed = optionParser.ParseWatchLinksCommandOptions(options);
-        if (!parsed.IsValid)
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.linkRepairCommandHandler = linkRepairCommandHandler ?? throw new ArgumentNullException(nameof(linkRepairCommandHandler));
+    }
+
+    public async Task<int> HandleAsync(WatchLinksCommandParsing options, CancellationToken cancellationToken)
+    {
+        if (!options.IsValid)
         {
-            await stderr.WriteLineAsync(parsed.ErrorMessage).ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync(options.ErrorMessage).ConfigureAwait(false);
             return 1;
         }
 
-        var pollIntervalSeconds = parsed.PollIntervalSeconds;
-        var importedAtPath = parsed.ImportedAtPath;
-        var checkedAtPath = parsed.CheckedAtPath;
-        var quiet = parsed.Quiet;
-
-        await LogInfoAsync(quiet, $"Link watcher started (poll interval: {pollIntervalSeconds}s)").ConfigureAwait(false);
-        await LogInfoAsync(quiet, $"Watching: {importedAtPath} vs {checkedAtPath}").ConfigureAwait(false);
+        await context.LogInfoAsync(options.Quiet, $"Link watcher started (poll interval: {options.PollIntervalSeconds}s)").ConfigureAwait(false);
+        await context.LogInfoAsync(options.Quiet, $"Watching: {options.ImportedAtPath} vs {options.CheckedAtPath}").ConfigureAwait(false);
 
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(options.PollIntervalSeconds), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
 
-            if (!File.Exists(importedAtPath))
+            if (!File.Exists(options.ImportedAtPath))
             {
                 continue;
             }
 
-            var importedTimestamp = await TryReadTrimmedTextAsync(importedAtPath).ConfigureAwait(false);
+            var importedTimestamp = await context.TryReadTrimmedTextAsync(options.ImportedAtPath).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(importedTimestamp))
             {
                 continue;
             }
 
-            var checkedTimestamp = await TryReadTrimmedTextAsync(checkedAtPath).ConfigureAwait(false) ?? string.Empty;
+            var checkedTimestamp = await context.TryReadTrimmedTextAsync(options.CheckedAtPath).ConfigureAwait(false) ?? string.Empty;
             if (!string.IsNullOrEmpty(checkedTimestamp) && string.CompareOrdinal(importedTimestamp, checkedTimestamp) <= 0)
             {
                 continue;
             }
 
-            await LogInfoAsync(quiet, $"Import newer than last check (imported={importedTimestamp}, checked={(string.IsNullOrWhiteSpace(checkedTimestamp) ? "never" : checkedTimestamp)}), running repair...").ConfigureAwait(false);
-            var exitCode = await RunLinkRepairCoreAsync(
-                new SystemLinkRepairCommandOptions(
-                    Check: false,
-                    Fix: true,
-                    DryRun: false,
+            await context.LogInfoAsync(
+                options.Quiet,
+                $"Import newer than last check (imported={importedTimestamp}, checked={(string.IsNullOrWhiteSpace(checkedTimestamp) ? "never" : checkedTimestamp)}), running repair...").ConfigureAwait(false);
+            var exitCode = await linkRepairCommandHandler.HandleAsync(
+                new LinkRepairCommandParsing(
+                    Mode: LinkRepairMode.Fix,
                     Quiet: true,
-                    BuiltinSpec: null,
-                    UserSpec: null,
-                    CheckedAtFile: checkedAtPath),
+                    BuiltinSpecPath: ContainerRuntimeDefaults.DefaultBuiltinLinkSpec,
+                    UserSpecPath: ContainerRuntimeDefaults.DefaultUserLinkSpec,
+                    CheckedAtFilePath: options.CheckedAtPath),
                 cancellationToken).ConfigureAwait(false);
             if (exitCode == 0)
             {
-                await LogInfoAsync(quiet, "Repair completed successfully").ConfigureAwait(false);
+                await context.LogInfoAsync(options.Quiet, "Repair completed successfully").ConfigureAwait(false);
             }
             else
             {
-                await stderr.WriteLineAsync("[ERROR] Repair command failed").ConfigureAwait(false);
+                await context.StandardError.WriteLineAsync("[ERROR] Repair command failed").ConfigureAwait(false);
             }
         }
 

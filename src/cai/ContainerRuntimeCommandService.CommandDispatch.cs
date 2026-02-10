@@ -1,39 +1,30 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal interface IContainerRuntimeInitCommandHandler
 {
-    public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return RunInitCoreAsync(options, cancellationToken);
-    }
+    Task<int> HandleAsync(InitCommandParsing options, CancellationToken cancellationToken);
+}
 
-    public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return RunLinkRepairCoreAsync(options, cancellationToken);
-    }
+internal interface IContainerRuntimeLinkRepairCommandHandler
+{
+    Task<int> HandleAsync(LinkRepairCommandParsing options, CancellationToken cancellationToken);
+}
 
-    public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return RunLinkWatcherCoreAsync(options, cancellationToken);
-    }
+internal interface IContainerRuntimeWatchLinksCommandHandler
+{
+    Task<int> HandleAsync(WatchLinksCommandParsing options, CancellationToken cancellationToken);
+}
 
-    public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return RunSystemDevcontainerInstallCoreAsync(options, cancellationToken);
-    }
+internal interface IContainerRuntimeDevcontainerCommandHandler
+{
+    Task<int> InstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken);
 
-    public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
-        => RunSystemDevcontainerInitCoreAsync(cancellationToken);
+    Task<int> InitAsync(CancellationToken cancellationToken);
 
-    public Task<int> RunSystemDevcontainerStartAsync(CancellationToken cancellationToken)
-        => RunSystemDevcontainerStartCoreAsync(cancellationToken);
+    Task<int> StartAsync(CancellationToken cancellationToken);
 
-    public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
-        => RunSystemDevcontainerVerifySysboxCoreAsync(cancellationToken);
+    Task<int> VerifySysboxAsync(CancellationToken cancellationToken);
 }

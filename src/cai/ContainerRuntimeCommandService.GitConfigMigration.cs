@@ -1,14 +1,28 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
-internal sealed partial class ContainerRuntimeCommandService
+namespace ContainAI.Cli.Host.ContainerRuntime.Services;
+
+internal interface IContainerRuntimeGitConfigService
 {
-    private async Task MigrateGitConfigAsync(string dataDir, bool quiet)
+    Task MigrateGitConfigAsync(string dataDir, bool quiet);
+
+    Task SetupGitConfigAsync(string dataDir, string homeDir, bool quiet);
+}
+
+internal sealed class ContainerRuntimeGitConfigService : IContainerRuntimeGitConfigService
+{
+    private readonly IContainerRuntimeExecutionContext context;
+
+    public ContainerRuntimeGitConfigService(IContainerRuntimeExecutionContext context)
+        => this.context = context ?? throw new ArgumentNullException(nameof(context));
+
+    public async Task MigrateGitConfigAsync(string dataDir, bool quiet)
     {
         var oldPath = Path.Combine(dataDir, ".gitconfig");
         var newDir = Path.Combine(dataDir, "git");
         var newPath = Path.Combine(newDir, "gitconfig");
 
-        if (!File.Exists(oldPath) || await IsSymlinkAsync(oldPath).ConfigureAwait(false))
+        if (!File.Exists(oldPath) || await context.IsSymlinkAsync(oldPath).ConfigureAwait(false))
         {
             return;
         }
@@ -25,16 +39,16 @@ internal sealed partial class ContainerRuntimeCommandService
             return;
         }
 
-        if (await IsSymlinkAsync(newDir).ConfigureAwait(false))
+        if (await context.IsSymlinkAsync(newDir).ConfigureAwait(false))
         {
-            await stderr.WriteLineAsync($"[WARN] {newDir} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"[WARN] {newDir} is a symlink - cannot migrate git config").ConfigureAwait(false);
             return;
         }
 
         Directory.CreateDirectory(newDir);
-        if (await IsSymlinkAsync(newPath).ConfigureAwait(false))
+        if (await context.IsSymlinkAsync(newPath).ConfigureAwait(false))
         {
-            await stderr.WriteLineAsync($"[WARN] {newPath} is a symlink - cannot migrate git config").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"[WARN] {newPath} is a symlink - cannot migrate git config").ConfigureAwait(false);
             return;
         }
 
@@ -42,13 +56,13 @@ internal sealed partial class ContainerRuntimeCommandService
         File.Copy(oldPath, tempPath, overwrite: true);
         File.Move(tempPath, newPath, overwrite: true);
         File.Delete(oldPath);
-        await LogInfoAsync(quiet, $"Migrated git config from {oldPath} to {newPath}").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"Migrated git config from {oldPath} to {newPath}").ConfigureAwait(false);
     }
 
-    private async Task SetupGitConfigAsync(string dataDir, string homeDir, bool quiet)
+    public async Task SetupGitConfigAsync(string dataDir, string homeDir, bool quiet)
     {
         var destination = Path.Combine(homeDir, ".gitconfig");
-        if (await IsSymlinkAsync(destination).ConfigureAwait(false))
+        if (await context.IsSymlinkAsync(destination).ConfigureAwait(false))
         {
             return;
         }
@@ -61,13 +75,13 @@ internal sealed partial class ContainerRuntimeCommandService
 
         if (Directory.Exists(destination))
         {
-            await stderr.WriteLineAsync($"[WARN] Destination {destination} exists but is not a regular file - skipping").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"[WARN] Destination {destination} exists but is not a regular file - skipping").ConfigureAwait(false);
             return;
         }
 
         var tempDestination = $"{destination}.tmp.{Environment.ProcessId}";
         File.Copy(source, tempDestination, overwrite: true);
         File.Move(tempDestination, destination, overwrite: true);
-        await LogInfoAsync(quiet, "Git config loaded from data volume").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, "Git config loaded from data volume").ConfigureAwait(false);
     }
 }

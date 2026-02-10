@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.Importing.Transfer;
+
 namespace ContainAI.Cli.Host;
 
 internal interface IImportTransferOperations
@@ -37,34 +39,37 @@ internal interface IImportTransferOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed partial class CaiImportTransferOperations : CaiRuntimeSupport
+internal sealed class CaiImportTransferOperations : CaiRuntimeSupport
     , IImportTransferOperations
 {
-    private readonly IImportPostCopyOperations postCopyOperations;
-    private readonly IImportSymlinkRelinker symlinkRelinker;
+    private readonly IImportArchiveTransferOperations archiveTransferOperations;
+    private readonly IImportManifestTransferOperations manifestTransferOperations;
+    private readonly IImportOverrideTransferOperations overrideTransferOperations;
 
     public CaiImportTransferOperations(TextWriter standardOutput, TextWriter standardError)
         : this(
             standardOutput,
             standardError,
-            new CaiImportPostCopyOperations(standardOutput, standardError),
-            new CaiImportSymlinkRelinker(standardOutput, standardError))
+            new ImportArchiveTransferOperations(standardOutput, standardError),
+            new ImportManifestTransferOperations(standardOutput, standardError),
+            new ImportOverrideTransferOperations(standardOutput, standardError))
     {
     }
 
     internal CaiImportTransferOperations(
         TextWriter standardOutput,
         TextWriter standardError,
-        IImportPostCopyOperations importPostCopyOperations,
-        IImportSymlinkRelinker importSymlinkRelinker)
+        IImportArchiveTransferOperations importArchiveTransferOperations,
+        IImportManifestTransferOperations importManifestTransferOperations,
+        IImportOverrideTransferOperations importOverrideTransferOperations)
         : base(standardOutput, standardError)
-    {
-        postCopyOperations = importPostCopyOperations;
-        symlinkRelinker = importSymlinkRelinker;
-    }
+        => (archiveTransferOperations, manifestTransferOperations, overrideTransferOperations) = (
+            importArchiveTransferOperations ?? throw new ArgumentNullException(nameof(importArchiveTransferOperations)),
+            importManifestTransferOperations ?? throw new ArgumentNullException(nameof(importManifestTransferOperations)),
+            importOverrideTransferOperations ?? throw new ArgumentNullException(nameof(importOverrideTransferOperations)));
 
     public Task<int> RestoreArchiveImportAsync(string volume, string archivePath, bool excludePriv, CancellationToken cancellationToken)
-        => RestoreArchiveImportCoreAsync(volume, archivePath, excludePriv, cancellationToken);
+        => archiveTransferOperations.RestoreArchiveImportAsync(volume, archivePath, excludePriv, cancellationToken);
 
     public Task<int> InitializeImportTargetsAsync(
         string volume,
@@ -72,7 +77,7 @@ internal sealed partial class CaiImportTransferOperations : CaiRuntimeSupport
         IReadOnlyList<ManifestEntry> entries,
         bool noSecrets,
         CancellationToken cancellationToken)
-        => InitializeImportTargetsCoreAsync(volume, sourceRoot, entries, noSecrets, cancellationToken);
+        => manifestTransferOperations.InitializeImportTargetsAsync(volume, sourceRoot, entries, noSecrets, cancellationToken);
 
     public Task<int> ImportManifestEntryAsync(
         string volume,
@@ -83,7 +88,7 @@ internal sealed partial class CaiImportTransferOperations : CaiRuntimeSupport
         bool dryRun,
         bool verbose,
         CancellationToken cancellationToken)
-        => ImportManifestEntryCoreAsync(
+        => manifestTransferOperations.ImportManifestEntryAsync(
             volume,
             sourceRoot,
             entry,
@@ -99,7 +104,7 @@ internal sealed partial class CaiImportTransferOperations : CaiRuntimeSupport
         bool noSecrets,
         bool verbose,
         CancellationToken cancellationToken)
-        => postCopyOperations.EnforceSecretPathPermissionsAsync(volume, manifestEntries, noSecrets, verbose, cancellationToken);
+        => manifestTransferOperations.EnforceSecretPathPermissionsAsync(volume, manifestEntries, noSecrets, verbose, cancellationToken);
 
     public Task<int> ApplyImportOverridesAsync(
         string volume,
@@ -108,5 +113,5 @@ internal sealed partial class CaiImportTransferOperations : CaiRuntimeSupport
         bool dryRun,
         bool verbose,
         CancellationToken cancellationToken)
-        => ApplyImportOverridesCoreAsync(volume, manifestEntries, noSecrets, dryRun, verbose, cancellationToken);
+        => overrideTransferOperations.ApplyImportOverridesAsync(volume, manifestEntries, noSecrets, dryRun, verbose, cancellationToken);
 }

@@ -1,6 +1,7 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.ContainerRuntime.Models;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Configuration;
 
 internal static class ContainerRuntimeDefaults
 {

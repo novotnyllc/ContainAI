@@ -1,103 +1,75 @@
-using System.Text.Json;
-using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+using ContainAI.Cli.Host.ContainerRuntime.Models;
+using ContainAI.Cli.Host;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal sealed partial class ContainerRuntimeCommandService
+internal sealed class ContainerRuntimeLinkRepairCommandHandler : IContainerRuntimeLinkRepairCommandHandler
 {
-    private async Task<int> RunLinkRepairCoreAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
-    {
-        var parsed = optionParser.ParseLinkRepairCommandOptions(options);
-        var mode = parsed.Mode;
-        var quiet = parsed.Quiet;
-        var builtinSpecPath = parsed.BuiltinSpecPath;
-        var userSpecPath = parsed.UserSpecPath;
-        var checkedAtFilePath = parsed.CheckedAtFilePath;
+    private readonly IContainerRuntimeExecutionContext context;
+    private readonly IContainerRuntimeLinkSpecProcessor linkSpecProcessor;
 
-        if (!File.Exists(builtinSpecPath))
+    public ContainerRuntimeLinkRepairCommandHandler(
+        IContainerRuntimeExecutionContext context,
+        IContainerRuntimeLinkSpecProcessor linkSpecProcessor)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.linkSpecProcessor = linkSpecProcessor ?? throw new ArgumentNullException(nameof(linkSpecProcessor));
+    }
+
+    public async Task<int> HandleAsync(LinkRepairCommandParsing options, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(options.BuiltinSpecPath))
         {
-            await stderr.WriteLineAsync($"ERROR: Built-in link spec not found: {builtinSpecPath}").ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"ERROR: Built-in link spec not found: {options.BuiltinSpecPath}").ConfigureAwait(false);
             return 1;
         }
 
         var stats = new LinkRepairStats();
         try
         {
-            await ProcessLinkSpecAsync(builtinSpecPath, mode, quiet, "built-in links", stats, cancellationToken).ConfigureAwait(false);
-            if (File.Exists(userSpecPath))
+            await linkSpecProcessor.ProcessLinkSpecAsync(options.BuiltinSpecPath, options.Mode, options.Quiet, "built-in links", stats, cancellationToken).ConfigureAwait(false);
+            if (File.Exists(options.UserSpecPath))
             {
                 try
                 {
-                    await ProcessLinkSpecAsync(userSpecPath, mode, quiet, "user-defined links", stats, cancellationToken).ConfigureAwait(false);
+                    await linkSpecProcessor.ProcessLinkSpecAsync(options.UserSpecPath, options.Mode, options.Quiet, "user-defined links", stats, cancellationToken).ConfigureAwait(false);
                 }
-                catch (InvalidOperationException ex)
-                {
-                    await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
-                }
-                catch (IOException ex)
-                {
-                    await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
-                }
-                catch (JsonException ex)
-                {
-                    await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
-                }
-                catch (ArgumentException ex)
-                {
-                    await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
-                }
-                catch (NotSupportedException ex)
+                catch (Exception ex) when (ContainerRuntimeExceptionHandling.IsHandled(ex))
                 {
                     await WriteUserLinkSpecWarningAsync(stats, ex).ConfigureAwait(false);
                 }
             }
 
-            if (mode == LinkRepairMode.Fix && stats.Errors == 0)
+            if (options.Mode == LinkRepairMode.Fix && stats.Errors == 0)
             {
-                await WriteTimestampAsync(checkedAtFilePath).ConfigureAwait(false);
-                await LogInfoAsync(quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
+                await context.WriteTimestampAsync(options.CheckedAtFilePath).ConfigureAwait(false);
+                await context.LogInfoAsync(options.Quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
             }
 
-            await WriteLinkRepairSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
+            await linkSpecProcessor.WriteSummaryAsync(options.Mode, stats, options.Quiet).ConfigureAwait(false);
             if (stats.Errors > 0)
             {
                 return 1;
             }
 
-            if (mode == LinkRepairMode.Check && (stats.Broken + stats.Missing) > 0)
+            if (options.Mode == LinkRepairMode.Check && (stats.Broken + stats.Missing) > 0)
             {
                 return 1;
             }
 
             return 0;
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ContainerRuntimeExceptionHandling.IsHandled(ex))
         {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
+            await context.StandardError.WriteLineAsync($"ERROR: {ex.Message}").ConfigureAwait(false);
+            return 1;
         }
-        catch (IOException ex)
-        {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (JsonException ex)
-        {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (ArgumentException ex)
-        {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
-        }
-        catch (NotSupportedException ex)
-        {
-            return await WriteLinkRepairErrorAsync(ex).ConfigureAwait(false);
-        }
+    }
+
+    private async Task WriteUserLinkSpecWarningAsync(LinkRepairStats stats, Exception exception)
+    {
+        stats.Errors++;
+        await context.StandardError.WriteLineAsync($"[WARN] Failed to process user link spec: {exception.Message}").ConfigureAwait(false);
     }
 }

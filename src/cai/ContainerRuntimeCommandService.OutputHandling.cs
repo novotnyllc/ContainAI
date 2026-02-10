@@ -1,22 +1,14 @@
-namespace ContainAI.Cli.Host;
+using System.Text.Json;
 
-internal sealed partial class ContainerRuntimeCommandService
+namespace ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
+
+internal static class ContainerRuntimeExceptionHandling
 {
-    private async Task<int> WriteInitErrorAsync(Exception exception)
-    {
-        await stderr.WriteLineAsync($"[ERROR] {exception.Message}").ConfigureAwait(false);
-        return 1;
-    }
-
-    private async Task WriteUserLinkSpecWarningAsync(LinkRepairStats stats, Exception exception)
-    {
-        stats.Errors++;
-        await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {exception.Message}").ConfigureAwait(false);
-    }
-
-    private async Task<int> WriteLinkRepairErrorAsync(Exception exception)
-    {
-        await stderr.WriteLineAsync($"ERROR: {exception.Message}").ConfigureAwait(false);
-        return 1;
-    }
+    public static bool IsHandled(Exception exception)
+        => exception is InvalidOperationException
+            or IOException
+            or UnauthorizedAccessException
+            or JsonException
+            or ArgumentException
+            or NotSupportedException;
 }

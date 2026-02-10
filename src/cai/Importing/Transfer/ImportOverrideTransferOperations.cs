@@ -1,8 +1,14 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal sealed partial class CaiImportTransferOperations
+internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
+    , IImportOverrideTransferOperations
 {
-    private async Task<int> ApplyImportOverridesCoreAsync(
+    public ImportOverrideTransferOperations(TextWriter standardOutput, TextWriter standardError)
+        : base(standardOutput, standardError)
+    {
+    }
+
+    public async Task<int> ApplyImportOverridesAsync(
         string volume,
         IReadOnlyList<ManifestEntry> manifestEntries,
         bool noSecrets,
@@ -84,12 +90,6 @@ internal sealed partial class CaiImportTransferOperations
 
         return 0;
     }
-
-    private static bool ShouldSkipForNoSecrets(ManifestEntry entry, bool noSecrets)
-        => noSecrets && IsSecretEntry(entry);
-
-    private static bool IsSecretEntry(ManifestEntry entry)
-        => entry.Flags.Contains('s', StringComparison.Ordinal);
 
     private static bool ShouldSkipOverrideForNoSecrets(string mappedFlags, bool noSecrets)
         => noSecrets && mappedFlags.Contains('s', StringComparison.Ordinal);
