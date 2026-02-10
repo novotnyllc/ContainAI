@@ -14,7 +14,7 @@ internal interface IContainerRuntimeLinkEntryRepairer
         LinkRepairStats stats);
 }
 
-internal sealed class ContainerRuntimeLinkEntryRepairer : IContainerRuntimeLinkEntryRepairer
+internal sealed partial class ContainerRuntimeLinkEntryRepairer : IContainerRuntimeLinkEntryRepairer
 {
     private readonly IContainerRuntimeExecutionContext context;
 
@@ -34,58 +34,13 @@ internal sealed class ContainerRuntimeLinkEntryRepairer : IContainerRuntimeLinkE
             return;
         }
 
-        var parent = Path.GetDirectoryName(linkPath);
-        if (!string.IsNullOrWhiteSpace(parent) && !Directory.Exists(parent))
+        await EnsureParentDirectoryAsync(linkPath, mode, quiet).ConfigureAwait(false);
+        var canContinue = await RemoveExistingPathIfNeededAsync(linkPath, removeFirst, mode, quiet, stats).ConfigureAwait(false);
+        if (!canContinue)
         {
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Create parent directory: {parent}").ConfigureAwait(false);
-            }
-            else
-            {
-                Directory.CreateDirectory(parent);
-            }
-        }
-
-        if (Directory.Exists(linkPath) && !await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
-        {
-            if (!removeFirst)
-            {
-                stats.Errors++;
-                await context.StandardError.WriteLineAsync($"ERROR: Cannot fix - directory exists without R flag: {linkPath}").ConfigureAwait(false);
-                return;
-            }
-
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Remove directory: {linkPath}").ConfigureAwait(false);
-            }
-            else
-            {
-                Directory.Delete(linkPath, recursive: true);
-            }
-        }
-        else if (File.Exists(linkPath) || await context.IsSymlinkAsync(linkPath).ConfigureAwait(false))
-        {
-            if (mode == LinkRepairMode.DryRun)
-            {
-                await context.LogInfoAsync(quiet, $"[WOULD] Replace path: {linkPath}").ConfigureAwait(false);
-            }
-            else
-            {
-                File.Delete(linkPath);
-            }
-        }
-
-        if (mode == LinkRepairMode.DryRun)
-        {
-            await context.LogInfoAsync(quiet, $"[WOULD] Create symlink: {linkPath} -> {targetPath}").ConfigureAwait(false);
-            stats.Fixed++;
             return;
         }
 
-        File.CreateSymbolicLink(linkPath, targetPath);
-        await context.LogInfoAsync(quiet, $"[FIXED] {linkPath} -> {targetPath}").ConfigureAwait(false);
-        stats.Fixed++;
+        await CreateSymlinkAsync(linkPath, targetPath, mode, quiet, stats).ConfigureAwait(false);
     }
 }
