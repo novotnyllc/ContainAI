@@ -5,7 +5,7 @@ internal interface IDevcontainerSysboxVerificationService
     Task<int> VerifySysboxAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class DevcontainerSysboxVerificationService(
+internal sealed partial class DevcontainerSysboxVerificationService(
     IDevcontainerProcessHelpers processHelpers,
     TextWriter standardOutput,
     TextWriter standardError) : IDevcontainerSysboxVerificationService
@@ -14,65 +14,27 @@ internal sealed class DevcontainerSysboxVerificationService(
     {
         var passed = 0;
         var sysboxfsFound = false;
-        await standardOutput.WriteLineAsync("ContainAI Sysbox Verification").ConfigureAwait(false);
-        await standardOutput.WriteLineAsync("--------------------------------").ConfigureAwait(false);
+        await WriteHeaderAsync(standardOutput).ConfigureAwait(false);
 
-        if (await processHelpers.IsSysboxFsMountedAsync(cancellationToken).ConfigureAwait(false))
+        if (await CheckSysboxFsAsync(processHelpers, standardOutput, cancellationToken).ConfigureAwait(false))
         {
             sysboxfsFound = true;
             passed++;
-            await standardOutput.WriteLineAsync("  [OK] Sysboxfs: mounted (REQUIRED)").ConfigureAwait(false);
-        }
-        else
-        {
-            await standardOutput.WriteLineAsync("  [FAIL] Sysboxfs: not found (REQUIRED)").ConfigureAwait(false);
         }
 
-        if (await processHelpers.HasUidMappingIsolationAsync(cancellationToken).ConfigureAwait(false))
+        if (await CheckUidMappingAsync(processHelpers, standardOutput, cancellationToken).ConfigureAwait(false))
         {
             passed++;
-            await standardOutput.WriteLineAsync("  [OK] UID mapping: sysbox user namespace").ConfigureAwait(false);
-        }
-        else
-        {
-            await standardOutput.WriteLineAsync("  [FAIL] UID mapping: 0->0 (not sysbox)").ConfigureAwait(false);
         }
 
-        if (await processHelpers.CommandSucceedsAsync("unshare", ["--user", "--map-root-user", "true"], cancellationToken).ConfigureAwait(false))
+        if (await CheckNestedUserNamespaceAsync(processHelpers, standardOutput, cancellationToken).ConfigureAwait(false))
         {
             passed++;
-            await standardOutput.WriteLineAsync("  [OK] Nested userns: allowed").ConfigureAwait(false);
-        }
-        else
-        {
-            await standardOutput.WriteLineAsync("  [FAIL] Nested userns: blocked").ConfigureAwait(false);
         }
 
-        var tempDirectory = Path.Combine(Path.GetTempPath(), $"containai-sysbox-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDirectory);
-        var mountSucceeded = await processHelpers.CommandSucceedsAsync("mount", ["-t", "tmpfs", "none", tempDirectory], cancellationToken).ConfigureAwait(false);
-        if (mountSucceeded)
+        if (await CheckCapabilitiesAsync(processHelpers, standardOutput, cancellationToken).ConfigureAwait(false))
         {
-            _ = await processHelpers.CommandSucceedsAsync("umount", [tempDirectory], cancellationToken).ConfigureAwait(false);
             passed++;
-            await standardOutput.WriteLineAsync("  [OK] Capabilities: CAP_SYS_ADMIN works").ConfigureAwait(false);
-        }
-        else
-        {
-            await standardOutput.WriteLineAsync("  [FAIL] Capabilities: mount denied").ConfigureAwait(false);
-        }
-
-        try
-        {
-            Directory.Delete(tempDirectory, recursive: true);
-        }
-        catch (IOException ex)
-        {
-            _ = ex;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            _ = ex;
         }
 
         await standardOutput.WriteLineAsync($"\nPassed: {passed} checks").ConfigureAwait(false);
