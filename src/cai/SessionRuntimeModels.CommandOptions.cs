@@ -1,0 +1,51 @@
+namespace ContainAI.Cli.Host;
+
+internal sealed record SessionCommandOptions(
+    SessionMode Mode,
+    string? Workspace,
+    string? DataVolume,
+    string? ExplicitConfig,
+    string? Container,
+    string? Template,
+    string? ImageTag,
+    string? Channel,
+    string? Memory,
+    string? Cpus,
+    string? Credentials,
+    bool AcknowledgeCredentialRisk,
+    bool Fresh,
+    bool Reset,
+    bool Force,
+    bool Detached,
+    bool Quiet,
+    bool Verbose,
+    bool Debug,
+    bool DryRun,
+    IReadOnlyList<string> CommandArgs,
+    List<string> EnvVars)
+{
+    public static SessionCommandOptions Create(SessionMode mode)
+        => new(
+            Mode: mode,
+            Workspace: null,
+            DataVolume: null,
+            ExplicitConfig: null,
+            Container: null,
+            Template: null,
+            ImageTag: null,
+            Channel: null,
+            Memory: null,
+            Cpus: null,
+            Credentials: null,
+            AcknowledgeCredentialRisk: false,
+            Fresh: false,
+            Reset: false,
+            Force: false,
+            Detached: false,
+            Quiet: false,
+            Verbose: false,
+            Debug: false,
+            DryRun: false,
+            CommandArgs: Array.Empty<string>(),
+            EnvVars: []);
+}
