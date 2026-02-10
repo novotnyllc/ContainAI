@@ -1,7 +1,18 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class TomlCommandUpdater : ITomlCommandUpdater
+internal sealed class TomlCommandUpdater : ITomlCommandUpdater
 {
+    public string UpsertWorkspaceKey(string content, string workspacePath, string key, string value)
+        => TomlWorkspaceKeyUpdater.UpsertWorkspaceKey(content, workspacePath, key, value);
+
+    public string RemoveWorkspaceKey(string content, string workspacePath, string key)
+        => TomlWorkspaceKeyUpdater.RemoveWorkspaceKey(content, workspacePath, key);
+
+    public string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
+        => TomlGlobalKeyUpdater.UpsertGlobalKey(content, keyParts, formattedValue);
+
+    public string RemoveGlobalKey(string content, string[] keyParts)
+        => TomlGlobalKeyUpdater.RemoveGlobalKey(content, keyParts);
 }
 
 internal static class TomlCommandTextFormatter

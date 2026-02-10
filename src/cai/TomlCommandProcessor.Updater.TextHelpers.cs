@@ -1,10 +1,10 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class TomlCommandUpdater
+internal static class TomlCommandUpdaterLineHelpers
 {
-    private static bool IsAnyTableHeader(string trimmed) => trimmed.StartsWith('[');
+    public static bool IsAnyTableHeader(string trimmed) => trimmed.StartsWith('[');
 
-    private static bool IsTargetHeader(string trimmed, string header)
+    public static bool IsTargetHeader(string trimmed, string header)
     {
         if (string.Equals(trimmed, header, StringComparison.Ordinal))
         {
@@ -20,7 +20,7 @@ internal sealed partial class TomlCommandUpdater
         return false;
     }
 
-    private static bool IsTomlKeyAssignmentLine(string trimmedLine, string key)
+    public static bool IsTomlKeyAssignmentLine(string trimmedLine, string key)
     {
         if (string.IsNullOrWhiteSpace(trimmedLine) || string.IsNullOrWhiteSpace(key))
         {
@@ -43,7 +43,7 @@ internal sealed partial class TomlCommandUpdater
         return position < line.Length && line[position] == '=';
     }
 
-    private static bool SectionHasContent(List<string> lines, int start, int end)
+    public static bool SectionHasContent(List<string> lines, int start, int end)
     {
         for (var index = start; index < end && index < lines.Count; index++)
         {
@@ -57,7 +57,7 @@ internal sealed partial class TomlCommandUpdater
         return false;
     }
 
-    private static List<string> SplitLines(string content)
+    public static List<string> SplitLines(string content)
     {
         if (string.IsNullOrEmpty(content))
         {
@@ -75,7 +75,7 @@ internal sealed partial class TomlCommandUpdater
             : normalized.Split('\n').ToList();
     }
 
-    private static string NormalizeOutputContent(List<string> lines)
+    public static string NormalizeOutputContent(List<string> lines)
     {
         if (lines.Count == 0)
         {

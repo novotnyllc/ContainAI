@@ -1,24 +1,22 @@
-using System.Text.RegularExpressions;
 using CsToml.Error;
 
 namespace ContainAI.Cli.Host;
 
-internal static partial class TomlCommandProcessor
+internal sealed class TomlCommandExecutionServices(
+    ITomlCommandFileIo fileIo,
+    ITomlCommandParser parser,
+    ITomlCommandSerializer serializer,
+    ITomlCommandUpdater updater,
+    ITomlCommandValidator validator)
 {
-    private static readonly TomlCommandFileIo FileIo = new();
-    private static readonly TomlCommandParser Parser = new();
-    private static readonly TomlCommandSerializer Serializer = new();
-    private static readonly TomlCommandUpdater Updater = new();
-    private static readonly TomlCommandValidator Validator = new(Parser);
+    public bool FileExists(string filePath) => fileIo.FileExists(filePath);
 
-    private static bool FileExists(string filePath) => FileIo.FileExists(filePath);
+    public TomlCommandResult WriteConfig(string filePath, string content)
+        => fileIo.WriteConfig(filePath, content);
 
-    private static TomlCommandResult WriteConfig(string filePath, string content)
-        => FileIo.WriteConfig(filePath, content);
-
-    private static TomlLoadResult LoadToml(string filePath, int missingFileExitCode, string? missingFileMessage)
+    public TomlLoadResult LoadToml(string filePath, int missingFileExitCode, string? missingFileMessage)
     {
-        if (!FileIo.FileExists(filePath))
+        if (!fileIo.FileExists(filePath))
         {
             if (missingFileMessage is not null)
             {
@@ -33,8 +31,8 @@ internal static partial class TomlCommandProcessor
 
         try
         {
-            var content = FileIo.ReadAllText(filePath);
-            var model = Parser.ParseTomlContent(content);
+            var content = fileIo.ReadAllText(filePath);
+            var model = parser.ParseTomlContent(content);
             return new TomlLoadResult(true, new TomlCommandResult(0, string.Empty, string.Empty), model);
         }
         catch (UnauthorizedAccessException)
@@ -63,67 +61,42 @@ internal static partial class TomlCommandProcessor
         }
     }
 
-    private static bool TryReadText(string filePath, out string content, out string? error)
-        => FileIo.TryReadText(filePath, out content, out error);
+    public bool TryReadText(string filePath, out string content, out string? error)
+        => fileIo.TryReadText(filePath, out content, out error);
 
-    private static TomlCommandResult SerializeAsJson(IReadOnlyDictionary<string, object?> table)
-        => Serializer.SerializeAsJson(table);
+    public TomlCommandResult SerializeAsJson(IReadOnlyDictionary<string, object?> table)
+        => serializer.SerializeAsJson(table);
 
-    private static string SerializeJsonValue(object? value)
-        => Serializer.SerializeJsonValue(value);
+    public string SerializeJsonValue(object? value)
+        => serializer.SerializeJsonValue(value);
 
-    private static string FormatValue(object? value)
-        => Serializer.FormatValue(value);
+    public string FormatValue(object? value)
+        => serializer.FormatValue(value);
 
-    private static bool TryGetNestedValue(IReadOnlyDictionary<string, object?> table, string key, out object? value)
-        => Parser.TryGetNestedValue(table, key, out value);
+    public bool TryGetNestedValue(IReadOnlyDictionary<string, object?> table, string key, out object? value)
+        => parser.TryGetNestedValue(table, key, out value);
 
-    private static object GetWorkspaceState(IReadOnlyDictionary<string, object?> table, string workspacePath)
-        => Parser.GetWorkspaceState(table, workspacePath);
+    public object GetWorkspaceState(IReadOnlyDictionary<string, object?> table, string workspacePath)
+        => parser.GetWorkspaceState(table, workspacePath);
 
-    private static string UpsertWorkspaceKey(string content, string workspacePath, string key, string value)
-        => Updater.UpsertWorkspaceKey(content, workspacePath, key, value);
+    public string UpsertWorkspaceKey(string content, string workspacePath, string key, string value)
+        => updater.UpsertWorkspaceKey(content, workspacePath, key, value);
 
-    private static string RemoveWorkspaceKey(string content, string workspacePath, string key)
-        => Updater.RemoveWorkspaceKey(content, workspacePath, key);
+    public string RemoveWorkspaceKey(string content, string workspacePath, string key)
+        => updater.RemoveWorkspaceKey(content, workspacePath, key);
 
-    private static string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
-        => Updater.UpsertGlobalKey(content, keyParts, formattedValue);
+    public string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
+        => updater.UpsertGlobalKey(content, keyParts, formattedValue);
 
-    private static string RemoveGlobalKey(string content, string[] keyParts)
-        => Updater.RemoveGlobalKey(content, keyParts);
+    public string RemoveGlobalKey(string content, string[] keyParts)
+        => updater.RemoveGlobalKey(content, keyParts);
 
-    private static string? FormatTomlValueForKey(string key, string value)
-        => Validator.FormatTomlValueForKey(key, value);
+    public string? FormatTomlValueForKey(string key, string value)
+        => validator.FormatTomlValueForKey(key, value);
 
-    private static (bool Success, object? Value, string? Warning, string? Error) ValidateEnvSection(IReadOnlyDictionary<string, object?> table)
-    {
-        var result = Validator.ValidateEnvSection(table);
-        return (result.Success, result.Value, result.Warning, result.Error);
-    }
+    public TomlEnvValidationResult ValidateEnvSection(IReadOnlyDictionary<string, object?> table)
+        => validator.ValidateEnvSection(table);
 
-    private static (bool Success, object? Value, string? Error) ValidateAgentSection(IReadOnlyDictionary<string, object?> table, string sourceFile)
-    {
-        var result = Validator.ValidateAgentSection(table, sourceFile);
-        return (result.Success, result.Value, result.Error);
-    }
-
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex WorkspaceKeyRegexFactory();
-
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_.]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex GlobalKeyRegexFactory();
-
-    private sealed record TomlCommandArguments
-    {
-        public string FilePath { get; init; } = string.Empty;
-
-        public string? KeyOrExistsArg { get; init; }
-
-        public string? WorkspacePathOrUnsetPath { get; init; }
-
-        public string? WorkspaceKey { get; init; }
-
-        public string? Value { get; init; }
-    }
+    public TomlAgentValidationResult ValidateAgentSection(IReadOnlyDictionary<string, object?> table, string sourceFile)
+        => validator.ValidateAgentSection(table, sourceFile);
 }

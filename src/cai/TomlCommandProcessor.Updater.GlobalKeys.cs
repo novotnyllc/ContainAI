@@ -1,10 +1,10 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class TomlCommandUpdater
+internal static class TomlGlobalKeyUpdater
 {
-    public string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
+    public static string UpsertGlobalKey(string content, string[] keyParts, string formattedValue)
     {
-        var lines = SplitLines(content);
+        var lines = TomlCommandUpdaterLineHelpers.SplitLines(content);
         var newLines = new List<string>(lines.Count + 3);
         var keyLine = $"{keyParts[^1]} = {formattedValue}";
 
@@ -16,7 +16,7 @@ internal sealed partial class TomlCommandUpdater
             foreach (var line in lines)
             {
                 var trimmed = line.Trim();
-                if (IsAnyTableHeader(trimmed))
+                if (TomlCommandUpdaterLineHelpers.IsAnyTableHeader(trimmed))
                 {
                     inTable = true;
                     if (!keyUpdated)
@@ -29,7 +29,7 @@ internal sealed partial class TomlCommandUpdater
                     continue;
                 }
 
-                if (!inTable && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
+                if (!inTable && TomlCommandUpdaterLineHelpers.IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
                 {
                     newLines.Add(keyLine);
                     keyUpdated = true;
@@ -43,7 +43,7 @@ internal sealed partial class TomlCommandUpdater
             {
                 if (inTable)
                 {
-                    var insertAt = newLines.FindIndex(static line => IsAnyTableHeader(line.Trim()));
+                    var insertAt = newLines.FindIndex(static line => TomlCommandUpdaterLineHelpers.IsAnyTableHeader(line.Trim()));
                     if (insertAt >= 0)
                     {
                         newLines.Insert(insertAt, keyLine);
@@ -59,7 +59,7 @@ internal sealed partial class TomlCommandUpdater
                 }
             }
 
-            return NormalizeOutputContent(newLines);
+            return TomlCommandUpdaterLineHelpers.NormalizeOutputContent(newLines);
         }
 
         var sectionHeader = $"[{keyParts[0]}]";
@@ -71,7 +71,7 @@ internal sealed partial class TomlCommandUpdater
         {
             var trimmed = line.Trim();
 
-            if (IsTargetHeader(trimmed, sectionHeader))
+            if (TomlCommandUpdaterLineHelpers.IsTargetHeader(trimmed, sectionHeader))
             {
                 inTargetSection = true;
                 foundSection = true;
@@ -79,7 +79,7 @@ internal sealed partial class TomlCommandUpdater
                 continue;
             }
 
-            if (inTargetSection && IsAnyTableHeader(trimmed))
+            if (inTargetSection && TomlCommandUpdaterLineHelpers.IsAnyTableHeader(trimmed))
             {
                 if (!keyUpdatedNested)
                 {
@@ -90,7 +90,7 @@ internal sealed partial class TomlCommandUpdater
                 inTargetSection = false;
             }
 
-            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
+            if (inTargetSection && TomlCommandUpdaterLineHelpers.IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
             {
                 newLines.Add(keyLine);
                 keyUpdatedNested = true;
@@ -116,12 +116,12 @@ internal sealed partial class TomlCommandUpdater
             newLines.Add(keyLine);
         }
 
-        return NormalizeOutputContent(newLines);
+        return TomlCommandUpdaterLineHelpers.NormalizeOutputContent(newLines);
     }
 
-    public string RemoveGlobalKey(string content, string[] keyParts)
+    public static string RemoveGlobalKey(string content, string[] keyParts)
     {
-        var lines = SplitLines(content);
+        var lines = TomlCommandUpdaterLineHelpers.SplitLines(content);
         var newLines = new List<string>(lines.Count);
 
         if (keyParts.Length == 1)
@@ -129,7 +129,7 @@ internal sealed partial class TomlCommandUpdater
             foreach (var line in lines)
             {
                 var trimmed = line.Trim();
-                if (!IsAnyTableHeader(trimmed) && IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
+                if (!TomlCommandUpdaterLineHelpers.IsAnyTableHeader(trimmed) && TomlCommandUpdaterLineHelpers.IsTomlKeyAssignmentLine(trimmed, keyParts[0]))
                 {
                     continue;
                 }
@@ -137,7 +137,7 @@ internal sealed partial class TomlCommandUpdater
                 newLines.Add(line);
             }
 
-            return NormalizeOutputContent(newLines);
+            return TomlCommandUpdaterLineHelpers.NormalizeOutputContent(newLines);
         }
 
         var sectionHeader = $"[{keyParts[0]}]";
@@ -148,7 +148,7 @@ internal sealed partial class TomlCommandUpdater
         {
             var trimmed = line.Trim();
 
-            if (IsTargetHeader(trimmed, sectionHeader))
+            if (TomlCommandUpdaterLineHelpers.IsTargetHeader(trimmed, sectionHeader))
             {
                 inTargetSection = true;
                 sectionStart = newLines.Count;
@@ -156,12 +156,12 @@ internal sealed partial class TomlCommandUpdater
                 continue;
             }
 
-            if (inTargetSection && IsAnyTableHeader(trimmed))
+            if (inTargetSection && TomlCommandUpdaterLineHelpers.IsAnyTableHeader(trimmed))
             {
                 inTargetSection = false;
             }
 
-            if (inTargetSection && IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
+            if (inTargetSection && TomlCommandUpdaterLineHelpers.IsTomlKeyAssignmentLine(trimmed, keyParts[^1]))
             {
                 continue;
             }
@@ -174,19 +174,19 @@ internal sealed partial class TomlCommandUpdater
             var sectionEnd = newLines.Count;
             for (var index = sectionStart + 1; index < newLines.Count; index++)
             {
-                if (IsAnyTableHeader(newLines[index].Trim()))
+                if (TomlCommandUpdaterLineHelpers.IsAnyTableHeader(newLines[index].Trim()))
                 {
                     sectionEnd = index;
                     break;
                 }
             }
 
-            if (!SectionHasContent(newLines, sectionStart + 1, sectionEnd))
+            if (!TomlCommandUpdaterLineHelpers.SectionHasContent(newLines, sectionStart + 1, sectionEnd))
             {
                 newLines.RemoveRange(sectionStart, sectionEnd - sectionStart);
             }
         }
 
-        return NormalizeOutputContent(newLines);
+        return TomlCommandUpdaterLineHelpers.NormalizeOutputContent(newLines);
     }
 }
