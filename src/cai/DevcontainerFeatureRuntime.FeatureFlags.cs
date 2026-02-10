@@ -26,11 +26,11 @@ internal sealed partial class DevcontainerFeatureRuntime
         }
 
         settings = new FeatureConfig(
-            DataVolume: Environment.GetEnvironmentVariable("DATAVOLUME") ?? DefaultDataVolume,
+            DataVolume: environmentVariableReader("DATAVOLUME") ?? DevcontainerFeaturePaths.DefaultDataVolume,
             EnableCredentials: enableCredentials,
             EnableSsh: enableSsh,
             InstallDocker: installDocker,
-            RemoteUser: Environment.GetEnvironmentVariable("REMOTEUSER") ?? "auto");
+            RemoteUser: environmentVariableReader("REMOTEUSER") ?? "auto");
 
         if (!configService.ValidateFeatureConfig(settings, out var validationError))
         {

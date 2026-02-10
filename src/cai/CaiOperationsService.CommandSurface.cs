@@ -27,7 +27,11 @@ internal sealed partial class CaiOperationsService : CaiRuntimeSupport
     {
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
 
-        containerRuntimeCommandService = new ContainerRuntimeCommandService(stdout, stderr, manifestTomlParser);
+        containerRuntimeCommandService = new ContainerRuntimeCommandService(
+            stdout,
+            stderr,
+            manifestTomlParser,
+            new ContainerRuntimeOptionParser());
         containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, ExecuteDockerCommandAsync);
     }
 

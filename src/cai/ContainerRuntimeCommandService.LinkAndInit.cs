@@ -133,21 +133,6 @@ internal sealed partial class ContainerRuntimeCommandService
         }
     }
 
-    private static LinkRepairMode ResolveLinkRepairMode(SystemLinkRepairCommandOptions options)
-    {
-        if (options.DryRun)
-        {
-            return LinkRepairMode.DryRun;
-        }
-
-        if (options.Fix)
-        {
-            return LinkRepairMode.Fix;
-        }
-
-        return LinkRepairMode.Check;
-    }
-
     private async Task LogInfoAsync(bool quiet, string message)
     {
         if (quiet)
@@ -197,13 +182,6 @@ internal sealed partial class ContainerRuntimeCommandService
         public int Fixed { get; set; }
 
         public int Errors { get; set; }
-    }
-
-    private enum LinkRepairMode
-    {
-        Check,
-        Fix,
-        DryRun,
     }
 
     private sealed record ProcessCaptureResult(int ExitCode, string StandardOutput, string StandardError);
