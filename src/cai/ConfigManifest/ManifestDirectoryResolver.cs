@@ -1,26 +1,17 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.ConfigManifest;
 
-internal sealed partial class CaiConfigManifestService
+internal sealed class ManifestDirectoryResolver : IManifestDirectoryResolver
 {
-    private static string ResolveImportManifestDirectory()
-    {
-        var candidates = ResolveManifestDirectoryCandidates();
-        foreach (var candidate in candidates)
-        {
-            if (Directory.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
+    private readonly Func<string, string> expandHomePath;
 
-        throw new InvalidOperationException($"manifest directory not found; tried: {string.Join(", ", candidates)}");
-    }
+    public ManifestDirectoryResolver(Func<string, string> expandHomePath) =>
+        this.expandHomePath = expandHomePath ?? throw new ArgumentNullException(nameof(expandHomePath));
 
-    private static string ResolveManifestDirectory(string? userProvidedPath)
+    public string ResolveManifestDirectory(string? userProvidedPath)
     {
         if (!string.IsNullOrWhiteSpace(userProvidedPath))
         {
-            return Path.GetFullPath(ExpandHomePath(userProvidedPath));
+            return Path.GetFullPath(expandHomePath(userProvidedPath));
         }
 
         var candidates = ResolveManifestDirectoryCandidates();
