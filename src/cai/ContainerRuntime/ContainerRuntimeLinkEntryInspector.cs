@@ -13,19 +13,32 @@ internal interface IContainerRuntimeLinkEntryInspector
         LinkRepairStats stats);
 }
 
-internal sealed class ContainerRuntimeLinkEntryInspector : IContainerRuntimeLinkEntryInspector
+internal enum ContainerRuntimeLinkInspectionState
+{
+    Ok,
+    BrokenDanglingSymlink,
+    BrokenWrongTargetSymlink,
+    BrokenDirectoryReplaceable,
+    DirectoryConflict,
+    BrokenFileReplaceable,
+    Missing,
+}
+
+internal readonly record struct ContainerRuntimeLinkEntryStateEvaluation(
+    ContainerRuntimeLinkInspectionState State,
+    string? CurrentTarget);
+
+internal sealed class ContainerRuntimeLinkEntryStateEvaluator
 {
     private readonly IContainerRuntimeExecutionContext context;
 
-    public ContainerRuntimeLinkEntryInspector(IContainerRuntimeExecutionContext context)
+    public ContainerRuntimeLinkEntryStateEvaluator(IContainerRuntimeExecutionContext context)
         => this.context = context ?? throw new ArgumentNullException(nameof(context));
 
-    public async Task<ContainerRuntimeLinkInspectionResult> InspectAsync(
+    public async Task<ContainerRuntimeLinkEntryStateEvaluation> EvaluateAsync(
         string linkPath,
         string targetPath,
-        bool removeFirst,
-        bool quiet,
-        LinkRepairStats stats)
+        bool removeFirst)
     {
         var isSymlink = await context.IsSymlinkAsync(linkPath).ConfigureAwait(false);
         if (isSymlink)
@@ -35,44 +48,102 @@ internal sealed class ContainerRuntimeLinkEntryInspector : IContainerRuntimeLink
             {
                 if (!File.Exists(linkPath) && !Directory.Exists(linkPath))
                 {
-                    stats.Broken++;
-                    await context.LogInfoAsync(quiet, $"[BROKEN] {linkPath} -> {targetPath} (dangling symlink)").ConfigureAwait(false);
+                    return new ContainerRuntimeLinkEntryStateEvaluation(
+                        ContainerRuntimeLinkInspectionState.BrokenDanglingSymlink,
+                        CurrentTarget: null);
                 }
-                else
-                {
-                    stats.Ok++;
-                    return new ContainerRuntimeLinkInspectionResult(linkPath, targetPath, removeFirst, RequiresRepair: false);
-                }
+
+                return new ContainerRuntimeLinkEntryStateEvaluation(
+                    ContainerRuntimeLinkInspectionState.Ok,
+                    CurrentTarget: null);
             }
-            else
-            {
-                stats.Broken++;
-                await context.LogInfoAsync(quiet, $"[WRONG_TARGET] {linkPath} -> {currentTarget} (expected: {targetPath})").ConfigureAwait(false);
-            }
+
+            return new ContainerRuntimeLinkEntryStateEvaluation(
+                ContainerRuntimeLinkInspectionState.BrokenWrongTargetSymlink,
+                CurrentTarget: currentTarget);
         }
-        else if (Directory.Exists(linkPath))
+
+        if (Directory.Exists(linkPath))
         {
-            if (removeFirst)
-            {
+            return removeFirst
+                ? new ContainerRuntimeLinkEntryStateEvaluation(
+                    ContainerRuntimeLinkInspectionState.BrokenDirectoryReplaceable,
+                    CurrentTarget: null)
+                : new ContainerRuntimeLinkEntryStateEvaluation(
+                    ContainerRuntimeLinkInspectionState.DirectoryConflict,
+                    CurrentTarget: null);
+        }
+
+        if (File.Exists(linkPath))
+        {
+            return new ContainerRuntimeLinkEntryStateEvaluation(
+                ContainerRuntimeLinkInspectionState.BrokenFileReplaceable,
+                CurrentTarget: null);
+        }
+
+        return new ContainerRuntimeLinkEntryStateEvaluation(
+            ContainerRuntimeLinkInspectionState.Missing,
+            CurrentTarget: null);
+    }
+}
+
+internal sealed class ContainerRuntimeLinkEntryInspector : IContainerRuntimeLinkEntryInspector
+{
+    private readonly IContainerRuntimeExecutionContext context;
+    private readonly ContainerRuntimeLinkEntryStateEvaluator stateEvaluator;
+
+    public ContainerRuntimeLinkEntryInspector(IContainerRuntimeExecutionContext context)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        stateEvaluator = new ContainerRuntimeLinkEntryStateEvaluator(this.context);
+    }
+
+    public async Task<ContainerRuntimeLinkInspectionResult> InspectAsync(
+        string linkPath,
+        string targetPath,
+        bool removeFirst,
+        bool quiet,
+        LinkRepairStats stats)
+    {
+        var evaluation = await stateEvaluator
+            .EvaluateAsync(linkPath, targetPath, removeFirst)
+            .ConfigureAwait(false);
+
+        switch (evaluation.State)
+        {
+            case ContainerRuntimeLinkInspectionState.Ok:
+                stats.Ok++;
+                return new ContainerRuntimeLinkInspectionResult(linkPath, targetPath, removeFirst, RequiresRepair: false);
+
+            case ContainerRuntimeLinkInspectionState.BrokenDanglingSymlink:
+                stats.Broken++;
+                await context.LogInfoAsync(quiet, $"[BROKEN] {linkPath} -> {targetPath} (dangling symlink)").ConfigureAwait(false);
+                break;
+
+            case ContainerRuntimeLinkInspectionState.BrokenWrongTargetSymlink:
+                stats.Broken++;
+                await context.LogInfoAsync(quiet, $"[WRONG_TARGET] {linkPath} -> {evaluation.CurrentTarget} (expected: {targetPath})").ConfigureAwait(false);
+                break;
+
+            case ContainerRuntimeLinkInspectionState.BrokenDirectoryReplaceable:
                 stats.Broken++;
                 await context.LogInfoAsync(quiet, $"[EXISTS_DIR] {linkPath} is a directory (will remove with R flag)").ConfigureAwait(false);
-            }
-            else
-            {
+                break;
+
+            case ContainerRuntimeLinkInspectionState.DirectoryConflict:
                 stats.Errors++;
                 await context.StandardError.WriteLineAsync($"[CONFLICT] {linkPath} exists as directory (no R flag - cannot fix)").ConfigureAwait(false);
                 return new ContainerRuntimeLinkInspectionResult(linkPath, targetPath, removeFirst, RequiresRepair: false);
-            }
-        }
-        else if (File.Exists(linkPath))
-        {
-            stats.Broken++;
-            await context.LogInfoAsync(quiet, $"[EXISTS_FILE] {linkPath} is a regular file (will replace)").ConfigureAwait(false);
-        }
-        else
-        {
-            stats.Missing++;
-            await context.LogInfoAsync(quiet, $"[MISSING] {linkPath} -> {targetPath}").ConfigureAwait(false);
+
+            case ContainerRuntimeLinkInspectionState.BrokenFileReplaceable:
+                stats.Broken++;
+                await context.LogInfoAsync(quiet, $"[EXISTS_FILE] {linkPath} is a regular file (will replace)").ConfigureAwait(false);
+                break;
+
+            case ContainerRuntimeLinkInspectionState.Missing:
+                stats.Missing++;
+                await context.LogInfoAsync(quiet, $"[MISSING] {linkPath} -> {targetPath}").ConfigureAwait(false);
+                break;
         }
 
         return new ContainerRuntimeLinkInspectionResult(linkPath, targetPath, removeFirst, RequiresRepair: true);
