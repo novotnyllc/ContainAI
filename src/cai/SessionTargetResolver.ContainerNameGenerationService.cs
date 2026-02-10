@@ -1,0 +1,42 @@
+namespace ContainAI.Cli.Host;
+
+internal interface ISessionTargetContainerNameGenerationService
+{
+    Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetContainerNameGenerationService : ISessionTargetContainerNameGenerationService
+{
+    public async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
+    {
+        var repoName = Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace));
+        if (string.IsNullOrWhiteSpace(repoName))
+        {
+            repoName = "repo";
+        }
+
+        var branchName = "nogit";
+        var gitProbe = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+            "git",
+            ["-C", workspace, "rev-parse", "--is-inside-work-tree"],
+            cancellationToken).ConfigureAwait(false);
+        if (gitProbe.ExitCode == 0)
+        {
+            var branch = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+                "git",
+                ["-C", workspace, "rev-parse", "--abbrev-ref", "HEAD"],
+                cancellationToken).ConfigureAwait(false);
+            if (branch.ExitCode == 0)
+            {
+                var value = branch.StandardOutput.Trim();
+                branchName = string.IsNullOrWhiteSpace(value) || string.Equals(value, "HEAD", StringComparison.Ordinal) ? "detached" : value;
+            }
+            else
+            {
+                branchName = "detached";
+            }
+        }
+
+        return ContainerNameGenerator.Compose(repoName, branchName);
+    }
+}
