@@ -19,121 +19,95 @@ internal static class TomlCommandJsonWriter
                 builder.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
                 return;
             case string stringValue:
-                WriteJsonString(builder, stringValue);
+                TomlCommandJsonStringWriter.WriteJsonString(builder, stringValue);
                 return;
             case IReadOnlyDictionary<string, object?> dictionary:
-                builder.Append('{');
-                var firstProperty = true;
-                foreach (var pair in dictionary)
-                {
-                    if (!firstProperty)
-                    {
-                        builder.Append(',');
-                    }
-
-                    firstProperty = false;
-                    WriteJsonString(builder, pair.Key);
-                    builder.Append(':');
-                    WriteJsonValue(builder, pair.Value);
-                }
-
-                builder.Append('}');
+                WriteJsonDictionary(builder, dictionary);
                 return;
             case IDictionary<string, object?> dictionary:
-                builder.Append('{');
-                var firstPropertyInDictionary = true;
-                foreach (var pair in dictionary)
-                {
-                    if (!firstPropertyInDictionary)
-                    {
-                        builder.Append(',');
-                    }
-
-                    firstPropertyInDictionary = false;
-                    WriteJsonString(builder, pair.Key);
-                    builder.Append(':');
-                    WriteJsonValue(builder, pair.Value);
-                }
-
-                builder.Append('}');
+                WriteJsonDictionary(builder, dictionary);
                 return;
             case IReadOnlyList<object?> list:
-                builder.Append('[');
-                for (var index = 0; index < list.Count; index++)
-                {
-                    if (index > 0)
-                    {
-                        builder.Append(',');
-                    }
-
-                    WriteJsonValue(builder, list[index]);
-                }
-
-                builder.Append(']');
+                WriteJsonList(builder, list);
                 return;
             case IList<object?> list:
-                builder.Append('[');
-                for (var index = 0; index < list.Count; index++)
-                {
-                    if (index > 0)
-                    {
-                        builder.Append(',');
-                    }
-
-                    WriteJsonValue(builder, list[index]);
-                }
-
-                builder.Append(']');
+                WriteJsonList(builder, list);
                 return;
             default:
-                WriteJsonString(builder, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
+                TomlCommandJsonStringWriter.WriteJsonString(builder, Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty);
                 return;
         }
     }
 
-    private static void WriteJsonString(StringBuilder builder, string value)
+    private static void WriteJsonDictionary(StringBuilder builder, IReadOnlyDictionary<string, object?> dictionary)
     {
-        builder.Append('"');
-        foreach (var ch in value)
+        builder.Append('{');
+        var firstProperty = true;
+        foreach (var pair in dictionary)
         {
-            switch (ch)
+            if (!firstProperty)
             {
-                case '"':
-                    builder.Append("\\\"");
-                    break;
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '\b':
-                    builder.Append("\\b");
-                    break;
-                case '\f':
-                    builder.Append("\\f");
-                    break;
-                case '\n':
-                    builder.Append("\\n");
-                    break;
-                case '\r':
-                    builder.Append("\\r");
-                    break;
-                case '\t':
-                    builder.Append("\\t");
-                    break;
-                default:
-                    if (ch < 0x20)
-                    {
-                        builder.Append("\\u");
-                        builder.Append(((int)ch).ToString("x4", CultureInfo.InvariantCulture));
-                    }
-                    else
-                    {
-                        builder.Append(ch);
-                    }
-
-                    break;
+                builder.Append(',');
             }
+
+            firstProperty = false;
+            TomlCommandJsonStringWriter.WriteJsonString(builder, pair.Key);
+            builder.Append(':');
+            WriteJsonValue(builder, pair.Value);
         }
 
-        builder.Append('"');
+        builder.Append('}');
+    }
+
+    private static void WriteJsonDictionary(StringBuilder builder, IDictionary<string, object?> dictionary)
+    {
+        builder.Append('{');
+        var firstProperty = true;
+        foreach (var pair in dictionary)
+        {
+            if (!firstProperty)
+            {
+                builder.Append(',');
+            }
+
+            firstProperty = false;
+            TomlCommandJsonStringWriter.WriteJsonString(builder, pair.Key);
+            builder.Append(':');
+            WriteJsonValue(builder, pair.Value);
+        }
+
+        builder.Append('}');
+    }
+
+    private static void WriteJsonList(StringBuilder builder, IReadOnlyList<object?> list)
+    {
+        builder.Append('[');
+        for (var index = 0; index < list.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            WriteJsonValue(builder, list[index]);
+        }
+
+        builder.Append(']');
+    }
+
+    private static void WriteJsonList(StringBuilder builder, IList<object?> list)
+    {
+        builder.Append('[');
+        for (var index = 0; index < list.Count; index++)
+        {
+            if (index > 0)
+            {
+                builder.Append(',');
+            }
+
+            WriteJsonValue(builder, list[index]);
+        }
+
+        builder.Append(']');
     }
 }
