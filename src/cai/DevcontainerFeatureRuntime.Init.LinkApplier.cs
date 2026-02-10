@@ -11,7 +11,7 @@ internal interface IDevcontainerFeatureInitLinkApplier
 
 internal readonly record struct DevcontainerFeatureLinkApplyResult(int Created, int Skipped);
 
-internal sealed class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureInitLinkApplier
+internal sealed partial class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureInitLinkApplier
 {
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
@@ -35,60 +35,38 @@ internal sealed class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureI
     {
         var created = 0;
         var skipped = 0;
-        var sourceHome = string.IsNullOrWhiteSpace(linkSpec.HomeDirectory) ? "/home/agent" : linkSpec.HomeDirectory!;
+        var sourceHome = ResolveSourceHome(linkSpec.HomeDirectory);
         foreach (var link in linkSpec.Links ?? [])
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (link is null || string.IsNullOrWhiteSpace(link.Link) || string.IsNullOrWhiteSpace(link.Target))
+            if (!HasRequiredPaths(link))
             {
                 continue;
             }
 
-            if (!settings.EnableCredentials && DevcontainerFeaturePaths.CredentialTargets.Contains(link.Target))
+            if (ShouldSkipCredentialLink(link, settings.EnableCredentials))
             {
                 await stdout.WriteLineAsync($"  [SKIP] {link.Link} (credentials disabled)").ConfigureAwait(false);
                 skipped++;
                 continue;
             }
 
-            if (!File.Exists(link.Target) && !Directory.Exists(link.Target))
+            if (!TargetExists(link.Target))
             {
                 continue;
             }
 
-            var rewrittenLink = link.Link.StartsWith(sourceHome, StringComparison.Ordinal)
-                ? userHome + link.Link[sourceHome.Length..]
-                : link.Link;
-            var parentDirectory = Path.GetDirectoryName(rewrittenLink);
-            if (!string.IsNullOrWhiteSpace(parentDirectory))
-            {
-                Directory.CreateDirectory(parentDirectory);
-            }
+            var rewrittenLink = RewriteLinkPath(link.Link, sourceHome, userHome);
+            EnsureParentDirectoryExists(rewrittenLink);
 
             var removeFirst = link.RemoveFirst ?? false;
-            if (Directory.Exists(rewrittenLink) && !processHelpers.IsSymlink(rewrittenLink))
+            var prepared = await PrepareDestinationAsync(rewrittenLink, removeFirst).ConfigureAwait(false);
+            if (!prepared)
             {
-                if (!removeFirst)
-                {
-                    await stderr.WriteLineAsync($"  [FAIL] {rewrittenLink} (directory exists, remove_first not set)").ConfigureAwait(false);
-                    continue;
-                }
-
-                Directory.Delete(rewrittenLink, recursive: true);
-            }
-            else if (File.Exists(rewrittenLink) || processHelpers.IsSymlink(rewrittenLink))
-            {
-                File.Delete(rewrittenLink);
+                continue;
             }
 
-            if (Directory.Exists(link.Target))
-            {
-                Directory.CreateSymbolicLink(rewrittenLink, link.Target);
-            }
-            else
-            {
-                File.CreateSymbolicLink(rewrittenLink, link.Target);
-            }
+            CreateSymbolicLink(rewrittenLink, link.Target);
 
             await stdout.WriteLineAsync($"  [OK] {rewrittenLink} -> {link.Target}").ConfigureAwait(false);
             created++;

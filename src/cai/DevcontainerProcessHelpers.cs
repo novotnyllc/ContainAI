@@ -23,7 +23,7 @@ internal interface IDevcontainerProcessHelpers
     Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken);
 }
 
-internal sealed class DevcontainerProcessHelpers : IDevcontainerProcessHelpers
+internal sealed partial class DevcontainerProcessHelpers : IDevcontainerProcessHelpers
 {
     private readonly IDevcontainerProcessExecution processExecution;
     private readonly IDevcontainerFileAndProcessInspection fileAndProcessInspection;
@@ -64,35 +64,6 @@ internal sealed class DevcontainerProcessHelpers : IDevcontainerProcessHelpers
         this.fileAndProcessInspection = fileAndProcessInspection ?? throw new ArgumentNullException(nameof(fileAndProcessInspection));
         this.portUsageInspection = portUsageInspection ?? throw new ArgumentNullException(nameof(portUsageInspection));
     }
-
-    public bool IsProcessAlive(int processId) => processExecution.IsProcessAlive(processId);
-
-    public Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
-        => processExecution.CommandExistsAsync(command, cancellationToken);
-
-    public Task<bool> CommandSucceedsAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => processExecution.CommandSucceedsAsync(executable, arguments, cancellationToken);
-
-    public Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => processExecution.RunAsRootAsync(executable, arguments, cancellationToken);
-
-    public Task<DevcontainerProcessResult> RunProcessCaptureAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => processExecution.RunProcessCaptureAsync(executable, arguments, cancellationToken);
-
-    public bool IsPortInUse(string portValue)
-        => portUsageInspection.IsPortInUse(portValue);
-
-    public bool IsSymlink(string path)
-        => fileAndProcessInspection.IsSymlink(path);
-
-    public Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken)
-        => fileAndProcessInspection.IsSshdRunningFromPidFileAsync(pidFilePath, cancellationToken);
-
-    public Task<bool> IsSysboxFsMountedAsync(CancellationToken cancellationToken)
-        => fileAndProcessInspection.IsSysboxFsMountedAsync(cancellationToken);
-
-    public Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken)
-        => fileAndProcessInspection.HasUidMappingIsolationAsync(cancellationToken);
 }
 
 internal readonly record struct DevcontainerProcessResult(int ExitCode, string StandardOutput, string StandardError);
