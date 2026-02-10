@@ -3,11 +3,11 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Meta;
 
 internal static class CompletionCommandBuilder
 {
-    internal static Command CreateCompletionCommand(RootCommand root, ICaiConsole console)
+    internal static Command Build(RootCommand root, ICaiConsole console)
     {
         var completionCommand = new Command("completion", "Resolve completions for shell integration.");
 

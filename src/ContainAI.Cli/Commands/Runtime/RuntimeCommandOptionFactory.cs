@@ -1,10 +1,10 @@
 using System.CommandLine;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Runtime;
 
-internal static partial class RuntimeCommandsBuilder
+internal static class RuntimeCommandOptionFactory
 {
-    private static void AddOptions(Command command, params Option[] options)
+    internal static void AddOptions(Command command, params Option[] options)
     {
         foreach (var option in options)
         {
@@ -12,91 +12,91 @@ internal static partial class RuntimeCommandsBuilder
         }
     }
 
-    private static Option<string?> CreateWorkspaceOption(string description)
+    internal static Option<string?> CreateWorkspaceOption(string description)
         => new("--workspace", "-w")
         {
             Description = description,
         };
 
-    private static Option<bool> CreateFreshOption()
+    internal static Option<bool> CreateFreshOption()
         => new("--fresh")
         {
             Description = "Request a fresh runtime environment.",
         };
 
-    private static Option<bool> CreateRestartOption()
+    internal static Option<bool> CreateRestartOption()
         => new("--restart")
         {
             Description = "Alias for --fresh.",
         };
 
-    private static Option<string?> CreateDataVolumeOption()
+    internal static Option<string?> CreateDataVolumeOption()
         => new("--data-volume")
         {
             Description = "Data volume override.",
         };
 
-    private static Option<string?> CreateConfigOption()
+    internal static Option<string?> CreateConfigOption()
         => new("--config")
         {
             Description = "Path to config file.",
         };
 
-    private static Option<string?> CreateContainerOption()
+    internal static Option<string?> CreateContainerOption()
         => new("--container")
         {
             Description = "Attach to a specific container.",
         };
 
-    private static Option<bool> CreateForceOption()
+    internal static Option<bool> CreateForceOption()
         => new("--force")
         {
             Description = "Force operation where supported.",
         };
 
-    private static Option<bool> CreateQuietOption()
+    internal static Option<bool> CreateQuietOption()
         => new("--quiet", "-q")
         {
             Description = "Suppress non-essential output.",
         };
 
-    private static Option<bool> CreateVerboseOption()
+    internal static Option<bool> CreateVerboseOption()
         => new("--verbose")
         {
             Description = "Enable verbose output.",
         };
 
-    private static Option<bool> CreateDebugOption()
+    internal static Option<bool> CreateDebugOption()
         => new("--debug", "-D")
         {
             Description = "Enable debug output.",
         };
 
-    private static Option<bool> CreateDryRunOption()
+    internal static Option<bool> CreateDryRunOption()
         => new("--dry-run")
         {
             Description = "Show planned actions without executing.",
         };
 
-    private static Option<string?> CreateTemplateOption()
+    internal static Option<string?> CreateTemplateOption()
         => new("--template")
         {
             Description = "Template name.",
         };
 
-    private static Option<string?> CreateChannelOption()
+    internal static Option<string?> CreateChannelOption()
         => new("--channel")
         {
             Description = "Channel override.",
         };
 
-    private static Option<string?> CreateMemoryOption()
+    internal static Option<string?> CreateMemoryOption()
         => new("--memory")
         {
             Description = "Container memory limit.",
         };
 
-    private static Option<string?> CreateCpusOption()
+    internal static Option<string?> CreateCpusOption()
         => new("--cpus")
         {
             Description = "Container CPU limit.",

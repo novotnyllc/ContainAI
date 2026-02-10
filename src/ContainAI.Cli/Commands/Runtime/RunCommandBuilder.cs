@@ -1,17 +1,17 @@
 using System.CommandLine;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Runtime;
 
-internal static partial class RuntimeCommandsBuilder
+internal static class RunCommandBuilder
 {
-    internal static Command CreateRunCommand(ICaiCommandRuntime runtime)
+    internal static Command Build(ICaiCommandRuntime runtime)
     {
         var command = new Command("run", "Start or attach to a runtime shell.");
 
-        var workspaceOption = CreateWorkspaceOption("Workspace path for command execution.");
-        var freshOption = CreateFreshOption();
-        var restartOption = CreateRestartOption();
+        var workspaceOption = RuntimeCommandOptionFactory.CreateWorkspaceOption("Workspace path for command execution.");
+        var freshOption = RuntimeCommandOptionFactory.CreateFreshOption();
+        var restartOption = RuntimeCommandOptionFactory.CreateRestartOption();
         var detachedOption = new Option<bool>("--detached", "-d")
         {
             Description = "Run in detached mode.",
@@ -24,22 +24,22 @@ internal static partial class RuntimeCommandsBuilder
         {
             Description = "Acknowledge credential risk for credential import modes.",
         };
-        var dataVolumeOption = CreateDataVolumeOption();
-        var configOption = CreateConfigOption();
-        var containerOption = CreateContainerOption();
-        var forceOption = CreateForceOption();
-        var quietOption = CreateQuietOption();
-        var verboseOption = CreateVerboseOption();
-        var debugOption = CreateDebugOption();
-        var dryRunOption = CreateDryRunOption();
+        var dataVolumeOption = RuntimeCommandOptionFactory.CreateDataVolumeOption();
+        var configOption = RuntimeCommandOptionFactory.CreateConfigOption();
+        var containerOption = RuntimeCommandOptionFactory.CreateContainerOption();
+        var forceOption = RuntimeCommandOptionFactory.CreateForceOption();
+        var quietOption = RuntimeCommandOptionFactory.CreateQuietOption();
+        var verboseOption = RuntimeCommandOptionFactory.CreateVerboseOption();
+        var debugOption = RuntimeCommandOptionFactory.CreateDebugOption();
+        var dryRunOption = RuntimeCommandOptionFactory.CreateDryRunOption();
         var imageTagOption = new Option<string?>("--image-tag")
         {
             Description = "Override image tag.",
         };
-        var templateOption = CreateTemplateOption();
-        var channelOption = CreateChannelOption();
-        var memoryOption = CreateMemoryOption();
-        var cpusOption = CreateCpusOption();
+        var templateOption = RuntimeCommandOptionFactory.CreateTemplateOption();
+        var channelOption = RuntimeCommandOptionFactory.CreateChannelOption();
+        var memoryOption = RuntimeCommandOptionFactory.CreateMemoryOption();
+        var cpusOption = RuntimeCommandOptionFactory.CreateCpusOption();
         var envOption = new Option<string[]>("--env", "-e")
         {
             Description = "Environment variable assignment.",
@@ -56,7 +56,7 @@ internal static partial class RuntimeCommandsBuilder
             Description = "Optional command to execute in the login shell.",
         };
 
-        AddOptions(
+        RuntimeCommandOptionFactory.AddOptions(
             command,
             workspaceOption,
             freshOption,

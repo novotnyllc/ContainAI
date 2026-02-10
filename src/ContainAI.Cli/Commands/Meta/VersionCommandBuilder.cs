@@ -1,11 +1,11 @@
 using System.CommandLine;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Meta;
 
 internal static class VersionCommandBuilder
 {
-    internal static Command CreateVersionCommand(ICaiCommandRuntime runtime, ICaiConsole console)
+    internal static Command Build(ICaiCommandRuntime runtime, ICaiConsole console)
     {
         var versionCommand = new Command("version");
 

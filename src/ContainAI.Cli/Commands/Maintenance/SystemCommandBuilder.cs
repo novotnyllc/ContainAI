@@ -1,83 +1,11 @@
 using System.CommandLine;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Maintenance;
 
-internal static partial class MaintenanceCommandsBuilder
+internal static class SystemCommandBuilder
 {
-    internal static Command CreateUpdateCommand(ICaiCommandRuntime runtime)
-    {
-        var command = new Command("update", "Update the local installation.");
-        var dryRunOption = new Option<bool>("--dry-run");
-        var stopContainersOption = new Option<bool>("--stop-containers");
-        var forceOption = new Option<bool>("--force");
-        var limaRecreateOption = new Option<bool>("--lima-recreate");
-        var verboseOption = new Option<bool>("--verbose");
-
-        command.Options.Add(dryRunOption);
-        command.Options.Add(stopContainersOption);
-        command.Options.Add(forceOption);
-        command.Options.Add(limaRecreateOption);
-        command.Options.Add(verboseOption);
-        command.SetAction((parseResult, cancellationToken) =>
-            runtime.RunUpdateAsync(
-                new UpdateCommandOptions(
-                    DryRun: parseResult.GetValue(dryRunOption),
-                    StopContainers: parseResult.GetValue(stopContainersOption),
-                    Force: parseResult.GetValue(forceOption),
-                    LimaRecreate: parseResult.GetValue(limaRecreateOption),
-                    Verbose: parseResult.GetValue(verboseOption)),
-                cancellationToken));
-
-        return command;
-    }
-
-    internal static Command CreateRefreshCommand(ICaiCommandRuntime runtime)
-    {
-        var command = new Command("refresh", "Refresh images and rebuild templates when requested.");
-        var rebuildOption = new Option<bool>("--rebuild");
-        var verboseOption = new Option<bool>("--verbose");
-
-        command.Options.Add(rebuildOption);
-        command.Options.Add(verboseOption);
-        command.SetAction((parseResult, cancellationToken) =>
-            runtime.RunRefreshAsync(
-                new RefreshCommandOptions(
-                    Rebuild: parseResult.GetValue(rebuildOption),
-                    Verbose: parseResult.GetValue(verboseOption)),
-                cancellationToken));
-
-        return command;
-    }
-
-    internal static Command CreateUninstallCommand(ICaiCommandRuntime runtime)
-    {
-        var command = new Command("uninstall", "Remove local installation artifacts.");
-        var dryRunOption = new Option<bool>("--dry-run");
-        var containersOption = new Option<bool>("--containers");
-        var volumesOption = new Option<bool>("--volumes");
-        var forceOption = new Option<bool>("--force");
-        var verboseOption = new Option<bool>("--verbose");
-
-        command.Options.Add(dryRunOption);
-        command.Options.Add(containersOption);
-        command.Options.Add(volumesOption);
-        command.Options.Add(forceOption);
-        command.Options.Add(verboseOption);
-        command.SetAction((parseResult, cancellationToken) =>
-            runtime.RunUninstallAsync(
-                new UninstallCommandOptions(
-                    DryRun: parseResult.GetValue(dryRunOption),
-                    Containers: parseResult.GetValue(containersOption),
-                    Volumes: parseResult.GetValue(volumesOption),
-                    Force: parseResult.GetValue(forceOption),
-                    Verbose: parseResult.GetValue(verboseOption)),
-                cancellationToken));
-
-        return command;
-    }
-
-    internal static Command CreateSystemCommand(ICaiCommandRuntime runtime)
+    internal static Command Build(ICaiCommandRuntime runtime)
     {
         var command = new Command("system", "Container-internal runtime commands.");
 

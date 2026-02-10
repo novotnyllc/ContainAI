@@ -1,8 +1,8 @@
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Runtime;
 
-internal static partial class RuntimeCommandsBuilder
+internal static class RuntimeDockerCompletionTokens
 {
-    private static readonly string[] DockerCompletionTokens =
+    internal static readonly string[] Values =
     [
         "attach",
         "build",

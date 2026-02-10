@@ -3,6 +3,9 @@ using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Text.Encodings.Web;
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Commands.Maintenance;
+using ContainAI.Cli.Commands.Meta;
+using ContainAI.Cli.Commands.Runtime;
 using ContainAI.Cli.Host;
 
 namespace ContainAI.Cli;
@@ -45,32 +48,32 @@ internal static class RootCommandBuilder
 
         foreach (var command in new Command[]
                  {
-                     RuntimeCommandsBuilder.CreateRunCommand(runtime),
-                     RuntimeCommandsBuilder.CreateShellCommand(runtime),
-                     RuntimeCommandsBuilder.CreateExecCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateDoctorCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateInstallCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateExamplesCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateSetupCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateValidateCommand(runtime),
-                     RuntimeCommandsBuilder.CreateDockerCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateImportCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateExportCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateSyncCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateStopCommand(runtime),
-                     RuntimeCommandsBuilder.CreateStatusCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateGcCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateSshCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateLinksCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateConfigCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateManifestCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateTemplateCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateUpdateCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateRefreshCommand(runtime),
-                     MaintenanceCommandsBuilder.CreateUninstallCommand(runtime),
-                     CompletionCommandBuilder.CreateCompletionCommand(root, console),
-                     VersionCommandBuilder.CreateVersionCommand(runtime, console),
-                     MaintenanceCommandsBuilder.CreateSystemCommand(runtime),
+                     RunCommandBuilder.Build(runtime),
+                     ShellCommandBuilder.Build(runtime),
+                     ExecCommandBuilder.Build(runtime),
+                     DoctorCommandBuilder.Build(runtime),
+                     InstallCommandBuilder.Build(runtime),
+                     ExamplesCommandBuilder.Build(runtime),
+                     SetupCommandBuilder.Build(runtime),
+                     ValidateCommandBuilder.Build(runtime),
+                     DockerCommandBuilder.Build(runtime),
+                     ImportCommandBuilder.Build(runtime),
+                     ExportCommandBuilder.Build(runtime),
+                     SyncCommandBuilder.Build(runtime),
+                     StopCommandBuilder.Build(runtime),
+                     StatusCommandBuilder.Build(runtime),
+                     GcCommandBuilder.Build(runtime),
+                     SshCommandBuilder.Build(runtime),
+                     LinksCommandBuilder.Build(runtime),
+                     ConfigCommandBuilder.Build(runtime),
+                     ManifestCommandBuilder.Build(runtime),
+                     TemplateCommandBuilder.Build(runtime),
+                     UpdateCommandBuilder.Build(runtime),
+                     RefreshCommandBuilder.Build(runtime),
+                     UninstallCommandBuilder.Build(runtime),
+                     CompletionCommandBuilder.Build(root, console),
+                     VersionCommandBuilder.Build(runtime, console),
+                     SystemCommandBuilder.Build(runtime),
                      AcpCommandBuilder.Build(runtime),
                  })
         {

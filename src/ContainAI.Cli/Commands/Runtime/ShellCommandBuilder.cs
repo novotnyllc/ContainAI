@@ -1,44 +1,44 @@
 using System.CommandLine;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Runtime;
 
-internal static partial class RuntimeCommandsBuilder
+internal static class ShellCommandBuilder
 {
-    internal static Command CreateShellCommand(ICaiCommandRuntime runtime)
+    internal static Command Build(ICaiCommandRuntime runtime)
     {
         var command = new Command("shell", "Open an interactive login shell.");
 
-        var workspaceOption = CreateWorkspaceOption("Workspace path for shell execution.");
-        var dataVolumeOption = CreateDataVolumeOption();
-        var configOption = CreateConfigOption();
-        var containerOption = CreateContainerOption();
-        var freshOption = CreateFreshOption();
-        var restartOption = CreateRestartOption();
+        var workspaceOption = RuntimeCommandOptionFactory.CreateWorkspaceOption("Workspace path for shell execution.");
+        var dataVolumeOption = RuntimeCommandOptionFactory.CreateDataVolumeOption();
+        var configOption = RuntimeCommandOptionFactory.CreateConfigOption();
+        var containerOption = RuntimeCommandOptionFactory.CreateContainerOption();
+        var freshOption = RuntimeCommandOptionFactory.CreateFreshOption();
+        var restartOption = RuntimeCommandOptionFactory.CreateRestartOption();
         var resetOption = new Option<bool>("--reset")
         {
             Description = "Create a reset volume shell session.",
         };
-        var forceOption = CreateForceOption();
-        var quietOption = CreateQuietOption();
-        var verboseOption = CreateVerboseOption();
-        var debugOption = CreateDebugOption();
-        var dryRunOption = CreateDryRunOption();
+        var forceOption = RuntimeCommandOptionFactory.CreateForceOption();
+        var quietOption = RuntimeCommandOptionFactory.CreateQuietOption();
+        var verboseOption = RuntimeCommandOptionFactory.CreateVerboseOption();
+        var debugOption = RuntimeCommandOptionFactory.CreateDebugOption();
+        var dryRunOption = RuntimeCommandOptionFactory.CreateDryRunOption();
         var imageTagOption = new Option<string?>("--image-tag")
         {
             Description = "Override image tag.",
         };
-        var templateOption = CreateTemplateOption();
-        var channelOption = CreateChannelOption();
-        var memoryOption = CreateMemoryOption();
-        var cpusOption = CreateCpusOption();
+        var templateOption = RuntimeCommandOptionFactory.CreateTemplateOption();
+        var channelOption = RuntimeCommandOptionFactory.CreateChannelOption();
+        var memoryOption = RuntimeCommandOptionFactory.CreateMemoryOption();
+        var cpusOption = RuntimeCommandOptionFactory.CreateCpusOption();
         var pathArgument = new Argument<string?>("path")
         {
             Arity = ArgumentArity.ZeroOrOne,
             Description = "Workspace path (optional positional form).",
         };
 
-        AddOptions(
+        RuntimeCommandOptionFactory.AddOptions(
             command,
             workspaceOption,
             dataVolumeOption,

@@ -1,11 +1,11 @@
 using System.CommandLine;
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli;
+namespace ContainAI.Cli.Commands.Meta;
 
 internal static class AcpCommandBuilder
 {
-    public static Command Build(ICaiCommandRuntime runtime)
+    internal static Command Build(ICaiCommandRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
 
