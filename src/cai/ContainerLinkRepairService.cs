@@ -1,8 +1,6 @@
-using System.Text.Json.Serialization;
-
 namespace ContainAI.Cli.Host;
 
-internal sealed class ContainerLinkRepairService
+internal sealed partial class ContainerLinkRepairService
 {
     private const string BuiltinSpecPath = "/usr/local/lib/containai/link-spec.json";
     private const string UserSpecPath = "/mnt/agent-data/containai/user-link-spec.json";
@@ -40,84 +38,20 @@ internal sealed class ContainerLinkRepairService
     {
         var stats = new ContainerLinkRepairStats();
 
-        var builtin = await specReader.ReadLinkSpecAsync(containerName, BuiltinSpecPath, required: true, cancellationToken).ConfigureAwait(false);
-        if (builtin.Error is not null)
+        var builtin = await LoadBuiltInSpecAsync(containerName, cancellationToken).ConfigureAwait(false);
+        if (!builtin.Success)
         {
-            await stderr.WriteLineAsync($"ERROR: {builtin.Error}").ConfigureAwait(false);
             return 1;
         }
 
-        var user = await specReader.ReadLinkSpecAsync(containerName, UserSpecPath, required: false, cancellationToken).ConfigureAwait(false);
-        if (user.Error is not null)
-        {
-            stats.Errors++;
-            await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {user.Error}").ConfigureAwait(false);
-        }
+        var user = await LoadUserSpecAsync(containerName, stats, cancellationToken).ConfigureAwait(false);
 
-        await entryProcessor.ProcessEntriesAsync(containerName, builtin.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await entryProcessor.ProcessEntriesAsync(containerName, builtin.Entries!, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
         await entryProcessor.ProcessEntriesAsync(containerName, user.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
 
-        if (mode == ContainerLinkRepairMode.Fix && stats.Errors == 0)
-        {
-            var timestampResult = await repairOperations.WriteCheckedTimestampAsync(containerName, CheckedAtFilePath, cancellationToken).ConfigureAwait(false);
-            if (!timestampResult.Success)
-            {
-                stats.Errors++;
-                await stderr.WriteLineAsync($"[WARN] Failed to update links-checked-at timestamp: {timestampResult.Error}").ConfigureAwait(false);
-            }
-            else
-            {
-                await reporter.LogInfoAsync(quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
-            }
-        }
+        await TryUpdateCheckedTimestampAsync(containerName, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
 
         await reporter.WriteSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
-        if (stats.Errors > 0)
-        {
-            return 1;
-        }
-
-        if (mode == ContainerLinkRepairMode.Check && (stats.Broken + stats.Missing) > 0)
-        {
-            return 1;
-        }
-
-        return 0;
+        return ComputeExitCode(mode, stats);
     }
 }
-
-internal enum ContainerLinkRepairMode
-{
-    Check,
-    DryRun,
-    Fix,
-}
-
-internal enum EntryStateKind
-{
-    Ok,
-    Missing,
-    DirectoryConflict,
-    FileConflict,
-    DanglingSymlink,
-    WrongTarget,
-    Error,
-}
-
-internal delegate Task<CommandExecutionResult> DockerCommandExecutor(
-    IReadOnlyList<string> arguments,
-    string? standardInput,
-    CancellationToken cancellationToken);
-
-internal readonly record struct CommandExecutionResult(int ExitCode, string StandardOutput, string StandardError);
-
-internal sealed record ContainerLinkSpecDocument(
-    [property: JsonPropertyName("links")] IReadOnlyList<ContainerLinkSpecEntry> Links);
-
-internal sealed record ContainerLinkSpecEntry(
-    [property: JsonPropertyName("link")] string Link,
-    [property: JsonPropertyName("target")] string Target,
-    [property: JsonPropertyName("remove_first")] bool RemoveFirst);
-
-[JsonSerializable(typeof(ContainerLinkSpecDocument))]
-internal sealed partial class ContainerLinkSpecJsonContext : JsonSerializerContext;

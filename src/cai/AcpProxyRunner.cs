@@ -1,35 +1,11 @@
 using System.Runtime.CompilerServices;
-using AgentClientProtocol.Proxy;
 
 [assembly: InternalsVisibleTo("AgentClientProtocol.Proxy.Tests")]
 [assembly: InternalsVisibleTo("ContainAI.Cli.Tests")]
 
 namespace ContainAI.Cli.Host;
 
-internal interface IAcpProxyProcess : IDisposable
-{
-    void Cancel();
-
-    Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken);
-}
-
-internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
-{
-    private readonly AcpProxy proxy;
-
-    public AcpProxyProcessAdapter(
-        string agent,
-        Stream stdout,
-        TextWriter stderr) => proxy = new AcpProxy(agent, stdout, stderr);
-
-    public void Cancel() => proxy.Cancel();
-
-    public Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken) => proxy.RunAsync(stdin, cancellationToken);
-
-    public void Dispose() => proxy.Dispose();
-}
-
-internal sealed class AcpProxyRunner
+internal sealed partial class AcpProxyRunner
 {
     private readonly Func<string, Stream, TextWriter, IAcpProxyProcess> proxyFactory;
     private readonly Func<Stream> stdinFactory;
@@ -71,31 +47,11 @@ internal sealed class AcpProxyRunner
 
         try
         {
-            using var proxy = proxyFactory(
-                resolvedAgent,
-                stdoutFactory(),
-                stderr);
-
-            ConsoleCancelEventHandler handler = (_, e) =>
-            {
-                e.Cancel = true;
-                proxy.Cancel();
-            };
-
-            subscribeCancelHandler(handler);
-            try
-            {
-                return await proxy.RunAsync(stdinFactory(), cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                unsubscribeCancelHandler(handler);
-            }
+            return await RunProxyAsync(resolvedAgent, cancellationToken).ConfigureAwait(false);
         }
         catch (ArgumentException ex)
         {
-            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -103,23 +59,19 @@ internal sealed class AcpProxyRunner
         }
         catch (InvalidOperationException ex)
         {
-            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
         catch (IOException ex)
         {
-            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
         catch (UnauthorizedAccessException ex)
         {
-            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
         catch (NotSupportedException ex)
         {
-            await stderr.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
     }
 }
