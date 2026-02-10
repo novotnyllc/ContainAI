@@ -3,18 +3,35 @@ using System.Text.Json.Serialization;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class ContainerLinkRepairService(
-    TextWriter standardOutput,
-    TextWriter standardError,
-    DockerCommandExecutor dockerExecutor)
+internal sealed class ContainerLinkRepairService
 {
     private const string BuiltinSpecPath = "/usr/local/lib/containai/link-spec.json";
     private const string UserSpecPath = "/mnt/agent-data/containai/user-link-spec.json";
     private const string CheckedAtFilePath = "/mnt/agent-data/.containai-links-checked-at";
 
-    private readonly TextWriter stdout = standardOutput;
-    private readonly TextWriter stderr = standardError;
-    private readonly DockerCommandExecutor executeDocker = dockerExecutor;
+    private readonly TextWriter stderr;
+    private readonly ContainerLinkSpecReader specReader;
+    private readonly ContainerLinkEntryInspector entryInspector;
+    private readonly ContainerLinkRepairOperations repairOperations;
+    private readonly ContainerLinkRepairReporter reporter;
+
+    public ContainerLinkRepairService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        DockerCommandExecutor dockerExecutor)
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(dockerExecutor);
+
+        stderr = standardError;
+
+        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
+        specReader = new ContainerLinkSpecReader(commandClient);
+        entryInspector = new ContainerLinkEntryInspector(commandClient);
+        repairOperations = new ContainerLinkRepairOperations(commandClient);
+        reporter = new ContainerLinkRepairReporter(standardOutput);
+    }
 
     public async Task<int> RunAsync(
         string containerName,
@@ -22,16 +39,16 @@ internal sealed partial class ContainerLinkRepairService(
         bool quiet,
         CancellationToken cancellationToken)
     {
-        var stats = new LinkRepairStats();
+        var stats = new ContainerLinkRepairStats();
 
-        var builtin = await ReadLinkSpecAsync(containerName, BuiltinSpecPath, required: true, cancellationToken).ConfigureAwait(false);
+        var builtin = await specReader.ReadLinkSpecAsync(containerName, BuiltinSpecPath, required: true, cancellationToken).ConfigureAwait(false);
         if (builtin.Error is not null)
         {
             await stderr.WriteLineAsync($"ERROR: {builtin.Error}").ConfigureAwait(false);
             return 1;
         }
 
-        var user = await ReadLinkSpecAsync(containerName, UserSpecPath, required: false, cancellationToken).ConfigureAwait(false);
+        var user = await specReader.ReadLinkSpecAsync(containerName, UserSpecPath, required: false, cancellationToken).ConfigureAwait(false);
         if (user.Error is not null)
         {
             stats.Errors++;
@@ -43,7 +60,7 @@ internal sealed partial class ContainerLinkRepairService(
 
         if (mode == ContainerLinkRepairMode.Fix && stats.Errors == 0)
         {
-            var timestampResult = await WriteCheckedTimestampAsync(containerName, cancellationToken).ConfigureAwait(false);
+            var timestampResult = await repairOperations.WriteCheckedTimestampAsync(containerName, CheckedAtFilePath, cancellationToken).ConfigureAwait(false);
             if (!timestampResult.Success)
             {
                 stats.Errors++;
@@ -51,11 +68,11 @@ internal sealed partial class ContainerLinkRepairService(
             }
             else
             {
-                await LogInfoAsync(quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
+                await reporter.LogInfoAsync(quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
             }
         }
 
-        await WriteSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
+        await reporter.WriteSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
         if (stats.Errors > 0)
         {
             return 1;
@@ -74,7 +91,7 @@ internal sealed partial class ContainerLinkRepairService(
         IReadOnlyList<ContainerLinkSpecEntry> entries,
         ContainerLinkRepairMode mode,
         bool quiet,
-        LinkRepairStats stats,
+        ContainerLinkRepairStats stats,
         CancellationToken cancellationToken)
     {
         foreach (var entry in entries)
@@ -96,10 +113,10 @@ internal sealed partial class ContainerLinkRepairService(
         ContainerLinkSpecEntry entry,
         ContainerLinkRepairMode mode,
         bool quiet,
-        LinkRepairStats stats,
+        ContainerLinkRepairStats stats,
         CancellationToken cancellationToken)
     {
-        var state = await GetEntryStateAsync(containerName, entry, cancellationToken).ConfigureAwait(false);
+        var state = await entryInspector.GetEntryStateAsync(containerName, entry, cancellationToken).ConfigureAwait(false);
         switch (state.Kind)
         {
             case EntryStateKind.Ok:
@@ -107,7 +124,7 @@ internal sealed partial class ContainerLinkRepairService(
                 return;
             case EntryStateKind.Missing:
                 stats.Missing++;
-                await LogInfoAsync(quiet, $"[MISSING] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
+                await reporter.LogInfoAsync(quiet, $"[MISSING] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
                 break;
             case EntryStateKind.DirectoryConflict when !entry.RemoveFirst:
                 stats.Errors++;
@@ -115,19 +132,19 @@ internal sealed partial class ContainerLinkRepairService(
                 return;
             case EntryStateKind.DirectoryConflict:
                 stats.Broken++;
-                await LogInfoAsync(quiet, $"[EXISTS_DIR] {entry.Link} is a directory (will remove with R flag)").ConfigureAwait(false);
+                await reporter.LogInfoAsync(quiet, $"[EXISTS_DIR] {entry.Link} is a directory (will remove with R flag)").ConfigureAwait(false);
                 break;
             case EntryStateKind.FileConflict:
                 stats.Broken++;
-                await LogInfoAsync(quiet, $"[EXISTS_FILE] {entry.Link} is a regular file (will replace)").ConfigureAwait(false);
+                await reporter.LogInfoAsync(quiet, $"[EXISTS_FILE] {entry.Link} is a regular file (will replace)").ConfigureAwait(false);
                 break;
             case EntryStateKind.DanglingSymlink:
                 stats.Broken++;
-                await LogInfoAsync(quiet, $"[BROKEN] {entry.Link} -> {entry.Target} (dangling symlink)").ConfigureAwait(false);
+                await reporter.LogInfoAsync(quiet, $"[BROKEN] {entry.Link} -> {entry.Target} (dangling symlink)").ConfigureAwait(false);
                 break;
             case EntryStateKind.WrongTarget:
                 stats.Broken++;
-                await LogInfoAsync(
+                await reporter.LogInfoAsync(
                         quiet,
                         $"[WRONG_TARGET] {entry.Link} -> {state.CurrentTarget ?? "<unknown>"} (expected: {entry.Target})")
                     .ConfigureAwait(false);
@@ -147,12 +164,12 @@ internal sealed partial class ContainerLinkRepairService(
 
         if (mode == ContainerLinkRepairMode.DryRun)
         {
-            await LogInfoAsync(quiet, $"[WOULD] Create symlink: {entry.Link} -> {entry.Target}").ConfigureAwait(false);
+            await reporter.LogInfoAsync(quiet, $"[WOULD] Create symlink: {entry.Link} -> {entry.Target}").ConfigureAwait(false);
             stats.Fixed++;
             return;
         }
 
-        var repair = await RepairEntryAsync(containerName, entry, state, cancellationToken).ConfigureAwait(false);
+        var repair = await repairOperations.RepairEntryAsync(containerName, entry, state, cancellationToken).ConfigureAwait(false);
         if (!repair.Success)
         {
             stats.Errors++;
@@ -161,7 +178,7 @@ internal sealed partial class ContainerLinkRepairService(
         }
 
         stats.Fixed++;
-        await LogInfoAsync(quiet, $"[FIXED] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
+        await reporter.LogInfoAsync(quiet, $"[FIXED] {entry.Link} -> {entry.Target}").ConfigureAwait(false);
     }
 }
 
