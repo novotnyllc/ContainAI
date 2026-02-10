@@ -1,8 +1,8 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeWorkspacePathHelpers
 {
-    protected static string? TryFindWorkspaceConfigPath(string? workspacePath)
+    internal static string? TryFindWorkspaceConfigPath(string? workspacePath, IReadOnlyList<string> configFileNames)
     {
         var normalizedStart = ResolveWorkspaceSearchStartPath(workspacePath);
         var current = File.Exists(normalizedStart)
@@ -11,7 +11,7 @@ internal abstract partial class CaiRuntimeSupport
 
         while (!string.IsNullOrWhiteSpace(current))
         {
-            foreach (var fileName in ConfigFileNames)
+            foreach (var fileName in configFileNames)
             {
                 var candidate = Path.Combine(current, ".containai", fileName);
                 if (File.Exists(candidate))
@@ -32,14 +32,15 @@ internal abstract partial class CaiRuntimeSupport
         return null;
     }
 
+    internal static string CanonicalizeWorkspacePath(string workspacePath)
+        => Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(workspacePath));
+
     private static string ResolveWorkspaceSearchStartPath(string? workspacePath)
     {
         var startPath = string.IsNullOrWhiteSpace(workspacePath)
             ? Directory.GetCurrentDirectory()
-            : ExpandHomePath(workspacePath);
+            : CaiRuntimeHomePathHelpers.ExpandHomePath(workspacePath);
 
         return Path.GetFullPath(startPath);
     }
-
-    private static string CanonicalizeWorkspacePath(string workspacePath) => Path.GetFullPath(ExpandHomePath(workspacePath));
 }

@@ -1,8 +1,8 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeProcessHelpers
 {
-    protected static string EscapeJson(string value)
+    internal static string EscapeJson(string value)
     {
         if (string.IsNullOrEmpty(value))
         {
@@ -17,7 +17,7 @@ internal abstract partial class CaiRuntimeSupport
             .Replace("\t", "\\t", StringComparison.Ordinal);
     }
 
-    protected static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
+    internal static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(destinationDirectory);
@@ -39,7 +39,7 @@ internal abstract partial class CaiRuntimeSupport
         }
     }
 
-    protected static async Task<ProcessResult> RunProcessCaptureAsync(
+    internal static async Task<RuntimeProcessResult> RunProcessCaptureAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
@@ -51,23 +51,23 @@ internal abstract partial class CaiRuntimeSupport
                 .RunCaptureAsync(fileName, arguments, cancellationToken, standardInput: standardInput)
                 .ConfigureAwait(false);
 
-            return new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+            return new RuntimeProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
         }
         catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return new ProcessResult(1, string.Empty, ex.Message);
+            return new RuntimeProcessResult(1, string.Empty, ex.Message);
         }
         catch (InvalidOperationException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return new ProcessResult(1, string.Empty, ex.Message);
+            return new RuntimeProcessResult(1, string.Empty, ex.Message);
         }
         catch (IOException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            return new ProcessResult(1, string.Empty, ex.Message);
+            return new RuntimeProcessResult(1, string.Empty, ex.Message);
         }
     }
 
-    protected static async Task<int> RunProcessInteractiveAsync(
+    internal static async Task<int> RunProcessInteractiveAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
@@ -91,5 +91,11 @@ internal abstract partial class CaiRuntimeSupport
             await Console.Error.WriteLineAsync($"Failed to start '{fileName}': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
+    }
+
+    internal static async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    {
+        var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
+        return result.ExitCode == 0;
     }
 }

@@ -1,5 +1,3 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
-{
-}
+// Intentionally left as a compatibility unit for CaiRuntimeSupport-related compilation items.

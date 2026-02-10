@@ -1,14 +1,12 @@
-using System.Text.RegularExpressions;
-
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeEnvFileHelpers
 {
-    protected static EnvFilePathResolution ResolveEnvFilePath(string workspaceRoot, string envFile)
+    internal static RuntimeEnvFilePathResolution ResolveEnvFilePath(string workspaceRoot, string envFile)
     {
         if (Path.IsPathRooted(envFile))
         {
-            return new EnvFilePathResolution(null, $"env_file path rejected: absolute paths are not allowed (must be workspace-relative): {envFile}");
+            return new RuntimeEnvFilePathResolution(null, $"env_file path rejected: absolute paths are not allowed (must be workspace-relative): {envFile}");
         }
 
         var candidate = Path.GetFullPath(Path.Combine(workspaceRoot, envFile));
@@ -17,23 +15,23 @@ internal abstract partial class CaiRuntimeSupport
             : workspaceRoot + Path.DirectorySeparatorChar;
         if (!candidate.StartsWith(workspacePrefix, StringComparison.Ordinal) && !string.Equals(candidate, workspaceRoot, StringComparison.Ordinal))
         {
-            return new EnvFilePathResolution(null, $"env_file path rejected: outside workspace boundary: {envFile}");
+            return new RuntimeEnvFilePathResolution(null, $"env_file path rejected: outside workspace boundary: {envFile}");
         }
 
         if (!File.Exists(candidate))
         {
-            return new EnvFilePathResolution(null, null);
+            return new RuntimeEnvFilePathResolution(null, null);
         }
 
-        if (IsSymbolicLinkPath(candidate))
+        if (CaiRuntimePathHelpers.IsSymbolicLinkPath(candidate))
         {
-            return new EnvFilePathResolution(null, $"env_file is a symlink (rejected): {candidate}");
+            return new RuntimeEnvFilePathResolution(null, $"env_file is a symlink (rejected): {candidate}");
         }
 
-        return new EnvFilePathResolution(candidate, null);
+        return new RuntimeEnvFilePathResolution(candidate, null);
     }
 
-    protected static ParsedEnvFile ParseEnvFile(string filePath)
+    internal static RuntimeParsedEnvFile ParseEnvFile(string filePath)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         var warnings = new List<string>();
@@ -62,7 +60,7 @@ internal abstract partial class CaiRuntimeSupport
 
             var key = normalized[..separatorIndex];
             var value = normalized[(separatorIndex + 1)..];
-            if (!EnvVarNameRegex().IsMatch(key))
+            if (!CaiRuntimeEnvRegexHelpers.EnvVarNameRegex().IsMatch(key))
             {
                 warnings.Add($"[WARN] line {lineNumber}: key '{key}' invalid format - skipping");
                 continue;
@@ -83,9 +81,6 @@ internal abstract partial class CaiRuntimeSupport
             values[key] = value;
         }
 
-        return new ParsedEnvFile(values, warnings);
+        return new RuntimeParsedEnvFile(values, warnings);
     }
-
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant)]
-    protected static partial Regex EnvVarNameRegex();
 }

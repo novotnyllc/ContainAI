@@ -2,20 +2,18 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeCommandParsingHelpers
 {
-    protected static async Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+    internal static async Task<string?> ResolveWorkspaceContainerNameAsync(
+        string workspace,
+        TextWriter stderr,
+        IReadOnlyList<string> configFileNames,
+        CancellationToken cancellationToken)
     {
-        var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
-        return result.ExitCode == 0;
-    }
-
-    protected async Task<string?> ResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken)
-    {
-        var configPath = ResolveConfigPath(workspace);
+        var configPath = CaiRuntimeConfigPathHelpers.ResolveConfigPath(workspace, configFileNames);
         if (File.Exists(configPath))
         {
-            var workspaceResult = await RunTomlAsync(
+            var workspaceResult = await CaiRuntimeParseAndTimeHelpers.RunTomlAsync(
                 () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
                 cancellationToken).ConfigureAwait(false);
 
@@ -28,7 +26,7 @@ internal abstract partial class CaiRuntimeSupport
                     var configuredName = containerNameElement.GetString();
                     if (!string.IsNullOrWhiteSpace(configuredName))
                     {
-                        var inspect = await DockerCaptureAsync(
+                        var inspect = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
                             ["inspect", "--type", "container", configuredName],
                             cancellationToken).ConfigureAwait(false);
                         if (inspect.ExitCode == 0)
@@ -40,7 +38,7 @@ internal abstract partial class CaiRuntimeSupport
             }
         }
 
-        var byLabel = await DockerCaptureAsync(
+        var byLabel = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["ps", "-aq", "--filter", $"label=containai.workspace={workspace}"],
             cancellationToken).ConfigureAwait(false);
 
@@ -63,7 +61,7 @@ internal abstract partial class CaiRuntimeSupport
             return null;
         }
 
-        var nameResult = await DockerCaptureAsync(
+        var nameResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["inspect", "--format", "{{.Name}}", ids[0]],
             cancellationToken).ConfigureAwait(false);
 

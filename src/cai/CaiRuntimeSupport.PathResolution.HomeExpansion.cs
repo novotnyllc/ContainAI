@@ -1,8 +1,8 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeHomePathHelpers
 {
-    protected static string ResolveHomeDirectory()
+    internal static string ResolveHomeDirectory()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(home))
@@ -13,7 +13,7 @@ internal abstract partial class CaiRuntimeSupport
         return string.IsNullOrWhiteSpace(home) ? Directory.GetCurrentDirectory() : home;
     }
 
-    protected static string ExpandHomePath(string path)
+    internal static string ExpandHomePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
         {

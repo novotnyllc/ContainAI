@@ -1,23 +1,17 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeConfigPathHelpers
 {
-    protected static readonly string[] ConfigFileNames =
-    [
-        "config.toml",
-        "containai.toml",
-    ];
-
-    protected static string ResolveUserConfigPath()
+    internal static string ResolveUserConfigPath(IReadOnlyList<string> configFileNames)
     {
         var containAiConfigDirectory = ResolveContainAiConfigDirectory();
-        return Path.Combine(containAiConfigDirectory, ConfigFileNames[0]);
+        return Path.Combine(containAiConfigDirectory, configFileNames[0]);
     }
 
-    protected static string? TryFindExistingUserConfigPath()
+    internal static string? TryFindExistingUserConfigPath(IReadOnlyList<string> configFileNames)
     {
         var containAiConfigDirectory = ResolveContainAiConfigDirectory();
-        foreach (var fileName in ConfigFileNames)
+        foreach (var fileName in configFileNames)
         {
             var candidate = Path.Combine(containAiConfigDirectory, fileName);
             if (File.Exists(candidate))
@@ -29,25 +23,25 @@ internal abstract partial class CaiRuntimeSupport
         return null;
     }
 
-    protected static string ResolveConfigPath(string? workspacePath)
+    internal static string ResolveConfigPath(string? workspacePath, IReadOnlyList<string> configFileNames)
     {
         var explicitConfigPath = Environment.GetEnvironmentVariable("CONTAINAI_CONFIG");
         if (!string.IsNullOrWhiteSpace(explicitConfigPath))
         {
-            return Path.GetFullPath(ExpandHomePath(explicitConfigPath));
+            return Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(explicitConfigPath));
         }
 
-        var workspaceConfigPath = TryFindWorkspaceConfigPath(workspacePath);
+        var workspaceConfigPath = CaiRuntimeWorkspacePathHelpers.TryFindWorkspaceConfigPath(workspacePath, configFileNames);
         if (!string.IsNullOrWhiteSpace(workspaceConfigPath))
         {
             return workspaceConfigPath;
         }
 
-        var userConfigPath = TryFindExistingUserConfigPath();
-        return userConfigPath ?? ResolveUserConfigPath();
+        var userConfigPath = TryFindExistingUserConfigPath(configFileNames);
+        return userConfigPath ?? ResolveUserConfigPath(configFileNames);
     }
 
-    protected static string ResolveTemplatesDirectory()
+    internal static string ResolveTemplatesDirectory()
     {
         var containAiConfigDirectory = ResolveContainAiConfigDirectory();
         return Path.Combine(containAiConfigDirectory, "templates");
@@ -55,7 +49,7 @@ internal abstract partial class CaiRuntimeSupport
 
     private static string ResolveContainAiConfigDirectory()
     {
-        var home = ResolveHomeDirectory();
+        var home = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
         var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         var configRoot = string.IsNullOrWhiteSpace(xdgConfigHome)
             ? Path.Combine(home, ".config")

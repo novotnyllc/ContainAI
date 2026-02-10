@@ -2,9 +2,9 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimePathResolutionHelpers
 {
-    protected static bool IsExecutableOnPath(string fileName)
+    internal static bool IsExecutableOnPath(string fileName)
     {
         if (Path.IsPathRooted(fileName) && File.Exists(fileName))
         {
@@ -37,7 +37,7 @@ internal abstract partial class CaiRuntimeSupport
         return false;
     }
 
-    protected static async Task<string> ResolveChannelAsync(CancellationToken cancellationToken)
+    internal static async Task<string> ResolveChannelAsync(IReadOnlyList<string> configFileNames, CancellationToken cancellationToken)
     {
         var envChannel = Environment.GetEnvironmentVariable("CAI_CHANNEL")
                          ?? Environment.GetEnvironmentVariable("CONTAINAI_CHANNEL");
@@ -51,13 +51,15 @@ internal abstract partial class CaiRuntimeSupport
             return "stable";
         }
 
-        var configPath = ResolveUserConfigPath();
+        var configPath = CaiRuntimeConfigPathHelpers.ResolveUserConfigPath(configFileNames);
         if (!File.Exists(configPath))
         {
             return "stable";
         }
 
-        var result = await RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "image.channel"), cancellationToken).ConfigureAwait(false);
+        var result = await CaiRuntimeParseAndTimeHelpers
+            .RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "image.channel"), cancellationToken)
+            .ConfigureAwait(false);
 
         if (result.ExitCode != 0)
         {
@@ -69,7 +71,11 @@ internal abstract partial class CaiRuntimeSupport
             : "stable";
     }
 
-    protected static async Task<string?> ResolveDataVolumeAsync(string workspace, string? explicitVolume, CancellationToken cancellationToken)
+    internal static async Task<string?> ResolveDataVolumeAsync(
+        string workspace,
+        string? explicitVolume,
+        IReadOnlyList<string> configFileNames,
+        CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {
@@ -82,16 +88,16 @@ internal abstract partial class CaiRuntimeSupport
             return envVolume;
         }
 
-        var configPath = ResolveConfigPath(workspace);
+        var configPath = CaiRuntimeConfigPathHelpers.ResolveConfigPath(workspace, configFileNames);
         if (!File.Exists(configPath))
         {
             return "containai-data";
         }
 
-        var normalizedWorkspace = CanonicalizeWorkspacePath(workspace);
-        var workspaceState = await RunTomlAsync(
-            () => TomlCommandProcessor.GetWorkspace(configPath, normalizedWorkspace),
-            cancellationToken).ConfigureAwait(false);
+        var normalizedWorkspace = CaiRuntimeWorkspacePathHelpers.CanonicalizeWorkspacePath(workspace);
+        var workspaceState = await CaiRuntimeParseAndTimeHelpers
+            .RunTomlAsync(() => TomlCommandProcessor.GetWorkspace(configPath, normalizedWorkspace), cancellationToken)
+            .ConfigureAwait(false);
 
         if (workspaceState.ExitCode == 0 && !string.IsNullOrWhiteSpace(workspaceState.StandardOutput))
         {
@@ -107,9 +113,9 @@ internal abstract partial class CaiRuntimeSupport
             }
         }
 
-        var globalResult = await RunTomlAsync(
-            () => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"),
-            cancellationToken).ConfigureAwait(false);
+        var globalResult = await CaiRuntimeParseAndTimeHelpers
+            .RunTomlAsync(() => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"), cancellationToken)
+            .ConfigureAwait(false);
 
         if (globalResult.ExitCode == 0)
         {

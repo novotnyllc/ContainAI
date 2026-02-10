@@ -2,21 +2,21 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeDockerHelpers
 {
-    protected static async Task<bool> DockerContainerExistsAsync(string containerName, CancellationToken cancellationToken)
+    internal static async Task<bool> DockerContainerExistsAsync(string containerName, CancellationToken cancellationToken)
     {
         var result = await DockerRunAsync(["inspect", "--type", "container", containerName], cancellationToken).ConfigureAwait(false);
         return result == 0;
     }
 
-    protected static async Task<int> DockerRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    internal static async Task<int> DockerRunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var result = await DockerCaptureAsync(args, cancellationToken).ConfigureAwait(false);
         return result.ExitCode;
     }
 
-    protected static async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    internal static async Task<RuntimeProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = new List<string>();
@@ -27,10 +27,10 @@ internal abstract partial class CaiRuntimeSupport
         }
 
         dockerArgs.AddRange(args);
-        return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
+        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
-    protected static async Task<ProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, string standardInput, CancellationToken cancellationToken)
+    internal static async Task<RuntimeProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, string standardInput, CancellationToken cancellationToken)
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = new List<string>();
@@ -41,10 +41,10 @@ internal abstract partial class CaiRuntimeSupport
         }
 
         dockerArgs.AddRange(args);
-        return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
+        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
     }
 
-    protected static async Task<CommandExecutionResult> ExecuteDockerCommandAsync(
+    internal static async Task<CommandExecutionResult> ExecuteDockerCommandAsync(
         IReadOnlyList<string> args,
         string? standardInput,
         CancellationToken cancellationToken)
@@ -55,14 +55,13 @@ internal abstract partial class CaiRuntimeSupport
         return new CommandExecutionResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 
-    protected static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
+    internal static async Task<string?> ResolveDockerContextAsync(CancellationToken cancellationToken)
     {
         foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
         {
-            var probe = await RunProcessCaptureAsync(
-                "docker",
-                ["context", "inspect", contextName],
-                cancellationToken).ConfigureAwait(false);
+            var probe = await CaiRuntimeProcessHelpers
+                .RunProcessCaptureAsync("docker", ["context", "inspect", contextName], cancellationToken)
+                .ConfigureAwait(false);
             if (probe.ExitCode == 0)
             {
                 return contextName;
@@ -72,7 +71,7 @@ internal abstract partial class CaiRuntimeSupport
         return null;
     }
 
-    protected static async Task<List<string>> FindContainerContextsAsync(string containerName, CancellationToken cancellationToken)
+    internal static async Task<List<string>> FindContainerContextsAsync(string containerName, CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         foreach (var contextName in await GetAvailableContextsAsync(cancellationToken).ConfigureAwait(false))
@@ -85,7 +84,7 @@ internal abstract partial class CaiRuntimeSupport
             }
 
             inspectArgs.AddRange(["inspect", "--type", "container", "--", containerName]);
-            var inspect = await RunProcessCaptureAsync("docker", inspectArgs, cancellationToken).ConfigureAwait(false);
+            var inspect = await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", inspectArgs, cancellationToken).ConfigureAwait(false);
             if (inspect.ExitCode == 0)
             {
                 contexts.Add(contextName);
@@ -95,12 +94,14 @@ internal abstract partial class CaiRuntimeSupport
         return contexts;
     }
 
-    protected static async Task<List<string>> GetAvailableContextsAsync(CancellationToken cancellationToken)
+    internal static async Task<List<string>> GetAvailableContextsAsync(CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
         foreach (var contextName in new[] { "containai-docker", "containai-secure", "docker-containai" })
         {
-            var probe = await RunProcessCaptureAsync("docker", ["context", "inspect", contextName], cancellationToken).ConfigureAwait(false);
+            var probe = await CaiRuntimeProcessHelpers
+                .RunProcessCaptureAsync("docker", ["context", "inspect", contextName], cancellationToken)
+                .ConfigureAwait(false);
             if (probe.ExitCode == 0)
             {
                 contexts.Add(contextName);
@@ -111,7 +112,7 @@ internal abstract partial class CaiRuntimeSupport
         return contexts;
     }
 
-    protected static async Task<ProcessResult> DockerCaptureForContextAsync(string context, IReadOnlyList<string> args, CancellationToken cancellationToken)
+    internal static async Task<RuntimeProcessResult> DockerCaptureForContextAsync(string context, IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         var dockerArgs = new List<string>();
         if (!string.Equals(context, "default", StringComparison.Ordinal))
@@ -121,10 +122,10 @@ internal abstract partial class CaiRuntimeSupport
         }
 
         dockerArgs.AddRange(args);
-        return await RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
+        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
-    protected static async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
+    internal static async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(explicitVolume))
         {

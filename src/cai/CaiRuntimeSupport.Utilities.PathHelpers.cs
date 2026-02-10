@@ -2,9 +2,9 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimePathHelpers
 {
-    protected static bool IsSymbolicLinkPath(string path)
+    internal static bool IsSymbolicLinkPath(string path)
     {
         try
         {
@@ -28,7 +28,7 @@ internal abstract partial class CaiRuntimeSupport
         }
     }
 
-    protected static bool TryMapSourcePathToTarget(
+    internal static bool TryMapSourcePathToTarget(
         string sourceRelativePath,
         IReadOnlyList<ManifestEntry> entries,
         out string targetRelativePath,
@@ -100,6 +100,6 @@ internal abstract partial class CaiRuntimeSupport
         return true;
     }
 
-    protected static string EscapeForSingleQuotedShell(string value)
+    internal static string EscapeForSingleQuotedShell(string value)
         => value.Replace("'", "'\"'\"'", StringComparison.Ordinal);
 }

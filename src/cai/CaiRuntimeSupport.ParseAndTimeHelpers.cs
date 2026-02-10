@@ -1,31 +1,33 @@
 namespace ContainAI.Cli.Host;
 
-internal abstract partial class CaiRuntimeSupport
+internal static class CaiRuntimeParseAndTimeHelpers
 {
-    protected static async Task<ProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken)
+    internal static async Task<RuntimeProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var result = operation();
-        return await Task.FromResult(new ProcessResult(result.ExitCode, result.StandardOutput, result.StandardError)).ConfigureAwait(false);
+        return await Task
+            .FromResult(new RuntimeProcessResult(result.ExitCode, result.StandardOutput, result.StandardError))
+            .ConfigureAwait(false);
     }
 
-    protected static string NormalizeConfigKey(string key) => string.Equals(key, "agent", StringComparison.Ordinal)
+    internal static string NormalizeConfigKey(string key)
+        => string.Equals(key, "agent", StringComparison.Ordinal)
             ? "agent.default"
             : key;
 
-    protected static (string? Workspace, string? Error) ResolveWorkspaceScope(ParsedConfigCommand parsed, string normalizedKey)
+    internal static (string? Workspace, string? Error) ResolveWorkspaceScope(bool isGlobal, string? workspace, string normalizedKey)
     {
         if (!string.Equals(normalizedKey, "data_volume", StringComparison.Ordinal))
         {
-            return (parsed.Workspace, null);
+            return (workspace, null);
         }
 
-        if (parsed.Global)
+        if (isGlobal)
         {
             return (null, "data_volume is workspace-scoped and cannot be set globally");
         }
 
-        var workspace = parsed.Workspace;
         if (string.IsNullOrWhiteSpace(workspace))
         {
             workspace = Directory.GetCurrentDirectory();
@@ -34,7 +36,7 @@ internal abstract partial class CaiRuntimeSupport
         return (Path.GetFullPath(workspace), null);
     }
 
-    protected static bool TryParseAgeDuration(string value, out TimeSpan duration)
+    internal static bool TryParseAgeDuration(string value, out TimeSpan duration)
     {
         duration = default;
         if (string.IsNullOrWhiteSpace(value) || value.Length < 2)
@@ -58,7 +60,7 @@ internal abstract partial class CaiRuntimeSupport
         return duration != default || amount == 0;
     }
 
-    protected static DateTimeOffset? ParseGcReferenceTime(string finishedAtRaw, string createdRaw)
+    internal static DateTimeOffset? ParseGcReferenceTime(string finishedAtRaw, string createdRaw)
     {
         if (!string.IsNullOrWhiteSpace(finishedAtRaw) &&
             !string.Equals(finishedAtRaw, "0001-01-01T00:00:00Z", StringComparison.Ordinal) &&
