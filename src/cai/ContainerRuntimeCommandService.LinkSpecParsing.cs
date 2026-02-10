@@ -1,4 +1,3 @@
-using System.Text.Json;
 using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 using ContainAI.Cli.Host.ContainerRuntime.Models;
 
@@ -20,9 +19,30 @@ internal interface IContainerRuntimeLinkSpecProcessor
 internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkSpecProcessor
 {
     private readonly IContainerRuntimeExecutionContext context;
+    private readonly IContainerRuntimeLinkSpecFileReader linkSpecFileReader;
+    private readonly IContainerRuntimeLinkSpecParser linkSpecParser;
+    private readonly IContainerRuntimeLinkSpecEntryValidator linkSpecEntryValidator;
 
     public ContainerRuntimeLinkSpecProcessor(IContainerRuntimeExecutionContext context)
-        => this.context = context ?? throw new ArgumentNullException(nameof(context));
+        : this(
+            context,
+            new ContainerRuntimeLinkSpecFileReader(),
+            new ContainerRuntimeLinkSpecParser(),
+            new ContainerRuntimeLinkSpecEntryValidator())
+    {
+    }
+
+    internal ContainerRuntimeLinkSpecProcessor(
+        IContainerRuntimeExecutionContext context,
+        IContainerRuntimeLinkSpecFileReader linkSpecFileReader,
+        IContainerRuntimeLinkSpecParser linkSpecParser,
+        IContainerRuntimeLinkSpecEntryValidator linkSpecEntryValidator)
+    {
+        this.context = context ?? throw new ArgumentNullException(nameof(context));
+        this.linkSpecFileReader = linkSpecFileReader ?? throw new ArgumentNullException(nameof(linkSpecFileReader));
+        this.linkSpecParser = linkSpecParser ?? throw new ArgumentNullException(nameof(linkSpecParser));
+        this.linkSpecEntryValidator = linkSpecEntryValidator ?? throw new ArgumentNullException(nameof(linkSpecEntryValidator));
+    }
 
     public async Task ProcessLinkSpecAsync(
         string specPath,
@@ -32,29 +52,22 @@ internal sealed class ContainerRuntimeLinkSpecProcessor : IContainerRuntimeLinkS
         LinkRepairStats stats,
         CancellationToken cancellationToken)
     {
-        var json = await File.ReadAllTextAsync(specPath, cancellationToken).ConfigureAwait(false);
-        using var document = JsonDocument.Parse(json);
-        if (!document.RootElement.TryGetProperty("links", out var linksElement) || linksElement.ValueKind != JsonValueKind.Array)
-        {
-            throw new InvalidOperationException($"Invalid link spec format: {specPath}");
-        }
+        var json = await linkSpecFileReader.ReadAllTextAsync(specPath, cancellationToken).ConfigureAwait(false);
+        var entries = linkSpecParser.ParseEntries(specPath, json);
 
-        await context.LogInfoAsync(quiet, $"Processing {specName} ({linksElement.GetArrayLength()} links)").ConfigureAwait(false);
+        await context.LogInfoAsync(quiet, $"Processing {specName} ({entries.Count} links)").ConfigureAwait(false);
 
-        foreach (var linkElement in linksElement.EnumerateArray())
+        foreach (var entry in entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var linkPath = linkElement.TryGetProperty("link", out var linkValue) ? linkValue.GetString() : null;
-            var targetPath = linkElement.TryGetProperty("target", out var targetValue) ? targetValue.GetString() : null;
-            var removeFirst = linkElement.TryGetProperty("remove_first", out var removeFirstValue) && removeFirstValue.ValueKind == JsonValueKind.True;
-            if (string.IsNullOrWhiteSpace(linkPath) || string.IsNullOrWhiteSpace(targetPath))
+            if (!linkSpecEntryValidator.TryValidate(entry, out var validatedEntry))
             {
                 stats.Errors++;
                 await context.StandardError.WriteLineAsync($"[WARN] Skipping invalid link spec entry in {specPath}").ConfigureAwait(false);
                 continue;
             }
 
-            await ProcessLinkEntryAsync(linkPath!, targetPath!, removeFirst, mode, quiet, stats).ConfigureAwait(false);
+            await ProcessLinkEntryAsync(validatedEntry.LinkPath, validatedEntry.TargetPath, validatedEntry.RemoveFirst, mode, quiet, stats).ConfigureAwait(false);
         }
     }
 
