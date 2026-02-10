@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace ContainAI.Cli.Host;
 
 internal interface IImportSecretPermissionOperations
@@ -18,7 +16,7 @@ internal interface IImportSecretPermissionOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
+internal sealed partial class ImportSecretPermissionOperations : CaiRuntimeSupport
     , IImportSecretPermissionOperations
 {
     public ImportSecretPermissionOperations(TextWriter standardOutput, TextWriter standardError)
@@ -33,60 +31,17 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var secretDirectories = new HashSet<string>(StringComparer.Ordinal);
-        var secretFiles = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in manifestEntries)
-        {
-            if (!entry.Flags.Contains('s', StringComparison.Ordinal) || noSecrets)
-            {
-                continue;
-            }
-
-            var normalizedTarget = entry.Target.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
-            if (entry.Flags.Contains('d', StringComparison.Ordinal))
-            {
-                secretDirectories.Add(normalizedTarget);
-                continue;
-            }
-
-            secretFiles.Add(normalizedTarget);
-            var parent = Path.GetDirectoryName(normalizedTarget)?.Replace("\\", "/", StringComparison.Ordinal);
-            if (!string.IsNullOrWhiteSpace(parent))
-            {
-                secretDirectories.Add(parent);
-            }
-        }
+        var (secretDirectories, secretFiles) = CollectSecretPaths(manifestEntries, noSecrets);
 
         if (secretDirectories.Count == 0 && secretFiles.Count == 0)
         {
             return 0;
         }
 
-        var commandBuilder = new StringBuilder();
-        foreach (var directory in secretDirectories.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            commandBuilder.Append("if [ -d '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("' ]; then chmod 700 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("' || true; fi; ");
-        }
-
-        foreach (var file in secretFiles.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            commandBuilder.Append("if [ -f '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("' ]; then chmod 600 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("' || true; fi; ");
-        }
+        var permissionsCommand = BuildBulkPermissionsCommand(secretDirectories, secretFiles);
 
         var result = await DockerCaptureAsync(
-            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", commandBuilder.ToString()],
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", permissionsCommand],
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
@@ -112,10 +67,7 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
         bool isDirectory,
         CancellationToken cancellationToken)
     {
-        var chmodMode = isDirectory ? "700" : "600";
-        var chmodCommand = $"target='/target/{EscapeForSingleQuotedShell(normalizedTarget)}'; " +
-                           "if [ -e \"$target\" ]; then chmod " + chmodMode + " \"$target\"; fi; " +
-                           "if [ -e \"$target\" ]; then chown 1000:1000 \"$target\" || true; fi";
+        var chmodCommand = BuildEntryPermissionsCommand(normalizedTarget, isDirectory);
         var chmodResult = await DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", chmodCommand],
             cancellationToken).ConfigureAwait(false);
