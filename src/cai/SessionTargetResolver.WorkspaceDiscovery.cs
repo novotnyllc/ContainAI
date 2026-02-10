@@ -13,7 +13,9 @@ internal interface ISessionTargetWorkspaceDiscoveryService
 
 internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWorkspaceDiscoveryService
 {
-    private readonly ISessionTargetParsingValidationService parsingValidationService;
+    private readonly ISessionTargetContextDiscoveryService contextDiscoveryService;
+    private readonly ISessionTargetDataVolumeResolutionService dataVolumeResolutionService;
+    private readonly ISessionTargetContainerNameGenerationService containerNameGenerationService;
 
     public SessionTargetWorkspaceDiscoveryService()
         : this(new SessionTargetParsingValidationService())
@@ -21,18 +23,73 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
     }
 
     internal SessionTargetWorkspaceDiscoveryService(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
-        => parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        : this(
+            new SessionTargetContextDiscoveryService(new SessionTargetConfiguredContextResolver()),
+            new SessionTargetDataVolumeResolutionService(sessionTargetParsingValidationService),
+            new SessionTargetContainerNameGenerationService())
+    {
+    }
+
+    internal SessionTargetWorkspaceDiscoveryService(
+        ISessionTargetContextDiscoveryService sessionTargetContextDiscoveryService,
+        ISessionTargetDataVolumeResolutionService sessionTargetDataVolumeResolutionService,
+        ISessionTargetContainerNameGenerationService sessionTargetContainerNameGenerationService)
+    {
+        contextDiscoveryService = sessionTargetContextDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetContextDiscoveryService));
+        dataVolumeResolutionService = sessionTargetDataVolumeResolutionService ?? throw new ArgumentNullException(nameof(sessionTargetDataVolumeResolutionService));
+        containerNameGenerationService = sessionTargetContainerNameGenerationService ?? throw new ArgumentNullException(nameof(sessionTargetContainerNameGenerationService));
+    }
+
+    public async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
+        => await contextDiscoveryService.ResolveContextForWorkspaceAsync(workspace, explicitConfig, force, cancellationToken).ConfigureAwait(false);
+
+    public async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
+        => await contextDiscoveryService.BuildCandidateContextsAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
+
+    public async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
+        => await dataVolumeResolutionService.ResolveDataVolumeAsync(workspace, explicitVolume, explicitConfig, cancellationToken).ConfigureAwait(false);
+
+    public async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
+        => await containerNameGenerationService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
+}
+
+internal interface ISessionTargetContextDiscoveryService
+{
+    Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken);
+
+    Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken);
+}
+
+internal interface ISessionTargetConfiguredContextResolver
+{
+    Task<string?> ResolveConfiguredContextAsync(string workspace, string? explicitConfig, CancellationToken cancellationToken);
+}
+
+internal interface ISessionTargetDataVolumeResolutionService
+{
+    Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken);
+}
+
+internal interface ISessionTargetContainerNameGenerationService
+{
+    Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken);
+}
+
+internal sealed class SessionTargetContextDiscoveryService : ISessionTargetContextDiscoveryService
+{
+    private const string DefaultContextName = "default";
+    private readonly ISessionTargetConfiguredContextResolver configuredContextResolver;
+
+    internal SessionTargetContextDiscoveryService(ISessionTargetConfiguredContextResolver sessionTargetConfiguredContextResolver)
+        => configuredContextResolver = sessionTargetConfiguredContextResolver ?? throw new ArgumentNullException(nameof(sessionTargetConfiguredContextResolver));
 
     public async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
     {
-        var configContext = await ResolveConfiguredContextAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(configContext))
+        var configured = await configuredContextResolver.ResolveConfiguredContextAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(configured) &&
+            await SessionRuntimeInfrastructure.DockerContextExistsAsync(configured, cancellationToken).ConfigureAwait(false))
         {
-            var exists = await SessionRuntimeInfrastructure.DockerContextExistsAsync(configContext, cancellationToken).ConfigureAwait(false);
-            if (exists)
-            {
-                return ContextSelectionResult.FromContext(configContext);
-            }
+            return ContextSelectionResult.FromContext(configured);
         }
 
         foreach (var candidate in SessionRuntimeConstants.ContextFallbackOrder)
@@ -45,7 +102,7 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
 
         if (force)
         {
-            return ContextSelectionResult.FromContext("default");
+            return ContextSelectionResult.FromContext(DefaultContextName);
         }
 
         return ContextSelectionResult.FromError("No isolation context available. Run 'cai setup' or use --force.");
@@ -54,7 +111,7 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
     public async Task<List<string>> BuildCandidateContextsAsync(string? workspace, string? explicitConfig, CancellationToken cancellationToken)
     {
         var contexts = new List<string>();
-        var configured = await ResolveConfiguredContextAsync(
+        var configured = await configuredContextResolver.ResolveConfiguredContextAsync(
             workspace ?? Directory.GetCurrentDirectory(),
             explicitConfig,
             cancellationToken).ConfigureAwait(false);
@@ -72,15 +129,18 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
             }
         }
 
-        if (!contexts.Contains("default", StringComparer.Ordinal))
+        if (!contexts.Contains(DefaultContextName, StringComparer.Ordinal))
         {
-            contexts.Add("default");
+            contexts.Add(DefaultContextName);
         }
 
         return contexts;
     }
+}
 
-    private static async Task<string?> ResolveConfiguredContextAsync(string workspace, string? explicitConfig, CancellationToken cancellationToken)
+internal sealed class SessionTargetConfiguredContextResolver : ISessionTargetConfiguredContextResolver
+{
+    public async Task<string?> ResolveConfiguredContextAsync(string workspace, string? explicitConfig, CancellationToken cancellationToken)
     {
         var configPath = SessionRuntimeInfrastructure.FindConfigFile(workspace, explicitConfig);
         if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
@@ -99,6 +159,14 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
         var context = contextResult.StandardOutput.Trim();
         return string.IsNullOrWhiteSpace(context) ? null : context;
     }
+}
+
+internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetDataVolumeResolutionService
+{
+    private readonly ISessionTargetParsingValidationService parsingValidationService;
+
+    internal SessionTargetDataVolumeResolutionService(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
+        => parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
 
     public async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
     {
@@ -113,53 +181,75 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
             return parsingValidationService.ValidateVolumeName(envVolume, "Invalid volume name in CONTAINAI_DATA_VOLUME: ");
         }
 
-        var userConfig = SessionRuntimeInfrastructure.ResolveUserConfigPath();
-        if (File.Exists(userConfig))
+        var userConfigVolume = await TryResolveWorkspaceVolumeAsync(
+            SessionRuntimeInfrastructure.ResolveUserConfigPath(),
+            workspace,
+            cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(userConfigVolume))
         {
-            var state = await SessionRuntimeInfrastructure.RunTomlAsync(
-                () => TomlCommandProcessor.GetWorkspace(userConfig, workspace),
-                cancellationToken).ConfigureAwait(false);
-            if (state.ExitCode == 0 && !string.IsNullOrWhiteSpace(state.StandardOutput))
-            {
-                var value = parsingValidationService.TryReadWorkspaceStringProperty(state.StandardOutput, "data_volume");
-                if (!string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value))
-                {
-                    return ResolutionResult<string>.SuccessResult(value);
-                }
-            }
+            return ResolutionResult<string>.SuccessResult(userConfigVolume);
         }
 
         var discoveredConfig = SessionRuntimeInfrastructure.FindConfigFile(workspace, explicitConfig);
-        if (!string.IsNullOrWhiteSpace(discoveredConfig) && File.Exists(discoveredConfig))
+        var workspaceVolume = await TryResolveWorkspaceVolumeAsync(discoveredConfig, workspace, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(workspaceVolume))
         {
-            var localWorkspace = await SessionRuntimeInfrastructure.RunTomlAsync(
-                () => TomlCommandProcessor.GetWorkspace(discoveredConfig, workspace),
-                cancellationToken).ConfigureAwait(false);
-            if (localWorkspace.ExitCode == 0 && !string.IsNullOrWhiteSpace(localWorkspace.StandardOutput))
-            {
-                var value = parsingValidationService.TryReadWorkspaceStringProperty(localWorkspace.StandardOutput, "data_volume");
-                if (!string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value))
-                {
-                    return ResolutionResult<string>.SuccessResult(value);
-                }
-            }
+            return ResolutionResult<string>.SuccessResult(workspaceVolume);
+        }
 
-            var global = await SessionRuntimeInfrastructure.RunTomlAsync(
-                () => TomlCommandProcessor.GetKey(discoveredConfig, "agent.data_volume"),
-                cancellationToken).ConfigureAwait(false);
-            if (global.ExitCode == 0)
-            {
-                var value = global.StandardOutput.Trim();
-                if (!string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value))
-                {
-                    return ResolutionResult<string>.SuccessResult(value);
-                }
-            }
+        var globalVolume = await TryResolveGlobalVolumeAsync(discoveredConfig, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(globalVolume))
+        {
+            return ResolutionResult<string>.SuccessResult(globalVolume);
         }
 
         return ResolutionResult<string>.SuccessResult(SessionRuntimeConstants.DefaultVolume);
     }
 
+    private async Task<string?> TryResolveWorkspaceVolumeAsync(string? configPath, string workspace, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+        {
+            return null;
+        }
+
+        var workspaceResult = await SessionRuntimeInfrastructure.RunTomlAsync(
+            () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
+            cancellationToken).ConfigureAwait(false);
+        if (workspaceResult.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceResult.StandardOutput))
+        {
+            return null;
+        }
+
+        var value = parsingValidationService.TryReadWorkspaceStringProperty(workspaceResult.StandardOutput, "data_volume");
+        return IsValidVolume(value) ? value : null;
+    }
+
+    private static async Task<string?> TryResolveGlobalVolumeAsync(string? configPath, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
+        {
+            return null;
+        }
+
+        var globalResult = await SessionRuntimeInfrastructure.RunTomlAsync(
+            () => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"),
+            cancellationToken).ConfigureAwait(false);
+        if (globalResult.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var value = globalResult.StandardOutput.Trim();
+        return IsValidVolume(value) ? value : null;
+    }
+
+    private static bool IsValidVolume(string? value)
+        => !string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value);
+}
+
+internal sealed class SessionTargetContainerNameGenerationService : ISessionTargetContainerNameGenerationService
+{
     public async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
         var repoName = Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace));

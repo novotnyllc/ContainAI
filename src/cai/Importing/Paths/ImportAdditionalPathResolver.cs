@@ -27,10 +27,8 @@ internal static class ImportAdditionalPathResolver
             return false;
         }
 
-        var targetRelativePath = MapAdditionalPathTarget(effectiveHome, fullPath);
-        if (string.IsNullOrWhiteSpace(targetRelativePath))
+        if (!TryMapAdditionalPathTarget(validatedRawPath, effectiveHome, fullPath, out var targetRelativePath, out warning))
         {
-            warning = $"[WARN] [import].additional_paths '{validatedRawPath}' resolved to an empty target; skipping";
             return false;
         }
 
@@ -94,22 +92,19 @@ internal static class ImportAdditionalPathResolver
         string fullPath,
         out string? warning)
     {
-        warning = null;
-
-        if (!IsPathWithinDirectory(fullPath, effectiveHome))
-        {
-            warning = $"[WARN] [import].additional_paths '{rawPath}' escapes HOME; skipping";
-            return false;
-        }
-
-        if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+        if (!TryValidatePathWithinHome(rawPath, fullPath, effectiveHome, out warning))
         {
             return false;
         }
 
-        if (ContainsSymlinkComponent(effectiveHome, fullPath))
+        if (!PathExists(fullPath))
         {
-            warning = $"[WARN] [import].additional_paths '{rawPath}' contains symlink components; skipping";
+            warning = null;
+            return false;
+        }
+
+        if (!TryValidateNoSymlinkComponents(rawPath, effectiveHome, fullPath, out warning))
+        {
             return false;
         }
 
@@ -132,6 +127,24 @@ internal static class ImportAdditionalPathResolver
             };
     }
 
+    private static bool TryMapAdditionalPathTarget(
+        string rawPath,
+        string homeDirectory,
+        string fullPath,
+        out string targetRelativePath,
+        out string? warning)
+    {
+        targetRelativePath = MapAdditionalPathTarget(homeDirectory, fullPath);
+        if (!string.IsNullOrWhiteSpace(targetRelativePath))
+        {
+            warning = null;
+            return true;
+        }
+
+        warning = $"[WARN] [import].additional_paths '{rawPath}' resolved to an empty target; skipping";
+        return false;
+    }
+
     private static string MapAdditionalPathTarget(string homeDirectory, string fullPath)
     {
         var relative = Path.GetRelativePath(homeDirectory, fullPath).Replace('\\', '/');
@@ -147,10 +160,7 @@ internal static class ImportAdditionalPathResolver
         }
 
         var first = segments[0];
-        if (first.StartsWith('.'))
-        {
-            first = first.TrimStart('.');
-        }
+        first = NormalizeTargetRootSegment(first);
 
         if (string.IsNullOrWhiteSpace(first))
         {
@@ -210,4 +220,40 @@ internal static class ImportAdditionalPathResolver
 
         return false;
     }
+
+    private static bool TryValidatePathWithinHome(
+        string rawPath,
+        string fullPath,
+        string effectiveHome,
+        out string? warning)
+    {
+        if (IsPathWithinDirectory(fullPath, effectiveHome))
+        {
+            warning = null;
+            return true;
+        }
+
+        warning = $"[WARN] [import].additional_paths '{rawPath}' escapes HOME; skipping";
+        return false;
+    }
+
+    private static bool TryValidateNoSymlinkComponents(
+        string rawPath,
+        string effectiveHome,
+        string fullPath,
+        out string? warning)
+    {
+        if (!ContainsSymlinkComponent(effectiveHome, fullPath))
+        {
+            warning = null;
+            return true;
+        }
+
+        warning = $"[WARN] [import].additional_paths '{rawPath}' contains symlink components; skipping";
+        return false;
+    }
+
+    private static bool PathExists(string fullPath) => File.Exists(fullPath) || Directory.Exists(fullPath);
+
+    private static string NormalizeTargetRootSegment(string segment) => segment.StartsWith('.') ? segment.TrimStart('.') : segment;
 }
