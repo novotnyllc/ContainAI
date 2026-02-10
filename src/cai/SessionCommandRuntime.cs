@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class SessionCommandRuntime
+internal sealed partial class SessionCommandRuntime
 {
     private readonly TextWriter stderr;
     private readonly ISessionTargetResolver targetResolver;
@@ -66,39 +66,5 @@ internal sealed class SessionCommandRuntime
     {
         ArgumentNullException.ThrowIfNull(options);
         return RunSessionAsync(optionMapper.FromExec(options), cancellationToken);
-    }
-
-    private async Task<int> RunSessionAsync(SessionCommandOptions options, CancellationToken cancellationToken)
-    {
-        var resolved = await targetResolver.ResolveAsync(options, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(resolved.Error))
-        {
-            await stderr.WriteLineAsync(resolved.Error).ConfigureAwait(false);
-            return resolved.ErrorCode;
-        }
-
-        var effectiveOptions = resolved.GeneratedFromReset
-            ? options with { Fresh = true }
-            : options;
-
-        if (options.DryRun)
-        {
-            await dryRunReporter.WriteAsync(effectiveOptions, resolved, cancellationToken).ConfigureAwait(false);
-            return 0;
-        }
-
-        var ensured = await containerProvisioner.EnsureAsync(effectiveOptions, resolved, cancellationToken).ConfigureAwait(false);
-        if (!string.IsNullOrWhiteSpace(ensured.Error))
-        {
-            await stderr.WriteLineAsync(ensured.Error).ConfigureAwait(false);
-            return ensured.ErrorCode;
-        }
-
-        if (resolved.ShouldPersistState)
-        {
-            await stateStore.PersistAsync(ensured, cancellationToken).ConfigureAwait(false);
-        }
-
-        return await remoteExecutor.ExecuteAsync(effectiveOptions, ensured, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -7,7 +7,7 @@ internal interface IContainerRuntimeEnvironmentFileLoader
     Task LoadEnvFileAsync(string envFilePath, bool quiet);
 }
 
-internal sealed class ContainerRuntimeEnvironmentFileLoader : IContainerRuntimeEnvironmentFileLoader
+internal sealed partial class ContainerRuntimeEnvironmentFileLoader : IContainerRuntimeEnvironmentFileLoader
 {
     private readonly IContainerRuntimeExecutionContext context;
 
@@ -47,64 +47,7 @@ internal sealed class ContainerRuntimeEnvironmentFileLoader : IContainerRuntimeE
         var lines = await File.ReadAllLinesAsync(envFilePath).ConfigureAwait(false);
         for (var index = 0; index < lines.Length; index++)
         {
-            var line = lines[index].TrimEnd('\r');
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            if (line.TrimStart().StartsWith('#'))
-            {
-                continue;
-            }
-
-            if (line.StartsWith("export ", StringComparison.Ordinal))
-            {
-                line = line[7..].TrimStart();
-            }
-
-            var separator = line.IndexOf('=', StringComparison.Ordinal);
-            if (separator <= 0)
-            {
-                continue;
-            }
-
-            var key = line[..separator];
-            var value = line[(separator + 1)..];
-            if (!IsValidEnvKey(key))
-            {
-                await context.StandardError.WriteLineAsync($"[WARN] line {index + 1}: invalid key '{key}' - skipping").ConfigureAwait(false);
-                continue;
-            }
-
-            if (Environment.GetEnvironmentVariable(key) is null)
-            {
-                Environment.SetEnvironmentVariable(key, value);
-            }
+            await ApplyEnvLineIfValidAsync(lines[index], index + 1).ConfigureAwait(false);
         }
-    }
-
-    private static bool IsValidEnvKey(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return false;
-        }
-
-        if (!(char.IsLetter(key[0]) || key[0] == '_'))
-        {
-            return false;
-        }
-
-        for (var index = 1; index < key.Length; index++)
-        {
-            var c = key[index];
-            if (!(char.IsLetterOrDigit(c) || c == '_'))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }
