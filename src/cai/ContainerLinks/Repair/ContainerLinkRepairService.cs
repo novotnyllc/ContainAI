@@ -2,32 +2,43 @@ namespace ContainAI.Cli.Host;
 
 internal sealed class ContainerLinkRepairService
 {
-    private const string BuiltinSpecPath = "/usr/local/lib/containai/link-spec.json";
-    private const string UserSpecPath = "/mnt/agent-data/containai/user-link-spec.json";
-    private const string CheckedAtFilePath = "/mnt/agent-data/.containai-links-checked-at";
-
-    private readonly TextWriter stderr;
-    private readonly ContainerLinkSpecReader specReader;
-    private readonly ContainerLinkRepairOperations repairOperations;
-    private readonly ContainerLinkRepairReporter reporter;
-    private readonly ContainerLinkEntryProcessor entryProcessor;
+    private readonly IContainerLinkSpecSetLoader specSetLoader;
+    private readonly IContainerLinkEntryProcessor entryProcessor;
+    private readonly IContainerLinkCheckedTimestampUpdater checkedTimestampUpdater;
+    private readonly IContainerLinkRepairReporter reporter;
+    private readonly IContainerLinkRepairExitCodeEvaluator exitCodeEvaluator;
 
     public ContainerLinkRepairService(
         TextWriter standardOutput,
         TextWriter standardError,
         DockerCommandExecutor dockerExecutor)
+        : this(
+            standardOutput,
+            standardError,
+            CreateSpecSetLoader(standardError, dockerExecutor),
+            CreateEntryProcessor(standardOutput, standardError, dockerExecutor),
+            CreateCheckedTimestampUpdater(standardOutput, standardError, dockerExecutor),
+            new ContainerLinkRepairReporter(standardOutput),
+            new ContainerLinkRepairExitCodeEvaluator())
+    {
+    }
+
+    internal ContainerLinkRepairService(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IContainerLinkSpecSetLoader containerLinkSpecSetLoader,
+        IContainerLinkEntryProcessor containerLinkEntryProcessor,
+        IContainerLinkCheckedTimestampUpdater containerLinkCheckedTimestampUpdater,
+        IContainerLinkRepairReporter containerLinkRepairReporter,
+        IContainerLinkRepairExitCodeEvaluator containerLinkRepairExitCodeEvaluator)
     {
         ArgumentNullException.ThrowIfNull(standardOutput);
         ArgumentNullException.ThrowIfNull(standardError);
-        ArgumentNullException.ThrowIfNull(dockerExecutor);
-
-        stderr = standardError;
-
-        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
-        specReader = new ContainerLinkSpecReader(commandClient);
-        repairOperations = new ContainerLinkRepairOperations(commandClient);
-        reporter = new ContainerLinkRepairReporter(standardOutput);
-        entryProcessor = new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), repairOperations, reporter);
+        specSetLoader = containerLinkSpecSetLoader ?? throw new ArgumentNullException(nameof(containerLinkSpecSetLoader));
+        entryProcessor = containerLinkEntryProcessor ?? throw new ArgumentNullException(nameof(containerLinkEntryProcessor));
+        checkedTimestampUpdater = containerLinkCheckedTimestampUpdater ?? throw new ArgumentNullException(nameof(containerLinkCheckedTimestampUpdater));
+        reporter = containerLinkRepairReporter ?? throw new ArgumentNullException(nameof(containerLinkRepairReporter));
+        exitCodeEvaluator = containerLinkRepairExitCodeEvaluator ?? throw new ArgumentNullException(nameof(containerLinkRepairExitCodeEvaluator));
     }
 
     public async Task<int> RunAsync(
@@ -38,93 +49,55 @@ internal sealed class ContainerLinkRepairService
     {
         var stats = new ContainerLinkRepairStats();
 
-        var builtin = await LoadBuiltInSpecAsync(containerName, cancellationToken).ConfigureAwait(false);
-        if (!builtin.Success)
+        var specSet = await specSetLoader
+            .LoadAsync(containerName, stats, cancellationToken)
+            .ConfigureAwait(false);
+        if (!specSet.Success)
         {
             return 1;
         }
 
-        var user = await LoadUserSpecAsync(containerName, stats, cancellationToken).ConfigureAwait(false);
-
-        await entryProcessor.ProcessEntriesAsync(containerName, builtin.Entries!, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
-        await entryProcessor.ProcessEntriesAsync(containerName, user.Entries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
-
-        await TryUpdateCheckedTimestampAsync(containerName, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await entryProcessor.ProcessEntriesAsync(containerName, specSet.BuiltinEntries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await entryProcessor.ProcessEntriesAsync(containerName, specSet.UserEntries, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
+        await checkedTimestampUpdater.TryUpdateAsync(containerName, mode, quiet, stats, cancellationToken).ConfigureAwait(false);
 
         await reporter.WriteSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
-        return ComputeExitCode(mode, stats);
+        return exitCodeEvaluator.Evaluate(mode, stats);
     }
 
-    private async Task<(bool Success, IReadOnlyList<ContainerLinkSpecEntry>? Entries)> LoadBuiltInSpecAsync(
-        string containerName,
-        CancellationToken cancellationToken)
+    private static ContainerLinkSpecSetLoader CreateSpecSetLoader(TextWriter standardError, DockerCommandExecutor dockerExecutor)
     {
-        var builtin = await specReader
-            .ReadLinkSpecAsync(containerName, BuiltinSpecPath, required: true, cancellationToken)
-            .ConfigureAwait(false);
-        if (builtin.Error is not null)
-        {
-            await stderr.WriteLineAsync($"ERROR: {builtin.Error}").ConfigureAwait(false);
-            return (false, null);
-        }
-
-        return (true, builtin.Entries);
+        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(dockerExecutor);
+        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
+        return new ContainerLinkSpecSetLoader(new ContainerLinkSpecReader(commandClient), standardError);
     }
 
-    private async Task<ContainerLinkSpecReadResult> LoadUserSpecAsync(
-        string containerName,
-        ContainerLinkRepairStats stats,
-        CancellationToken cancellationToken)
+    private static ContainerLinkEntryProcessor CreateEntryProcessor(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        DockerCommandExecutor dockerExecutor)
     {
-        var user = await specReader
-            .ReadLinkSpecAsync(containerName, UserSpecPath, required: false, cancellationToken)
-            .ConfigureAwait(false);
-        if (user.Error is not null)
-        {
-            stats.Errors++;
-            await stderr.WriteLineAsync($"[WARN] Failed to process user link spec: {user.Error}").ConfigureAwait(false);
-        }
-
-        return user;
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(dockerExecutor);
+        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
+        var repairOperations = new ContainerLinkRepairOperations(commandClient);
+        var reporter = new ContainerLinkRepairReporter(standardOutput);
+        return new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), repairOperations, reporter);
     }
 
-    private async Task TryUpdateCheckedTimestampAsync(
-        string containerName,
-        ContainerLinkRepairMode mode,
-        bool quiet,
-        ContainerLinkRepairStats stats,
-        CancellationToken cancellationToken)
+    private static ContainerLinkCheckedTimestampUpdater CreateCheckedTimestampUpdater(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        DockerCommandExecutor dockerExecutor)
     {
-        if (mode != ContainerLinkRepairMode.Fix || stats.Errors != 0)
-        {
-            return;
-        }
-
-        var timestampResult = await repairOperations
-            .WriteCheckedTimestampAsync(containerName, CheckedAtFilePath, cancellationToken)
-            .ConfigureAwait(false);
-        if (!timestampResult.Success)
-        {
-            stats.Errors++;
-            await stderr.WriteLineAsync($"[WARN] Failed to update links-checked-at timestamp: {timestampResult.Error}").ConfigureAwait(false);
-            return;
-        }
-
-        await reporter.LogInfoAsync(quiet, "Updated links-checked-at timestamp").ConfigureAwait(false);
-    }
-
-    private static int ComputeExitCode(ContainerLinkRepairMode mode, ContainerLinkRepairStats stats)
-    {
-        if (stats.Errors > 0)
-        {
-            return 1;
-        }
-
-        if (mode == ContainerLinkRepairMode.Check && (stats.Broken + stats.Missing) > 0)
-        {
-            return 1;
-        }
-
-        return 0;
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(dockerExecutor);
+        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
+        var repairOperations = new ContainerLinkRepairOperations(commandClient);
+        var reporter = new ContainerLinkRepairReporter(standardOutput);
+        return new ContainerLinkCheckedTimestampUpdater(repairOperations, reporter, standardError);
     }
 }
