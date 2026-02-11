@@ -39,8 +39,7 @@ internal interface IImportTransferOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class CaiImportTransferOperations : CaiRuntimeSupport
-    , IImportTransferOperations
+internal sealed class CaiImportTransferOperations : IImportTransferOperations
 {
     private readonly IImportArchiveTransferOperations archiveTransferOperations;
     private readonly IImportManifestTransferOperations manifestTransferOperations;
@@ -62,11 +61,14 @@ internal sealed class CaiImportTransferOperations : CaiRuntimeSupport
         IImportArchiveTransferOperations importArchiveTransferOperations,
         IImportManifestTransferOperations importManifestTransferOperations,
         IImportOverrideTransferOperations importOverrideTransferOperations)
-        : base(standardOutput, standardError)
-        => (archiveTransferOperations, manifestTransferOperations, overrideTransferOperations) = (
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        (archiveTransferOperations, manifestTransferOperations, overrideTransferOperations) = (
             importArchiveTransferOperations ?? throw new ArgumentNullException(nameof(importArchiveTransferOperations)),
             importManifestTransferOperations ?? throw new ArgumentNullException(nameof(importManifestTransferOperations)),
             importOverrideTransferOperations ?? throw new ArgumentNullException(nameof(importOverrideTransferOperations)));
+    }
 
     public Task<int> RestoreArchiveImportAsync(string volume, string archivePath, bool excludePriv, CancellationToken cancellationToken)
         => archiveTransferOperations.RestoreArchiveImportAsync(volume, archivePath, excludePriv, cancellationToken);

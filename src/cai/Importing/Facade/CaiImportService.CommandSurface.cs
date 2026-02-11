@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiImportService : CaiRuntimeSupport
+internal sealed class CaiImportService
 {
     private readonly IImportOrchestrationOperations orchestrationOperations;
 
@@ -59,8 +59,11 @@ internal sealed class CaiImportService : CaiRuntimeSupport
         TextWriter standardOutput,
         TextWriter standardError,
         IImportOrchestrationOperations importOrchestrationOperations)
-        : base(standardOutput, standardError)
-        => orchestrationOperations = importOrchestrationOperations ?? throw new ArgumentNullException(nameof(importOrchestrationOperations));
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        orchestrationOperations = importOrchestrationOperations ?? throw new ArgumentNullException(nameof(importOrchestrationOperations));
+    }
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
     {

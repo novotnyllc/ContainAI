@@ -1,4 +1,5 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
@@ -7,9 +8,10 @@ internal interface IImportOrchestrationOperations
     Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken);
 }
 
-internal sealed class CaiImportOrchestrationOperations : CaiRuntimeSupport
-    , IImportOrchestrationOperations
+internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly ImportRunContextResolver runContextResolver;
     private readonly ImportManifestEntryLoader manifestEntryLoader;
     private readonly ImportArchiveHandler archiveHandler;
@@ -35,8 +37,9 @@ internal sealed class CaiImportOrchestrationOperations : CaiRuntimeSupport
         IImportPathOperations importPathOperations,
         IImportTransferOperations importTransferOperations,
         IImportEnvironmentOperations importEnvironmentOperations)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
         ArgumentNullException.ThrowIfNull(importManifestCatalog);
         var pathOperations = importPathOperations ?? throw new ArgumentNullException(nameof(importPathOperations));
@@ -89,7 +92,7 @@ internal sealed class CaiImportOrchestrationOperations : CaiRuntimeSupport
 
         if (!options.DryRun)
         {
-            var ensureVolume = await DockerCaptureAsync(["volume", "create", context.Volume], cancellationToken).ConfigureAwait(false);
+            var ensureVolume = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["volume", "create", context.Volume], cancellationToken).ConfigureAwait(false);
             if (ensureVolume.ExitCode != 0)
             {
                 await stderr.WriteLineAsync(ensureVolume.StandardError.Trim()).ConfigureAwait(false);

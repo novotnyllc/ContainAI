@@ -1,5 +1,7 @@
 using System.Text.Json;
 using ContainAI.Cli.Host.Importing.Environment;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
@@ -14,11 +16,18 @@ internal interface IImportEnvironmentOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
-    , IImportEnvironmentOperations
+internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperations
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
     internal const string EnvTargetSymlinkGuardMessage = ".env target is symlink";
 
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly IImportEnvironmentValueOperations environmentValueOperations;
 
     public CaiImportEnvironmentOperations(TextWriter standardOutput, TextWriter standardError)
@@ -30,8 +39,11 @@ internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
         TextWriter standardOutput,
         TextWriter standardError,
         IImportEnvironmentValueOperations importEnvironmentValueOperations)
-        : base(standardOutput, standardError)
-        => environmentValueOperations = importEnvironmentValueOperations ?? throw new ArgumentNullException(nameof(importEnvironmentValueOperations));
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        environmentValueOperations = importEnvironmentValueOperations ?? throw new ArgumentNullException(nameof(importEnvironmentValueOperations));
+    }
 
     public async Task<int> ImportEnvironmentVariablesAsync(
         string volume,
@@ -67,7 +79,7 @@ internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var workspaceRoot = Path.GetFullPath(ExpandHomePath(workspace));
+        var workspaceRoot = Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(workspace));
         var fileVariables = await environmentValueOperations.ResolveFileVariablesAsync(envSection, workspaceRoot, validatedKeys, cancellationToken).ConfigureAwait(false);
         if (fileVariables is null)
         {
@@ -98,11 +110,13 @@ internal sealed class CaiImportEnvironmentOperations : CaiRuntimeSupport
     private static string ResolveEnvironmentConfigPath(string workspace, string? explicitConfigPath)
         => !string.IsNullOrWhiteSpace(explicitConfigPath)
             ? explicitConfigPath
-            : ResolveConfigPath(workspace);
+            : CaiRuntimeConfigLocator.ResolveConfigPath(workspace, ConfigFileNames);
 
     private async Task<EnvironmentSectionParseResult> TryLoadEnvironmentSectionAsync(string configPath, CancellationToken cancellationToken)
     {
-        var configResult = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
+        var configResult = await CaiRuntimeParseAndTimeHelpers
+            .RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken)
+            .ConfigureAwait(false);
         if (configResult.ExitCode != 0)
         {
             if (!string.IsNullOrWhiteSpace(configResult.StandardError))
