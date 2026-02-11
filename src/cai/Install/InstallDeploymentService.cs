@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IInstallDeploymentService
-{
-    InstallDeploymentResult Deploy(string sourceExecutablePath, string installDir, string binDir);
-}
-
 internal sealed class InstallDeploymentService : IInstallDeploymentService
 {
     public InstallDeploymentResult Deploy(string sourceExecutablePath, string installDir, string binDir)

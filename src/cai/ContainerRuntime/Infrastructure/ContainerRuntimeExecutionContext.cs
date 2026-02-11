@@ -1,44 +1,6 @@
-namespace ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
-
 using ContainAI.Cli.Host.ContainerRuntime.Models;
 
-internal interface IContainerRuntimeExecutionContext
-{
-    TextWriter StandardOutput { get; }
-
-    TextWriter StandardError { get; }
-
-    IManifestTomlParser ManifestTomlParser { get; }
-
-    Task LogInfoAsync(bool quiet, string message);
-
-    Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments);
-
-    Task<ProcessCaptureResult> RunAsRootCaptureAsync(
-        string executable,
-        IReadOnlyList<string> arguments,
-        string? standardInput,
-        CancellationToken cancellationToken);
-
-    Task<ProcessCaptureResult> RunProcessCaptureAsync(
-        string executable,
-        IReadOnlyList<string> arguments,
-        string? workingDirectory,
-        CancellationToken cancellationToken,
-        string? standardInput = null);
-
-    Task<bool> IsSymlinkAsync(string path);
-
-    Task<string?> ReadLinkTargetAsync(string path);
-
-    Task<string?> TryReadTrimmedTextAsync(string path);
-
-    Task WriteTimestampAsync(string path);
-
-    void EnsureFileWithContent(string path, string? content);
-
-    bool IsExecutable(string path);
-}
+namespace ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
 internal sealed class ContainerRuntimeExecutionContext : IContainerRuntimeExecutionContext
 {
@@ -63,14 +25,9 @@ internal sealed class ContainerRuntimeExecutionContext : IContainerRuntimeExecut
     public IManifestTomlParser ManifestTomlParser { get; }
 
     public Task LogInfoAsync(bool quiet, string message)
-    {
-        if (quiet)
-        {
-            return Task.CompletedTask;
-        }
-
-        return StandardOutput.WriteLineAsync($"[INFO] {message}");
-    }
+        => quiet
+            ? Task.CompletedTask
+            : StandardOutput.WriteLineAsync($"[INFO] {message}");
 
     public Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments)
         => privilegedCommandService.RunAsRootAsync(executable, arguments);

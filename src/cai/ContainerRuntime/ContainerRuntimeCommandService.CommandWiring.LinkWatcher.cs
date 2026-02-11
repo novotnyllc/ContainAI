@@ -1,21 +1,30 @@
 using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 using ContainAI.Cli.Host.ContainerRuntime.Models;
-using ContainAI.Cli.Host;
-using ContainAI.Cli.Host.ContainerRuntime.Configuration;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
 internal sealed class ContainerRuntimeWatchLinksCommandHandler : IContainerRuntimeWatchLinksCommandHandler
 {
     private readonly IContainerRuntimeExecutionContext context;
-    private readonly IContainerRuntimeLinkRepairCommandHandler linkRepairCommandHandler;
+    private readonly IContainerRuntimeWatchLinksPollCycleProcessor pollCycleProcessor;
 
     public ContainerRuntimeWatchLinksCommandHandler(
         IContainerRuntimeExecutionContext context,
         IContainerRuntimeLinkRepairCommandHandler linkRepairCommandHandler)
+        : this(
+            context,
+            new ContainerRuntimeWatchLinksPollCycleProcessor(
+                context,
+                new ContainerRuntimeWatchLinksRepairRunner(context, linkRepairCommandHandler)))
+    {
+    }
+
+    internal ContainerRuntimeWatchLinksCommandHandler(
+        IContainerRuntimeExecutionContext context,
+        IContainerRuntimeWatchLinksPollCycleProcessor pollCycleProcessor)
     {
         this.context = context ?? throw new ArgumentNullException(nameof(context));
-        this.linkRepairCommandHandler = linkRepairCommandHandler ?? throw new ArgumentNullException(nameof(linkRepairCommandHandler));
+        this.pollCycleProcessor = pollCycleProcessor ?? throw new ArgumentNullException(nameof(pollCycleProcessor));
     }
 
     public async Task<int> HandleAsync(WatchLinksCommandParsing options, CancellationToken cancellationToken)
@@ -55,24 +64,7 @@ internal sealed class ContainerRuntimeWatchLinksCommandHandler : IContainerRunti
                 break;
             }
 
-            if (!File.Exists(options.ImportedAtPath))
-            {
-                continue;
-            }
-
-            var importedTimestamp = await context.TryReadTrimmedTextAsync(options.ImportedAtPath).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(importedTimestamp))
-            {
-                continue;
-            }
-
-            var checkedTimestamp = await context.TryReadTrimmedTextAsync(options.CheckedAtPath).ConfigureAwait(false) ?? string.Empty;
-            if (!string.IsNullOrEmpty(checkedTimestamp) && string.CompareOrdinal(importedTimestamp, checkedTimestamp) <= 0)
-            {
-                continue;
-            }
-
-            await RunRepairAsync(options, importedTimestamp, checkedTimestamp, cancellationToken).ConfigureAwait(false);
+            await pollCycleProcessor.ProcessCycleAsync(options, cancellationToken).ConfigureAwait(false);
         }
 
         return 0;
@@ -91,30 +83,4 @@ internal sealed class ContainerRuntimeWatchLinksCommandHandler : IContainerRunti
         }
     }
 
-    private async Task RunRepairAsync(
-        WatchLinksCommandParsing options,
-        string importedTimestamp,
-        string checkedTimestamp,
-        CancellationToken cancellationToken)
-    {
-        await context.LogInfoAsync(
-            options.Quiet,
-            $"Import newer than last check (imported={importedTimestamp}, checked={(string.IsNullOrWhiteSpace(checkedTimestamp) ? "never" : checkedTimestamp)}), running repair...").ConfigureAwait(false);
-        var exitCode = await linkRepairCommandHandler.HandleAsync(
-            new LinkRepairCommandParsing(
-                Mode: LinkRepairMode.Fix,
-                Quiet: true,
-                BuiltinSpecPath: ContainerRuntimeDefaults.DefaultBuiltinLinkSpec,
-                UserSpecPath: ContainerRuntimeDefaults.DefaultUserLinkSpec,
-                CheckedAtFilePath: options.CheckedAtPath),
-            cancellationToken).ConfigureAwait(false);
-        if (exitCode == 0)
-        {
-            await context.LogInfoAsync(options.Quiet, "Repair completed successfully").ConfigureAwait(false);
-        }
-        else
-        {
-            await context.StandardError.WriteLineAsync("[ERROR] Repair command failed").ConfigureAwait(false);
-        }
-    }
 }

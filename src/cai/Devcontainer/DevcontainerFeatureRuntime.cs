@@ -4,7 +4,6 @@ namespace ContainAI.Cli.Host;
 
 internal sealed class DevcontainerFeatureRuntime
 {
-    private readonly TextWriter stdout;
     private readonly TextWriter stderr;
     private readonly IDevcontainerFeatureInstallWorkflow installWorkflow;
     private readonly IDevcontainerFeatureInitWorkflow initWorkflow;
@@ -52,14 +51,20 @@ internal sealed class DevcontainerFeatureRuntime
         ArgumentNullException.ThrowIfNull(serviceBootstrap);
         ArgumentNullException.ThrowIfNull(environmentVariableReader);
 
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        var output = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
         stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
 
-        var settingsFactory = new DevcontainerFeatureSettingsFactory(configService, environmentVariableReader);
-        var configLoader = new DevcontainerFeatureConfigLoader(configService, stderr);
-        installWorkflow = new DevcontainerFeatureInstallWorkflow(stdout, stderr, processHelpers, userEnvironmentSetup, settingsFactory);
-        initWorkflow = new DevcontainerFeatureInitWorkflow(stdout, stderr, processHelpers, userEnvironmentSetup, serviceBootstrap, configLoader);
-        startWorkflow = new DevcontainerFeatureStartWorkflow(stdout, stderr, serviceBootstrap, configLoader);
+        var workflows = DevcontainerFeatureWorkflowFactory.Create(
+            output,
+            stderr,
+            configService,
+            processHelpers,
+            userEnvironmentSetup,
+            serviceBootstrap,
+            environmentVariableReader);
+        installWorkflow = workflows.InstallWorkflow;
+        initWorkflow = workflows.InitWorkflow;
+        startWorkflow = workflows.StartWorkflow;
     }
 
     internal DevcontainerFeatureRuntime(
@@ -69,7 +74,7 @@ internal sealed class DevcontainerFeatureRuntime
         IDevcontainerFeatureInitWorkflow initWorkflow,
         IDevcontainerFeatureStartWorkflow startWorkflow)
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        ArgumentNullException.ThrowIfNull(standardOutput);
         stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.installWorkflow = installWorkflow ?? throw new ArgumentNullException(nameof(installWorkflow));
         this.initWorkflow = initWorkflow ?? throw new ArgumentNullException(nameof(initWorkflow));

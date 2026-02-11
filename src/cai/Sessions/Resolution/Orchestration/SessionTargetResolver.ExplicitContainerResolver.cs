@@ -8,10 +8,8 @@ internal interface ISessionTargetExplicitContainerResolver
 internal sealed class SessionTargetExplicitContainerResolver : ISessionTargetExplicitContainerResolver
 {
     private readonly ISessionTargetDockerLookupService dockerLookupService;
-    private readonly ISessionTargetWorkspacePathOptionResolver workspacePathOptionResolver;
-    private readonly ISessionTargetWorkspaceContextSelectionService workspaceContextSelectionService;
-    private readonly ISessionTargetWorkspaceDataVolumeSelectionService workspaceDataVolumeSelectionService;
-    private readonly ISessionTargetExplicitContainerTargetFactory explicitContainerTargetFactory;
+    private readonly ISessionTargetExistingContainerResolver existingContainerResolver;
+    private readonly ISessionTargetWorkspaceDerivedResolver workspaceDerivedResolver;
 
     internal SessionTargetExplicitContainerResolver(
         ISessionTargetParsingValidationService sessionTargetParsingValidationService,
@@ -19,25 +17,24 @@ internal sealed class SessionTargetExplicitContainerResolver : ISessionTargetExp
         ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService)
         : this(
             sessionTargetDockerLookupService,
-            new SessionTargetWorkspacePathOptionResolver(sessionTargetParsingValidationService),
-            new SessionTargetWorkspaceContextSelectionService(sessionTargetWorkspaceDiscoveryService),
-            new SessionTargetWorkspaceDataVolumeSelectionService(sessionTargetWorkspaceDiscoveryService),
-            new SessionTargetExplicitContainerTargetFactory())
+            new SessionTargetExistingContainerResolver(
+                sessionTargetDockerLookupService,
+                new SessionTargetExplicitContainerTargetFactory()),
+            new SessionTargetWorkspaceDerivedResolver(
+                new SessionTargetWorkspacePathOptionResolver(sessionTargetParsingValidationService),
+                new SessionTargetWorkspaceContextSelectionService(sessionTargetWorkspaceDiscoveryService),
+                new SessionTargetWorkspaceDataVolumeSelectionService(sessionTargetWorkspaceDiscoveryService)))
     {
     }
 
     internal SessionTargetExplicitContainerResolver(
         ISessionTargetDockerLookupService sessionTargetDockerLookupService,
-        ISessionTargetWorkspacePathOptionResolver sessionTargetWorkspacePathOptionResolver,
-        ISessionTargetWorkspaceContextSelectionService sessionTargetWorkspaceContextSelectionService,
-        ISessionTargetWorkspaceDataVolumeSelectionService sessionTargetWorkspaceDataVolumeSelectionService,
-        ISessionTargetExplicitContainerTargetFactory sessionTargetExplicitContainerTargetFactory)
+        ISessionTargetExistingContainerResolver sessionTargetExistingContainerResolver,
+        ISessionTargetWorkspaceDerivedResolver sessionTargetWorkspaceDerivedResolver)
     {
         dockerLookupService = sessionTargetDockerLookupService ?? throw new ArgumentNullException(nameof(sessionTargetDockerLookupService));
-        workspacePathOptionResolver = sessionTargetWorkspacePathOptionResolver ?? throw new ArgumentNullException(nameof(sessionTargetWorkspacePathOptionResolver));
-        workspaceContextSelectionService = sessionTargetWorkspaceContextSelectionService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceContextSelectionService));
-        workspaceDataVolumeSelectionService = sessionTargetWorkspaceDataVolumeSelectionService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDataVolumeSelectionService));
-        explicitContainerTargetFactory = sessionTargetExplicitContainerTargetFactory ?? throw new ArgumentNullException(nameof(sessionTargetExplicitContainerTargetFactory));
+        existingContainerResolver = sessionTargetExistingContainerResolver ?? throw new ArgumentNullException(nameof(sessionTargetExistingContainerResolver));
+        workspaceDerivedResolver = sessionTargetWorkspaceDerivedResolver ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDerivedResolver));
     }
 
     public async Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken)
@@ -54,67 +51,9 @@ internal sealed class SessionTargetExplicitContainerResolver : ISessionTargetExp
 
         if (found.Exists)
         {
-            return await ResolveExistingContainerAsync(options, found.Context!, cancellationToken).ConfigureAwait(false);
+            return await existingContainerResolver.ResolveAsync(options, found.Context!, cancellationToken).ConfigureAwait(false);
         }
 
-        return await ResolveWorkspaceDerivedAsync(options, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<ResolvedTarget> ResolveExistingContainerAsync(
-        SessionCommandOptions options,
-        string context,
-        CancellationToken cancellationToken)
-    {
-        var labels = await dockerLookupService.ReadContainerLabelsAsync(options.Container!, context, cancellationToken).ConfigureAwait(false);
-        var existingContainerTarget = explicitContainerTargetFactory.CreateFromExistingContainer(
-            options,
-            options.Container!,
-            context,
-            labels);
-        if (!existingContainerTarget.Success)
-        {
-            return ResolvedTarget.ErrorResult(existingContainerTarget.Error!, existingContainerTarget.ErrorCode);
-        }
-
-        return existingContainerTarget.Value!;
-    }
-
-    private async Task<ResolvedTarget> ResolveWorkspaceDerivedAsync(SessionCommandOptions options, CancellationToken cancellationToken)
-    {
-        var workspace = workspacePathOptionResolver.ResolveWorkspace(options);
-        if (!workspace.Success)
-        {
-            return ResolvedTarget.ErrorResult(workspace.Error!, workspace.ErrorCode);
-        }
-
-        var contextSelection = await workspaceContextSelectionService.ResolveContextAsync(
-            workspace.Value!,
-            options,
-            cancellationToken).ConfigureAwait(false);
-        if (!contextSelection.Success)
-        {
-            return ResolvedTarget.ErrorResult(contextSelection.Error!, contextSelection.ErrorCode);
-        }
-
-        var volume = await workspaceDataVolumeSelectionService.ResolveVolumeAsync(
-            workspace.Value!,
-            options,
-            allowResetVolume: false,
-            cancellationToken).ConfigureAwait(false);
-        if (!volume.Success)
-        {
-            return ResolvedTarget.ErrorResult(volume.Error!, volume.ErrorCode);
-        }
-
-        return new ResolvedTarget(
-            ContainerName: options.Container!,
-            Workspace: workspace.Value!,
-            DataVolume: volume.Value!.DataVolume,
-            Context: contextSelection.Context!,
-            ShouldPersistState: true,
-            CreatedByThisInvocation: true,
-            GeneratedFromReset: false,
-            Error: null,
-            ErrorCode: 1);
+        return await workspaceDerivedResolver.ResolveAsync(options, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -2,109 +2,36 @@ using System.Text.RegularExpressions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class TomlCommandSetUnsetExecutor(
-    TomlCommandExecutionServices services,
-    Regex workspaceKeyRegex,
-    Regex globalKeyRegex)
+internal sealed class TomlCommandSetUnsetExecutor
 {
-    private readonly TomlSetUnsetInputValidator inputValidator = new(services, workspaceKeyRegex, globalKeyRegex);
-    private readonly TomlSetUnsetContentCoordinator contentCoordinator = new(services);
+    private readonly TomlWorkspaceSetUnsetExecutor workspaceExecutor;
+    private readonly TomlGlobalSetUnsetExecutor globalExecutor;
+
+    public TomlCommandSetUnsetExecutor(
+        TomlCommandExecutionServices services,
+        Regex workspaceKeyRegex,
+        Regex globalKeyRegex)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(workspaceKeyRegex);
+        ArgumentNullException.ThrowIfNull(globalKeyRegex);
+
+        var inputValidator = new TomlSetUnsetInputValidator(services, workspaceKeyRegex, globalKeyRegex);
+        var contentCoordinator = new TomlSetUnsetContentCoordinator(services);
+
+        workspaceExecutor = new TomlWorkspaceSetUnsetExecutor(services, inputValidator, contentCoordinator);
+        globalExecutor = new TomlGlobalSetUnsetExecutor(services, inputValidator, contentCoordinator);
+    }
 
     public TomlCommandResult SetWorkspaceKey(string filePath, string workspacePath, string key, string value)
-    {
-        var validationError = inputValidator.ValidateWorkspaceKey(key);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathAbsolute(workspacePath);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathForSet(workspacePath);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        return contentCoordinator.UpdateContent(
-            filePath,
-            content => services.UpsertWorkspaceKey(content, workspacePath, key, value));
-    }
+        => workspaceExecutor.SetWorkspaceKey(filePath, workspacePath, key, value);
 
     public TomlCommandResult UnsetWorkspaceKey(string filePath, string workspacePath, string key)
-    {
-        var validationError = inputValidator.ValidateWorkspaceKey(key);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathAbsolute(workspacePath);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        var missingFileResult = contentCoordinator.GetUnsetNoOpWhenFileMissing(filePath);
-        if (missingFileResult is not null)
-        {
-            return missingFileResult;
-        }
-
-        return contentCoordinator.UpdateContent(
-            filePath,
-            content => services.RemoveWorkspaceKey(content, workspacePath, key));
-    }
+        => workspaceExecutor.UnsetWorkspaceKey(filePath, workspacePath, key);
 
     public TomlCommandResult SetKey(string filePath, string key, string value)
-    {
-        var validationError = inputValidator.ValidateGlobalKey(key);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        validationError = TomlSetUnsetInputValidator.ValidateGlobalSetKeyParts(key, out var parts);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        validationError = inputValidator.ValidateGlobalSetValue(key, value, out var formattedValue);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        return contentCoordinator.UpdateContent(
-            filePath,
-            content => services.UpsertGlobalKey(content, parts, formattedValue));
-    }
+        => globalExecutor.SetKey(filePath, key, value);
 
     public TomlCommandResult UnsetKey(string filePath, string key)
-    {
-        var validationError = inputValidator.ValidateGlobalKey(key);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        var missingFileResult = contentCoordinator.GetUnsetNoOpWhenFileMissing(filePath);
-        if (missingFileResult is not null)
-        {
-            return missingFileResult;
-        }
-
-        validationError = TomlSetUnsetInputValidator.ValidateGlobalUnsetKeyParts(key, out var parts);
-        if (validationError is not null)
-        {
-            return validationError;
-        }
-
-        return contentCoordinator.UpdateContent(filePath, content => services.RemoveGlobalKey(content, parts));
-    }
+        => globalExecutor.UnsetKey(filePath, key);
 }

@@ -15,9 +15,9 @@ internal sealed class ContainerLinkRepairService
         : this(
             standardOutput,
             standardError,
-            CreateSpecSetLoader(standardError, dockerExecutor),
-            CreateEntryProcessor(standardOutput, standardError, dockerExecutor),
-            CreateCheckedTimestampUpdater(standardOutput, standardError, dockerExecutor),
+            ContainerLinkRepairComponentsFactory.CreateSpecSetLoader(standardError, dockerExecutor),
+            ContainerLinkRepairComponentsFactory.CreateEntryProcessor(standardOutput, standardError, dockerExecutor),
+            ContainerLinkRepairComponentsFactory.CreateCheckedTimestampUpdater(standardOutput, standardError, dockerExecutor),
             new ContainerLinkRepairReporter(standardOutput),
             new ContainerLinkRepairExitCodeEvaluator())
     {
@@ -63,43 +63,5 @@ internal sealed class ContainerLinkRepairService
 
         await reporter.WriteSummaryAsync(mode, stats, quiet).ConfigureAwait(false);
         return exitCodeEvaluator.Evaluate(mode, stats);
-    }
-
-    private static ContainerLinkSpecSetLoader CreateSpecSetLoader(TextWriter standardError, DockerCommandExecutor dockerExecutor)
-    {
-        ArgumentNullException.ThrowIfNull(standardError);
-        ArgumentNullException.ThrowIfNull(dockerExecutor);
-        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
-        return new ContainerLinkSpecSetLoader(new ContainerLinkSpecReader(commandClient), standardError);
-    }
-
-    private static ContainerLinkEntryProcessor CreateEntryProcessor(
-        TextWriter standardOutput,
-        TextWriter standardError,
-        DockerCommandExecutor dockerExecutor)
-    {
-        ArgumentNullException.ThrowIfNull(standardOutput);
-        ArgumentNullException.ThrowIfNull(standardError);
-        ArgumentNullException.ThrowIfNull(dockerExecutor);
-        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
-        var repairOperations = new ContainerLinkRepairOperations(commandClient);
-        var reporter = new ContainerLinkRepairReporter(standardOutput);
-        var stateReporter = new ContainerLinkEntryStateReporter(standardError, reporter);
-        var repairExecutor = new ContainerLinkEntryRepairExecutor(standardError, repairOperations, reporter);
-        return new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), stateReporter, repairExecutor);
-    }
-
-    private static ContainerLinkCheckedTimestampUpdater CreateCheckedTimestampUpdater(
-        TextWriter standardOutput,
-        TextWriter standardError,
-        DockerCommandExecutor dockerExecutor)
-    {
-        ArgumentNullException.ThrowIfNull(standardOutput);
-        ArgumentNullException.ThrowIfNull(standardError);
-        ArgumentNullException.ThrowIfNull(dockerExecutor);
-        var commandClient = new ContainerLinkCommandClient(dockerExecutor);
-        var repairOperations = new ContainerLinkRepairOperations(commandClient);
-        var reporter = new ContainerLinkRepairReporter(standardOutput);
-        return new ContainerLinkCheckedTimestampUpdater(repairOperations, reporter, standardError);
     }
 }

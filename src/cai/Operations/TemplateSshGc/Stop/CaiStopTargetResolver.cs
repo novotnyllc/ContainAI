@@ -3,14 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiStopTargetResolver
-{
-    Task<ResolutionResult<IReadOnlyList<CaiStopTarget>>> ResolveAsync(
-        string? containerName,
-        bool stopAll,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class CaiStopTargetResolver : ICaiStopTargetResolver
 {
     private static readonly string[] ConfigFileNames =

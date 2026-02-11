@@ -2,17 +2,6 @@ using ContainAI.Cli.Host.Importing.Environment;
 
 namespace ContainAI.Cli.Host;
 
-internal interface IImportEnvironmentOperations
-{
-    Task<int> ImportEnvironmentVariablesAsync(
-        string volume,
-        string workspace,
-        string? explicitConfigPath,
-        bool dryRun,
-        bool verbose,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperations
 {
     internal const string EnvTargetSymlinkGuardMessage = ".env target is symlink";
