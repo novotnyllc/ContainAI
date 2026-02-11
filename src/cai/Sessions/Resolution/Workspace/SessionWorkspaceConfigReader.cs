@@ -8,24 +8,35 @@ internal interface ISessionWorkspaceConfigReader
 internal sealed class SessionWorkspaceConfigReader : ISessionWorkspaceConfigReader
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     public SessionWorkspaceConfigReader()
-        : this(new SessionTargetParsingValidationService())
+        : this(new SessionTargetParsingValidationService(), new SessionRuntimeOperations())
     {
     }
 
     internal SessionWorkspaceConfigReader(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
-        => parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        : this(sessionTargetParsingValidationService, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionWorkspaceConfigReader(
+        ISessionTargetParsingValidationService sessionTargetParsingValidationService,
+        ISessionRuntimeOperations sessionRuntimeOperations)
+    {
+        parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+    }
 
     public async Task<string?> TryResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
-        var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
+        var configPath = runtimeOperations.ResolveUserConfigPath();
         if (!File.Exists(configPath))
         {
             return null;
         }
 
-        var workspaceState = await SessionRuntimeInfrastructure.RunTomlAsync(
+        var workspaceState = await runtimeOperations.RunTomlAsync(
             () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
             cancellationToken).ConfigureAwait(false);
         if (workspaceState.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceState.StandardOutput))

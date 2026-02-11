@@ -11,22 +11,33 @@ internal sealed class SessionTargetContextDiscoveryService : ISessionTargetConte
 {
     private const string DefaultContextName = "default";
     private readonly ISessionTargetConfiguredContextResolver configuredContextResolver;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     internal SessionTargetContextDiscoveryService(ISessionTargetConfiguredContextResolver sessionTargetConfiguredContextResolver)
-        => configuredContextResolver = sessionTargetConfiguredContextResolver ?? throw new ArgumentNullException(nameof(sessionTargetConfiguredContextResolver));
+        : this(sessionTargetConfiguredContextResolver, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetContextDiscoveryService(
+        ISessionTargetConfiguredContextResolver sessionTargetConfiguredContextResolver,
+        ISessionRuntimeOperations sessionRuntimeOperations)
+    {
+        configuredContextResolver = sessionTargetConfiguredContextResolver ?? throw new ArgumentNullException(nameof(sessionTargetConfiguredContextResolver));
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+    }
 
     public async Task<ContextSelectionResult> ResolveContextForWorkspaceAsync(string workspace, string? explicitConfig, bool force, CancellationToken cancellationToken)
     {
         var configured = await configuredContextResolver.ResolveConfiguredContextAsync(workspace, explicitConfig, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(configured) &&
-            await SessionRuntimeInfrastructure.DockerContextExistsAsync(configured, cancellationToken).ConfigureAwait(false))
+            await runtimeOperations.DockerContextExistsAsync(configured, cancellationToken).ConfigureAwait(false))
         {
             return ContextSelectionResult.FromContext(configured);
         }
 
         foreach (var candidate in SessionRuntimeConstants.ContextFallbackOrder)
         {
-            if (await SessionRuntimeInfrastructure.DockerContextExistsAsync(candidate, cancellationToken).ConfigureAwait(false))
+            if (await runtimeOperations.DockerContextExistsAsync(candidate, cancellationToken).ConfigureAwait(false))
             {
                 return ContextSelectionResult.FromContext(candidate);
             }
@@ -55,7 +66,7 @@ internal sealed class SessionTargetContextDiscoveryService : ISessionTargetConte
         foreach (var fallback in SessionRuntimeConstants.ContextFallbackOrder)
         {
             if (!contexts.Contains(fallback, StringComparer.Ordinal) &&
-                await SessionRuntimeInfrastructure.DockerContextExistsAsync(fallback, cancellationToken).ConfigureAwait(false))
+                await runtimeOperations.DockerContextExistsAsync(fallback, cancellationToken).ConfigureAwait(false))
             {
                 contexts.Add(fallback);
             }

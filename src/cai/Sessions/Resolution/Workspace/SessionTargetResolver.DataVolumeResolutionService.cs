@@ -8,9 +8,20 @@ internal interface ISessionTargetDataVolumeResolutionService
 internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetDataVolumeResolutionService
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     internal SessionTargetDataVolumeResolutionService(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
-        => parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        : this(sessionTargetParsingValidationService, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetDataVolumeResolutionService(
+        ISessionTargetParsingValidationService sessionTargetParsingValidationService,
+        ISessionRuntimeOperations sessionRuntimeOperations)
+    {
+        parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+    }
 
     public async Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken)
     {
@@ -26,7 +37,7 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
         }
 
         var userConfigVolume = await TryResolveWorkspaceVolumeAsync(
-            SessionRuntimeInfrastructure.ResolveUserConfigPath(),
+            runtimeOperations.ResolveUserConfigPath(),
             workspace,
             cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(userConfigVolume))
@@ -34,14 +45,14 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
             return ResolutionResult<string>.SuccessResult(userConfigVolume);
         }
 
-        var discoveredConfig = SessionRuntimeInfrastructure.FindConfigFile(workspace, explicitConfig);
+        var discoveredConfig = runtimeOperations.FindConfigFile(workspace, explicitConfig);
         var workspaceVolume = await TryResolveWorkspaceVolumeAsync(discoveredConfig, workspace, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(workspaceVolume))
         {
             return ResolutionResult<string>.SuccessResult(workspaceVolume);
         }
 
-        var globalVolume = await TryResolveGlobalVolumeAsync(discoveredConfig, cancellationToken).ConfigureAwait(false);
+        var globalVolume = await TryResolveGlobalVolumeAsync(discoveredConfig, runtimeOperations, cancellationToken).ConfigureAwait(false);
         if (!string.IsNullOrWhiteSpace(globalVolume))
         {
             return ResolutionResult<string>.SuccessResult(globalVolume);
@@ -50,14 +61,17 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
         return ResolutionResult<string>.SuccessResult(SessionRuntimeConstants.DefaultVolume);
     }
 
-    private static async Task<string?> TryResolveGlobalVolumeAsync(string? configPath, CancellationToken cancellationToken)
+    private async Task<string?> TryResolveGlobalVolumeAsync(
+        string? configPath,
+        ISessionRuntimeOperations runtimeOperations,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(configPath) || !File.Exists(configPath))
         {
             return null;
         }
 
-        var globalResult = await SessionRuntimeInfrastructure.RunTomlAsync(
+        var globalResult = await runtimeOperations.RunTomlAsync(
             () => TomlCommandProcessor.GetKey(configPath, "agent.data_volume"),
             cancellationToken).ConfigureAwait(false);
         if (globalResult.ExitCode != 0)
@@ -76,7 +90,7 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
             return null;
         }
 
-        var workspaceResult = await SessionRuntimeInfrastructure.RunTomlAsync(
+        var workspaceResult = await runtimeOperations.RunTomlAsync(
             () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
             cancellationToken).ConfigureAwait(false);
         if (workspaceResult.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceResult.StandardOutput))
@@ -88,6 +102,6 @@ internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetD
         return IsValidVolume(value) ? value : null;
     }
 
-    private static bool IsValidVolume(string? value)
-        => !string.IsNullOrWhiteSpace(value) && SessionRuntimeInfrastructure.IsValidVolumeName(value);
+    private bool IsValidVolume(string? value)
+        => !string.IsNullOrWhiteSpace(value) && runtimeOperations.IsValidVolumeName(value);
 }

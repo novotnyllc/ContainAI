@@ -18,15 +18,22 @@ internal sealed class SessionTargetWorkspaceDiscoveryService : ISessionTargetWor
     private readonly ISessionTargetContainerNameGenerationService containerNameGenerationService;
 
     public SessionTargetWorkspaceDiscoveryService()
-        : this(new SessionTargetParsingValidationService())
+        : this(new SessionTargetParsingValidationService(), new SessionRuntimeOperations())
     {
     }
 
     internal SessionTargetWorkspaceDiscoveryService(ISessionTargetParsingValidationService sessionTargetParsingValidationService)
+        : this(sessionTargetParsingValidationService, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetWorkspaceDiscoveryService(
+        ISessionTargetParsingValidationService sessionTargetParsingValidationService,
+        ISessionRuntimeOperations sessionRuntimeOperations)
         : this(
-            new SessionTargetContextDiscoveryService(new SessionTargetConfiguredContextResolver()),
-            new SessionTargetDataVolumeResolutionService(sessionTargetParsingValidationService),
-            new SessionTargetContainerNameGenerationService())
+            new SessionTargetContextDiscoveryService(new SessionTargetConfiguredContextResolver(sessionRuntimeOperations), sessionRuntimeOperations),
+            new SessionTargetDataVolumeResolutionService(sessionTargetParsingValidationService, sessionRuntimeOperations),
+            new SessionTargetContainerNameGenerationService(sessionRuntimeOperations))
     {
     }
 

@@ -12,9 +12,20 @@ internal interface ISessionTargetWorkspaceDataVolumeSelectionService
 internal sealed class SessionTargetWorkspaceDataVolumeSelectionService : ISessionTargetWorkspaceDataVolumeSelectionService
 {
     private readonly ISessionTargetWorkspaceDiscoveryService workspaceDiscoveryService;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     internal SessionTargetWorkspaceDataVolumeSelectionService(ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService)
-        => workspaceDiscoveryService = sessionTargetWorkspaceDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDiscoveryService));
+        : this(sessionTargetWorkspaceDiscoveryService, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetWorkspaceDataVolumeSelectionService(
+        ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService,
+        ISessionRuntimeOperations sessionRuntimeOperations)
+    {
+        workspaceDiscoveryService = sessionTargetWorkspaceDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDiscoveryService));
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+    }
 
     public async Task<ResolutionResult<SessionTargetVolumeSelection>> ResolveVolumeAsync(
         string workspace,
@@ -36,7 +47,7 @@ internal sealed class SessionTargetWorkspaceDataVolumeSelectionService : ISessio
         {
             return ResolutionResult<SessionTargetVolumeSelection>.SuccessResult(
                 new SessionTargetVolumeSelection(
-                    SessionRuntimeInfrastructure.GenerateWorkspaceVolumeName(workspace),
+                    runtimeOperations.GenerateWorkspaceVolumeName(workspace),
                     GeneratedFromReset: true));
         }
 

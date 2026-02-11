@@ -7,6 +7,16 @@ internal interface ISessionTargetContainerNameGenerationService
 
 internal sealed class SessionTargetContainerNameGenerationService : ISessionTargetContainerNameGenerationService
 {
+    private readonly ISessionRuntimeOperations runtimeOperations;
+
+    public SessionTargetContainerNameGenerationService()
+        : this(new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetContainerNameGenerationService(ISessionRuntimeOperations sessionRuntimeOperations)
+        => runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+
     public async Task<string> GenerateContainerNameAsync(string workspace, CancellationToken cancellationToken)
     {
         var repoName = Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace));
@@ -16,13 +26,13 @@ internal sealed class SessionTargetContainerNameGenerationService : ISessionTarg
         }
 
         var branchName = "nogit";
-        var gitProbe = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+        var gitProbe = await runtimeOperations.RunProcessCaptureAsync(
             "git",
             ["-C", workspace, "rev-parse", "--is-inside-work-tree"],
             cancellationToken).ConfigureAwait(false);
         if (gitProbe.ExitCode == 0)
         {
-            var branch = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+            var branch = await runtimeOperations.RunProcessCaptureAsync(
                 "git",
                 ["-C", workspace, "rev-parse", "--abbrev-ref", "HEAD"],
                 cancellationToken).ConfigureAwait(false);

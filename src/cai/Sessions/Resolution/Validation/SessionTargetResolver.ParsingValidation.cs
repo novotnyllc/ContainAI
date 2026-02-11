@@ -17,6 +17,16 @@ internal interface ISessionTargetParsingValidationService
 
 internal sealed class SessionTargetParsingValidationService : ISessionTargetParsingValidationService
 {
+    private readonly ISessionRuntimeOperations runtimeOperations;
+
+    public SessionTargetParsingValidationService()
+        : this(new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionTargetParsingValidationService(ISessionRuntimeOperations sessionRuntimeOperations)
+        => runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+
     public ResolvedTarget? ValidateOptions(SessionCommandOptions options)
     {
         if (!string.IsNullOrWhiteSpace(options.Container))
@@ -58,7 +68,7 @@ internal sealed class SessionTargetParsingValidationService : ISessionTargetPars
 
     public ResolutionResult<string> NormalizeWorkspacePath(string workspacePathInput)
     {
-        var normalizedWorkspace = SessionRuntimeInfrastructure.NormalizeWorkspacePath(workspacePathInput);
+        var normalizedWorkspace = runtimeOperations.NormalizeWorkspacePath(workspacePathInput);
         if (!Directory.Exists(normalizedWorkspace))
         {
             return ResolutionResult<string>.ErrorResult($"Workspace path does not exist: {workspacePathInput}");
@@ -68,7 +78,7 @@ internal sealed class SessionTargetParsingValidationService : ISessionTargetPars
     }
 
     public ResolutionResult<string> ValidateVolumeName(string volume, string errorPrefix)
-        => SessionRuntimeInfrastructure.IsValidVolumeName(volume)
+        => runtimeOperations.IsValidVolumeName(volume)
             ? ResolutionResult<string>.SuccessResult(volume)
             : ResolutionResult<string>.ErrorResult($"{errorPrefix}{volume}");
 
