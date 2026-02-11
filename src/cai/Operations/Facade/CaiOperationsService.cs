@@ -12,13 +12,10 @@ internal sealed class CaiOperationsService
         "ghcr.io/novotnyllc/containai",
     ];
 
-    private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
-    private readonly ContainerRuntimeCommandService containerRuntimeCommandService;
-    private readonly ContainerLinkRepairService containerLinkRepairService;
-    private readonly CaiDiagnosticsAndSetupOperations diagnosticsAndSetupOperations;
-    private readonly CaiMaintenanceOperations maintenanceOperations;
-    private readonly CaiTemplateSshAndGcOperations templateSshAndGcOperations;
+    private readonly CaiDiagnosticsCommandHandler diagnosticsHandler;
+    private readonly CaiMaintenanceCommandHandler maintenanceHandler;
+    private readonly CaiSystemCommandHandler systemHandler;
+    private readonly CaiTemplateSshGcCommandHandler templateSshGcHandler;
 
     public CaiOperationsService(TextWriter standardOutput, TextWriter standardError)
         : this(standardOutput, standardError, new ManifestTomlParser())
@@ -30,35 +27,44 @@ internal sealed class CaiOperationsService
         TextWriter standardError,
         IManifestTomlParser manifestTomlParser)
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
 
-        containerRuntimeCommandService = new ContainerRuntimeCommandService(
-            stdout,
-            stderr,
+        var containerRuntimeCommandService = new ContainerRuntimeCommandService(
+            standardOutput,
+            standardError,
             manifestTomlParser,
             new ContainerRuntimeOptionParser());
-        containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, CaiRuntimeDockerHelpers.ExecuteDockerCommandAsync);
-        var sshCleanupOperations = new CaiSshCleanupOperations(stdout, stderr);
 
-        diagnosticsAndSetupOperations = new CaiDiagnosticsAndSetupOperations(
-            stdout,
-            stderr,
+        var containerLinkRepairService = new ContainerLinkRepairService(
+            standardOutput,
+            standardError,
+            CaiRuntimeDockerHelpers.ExecuteDockerCommandAsync);
+
+        var sshCleanupOperations = new CaiSshCleanupOperations(standardOutput, standardError);
+        var diagnosticsOperations = new CaiDiagnosticsAndSetupOperations(
+            standardOutput,
+            standardError,
             sshCleanupOperations.RunSshCleanupAsync);
 
-        maintenanceOperations = new CaiMaintenanceOperations(
-            stdout,
-            stderr,
+        var maintenanceOperations = new CaiMaintenanceOperations(
+            standardOutput,
+            standardError,
             containerLinkRepairService,
-            diagnosticsAndSetupOperations.RunDoctorAsync);
+            diagnosticsOperations.RunDoctorAsync);
 
-        templateSshAndGcOperations = new CaiTemplateSshAndGcOperations(
-            stdout,
-            stderr,
+        var templateSshAndGcOperations = new CaiTemplateSshAndGcOperations(
+            standardOutput,
+            standardError,
             ContainAiImagePrefixes,
             maintenanceOperations.RunExportAsync,
             sshCleanupOperations);
+
+        diagnosticsHandler = new CaiDiagnosticsCommandHandler(diagnosticsOperations);
+        maintenanceHandler = new CaiMaintenanceCommandHandler(maintenanceOperations);
+        systemHandler = new CaiSystemCommandHandler(containerRuntimeCommandService);
+        templateSshGcHandler = new CaiTemplateSshGcCommandHandler(templateSshAndGcOperations);
     }
 
     public static Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
@@ -68,161 +74,74 @@ internal sealed class CaiOperationsService
     }
 
     public Task<int> RunStatusAsync(StatusCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return diagnosticsAndSetupOperations.RunStatusAsync(options.Json, options.Verbose, options.Workspace, options.Container, cancellationToken);
-    }
+        => diagnosticsHandler.RunStatusAsync(options, cancellationToken);
 
     public Task<int> RunDoctorAsync(DoctorCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return diagnosticsAndSetupOperations.RunDoctorAsync(options.Json, options.BuildTemplates, options.ResetLima, cancellationToken);
-    }
+        => diagnosticsHandler.RunDoctorAsync(options, cancellationToken);
 
     public Task<int> RunDoctorFixAsync(DoctorFixCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return diagnosticsAndSetupOperations.RunDoctorFixAsync(options.All, options.DryRun, options.Target, options.TargetArg, cancellationToken);
-    }
+        => diagnosticsHandler.RunDoctorFixAsync(options, cancellationToken);
 
     public Task<int> RunValidateAsync(ValidateCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return diagnosticsAndSetupOperations.RunDoctorAsync(options.Json, buildTemplates: false, resetLima: false, cancellationToken);
-    }
+        => diagnosticsHandler.RunValidateAsync(options, cancellationToken);
 
     public Task<int> RunSetupAsync(SetupCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return diagnosticsAndSetupOperations.RunSetupAsync(
-            dryRun: options.DryRun,
-            verbose: options.Verbose,
-            skipTemplates: options.SkipTemplates,
-            showHelp: false,
-            cancellationToken);
-    }
+        => diagnosticsHandler.RunSetupAsync(options, cancellationToken);
 
     public Task<int> RunVersionAsync(CancellationToken cancellationToken)
-        => diagnosticsAndSetupOperations.RunVersionAsync(json: false, cancellationToken);
+        => diagnosticsHandler.RunVersionAsync(cancellationToken);
 
     public Task<int> RunExportAsync(ExportCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return maintenanceOperations.RunExportAsync(options.Output, options.DataVolume, options.Container, options.Workspace, cancellationToken);
-    }
+        => maintenanceHandler.RunExportAsync(options, cancellationToken);
 
     public Task<int> RunSyncAsync(CancellationToken cancellationToken)
-        => maintenanceOperations.RunSyncAsync(cancellationToken);
+        => maintenanceHandler.RunSyncAsync(cancellationToken);
 
     public Task<int> RunUpdateAsync(UpdateCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return maintenanceOperations.RunUpdateAsync(
-            dryRun: options.DryRun,
-            stopContainers: options.StopContainers || options.Force,
-            limaRecreate: options.LimaRecreate,
-            showHelp: false,
-            cancellationToken);
-    }
+        => maintenanceHandler.RunUpdateAsync(options, cancellationToken);
 
     public Task<int> RunRefreshAsync(RefreshCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return maintenanceOperations.RunRefreshAsync(
-            rebuild: options.Rebuild,
-            showHelp: false,
-            cancellationToken);
-    }
+        => maintenanceHandler.RunRefreshAsync(options, cancellationToken);
 
     public Task<int> RunUninstallAsync(UninstallCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return maintenanceOperations.RunUninstallAsync(
-            dryRun: options.DryRun,
-            removeContainers: options.Containers,
-            removeVolumes: options.Volumes,
-            showHelp: false,
-            cancellationToken);
-    }
+        => maintenanceHandler.RunUninstallAsync(options, cancellationToken);
 
     public Task<int> RunLinksCheckAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
-        => RunLinksSubcommandAsync("check", options, cancellationToken);
+        => maintenanceHandler.RunLinksCheckAsync(options, cancellationToken);
 
     public Task<int> RunLinksFixAsync(LinksSubcommandOptions options, CancellationToken cancellationToken)
-        => RunLinksSubcommandAsync("fix", options, cancellationToken);
+        => maintenanceHandler.RunLinksFixAsync(options, cancellationToken);
 
     public Task<int> RunSystemInitAsync(SystemInitCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunSystemInitAsync(options, cancellationToken);
-    }
+        => systemHandler.RunSystemInitAsync(options, cancellationToken);
 
     public Task<int> RunSystemLinkRepairAsync(SystemLinkRepairCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunSystemLinkRepairAsync(options, cancellationToken);
-    }
+        => systemHandler.RunSystemLinkRepairAsync(options, cancellationToken);
 
     public Task<int> RunSystemWatchLinksAsync(SystemWatchLinksCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunSystemWatchLinksAsync(options, cancellationToken);
-    }
+        => systemHandler.RunSystemWatchLinksAsync(options, cancellationToken);
 
     public Task<int> RunSystemDevcontainerInstallAsync(SystemDevcontainerInstallCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return containerRuntimeCommandService.RunSystemDevcontainerInstallAsync(options, cancellationToken);
-    }
+        => systemHandler.RunSystemDevcontainerInstallAsync(options, cancellationToken);
 
     public Task<int> RunSystemDevcontainerInitAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunSystemDevcontainerInitAsync(cancellationToken);
+        => systemHandler.RunSystemDevcontainerInitAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerStartAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunSystemDevcontainerStartAsync(cancellationToken);
+        => systemHandler.RunSystemDevcontainerStartAsync(cancellationToken);
 
     public Task<int> RunSystemDevcontainerVerifySysboxAsync(CancellationToken cancellationToken)
-        => containerRuntimeCommandService.RunSystemDevcontainerVerifySysboxAsync(cancellationToken);
+        => systemHandler.RunSystemDevcontainerVerifySysboxAsync(cancellationToken);
 
     public Task<int> RunStopAsync(StopCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return templateSshAndGcOperations.RunStopAsync(
-            containerName: options.Container,
-            stopAll: options.All,
-            remove: options.Remove,
-            force: options.Force,
-            exportFirst: options.Export,
-            cancellationToken);
-    }
+        => templateSshGcHandler.RunStopAsync(options, cancellationToken);
 
     public Task<int> RunGcAsync(GcCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return templateSshAndGcOperations.RunGcAsync(
-            dryRun: options.DryRun,
-            force: options.Force,
-            includeImages: options.Images,
-            ageValue: options.Age ?? "30d",
-            cancellationToken);
-    }
+        => templateSshGcHandler.RunGcAsync(options, cancellationToken);
 
     public Task<int> RunSshCleanupAsync(SshCleanupCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return templateSshAndGcOperations.RunSshCleanupAsync(options.DryRun, cancellationToken);
-    }
+        => templateSshGcHandler.RunSshCleanupAsync(options, cancellationToken);
 
     public Task<int> RunTemplateUpgradeAsync(TemplateUpgradeCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return templateSshAndGcOperations.RunTemplateUpgradeAsync(options.Name, options.DryRun, cancellationToken);
-    }
-
-    private Task<int> RunLinksSubcommandAsync(string subcommand, LinksSubcommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        var containerName = string.IsNullOrWhiteSpace(options.Container) ? options.Name : options.Container;
-        return maintenanceOperations.RunLinksAsync(subcommand, containerName, options.Workspace, options.DryRun, options.Quiet, cancellationToken);
-    }
+        => templateSshGcHandler.RunTemplateUpgradeAsync(options, cancellationToken);
 }
