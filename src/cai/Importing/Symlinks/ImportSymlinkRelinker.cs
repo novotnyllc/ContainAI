@@ -1,6 +1,4 @@
-using System.Text;
 using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Symlinks;
 
@@ -8,10 +6,16 @@ internal sealed class ImportSymlinkRelinker : IImportSymlinkRelinker
 {
     private readonly TextWriter stderr;
     private readonly IImportSymlinkScanner symlinkScanner;
-    private readonly IPosixPathService posixPathService;
+    private readonly IImportSymlinkRelinkOperationBuilder operationBuilder;
+    private readonly IImportSymlinkRelinkShellCommandBuilder commandBuilder;
 
     public ImportSymlinkRelinker(TextWriter standardOutput, TextWriter standardError)
-        : this(standardOutput, standardError, new ImportSymlinkScanner(), new PosixPathService())
+        : this(
+            standardOutput,
+            standardError,
+            new ImportSymlinkScanner(),
+            new ImportSymlinkRelinkOperationBuilder(standardError, new PosixPathService()),
+            new ImportSymlinkRelinkShellCommandBuilder())
     {
     }
 
@@ -19,12 +23,14 @@ internal sealed class ImportSymlinkRelinker : IImportSymlinkRelinker
         TextWriter standardOutput,
         TextWriter standardError,
         IImportSymlinkScanner symlinkScanner,
-        IPosixPathService posixPathService)
+        IImportSymlinkRelinkOperationBuilder importSymlinkRelinkOperationBuilder,
+        IImportSymlinkRelinkShellCommandBuilder importSymlinkRelinkShellCommandBuilder)
     {
         ArgumentNullException.ThrowIfNull(standardOutput);
         stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.symlinkScanner = symlinkScanner ?? throw new ArgumentNullException(nameof(symlinkScanner));
-        this.posixPathService = posixPathService ?? throw new ArgumentNullException(nameof(posixPathService));
+        operationBuilder = importSymlinkRelinkOperationBuilder ?? throw new ArgumentNullException(nameof(importSymlinkRelinkOperationBuilder));
+        commandBuilder = importSymlinkRelinkShellCommandBuilder ?? throw new ArgumentNullException(nameof(importSymlinkRelinkShellCommandBuilder));
     }
 
     public async Task<int> RelinkImportedDirectorySymlinksAsync(
@@ -39,15 +45,15 @@ internal sealed class ImportSymlinkRelinker : IImportSymlinkRelinker
             return 0;
         }
 
-        var operations = BuildSymlinkOperations(sourceDirectoryPath, targetRelativePath, symlinks);
+        var operations = operationBuilder.Build(sourceDirectoryPath, targetRelativePath, symlinks);
         if (operations.Count == 0)
         {
             return 0;
         }
 
-        var commandBuilder = BuildRelinkShellCommand(operations);
+        var command = commandBuilder.Build(operations);
         var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", commandBuilder.ToString()],
+            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", command],
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
@@ -57,59 +63,5 @@ internal sealed class ImportSymlinkRelinker : IImportSymlinkRelinker
         }
 
         return 0;
-    }
-
-    private List<(string LinkPath, string RelativeTarget)> BuildSymlinkOperations(
-        string sourceDirectoryPath,
-        string targetRelativePath,
-        IReadOnlyList<ImportSymlink> symlinks)
-    {
-        var operations = new List<(string LinkPath, string RelativeTarget)>();
-        foreach (var symlink in symlinks)
-        {
-            if (!Path.IsPathRooted(symlink.Target))
-            {
-                continue;
-            }
-
-            var absoluteTarget = Path.GetFullPath(symlink.Target);
-            if (!posixPathService.IsPathWithinDirectory(absoluteTarget, sourceDirectoryPath))
-            {
-                stderr.WriteLine($"[WARN] preserving external absolute symlink: {symlink.RelativePath} -> {symlink.Target}");
-                continue;
-            }
-
-            if (!File.Exists(absoluteTarget) && !Directory.Exists(absoluteTarget))
-            {
-                continue;
-            }
-
-            var sourceRelativeTarget = Path.GetRelativePath(sourceDirectoryPath, absoluteTarget).Replace('\\', '/');
-            var volumeLinkPath = $"/target/{targetRelativePath.TrimEnd('/')}/{symlink.RelativePath.TrimStart('/')}";
-            var volumeTargetPath = $"/target/{targetRelativePath.TrimEnd('/')}/{sourceRelativeTarget.TrimStart('/')}";
-            var volumeParentPath = posixPathService.NormalizePosixPath(Path.GetDirectoryName(volumeLinkPath)?.Replace('\\', '/') ?? "/target");
-            var relativeTarget = posixPathService.ComputeRelativePosixPath(volumeParentPath, posixPathService.NormalizePosixPath(volumeTargetPath));
-            operations.Add((posixPathService.NormalizePosixPath(volumeLinkPath), relativeTarget));
-        }
-
-        return operations;
-    }
-
-    private static StringBuilder BuildRelinkShellCommand(IReadOnlyList<(string LinkPath, string RelativeTarget)> operations)
-    {
-        var commandBuilder = new StringBuilder();
-        foreach (var operation in operations)
-        {
-            commandBuilder.Append("link='");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(operation.LinkPath));
-            commandBuilder.Append("'; ");
-            commandBuilder.Append("mkdir -p \"$(dirname \"$link\")\"; ");
-            commandBuilder.Append("rm -rf -- \"$link\"; ");
-            commandBuilder.Append("ln -sfn -- '");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(operation.RelativeTarget));
-            commandBuilder.Append("' \"$link\"; ");
-        }
-
-        return commandBuilder;
     }
 }
