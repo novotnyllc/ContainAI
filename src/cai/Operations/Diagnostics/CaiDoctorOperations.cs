@@ -1,19 +1,31 @@
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Parsing;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
-using ContainAI.Cli.Host.RuntimeSupport.Process;
-
 namespace ContainAI.Cli.Host;
 
 internal sealed class CaiDoctorOperations
 {
-    private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
+    private readonly ICaiDoctorLimaResetter limaResetter;
+    private readonly ICaiDoctorRuntimeProbe runtimeProbe;
+    private readonly ICaiDoctorTemplateValidator templateValidator;
+    private readonly ICaiDoctorStatusWriter statusWriter;
 
     public CaiDoctorOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            new CaiDoctorLimaResetter(standardOutput, standardError),
+            new CaiDoctorRuntimeProbe(),
+            new CaiDoctorTemplateValidator(),
+            new CaiDoctorStatusWriter(standardOutput))
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+    }
+
+    internal CaiDoctorOperations(
+        ICaiDoctorLimaResetter caiDoctorLimaResetter,
+        ICaiDoctorRuntimeProbe caiDoctorRuntimeProbe,
+        ICaiDoctorTemplateValidator caiDoctorTemplateValidator,
+        ICaiDoctorStatusWriter caiDoctorStatusWriter)
+    {
+        limaResetter = caiDoctorLimaResetter ?? throw new ArgumentNullException(nameof(caiDoctorLimaResetter));
+        runtimeProbe = caiDoctorRuntimeProbe ?? throw new ArgumentNullException(nameof(caiDoctorRuntimeProbe));
+        templateValidator = caiDoctorTemplateValidator ?? throw new ArgumentNullException(nameof(caiDoctorTemplateValidator));
+        statusWriter = caiDoctorStatusWriter ?? throw new ArgumentNullException(nameof(caiDoctorStatusWriter));
     }
 
     public async Task<int> RunDoctorAsync(
@@ -22,122 +34,19 @@ internal sealed class CaiDoctorOperations
         bool resetLima,
         CancellationToken cancellationToken)
     {
-        var resetExitCode = await TryResetLimaAsync(resetLima, cancellationToken).ConfigureAwait(false);
+        var resetExitCode = await limaResetter.TryResetLimaAsync(resetLima, cancellationToken).ConfigureAwait(false);
         if (resetExitCode.HasValue)
         {
             return resetExitCode.Value;
         }
 
-        var dockerCli = await CaiRuntimeProcessRunner.CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
-        var contextName = await CaiRuntimeDockerHelpers.ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
-        var contextExists = !string.IsNullOrWhiteSpace(contextName);
-        var dockerInfoArgs = BuildDockerInfoArgs(contextName, contextExists);
-        var dockerInfo = await CaiRuntimeProcessRunner.CommandSucceedsAsync("docker", dockerInfoArgs, cancellationToken).ConfigureAwait(false);
+        var runtimeStatus = await runtimeProbe.ProbeAsync(cancellationToken).ConfigureAwait(false);
+        var templateStatus = await templateValidator.ResolveTemplateStatusAsync(buildTemplates, cancellationToken).ConfigureAwait(false);
 
-        var runtimeArgs = new List<string>(dockerInfoArgs)
-        {
-            "--format",
-            "{{json .Runtimes}}",
-        };
-        var runtimeInfo = await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", runtimeArgs, cancellationToken).ConfigureAwait(false);
-        var sysboxRuntime = runtimeInfo.ExitCode == 0 && runtimeInfo.StandardOutput.Contains("sysbox-runc", StringComparison.Ordinal);
-        var templateStatus = await ResolveTemplateStatusAsync(buildTemplates, cancellationToken).ConfigureAwait(false);
-        await WriteDoctorStatusAsync(
-            outputJson,
-            buildTemplates,
-            dockerCli,
-            contextExists,
-            contextName,
-            dockerInfo,
-            sysboxRuntime,
-            templateStatus).ConfigureAwait(false);
+        await statusWriter.WriteAsync(outputJson, buildTemplates, runtimeStatus, templateStatus).ConfigureAwait(false);
 
-        return dockerCli && contextExists && dockerInfo && sysboxRuntime && templateStatus ? 0 : 1;
-    }
-
-    private async Task<int?> TryResetLimaAsync(bool resetLima, CancellationToken cancellationToken)
-    {
-        if (!resetLima)
-        {
-            return null;
-        }
-
-        if (!OperatingSystem.IsMacOS())
-        {
-            await stderr.WriteLineAsync("--reset-lima is only available on macOS").ConfigureAwait(false);
-            return 1;
-        }
-
-        await stdout.WriteLineAsync("Resetting Lima VM containai...").ConfigureAwait(false);
-        await CaiRuntimeProcessRunner.RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
-        await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", ["context", "rm", "-f", "containai-docker"], cancellationToken).ConfigureAwait(false);
-        return null;
-    }
-
-    private static List<string> BuildDockerInfoArgs(string? contextName, bool contextExists)
-    {
-        var dockerInfoArgs = new List<string>();
-        if (contextExists)
-        {
-            dockerInfoArgs.Add("--context");
-            dockerInfoArgs.Add(contextName!);
-        }
-
-        dockerInfoArgs.Add("info");
-        return dockerInfoArgs;
-    }
-
-    private static Task<bool> ResolveTemplateStatusAsync(bool buildTemplates, CancellationToken cancellationToken) =>
-        buildTemplates
-            ? ValidateTemplatesAsync(cancellationToken)
-            : Task.FromResult(true);
-
-    private static async Task<bool> ValidateTemplatesAsync(CancellationToken cancellationToken)
-    {
-        var templatesRoot = CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
-        if (!Directory.Exists(templatesRoot))
-        {
-            return false;
-        }
-
-        foreach (var dockerfile in Directory.EnumerateFiles(templatesRoot, "Dockerfile", SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var directory = Path.GetDirectoryName(dockerfile)!;
-            var imageName = $"containai-template-check-{Path.GetFileName(directory)}";
-            var build = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["build", "-q", "-f", dockerfile, "-t", imageName, directory], cancellationToken).ConfigureAwait(false);
-            if (build.ExitCode != 0)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private async Task WriteDoctorStatusAsync(
-        bool outputJson,
-        bool buildTemplates,
-        bool dockerCli,
-        bool contextExists,
-        string? contextName,
-        bool dockerInfo,
-        bool sysboxRuntime,
-        bool templateStatus)
-    {
-        if (outputJson)
-        {
-            await stdout.WriteLineAsync($"{{\"docker_cli\":{dockerCli.ToString().ToLowerInvariant()},\"context\":{contextExists.ToString().ToLowerInvariant()},\"docker_daemon\":{dockerInfo.ToString().ToLowerInvariant()},\"sysbox_runtime\":{sysboxRuntime.ToString().ToLowerInvariant()},\"templates\":{templateStatus.ToString().ToLowerInvariant()}}}").ConfigureAwait(false);
-            return;
-        }
-
-        await stdout.WriteLineAsync($"Docker CLI: {(dockerCli ? "ok" : "missing")}").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"Context: {(contextExists ? contextName : "missing")}").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"Docker daemon: {(dockerInfo ? "ok" : "unreachable")}").ConfigureAwait(false);
-        await stdout.WriteLineAsync($"sysbox-runc runtime: {(sysboxRuntime ? "ok" : "missing")}").ConfigureAwait(false);
-        if (buildTemplates)
-        {
-            await stdout.WriteLineAsync($"Templates: {(templateStatus ? "ok" : "failed")}").ConfigureAwait(false);
-        }
+        return runtimeStatus.DockerCli && runtimeStatus.ContextExists && runtimeStatus.DockerInfo && runtimeStatus.SysboxRuntime && templateStatus
+            ? 0
+            : 1;
     }
 }

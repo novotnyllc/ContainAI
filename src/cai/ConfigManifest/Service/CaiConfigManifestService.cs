@@ -1,21 +1,13 @@
 using ContainAI.Cli.Abstractions;
 using ContainAI.Cli.Host.ConfigManifest;
 using ContainAI.Cli.Host.Manifests.Apply;
-using ContainAI.Cli.Host.RuntimeSupport.Parsing;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
 internal sealed class CaiConfigManifestService
 {
-    private static readonly string[] ConfigFileNames =
-    [
-        "config.toml",
-        "containai.toml",
-    ];
-
-    private readonly IConfigCommandProcessor configCommandProcessor;
-    private readonly IManifestCommandProcessor manifestCommandProcessor;
+    private readonly CaiConfigCommandHandler configCommandHandler;
+    private readonly CaiManifestCommandHandler manifestCommandHandler;
 
     public CaiConfigManifestService(TextWriter standardOutput, TextWriter standardError)
         : this(standardOutput, standardError, new ManifestTomlParser())
@@ -40,26 +32,8 @@ internal sealed class CaiConfigManifestService
             standardError,
             manifestTomlParser,
             manifestApplier,
-            new ConfigCommandProcessor(
-                standardOutput,
-                standardError,
-                new CaiConfigRuntimeAdapter(
-                    workspacePath => CaiRuntimeConfigLocator.ResolveConfigPath(workspacePath, ConfigFileNames),
-                    CaiRuntimeHomePathHelpers.ExpandHomePath,
-                    CaiRuntimeParseAndTimeHelpers.NormalizeConfigKey,
-                    (request, normalizedKey) => CaiRuntimeParseAndTimeHelpers.ResolveWorkspaceScope(request.Global, request.Workspace, normalizedKey),
-                    async (operation, cancellationToken) =>
-                    {
-                        var result = await CaiRuntimeParseAndTimeHelpers.RunTomlAsync(operation, cancellationToken).ConfigureAwait(false);
-                        return new TomlProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
-                    },
-                    (workspace, explicitVolume, cancellationToken) => CaiRuntimePathResolutionHelpers.ResolveDataVolumeAsync(workspace, explicitVolume, ConfigFileNames, cancellationToken))),
-            new ManifestCommandProcessor(
-                standardOutput,
-                standardError,
-                manifestTomlParser,
-                manifestApplier,
-                new ManifestDirectoryResolver(CaiRuntimeHomePathHelpers.ExpandHomePath)))
+            CaiConfigManifestProcessorFactory.CreateConfigCommandProcessor(standardOutput, standardError),
+            CaiConfigManifestProcessorFactory.CreateManifestCommandProcessor(standardOutput, standardError, manifestTomlParser, manifestApplier))
     {
     }
 
@@ -75,85 +49,35 @@ internal sealed class CaiConfigManifestService
         ArgumentNullException.ThrowIfNull(standardError);
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
         ArgumentNullException.ThrowIfNull(manifestApplier);
-        this.configCommandProcessor = configCommandProcessor ?? throw new ArgumentNullException(nameof(configCommandProcessor));
-        this.manifestCommandProcessor = manifestCommandProcessor ?? throw new ArgumentNullException(nameof(manifestCommandProcessor));
+
+        configCommandHandler = new CaiConfigCommandHandler(configCommandProcessor ?? throw new ArgumentNullException(nameof(configCommandProcessor)));
+        manifestCommandHandler = new CaiManifestCommandHandler(manifestCommandProcessor ?? throw new ArgumentNullException(nameof(manifestCommandProcessor)));
     }
 
     public Task<int> RunConfigListAsync(ConfigListCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return configCommandProcessor.RunAsync(
-            new ConfigCommandRequest("list", null, null, options.Global, options.Workspace),
-            cancellationToken);
-    }
+        => configCommandHandler.RunConfigListAsync(options, cancellationToken);
 
     public Task<int> RunConfigGetAsync(ConfigGetCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return configCommandProcessor.RunAsync(
-            new ConfigCommandRequest("get", options.Key, null, options.Global, options.Workspace),
-            cancellationToken);
-    }
+        => configCommandHandler.RunConfigGetAsync(options, cancellationToken);
 
     public Task<int> RunConfigSetAsync(ConfigSetCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return configCommandProcessor.RunAsync(
-            new ConfigCommandRequest("set", options.Key, options.Value, options.Global, options.Workspace),
-            cancellationToken);
-    }
+        => configCommandHandler.RunConfigSetAsync(options, cancellationToken);
 
     public Task<int> RunConfigUnsetAsync(ConfigUnsetCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return configCommandProcessor.RunAsync(
-            new ConfigCommandRequest("unset", options.Key, null, options.Global, options.Workspace),
-            cancellationToken);
-    }
+        => configCommandHandler.RunConfigUnsetAsync(options, cancellationToken);
 
     public Task<int> RunConfigResolveVolumeAsync(ConfigResolveVolumeCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return configCommandProcessor.RunAsync(
-            new ConfigCommandRequest("resolve-volume", options.ExplicitVolume, null, false, options.Workspace),
-            cancellationToken);
-    }
+        => configCommandHandler.RunConfigResolveVolumeAsync(options, cancellationToken);
 
     public Task<int> RunManifestParseAsync(ManifestParseCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return manifestCommandProcessor.RunParseAsync(
-            new ManifestParseRequest(options.ManifestPath, options.IncludeDisabled, options.EmitSourceFile),
-            cancellationToken);
-    }
+        => manifestCommandHandler.RunManifestParseAsync(options, cancellationToken);
 
     public Task<int> RunManifestGenerateAsync(ManifestGenerateCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return manifestCommandProcessor.RunGenerateAsync(
-            new ManifestGenerateRequest(options.Kind, options.ManifestPath, options.OutputPath),
-            cancellationToken);
-    }
+        => manifestCommandHandler.RunManifestGenerateAsync(options, cancellationToken);
 
     public Task<int> RunManifestApplyAsync(ManifestApplyCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return manifestCommandProcessor.RunApplyAsync(
-            new ManifestApplyRequest(
-                options.Kind,
-                options.ManifestPath,
-                options.DataDir ?? "/mnt/agent-data",
-                options.HomeDir ?? "/home/agent",
-                options.ShimDir ?? "/opt/containai/user-agent-shims",
-                options.CaiBinary ?? "/usr/local/bin/cai"),
-            cancellationToken);
-    }
+        => manifestCommandHandler.RunManifestApplyAsync(options, cancellationToken);
 
     public Task<int> RunManifestCheckAsync(ManifestCheckCommandOptions options, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return manifestCommandProcessor.RunCheckAsync(
-            new ManifestCheckRequest(options.ManifestDir),
-            cancellationToken);
-    }
+        => manifestCommandHandler.RunManifestCheckAsync(options, cancellationToken);
 }
