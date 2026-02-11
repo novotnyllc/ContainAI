@@ -1,4 +1,6 @@
 using System.Text;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
@@ -12,12 +14,14 @@ internal interface IImportManifestTargetInitializer
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportManifestTargetInitializer : CaiRuntimeSupport
-    , IImportManifestTargetInitializer
+internal sealed class ImportManifestTargetInitializer : IImportManifestTargetInitializer
 {
+    private readonly TextWriter stderr;
+
     public ImportManifestTargetInitializer(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> EnsureEntryTargetAsync(
@@ -43,7 +47,7 @@ internal sealed class ImportManifestTargetInitializer : CaiRuntimeSupport
 
         if (isDirectory)
         {
-            var ensureDirectory = await DockerCaptureAsync(
+            var ensureDirectory = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
                 ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", BuildEnsureDirectoryCommand(entry.Target, IsSecretEntry(entry))],
                 cancellationToken).ConfigureAwait(false);
             if (ensureDirectory.ExitCode != 0)
@@ -60,7 +64,7 @@ internal sealed class ImportManifestTargetInitializer : CaiRuntimeSupport
             return 0;
         }
 
-        var ensureFile = await DockerCaptureAsync(
+        var ensureFile = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", BuildEnsureFileCommand(entry)],
             cancellationToken).ConfigureAwait(false);
         if (ensureFile.ExitCode != 0)
@@ -80,7 +84,7 @@ internal sealed class ImportManifestTargetInitializer : CaiRuntimeSupport
 
     private static string BuildEnsureDirectoryCommand(string targetPath, bool isSecret)
     {
-        var escapedTarget = EscapeForSingleQuotedShell(targetPath);
+        var escapedTarget = CaiRuntimePathHelpers.EscapeForSingleQuotedShell(targetPath);
         var command = $"mkdir -p '/mnt/agent-data/{escapedTarget}' && chown -R 1000:1000 '/mnt/agent-data/{escapedTarget}' || true";
         if (isSecret)
         {
@@ -93,7 +97,7 @@ internal sealed class ImportManifestTargetInitializer : CaiRuntimeSupport
     private static string BuildEnsureFileCommand(ManifestEntry entry)
     {
         var ensureFileCommand = new StringBuilder();
-        ensureFileCommand.Append($"dest='/mnt/agent-data/{EscapeForSingleQuotedShell(entry.Target)}'; ");
+        ensureFileCommand.Append($"dest='/mnt/agent-data/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(entry.Target)}'; ");
         ensureFileCommand.Append("mkdir -p \"$(dirname \"$dest\")\"; ");
         ensureFileCommand.Append("if [ ! -f \"$dest\" ]; then : > \"$dest\"; fi; ");
         if (entry.Flags.Contains('j', StringComparison.Ordinal))

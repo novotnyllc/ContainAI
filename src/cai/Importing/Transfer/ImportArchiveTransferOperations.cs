@@ -1,16 +1,20 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal sealed class ImportArchiveTransferOperations : CaiRuntimeSupport
-    , IImportArchiveTransferOperations
+internal sealed class ImportArchiveTransferOperations : IImportArchiveTransferOperations
 {
+    private readonly TextWriter stderr;
+
     public ImportArchiveTransferOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RestoreArchiveImportAsync(string volume, string archivePath, bool excludePriv, CancellationToken cancellationToken)
     {
-        var clear = await DockerCaptureAsync(
+        var clear = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", "find /mnt/agent-data -mindepth 1 -delete"],
             cancellationToken).ConfigureAwait(false);
         if (clear.ExitCode != 0)
@@ -43,7 +47,7 @@ internal sealed class ImportArchiveTransferOperations : CaiRuntimeSupport
         extractArgs.Add("-C");
         extractArgs.Add("/mnt/agent-data");
 
-        var extract = await DockerCaptureAsync(extractArgs, cancellationToken).ConfigureAwait(false);
+        var extract = await CaiRuntimeDockerHelpers.DockerCaptureAsync(extractArgs, cancellationToken).ConfigureAwait(false);
         if (extract.ExitCode != 0)
         {
             await stderr.WriteLineAsync(extract.StandardError.Trim()).ConfigureAwait(false);

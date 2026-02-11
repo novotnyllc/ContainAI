@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.RuntimeSupport.Environment;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
@@ -7,12 +8,15 @@ internal interface IImportEnvironmentAllowlistOperations
     Task<List<string>> ResolveValidatedImportKeysAsync(JsonElement envSection, bool verbose, CancellationToken cancellationToken);
 }
 
-internal sealed class ImportEnvironmentAllowlistOperations : CaiRuntimeSupport
-    , IImportEnvironmentAllowlistOperations
+internal sealed class ImportEnvironmentAllowlistOperations : IImportEnvironmentAllowlistOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public ImportEnvironmentAllowlistOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<List<string>> ResolveValidatedImportKeysAsync(JsonElement envSection, bool verbose, CancellationToken cancellationToken)
@@ -103,4 +107,7 @@ internal sealed class ImportEnvironmentAllowlistOperations : CaiRuntimeSupport
 
         return validatedKeys;
     }
+
+    private static System.Text.RegularExpressions.Regex EnvVarNameRegex()
+        => CaiRuntimeEnvRegexHelpers.EnvVarNameRegex();
 }

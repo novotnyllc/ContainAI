@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
 internal interface IImportManifestCopyOperations
@@ -12,12 +14,14 @@ internal interface IImportManifestCopyOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportManifestCopyOperations : CaiRuntimeSupport
-    , IImportManifestCopyOperations
+internal sealed class ImportManifestCopyOperations : IImportManifestCopyOperations
 {
+    private readonly TextWriter stderr;
+
     public ImportManifestCopyOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> CopyManifestEntryAsync(
@@ -30,7 +34,7 @@ internal sealed class ImportManifestCopyOperations : CaiRuntimeSupport
         CancellationToken cancellationToken)
     {
         var rsyncArgs = BuildManifestRsyncArguments(volume, sourceRoot, entry, excludePriv, noExcludes, importPlan);
-        var result = await DockerCaptureAsync(rsyncArgs, cancellationToken).ConfigureAwait(false);
+        var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(rsyncArgs, cancellationToken).ConfigureAwait(false);
         if (result.ExitCode == 0)
         {
             return 0;

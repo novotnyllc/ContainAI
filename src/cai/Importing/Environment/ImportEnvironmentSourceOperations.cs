@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.RuntimeSupport.Environment;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
@@ -19,12 +20,14 @@ internal interface IImportEnvironmentSourceOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportEnvironmentSourceOperations : CaiRuntimeSupport
-    , IImportEnvironmentSourceOperations
+internal sealed class ImportEnvironmentSourceOperations : IImportEnvironmentSourceOperations
 {
+    private readonly TextWriter stderr;
+
     public ImportEnvironmentSourceOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<Dictionary<string, string>?> ResolveFileVariablesAsync(
@@ -41,7 +44,7 @@ internal sealed class ImportEnvironmentSourceOperations : CaiRuntimeSupport
             var envFile = envFileElement.GetString();
             if (!string.IsNullOrWhiteSpace(envFile))
             {
-                var envFileResolution = ResolveEnvFilePath(workspaceRoot, envFile);
+                var envFileResolution = CaiRuntimeEnvFileHelpers.ResolveEnvFilePath(workspaceRoot, envFile);
                 if (envFileResolution.Error is not null)
                 {
                     await stderr.WriteLineAsync(envFileResolution.Error).ConfigureAwait(false);
@@ -50,7 +53,7 @@ internal sealed class ImportEnvironmentSourceOperations : CaiRuntimeSupport
 
                 if (envFileResolution.Path is not null)
                 {
-                    var parsed = ParseEnvFile(envFileResolution.Path);
+                    var parsed = CaiRuntimeEnvFileHelpers.ParseEnvFile(envFileResolution.Path);
                     foreach (var warning in parsed.Warnings)
                     {
                         await stderr.WriteLineAsync(warning).ConfigureAwait(false);

@@ -2,8 +2,7 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
-internal sealed class ImportEnvironmentValueOperations : CaiRuntimeSupport
-    , IImportEnvironmentValueOperations
+internal sealed class ImportEnvironmentValueOperations : IImportEnvironmentValueOperations
 {
     private readonly IImportEnvironmentAllowlistOperations allowlistOperations;
     private readonly IImportEnvironmentSourceOperations sourceOperations;
@@ -25,8 +24,9 @@ internal sealed class ImportEnvironmentValueOperations : CaiRuntimeSupport
         IImportEnvironmentAllowlistOperations importEnvironmentAllowlistOperations,
         IImportEnvironmentSourceOperations importEnvironmentSourceOperations,
         IImportEnvironmentPersistenceOperations importEnvironmentPersistenceOperations)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
         allowlistOperations = importEnvironmentAllowlistOperations ?? throw new ArgumentNullException(nameof(importEnvironmentAllowlistOperations));
         sourceOperations = importEnvironmentSourceOperations ?? throw new ArgumentNullException(nameof(importEnvironmentSourceOperations));
         persistenceOperations = importEnvironmentPersistenceOperations ?? throw new ArgumentNullException(nameof(importEnvironmentPersistenceOperations));

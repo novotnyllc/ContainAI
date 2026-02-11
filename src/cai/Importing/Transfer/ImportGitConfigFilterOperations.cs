@@ -1,3 +1,6 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
 internal interface IImportGitConfigFilterOperations
@@ -9,12 +12,15 @@ internal interface IImportGitConfigFilterOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportGitConfigFilterOperations : CaiRuntimeSupport
-    , IImportGitConfigFilterOperations
+internal sealed class ImportGitConfigFilterOperations : IImportGitConfigFilterOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public ImportGitConfigFilterOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> ApplyGitConfigFilterAsync(
@@ -23,7 +29,7 @@ internal sealed class ImportGitConfigFilterOperations : CaiRuntimeSupport
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var filterScript = $"target='/target/{EscapeForSingleQuotedShell(targetRelativePath)}'; " +
+        var filterScript = $"target='/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(targetRelativePath)}'; " +
                            "if [ ! -f \"$target\" ]; then exit 0; fi; " +
                            "tmp=\"$target.tmp\"; " +
                            "awk '\n" +
@@ -51,7 +57,7 @@ internal sealed class ImportGitConfigFilterOperations : CaiRuntimeSupport
                            "fi; " +
                            "chown 1000:1000 \"$target\" || true";
 
-        var filterResult = await DockerCaptureAsync(
+        var filterResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", filterScript],
             cancellationToken).ConfigureAwait(false);
         if (filterResult.ExitCode != 0)

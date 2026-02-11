@@ -1,11 +1,17 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
-    , IImportOverrideTransferOperations
+internal sealed class ImportOverrideTransferOperations : IImportOverrideTransferOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public ImportOverrideTransferOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> ApplyImportOverridesAsync(
@@ -16,7 +22,7 @@ internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var overridesDirectory = Path.Combine(ResolveHomeDirectory(), ".config", "containai", "import-overrides");
+        var overridesDirectory = Path.Combine(CaiRuntimeHomePathHelpers.ResolveHomeDirectory(), ".config", "containai", "import-overrides");
         if (!Directory.Exists(overridesDirectory))
         {
             return 0;
@@ -74,14 +80,14 @@ internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
         bool noSecrets,
         bool verbose)
     {
-        if (IsSymbolicLinkPath(file))
+        if (CaiRuntimePathHelpers.IsSymbolicLinkPath(file))
         {
             await stderr.WriteLineAsync($"Skipping override symlink: {file}").ConfigureAwait(false);
             return null;
         }
 
         var relative = NormalizeOverrideRelativePath(overridesDirectory, file);
-        if (!TryMapSourcePathToTarget(relative, manifestEntries, out var mappedTarget, out var mappedFlags))
+        if (!CaiRuntimePathHelpers.TryMapSourcePathToTarget(relative, manifestEntries, out var mappedTarget, out var mappedFlags))
         {
             if (verbose)
             {
@@ -121,7 +127,7 @@ internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
         PreparedOverride preparedOverride,
         CancellationToken cancellationToken)
     {
-        var copy = await DockerCaptureAsync(
+        var copy = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             [
                 "run",
                 "--rm",
@@ -148,7 +154,7 @@ internal sealed class ImportOverrideTransferOperations : CaiRuntimeSupport
         => noSecrets && mappedFlags.Contains('s', StringComparison.Ordinal);
 
     private static string BuildOverrideCopyCommand(string relativePath, string mappedTargetPath)
-        => $"src='/override/{EscapeForSingleQuotedShell(relativePath.TrimStart('/'))}'; " +
-           $"dest='/target/{EscapeForSingleQuotedShell(mappedTargetPath)}'; " +
+        => $"src='/override/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(relativePath.TrimStart('/'))}'; " +
+           $"dest='/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(mappedTargetPath)}'; " +
            "mkdir -p \"$(dirname \"$dest\")\"; cp -f \"$src\" \"$dest\"; chown 1000:1000 \"$dest\" || true";
 }

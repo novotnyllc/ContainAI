@@ -2,16 +2,21 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class ImportArchiveHandler : CaiRuntimeSupport
+internal sealed class ImportArchiveHandler
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly IImportTransferOperations transferOperations;
 
     public ImportArchiveHandler(
         TextWriter standardOutput,
         TextWriter standardError,
         IImportTransferOperations transferOperations)
-        : base(standardOutput, standardError)
-        => this.transferOperations = transferOperations ?? throw new ArgumentNullException(nameof(transferOperations));
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        this.transferOperations = transferOperations ?? throw new ArgumentNullException(nameof(transferOperations));
+    }
 
     public async Task<int> HandleArchiveImportAsync(
         ImportCommandOptions options,

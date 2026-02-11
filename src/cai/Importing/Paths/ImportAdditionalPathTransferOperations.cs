@@ -1,13 +1,18 @@
 using ContainAI.Cli.Host;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Paths;
 
-internal sealed class ImportAdditionalPathTransferOperations : CaiRuntimeSupport
-    , IImportAdditionalPathTransferOperations
+internal sealed class ImportAdditionalPathTransferOperations : IImportAdditionalPathTransferOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public ImportAdditionalPathTransferOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> ImportAdditionalPathAsync(
@@ -30,9 +35,9 @@ internal sealed class ImportAdditionalPathTransferOperations : CaiRuntimeSupport
         }
 
         var ensureCommand = additionalPath.IsDirectory
-            ? $"mkdir -p '/target/{EscapeForSingleQuotedShell(additionalPath.TargetPath)}'"
-            : $"mkdir -p \"$(dirname '/target/{EscapeForSingleQuotedShell(additionalPath.TargetPath)}')\"";
-        var ensureResult = await DockerCaptureAsync(
+            ? $"mkdir -p '/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(additionalPath.TargetPath)}'"
+            : $"mkdir -p \"$(dirname '/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(additionalPath.TargetPath)}')\"";
+        var ensureResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", ensureCommand],
             cancellationToken).ConfigureAwait(false);
         if (ensureResult.ExitCode != 0)
@@ -45,7 +50,7 @@ internal sealed class ImportAdditionalPathTransferOperations : CaiRuntimeSupport
             return 1;
         }
 
-        var result = await DockerCaptureAsync(
+        var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             BuildRsyncArgs(volume, additionalPath),
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)

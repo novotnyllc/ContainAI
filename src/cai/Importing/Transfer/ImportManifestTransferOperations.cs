@@ -2,9 +2,10 @@ using ContainAI.Cli.Host.Importing.Symlinks;
 
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
-    , IImportManifestTransferOperations
+internal sealed class ImportManifestTransferOperations : IImportManifestTransferOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly IImportPostCopyOperations postCopyOperations;
     private readonly IImportManifestTargetInitializer targetInitializer;
     private readonly IImportManifestPlanBuilder planBuilder;
@@ -50,13 +51,16 @@ internal sealed class ImportManifestTransferOperations : CaiRuntimeSupport
         IImportManifestPlanBuilder importManifestPlanBuilder,
         IImportManifestCopyOperations importManifestCopyOperations,
         IImportManifestPostCopyTransferOperations importManifestPostCopyTransferOperations)
-        : base(standardOutput, standardError)
-        => (postCopyOperations, targetInitializer, planBuilder, copyOperations, postCopyTransferOperations) = (
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        (postCopyOperations, targetInitializer, planBuilder, copyOperations, postCopyTransferOperations) = (
             importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
             importManifestTargetInitializer ?? throw new ArgumentNullException(nameof(importManifestTargetInitializer)),
             importManifestPlanBuilder ?? throw new ArgumentNullException(nameof(importManifestPlanBuilder)),
             importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)),
             importManifestPostCopyTransferOperations ?? throw new ArgumentNullException(nameof(importManifestPostCopyTransferOperations)));
+    }
 
     public async Task<int> InitializeImportTargetsAsync(
         string volume,

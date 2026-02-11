@@ -17,8 +17,7 @@ internal interface IImportPostCopyOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class CaiImportPostCopyOperations : CaiRuntimeSupport
-    , IImportPostCopyOperations
+internal sealed class CaiImportPostCopyOperations : IImportPostCopyOperations
 {
     private readonly IImportSecretPermissionOperations secretPermissionOperations;
     private readonly IImportGitConfigFilterOperations gitConfigFilterOperations;
@@ -37,10 +36,13 @@ internal sealed class CaiImportPostCopyOperations : CaiRuntimeSupport
         TextWriter standardError,
         IImportSecretPermissionOperations importSecretPermissionOperations,
         IImportGitConfigFilterOperations importGitConfigFilterOperations)
-        : base(standardOutput, standardError)
-        => (secretPermissionOperations, gitConfigFilterOperations) = (
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        (secretPermissionOperations, gitConfigFilterOperations) = (
             importSecretPermissionOperations ?? throw new ArgumentNullException(nameof(importSecretPermissionOperations)),
             importGitConfigFilterOperations ?? throw new ArgumentNullException(nameof(importGitConfigFilterOperations)));
+    }
 
     public Task<int> EnforceSecretPathPermissionsAsync(
         string volume,

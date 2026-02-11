@@ -2,8 +2,10 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class ImportDirectoryHandler : CaiRuntimeSupport
+internal sealed class ImportDirectoryHandler
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly IImportPathOperations pathOperations;
     private readonly IImportTransferOperations transferOperations;
     private readonly IImportEnvironmentOperations environmentOperations;
@@ -14,8 +16,9 @@ internal sealed class ImportDirectoryHandler : CaiRuntimeSupport
         IImportPathOperations pathOperations,
         IImportTransferOperations transferOperations,
         IImportEnvironmentOperations environmentOperations)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.pathOperations = pathOperations ?? throw new ArgumentNullException(nameof(pathOperations));
         this.transferOperations = transferOperations ?? throw new ArgumentNullException(nameof(transferOperations));
         this.environmentOperations = environmentOperations ?? throw new ArgumentNullException(nameof(environmentOperations));

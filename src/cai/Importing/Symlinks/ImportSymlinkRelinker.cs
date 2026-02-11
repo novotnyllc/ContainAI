@@ -1,10 +1,12 @@
 using System.Text;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Symlinks;
 
-internal sealed class ImportSymlinkRelinker : CaiRuntimeSupport
-    , IImportSymlinkRelinker
+internal sealed class ImportSymlinkRelinker : IImportSymlinkRelinker
 {
+    private readonly TextWriter stderr;
     private readonly IImportSymlinkScanner symlinkScanner;
     private readonly IPosixPathService posixPathService;
 
@@ -18,8 +20,9 @@ internal sealed class ImportSymlinkRelinker : CaiRuntimeSupport
         TextWriter standardError,
         IImportSymlinkScanner symlinkScanner,
         IPosixPathService posixPathService)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.symlinkScanner = symlinkScanner ?? throw new ArgumentNullException(nameof(symlinkScanner));
         this.posixPathService = posixPathService ?? throw new ArgumentNullException(nameof(posixPathService));
     }
@@ -43,7 +46,7 @@ internal sealed class ImportSymlinkRelinker : CaiRuntimeSupport
         }
 
         var commandBuilder = BuildRelinkShellCommand(operations);
-        var result = await DockerCaptureAsync(
+        var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", commandBuilder.ToString()],
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
@@ -98,12 +101,12 @@ internal sealed class ImportSymlinkRelinker : CaiRuntimeSupport
         foreach (var operation in operations)
         {
             commandBuilder.Append("link='");
-            commandBuilder.Append(EscapeForSingleQuotedShell(operation.LinkPath));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(operation.LinkPath));
             commandBuilder.Append("'; ");
             commandBuilder.Append("mkdir -p \"$(dirname \"$link\")\"; ");
             commandBuilder.Append("rm -rf -- \"$link\"; ");
             commandBuilder.Append("ln -sfn -- '");
-            commandBuilder.Append(EscapeForSingleQuotedShell(operation.RelativeTarget));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(operation.RelativeTarget));
             commandBuilder.Append("' \"$link\"; ");
         }
 

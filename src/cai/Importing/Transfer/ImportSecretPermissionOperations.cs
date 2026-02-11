@@ -1,4 +1,6 @@
 using System.Text;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
@@ -18,12 +20,15 @@ internal interface IImportSecretPermissionOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
-    , IImportSecretPermissionOperations
+internal sealed class ImportSecretPermissionOperations : IImportSecretPermissionOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public ImportSecretPermissionOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> EnforceSecretPathPermissionsAsync(
@@ -42,7 +47,7 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
 
         var permissionsCommand = BuildBulkPermissionsCommand(secretDirectories, secretFiles);
 
-        var result = await DockerCaptureAsync(
+        var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", permissionsCommand],
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
@@ -70,7 +75,7 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
         CancellationToken cancellationToken)
     {
         var chmodCommand = BuildEntryPermissionsCommand(normalizedTarget, isDirectory);
-        var chmodResult = await DockerCaptureAsync(
+        var chmodResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", chmodCommand],
             cancellationToken).ConfigureAwait(false);
         if (chmodResult.ExitCode != 0)
@@ -123,22 +128,22 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
         foreach (var directory in secretDirectories.OrderBy(static value => value, StringComparer.Ordinal))
         {
             commandBuilder.Append("if [ -d '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
             commandBuilder.Append("' ]; then chmod 700 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
             commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(directory));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
             commandBuilder.Append("' || true; fi; ");
         }
 
         foreach (var file in secretFiles.OrderBy(static value => value, StringComparer.Ordinal))
         {
             commandBuilder.Append("if [ -f '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
             commandBuilder.Append("' ]; then chmod 600 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
             commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(EscapeForSingleQuotedShell(file));
+            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
             commandBuilder.Append("' || true; fi; ");
         }
 
@@ -148,7 +153,7 @@ internal sealed class ImportSecretPermissionOperations : CaiRuntimeSupport
     private static string BuildEntryPermissionsCommand(string normalizedTarget, bool isDirectory)
     {
         var chmodMode = isDirectory ? "700" : "600";
-        return $"target='/target/{EscapeForSingleQuotedShell(normalizedTarget)}'; " +
+        return $"target='/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(normalizedTarget)}'; " +
                "if [ -e \"$target\" ]; then chmod " + chmodMode + " \"$target\"; fi; " +
                "if [ -e \"$target\" ]; then chown 1000:1000 \"$target\" || true; fi";
     }

@@ -1,14 +1,17 @@
 using System.Text.Json;
 using ContainAI.Cli.Host;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 namespace ContainAI.Cli.Host.Importing.Paths;
 
-internal sealed class ImportAdditionalPathCatalog : CaiRuntimeSupport
-    , IImportAdditionalPathCatalog
+internal sealed class ImportAdditionalPathCatalog : IImportAdditionalPathCatalog
 {
+    private readonly TextWriter stderr;
+
     public ImportAdditionalPathCatalog(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<IReadOnlyList<ImportAdditionalPath>> ResolveAdditionalImportPathsAsync(
@@ -23,7 +26,9 @@ internal sealed class ImportAdditionalPathCatalog : CaiRuntimeSupport
             return [];
         }
 
-        var result = await RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken).ConfigureAwait(false);
+        var result = await CaiRuntimeParseAndTimeHelpers
+            .RunTomlAsync(() => TomlCommandProcessor.GetJson(configPath), cancellationToken)
+            .ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
             if (verbose && !string.IsNullOrWhiteSpace(result.StandardError))

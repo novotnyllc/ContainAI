@@ -1,4 +1,6 @@
 using System.Text;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
@@ -11,12 +13,14 @@ internal interface IImportEnvironmentPersistenceOperations
         CancellationToken cancellationToken);
 }
 
-internal sealed class ImportEnvironmentPersistenceOperations : CaiRuntimeSupport
-    , IImportEnvironmentPersistenceOperations
+internal sealed class ImportEnvironmentPersistenceOperations : IImportEnvironmentPersistenceOperations
 {
+    private readonly TextWriter stderr;
+
     public ImportEnvironmentPersistenceOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> PersistMergedEnvironmentAsync(
@@ -39,9 +43,9 @@ internal sealed class ImportEnvironmentPersistenceOperations : CaiRuntimeSupport
             builder.Append('\n');
         }
 
-        var writeCommand = $"set -e; target='/mnt/agent-data/.env'; if [ -L \"$target\" ]; then echo '{EscapeForSingleQuotedShell(CaiImportEnvironmentOperations.EnvTargetSymlinkGuardMessage)}' >&2; exit 1; fi; " +
+        var writeCommand = $"set -e; target='/mnt/agent-data/.env'; if [ -L \"$target\" ]; then echo '{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(CaiImportEnvironmentOperations.EnvTargetSymlinkGuardMessage)}' >&2; exit 1; fi; " +
                            "tmp='/mnt/agent-data/.env.tmp'; cat > \"$tmp\"; chmod 600 \"$tmp\"; chown 1000:1000 \"$tmp\" || true; mv -f \"$tmp\" \"$target\"";
-        var write = await DockerCaptureAsync(
+        var write = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-i", "-v", $"{volume}:/mnt/agent-data", "alpine:3.20", "sh", "-lc", writeCommand],
             builder.ToString(),
             cancellationToken).ConfigureAwait(false);
