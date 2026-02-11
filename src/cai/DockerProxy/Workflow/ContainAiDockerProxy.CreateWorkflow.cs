@@ -5,11 +5,8 @@ internal sealed class DockerProxyCreateWorkflow : IDockerProxyCreateWorkflow
     private readonly IDockerProxyArgumentParser argumentParser;
     private readonly IDevcontainerFeatureSettingsParser featureSettingsParser;
     private readonly IDockerProxyCommandExecutor commandExecutor;
-    private readonly IDockerProxyPortAllocator portAllocator;
-    private readonly IDockerProxyVolumeCredentialValidator volumeCredentialValidator;
-    private readonly IDockerProxySshConfigUpdater sshConfigUpdater;
     private readonly IContainAiSystemEnvironment environment;
-    private readonly IUtcClock clock;
+    private readonly DockerProxyManagedCreateExecutor managedCreateExecutor;
 
     public DockerProxyCreateWorkflow(
         IDockerProxyArgumentParser argumentParser,
@@ -24,11 +21,14 @@ internal sealed class DockerProxyCreateWorkflow : IDockerProxyCreateWorkflow
         this.argumentParser = argumentParser;
         this.featureSettingsParser = featureSettingsParser;
         this.commandExecutor = commandExecutor;
-        this.portAllocator = portAllocator;
-        this.volumeCredentialValidator = volumeCredentialValidator;
-        this.sshConfigUpdater = sshConfigUpdater;
         this.environment = environment;
-        this.clock = clock;
+        managedCreateExecutor = new DockerProxyManagedCreateExecutor(
+            argumentParser,
+            commandExecutor,
+            portAllocator,
+            volumeCredentialValidator,
+            sshConfigUpdater,
+            clock);
     }
 
     public async Task<int> RunAsync(
@@ -58,46 +58,11 @@ internal sealed class DockerProxyCreateWorkflow : IDockerProxyCreateWorkflow
             return 1;
         }
 
-        var request = createParseResult.Request!;
-
-        var sshPort = await portAllocator.AllocateSshPortAsync(
-            request.LockPath,
-            request.ContainAiConfigDir,
-            contextName,
-            request.Workspace.Name,
-            request.Workspace.SanitizedName,
-            cancellationToken).ConfigureAwait(false);
-
-        var mountVolume = await volumeCredentialValidator.ValidateAsync(
-            contextName,
-            request.Settings.DataVolume,
-            request.Settings.EnableCredentials,
-            wrapperFlags.Quiet,
-            stderr,
-            cancellationToken).ConfigureAwait(false);
-
-        var modifiedArgs = await DockerProxyCreateCommandOutputBuilder.BuildManagedCreateArgumentsAsync(
+        return await managedCreateExecutor.ExecuteAsync(
             dockerArgs,
+            wrapperFlags,
             contextName,
-            request.Workspace.Name,
-            request.Settings,
-            sshPort,
-            mountVolume,
-            wrapperFlags.Quiet,
-            commandExecutor,
-            clock,
-            stderr,
-            cancellationToken).ConfigureAwait(false);
-
-        await sshConfigUpdater
-            .UpdateAsync(request.Workspace.SanitizedName, sshPort, request.Settings.RemoteUser, stderr, cancellationToken)
-            .ConfigureAwait(false);
-        await DockerProxyCreateCommandOutputBuilder
-            .WriteVerboseExecutionAsync(wrapperFlags.Verbose, wrapperFlags.Quiet, contextName, modifiedArgs, stderr)
-            .ConfigureAwait(false);
-
-        return await commandExecutor.RunInteractiveAsync(
-            argumentParser.PrependContext(contextName, modifiedArgs),
+            createParseResult.Request!,
             stderr,
             cancellationToken).ConfigureAwait(false);
     }
