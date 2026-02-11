@@ -39,18 +39,26 @@ internal static class ContainAiDockerProxy
         var portAllocator = new DockerProxyPortAllocator(options, systemEnvironment, commandExecutor);
         var volumeCredentialValidator = new DockerProxyVolumeCredentialValidator(commandExecutor);
         var sshConfigUpdater = new DockerProxySshConfigUpdater(systemEnvironment, clock);
-
-        return new ContainAiDockerProxyService(
-            options,
+        var createWorkflow = new DockerProxyCreateWorkflow(
             argumentParser,
             featureSettingsParser,
             commandExecutor,
-            contextSelector,
             portAllocator,
             volumeCredentialValidator,
             sshConfigUpdater,
             systemEnvironment,
             clock);
+        var passthroughWorkflow = new DockerProxyPassthroughWorkflow(
+            argumentParser,
+            commandExecutor,
+            contextSelector);
+
+        return new ContainAiDockerProxyService(
+            options,
+            argumentParser,
+            createWorkflow,
+            passthroughWorkflow,
+            systemEnvironment);
     }
 
     private static DockerProxyArgumentParser CreateArgumentParser() => new();

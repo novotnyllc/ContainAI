@@ -5,6 +5,25 @@ internal interface IContainAiDockerProxyService
     Task<int> RunAsync(IReadOnlyList<string> args, TextWriter stdout, TextWriter stderr, CancellationToken cancellationToken);
 }
 
+internal interface IDockerProxyCreateWorkflow
+{
+    Task<int> RunAsync(
+        IReadOnlyList<string> dockerArgs,
+        DockerProxyWrapperFlags wrapperFlags,
+        string contextName,
+        TextWriter stderr,
+        CancellationToken cancellationToken);
+}
+
+internal interface IDockerProxyPassthroughWorkflow
+{
+    Task<int> RunAsync(
+        IReadOnlyList<string> dockerArgs,
+        string contextName,
+        TextWriter stderr,
+        CancellationToken cancellationToken);
+}
+
 internal interface IDockerProxyProcessRunner
 {
     Task<int> RunInteractiveAsync(IReadOnlyList<string> args, CancellationToken cancellationToken);
