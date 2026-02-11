@@ -36,28 +36,32 @@ internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOpe
         IImportPathOperations importPathOperations,
         IImportTransferOperations importTransferOperations,
         IImportEnvironmentOperations importEnvironmentOperations)
+        : this(
+            standardOutput,
+            standardError,
+            CaiImportOrchestrationDependenciesFactory.Create(
+                standardOutput,
+                standardError,
+                manifestTomlParser,
+                importManifestCatalog,
+                importPathOperations,
+                importTransferOperations,
+                importEnvironmentOperations))
+    {
+    }
+
+    internal CaiImportOrchestrationOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        CaiImportOrchestrationDependencies dependencies)
     {
         stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
         stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
-        ArgumentNullException.ThrowIfNull(manifestTomlParser);
-        ArgumentNullException.ThrowIfNull(importManifestCatalog);
-        var pathOperations = importPathOperations ?? throw new ArgumentNullException(nameof(importPathOperations));
-        ArgumentNullException.ThrowIfNull(importTransferOperations);
-        ArgumentNullException.ThrowIfNull(importEnvironmentOperations);
-
-        runContextResolver = new ImportRunContextResolver(standardOutput, standardError, pathOperations);
-        var manifestEntryLoader = new ImportManifestEntryLoader(manifestTomlParser, importManifestCatalog);
-        dataVolumeEnsurer = new ImportDataVolumeEnsurer(standardError);
-        manifestLoadingService = new ImportManifestLoadingService(manifestEntryLoader);
-
-        var archiveHandler = new ImportArchiveHandler(standardOutput, standardError, importTransferOperations);
-        var directoryHandler = new ImportDirectoryHandler(
-            standardOutput,
-            standardError,
-            pathOperations,
-            importTransferOperations,
-            importEnvironmentOperations);
-        sourceDispatcher = new ImportSourceDispatcher(archiveHandler, directoryHandler);
+        ArgumentNullException.ThrowIfNull(dependencies);
+        runContextResolver = dependencies.RunContextResolver;
+        dataVolumeEnsurer = dependencies.DataVolumeEnsurer;
+        manifestLoadingService = dependencies.ManifestLoadingService;
+        sourceDispatcher = dependencies.SourceDispatcher;
     }
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)

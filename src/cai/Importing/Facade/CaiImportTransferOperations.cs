@@ -46,28 +46,17 @@ internal sealed class CaiImportTransferOperations : IImportTransferOperations
     private readonly IImportOverrideTransferOperations overrideTransferOperations;
 
     public CaiImportTransferOperations(TextWriter standardOutput, TextWriter standardError)
-        : this(
-            standardOutput,
-            standardError,
-            new ImportArchiveTransferOperations(standardOutput, standardError),
-            new ImportManifestTransferOperations(standardOutput, standardError),
-            new ImportOverrideTransferOperations(standardOutput, standardError))
+        : this(CaiImportTransferDependenciesFactory.Create(standardOutput, standardError))
     {
     }
 
-    internal CaiImportTransferOperations(
-        TextWriter standardOutput,
-        TextWriter standardError,
-        IImportArchiveTransferOperations importArchiveTransferOperations,
-        IImportManifestTransferOperations importManifestTransferOperations,
-        IImportOverrideTransferOperations importOverrideTransferOperations)
+    internal CaiImportTransferOperations(CaiImportTransferDependencies dependencies)
     {
-        ArgumentNullException.ThrowIfNull(standardOutput);
-        ArgumentNullException.ThrowIfNull(standardError);
+        ArgumentNullException.ThrowIfNull(dependencies);
         (archiveTransferOperations, manifestTransferOperations, overrideTransferOperations) = (
-            importArchiveTransferOperations ?? throw new ArgumentNullException(nameof(importArchiveTransferOperations)),
-            importManifestTransferOperations ?? throw new ArgumentNullException(nameof(importManifestTransferOperations)),
-            importOverrideTransferOperations ?? throw new ArgumentNullException(nameof(importOverrideTransferOperations)));
+            dependencies.ArchiveTransferOperations,
+            dependencies.ManifestTransferOperations,
+            dependencies.OverrideTransferOperations);
     }
 
     public Task<int> RestoreArchiveImportAsync(string volume, string archivePath, bool excludePriv, CancellationToken cancellationToken)

@@ -1,6 +1,4 @@
-using System.Text.Json;
 using ContainAI.Cli.Host.Importing.Environment;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
@@ -19,10 +17,10 @@ internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperati
 {
     internal const string EnvTargetSymlinkGuardMessage = ".env target is symlink";
 
-    private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
     private readonly IImportEnvironmentValueOperations environmentValueOperations;
-    private readonly IImportEnvironmentSectionLoader environmentSectionLoader;
+    private readonly ImportEnvironmentConfigLoadCoordinator configLoadCoordinator;
+    private readonly ImportEnvironmentSectionValidator sectionValidator;
+    private readonly ImportEnvironmentMergePersistCoordinator mergePersistCoordinator;
 
     public CaiImportEnvironmentOperations(TextWriter standardOutput, TextWriter standardError)
         : this(
@@ -39,10 +37,17 @@ internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperati
         IImportEnvironmentValueOperations importEnvironmentValueOperations,
         IImportEnvironmentSectionLoader importEnvironmentSectionLoader)
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        var output = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        var error = standardError ?? throw new ArgumentNullException(nameof(standardError));
         environmentValueOperations = importEnvironmentValueOperations ?? throw new ArgumentNullException(nameof(importEnvironmentValueOperations));
-        environmentSectionLoader = importEnvironmentSectionLoader ?? throw new ArgumentNullException(nameof(importEnvironmentSectionLoader));
+        var sectionLoader = importEnvironmentSectionLoader ?? throw new ArgumentNullException(nameof(importEnvironmentSectionLoader));
+
+        var dryRunReporter = new ImportEnvironmentDryRunReporter(output);
+        configLoadCoordinator = new ImportEnvironmentConfigLoadCoordinator(sectionLoader);
+        sectionValidator = new ImportEnvironmentSectionValidator(error);
+        mergePersistCoordinator = new ImportEnvironmentMergePersistCoordinator(
+            environmentValueOperations,
+            dryRunReporter);
     }
 
     public async Task<int> ImportEnvironmentVariablesAsync(
@@ -53,23 +58,26 @@ internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperati
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var configPath = ImportEnvironmentConfigPathResolver.ResolveEnvironmentConfigPath(workspace, explicitConfigPath);
-        if (!File.Exists(configPath))
+        var loadResult = await configLoadCoordinator
+            .LoadAsync(workspace, explicitConfigPath, cancellationToken)
+            .ConfigureAwait(false);
+        if (loadResult.ShouldSkip)
         {
             return 0;
         }
 
-        var envSectionResult = await environmentSectionLoader.LoadAsync(configPath, cancellationToken).ConfigureAwait(false);
-        if (!envSectionResult.Success)
+        if (!loadResult.Success)
         {
-            return envSectionResult.ExitCode;
+            return loadResult.ExitCode;
         }
 
-        using var configDocument = envSectionResult.Document!;
-        var envSection = envSectionResult.Section;
-        if (envSection.ValueKind != JsonValueKind.Object)
+        using var configDocument = loadResult.Document!;
+        var envSection = loadResult.Section;
+        var sectionIsValid = await sectionValidator
+            .ValidateAsync(envSection, cancellationToken)
+            .ConfigureAwait(false);
+        if (!sectionIsValid)
         {
-            await stderr.WriteLineAsync("[WARN] [env] section must be a table; skipping env import").ConfigureAwait(false);
             return 0;
         }
 
@@ -82,40 +90,14 @@ internal sealed class CaiImportEnvironmentOperations : IImportEnvironmentOperati
             return 0;
         }
 
-        var workspaceRoot = Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(workspace));
-        var fileVariables = await environmentValueOperations
-            .ResolveFileVariablesAsync(envSection, workspaceRoot, validatedKeys, cancellationToken)
-            .ConfigureAwait(false);
-        if (fileVariables is null)
-        {
-            return 1;
-        }
-
-        var fromHost = await environmentValueOperations
-            .ResolveFromHostFlagAsync(envSection, cancellationToken)
-            .ConfigureAwait(false);
-
-        var merged = await environmentValueOperations
-            .MergeVariablesWithHostValuesAsync(fileVariables, validatedKeys, fromHost, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (merged.Count == 0)
-        {
-            return 0;
-        }
-
-        if (dryRun)
-        {
-            foreach (var key in merged.Keys.OrderBy(static value => value, StringComparer.Ordinal))
-            {
-                await stdout.WriteLineAsync($"[DRY-RUN] env key: {key}").ConfigureAwait(false);
-            }
-
-            return 0;
-        }
-
-        return await environmentValueOperations
-            .PersistMergedEnvironmentAsync(volume, validatedKeys, merged, cancellationToken)
+        return await mergePersistCoordinator
+            .MergeAndPersistAsync(
+                volume,
+                workspace,
+                envSection,
+                validatedKeys,
+                dryRun,
+                cancellationToken)
             .ConfigureAwait(false);
     }
 }
