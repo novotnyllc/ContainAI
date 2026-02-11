@@ -1,17 +1,31 @@
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
-
 namespace ContainAI.Cli.Host;
 
 internal sealed class CaiUninstallOperations
 {
     private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
+    private readonly ICaiUninstallShellIntegrationCleaner shellIntegrationCleaner;
+    private readonly ICaiUninstallDockerContextCleaner dockerContextCleaner;
+    private readonly ICaiUninstallContainerAndVolumeCleaner containerAndVolumeCleaner;
 
     public CaiUninstallOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            standardOutput,
+            new CaiUninstallShellIntegrationCleaner(standardOutput),
+            new CaiUninstallDockerContextCleaner(standardOutput),
+            new CaiUninstallContainerAndVolumeCleaner(standardOutput, standardError))
+    {
+    }
+
+    internal CaiUninstallOperations(
+        TextWriter standardOutput,
+        ICaiUninstallShellIntegrationCleaner caiUninstallShellIntegrationCleaner,
+        ICaiUninstallDockerContextCleaner caiUninstallDockerContextCleaner,
+        ICaiUninstallContainerAndVolumeCleaner caiUninstallContainerAndVolumeCleaner)
     {
         stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        shellIntegrationCleaner = caiUninstallShellIntegrationCleaner ?? throw new ArgumentNullException(nameof(caiUninstallShellIntegrationCleaner));
+        dockerContextCleaner = caiUninstallDockerContextCleaner ?? throw new ArgumentNullException(nameof(caiUninstallDockerContextCleaner));
+        containerAndVolumeCleaner = caiUninstallContainerAndVolumeCleaner ?? throw new ArgumentNullException(nameof(caiUninstallContainerAndVolumeCleaner));
     }
 
     public async Task<int> RunUninstallAsync(
@@ -27,9 +41,8 @@ internal sealed class CaiUninstallOperations
             return 0;
         }
 
-        await RemoveShellIntegrationAsync(dryRun, cancellationToken).ConfigureAwait(false);
-
-        await RemoveDockerContextsAsync(dryRun, cancellationToken).ConfigureAwait(false);
+        await shellIntegrationCleaner.CleanAsync(dryRun, cancellationToken).ConfigureAwait(false);
+        await dockerContextCleaner.CleanAsync(dryRun, cancellationToken).ConfigureAwait(false);
 
         if (!removeContainers)
         {
@@ -37,134 +50,20 @@ internal sealed class CaiUninstallOperations
             return 0;
         }
 
-        var removeResult = await RemoveManagedContainersAndCollectVolumesAsync(dryRun, removeVolumes, cancellationToken).ConfigureAwait(false);
+        var removeResult = await containerAndVolumeCleaner
+            .RemoveManagedContainersAndCollectVolumesAsync(dryRun, removeVolumes, cancellationToken)
+            .ConfigureAwait(false);
+
         if (removeResult.ExitCode != 0)
         {
             return 1;
         }
 
-        await RemoveVolumesAsync(removeResult.VolumeNames, dryRun, cancellationToken).ConfigureAwait(false);
+        await containerAndVolumeCleaner
+            .RemoveVolumesAsync(removeResult.VolumeNames, dryRun, cancellationToken)
+            .ConfigureAwait(false);
 
         await stdout.WriteLineAsync("Uninstall complete.").ConfigureAwait(false);
         return 0;
     }
-
-    private async Task RemoveShellIntegrationAsync(bool dryRun, CancellationToken cancellationToken)
-    {
-        var homeDirectory = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
-        var profileScriptPath = ShellProfileIntegration.GetProfileScriptPath(homeDirectory);
-        if (dryRun)
-        {
-            if (File.Exists(profileScriptPath))
-            {
-                await stdout.WriteLineAsync($"Would remove shell profile script: {profileScriptPath}").ConfigureAwait(false);
-            }
-        }
-        else if (await ShellProfileIntegration.RemoveProfileScriptAsync(homeDirectory, cancellationToken).ConfigureAwait(false))
-        {
-            await stdout.WriteLineAsync($"Removed shell profile script: {profileScriptPath}").ConfigureAwait(false);
-        }
-
-        foreach (var shellProfilePath in ShellProfileIntegration.GetCandidateShellProfilePaths(homeDirectory, Environment.GetEnvironmentVariable("SHELL")))
-        {
-            if (!File.Exists(shellProfilePath))
-            {
-                continue;
-            }
-
-            var existing = await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false);
-            if (!ShellProfileIntegration.HasHookBlock(existing))
-            {
-                continue;
-            }
-
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove shell integration from: {shellProfilePath}").ConfigureAwait(false);
-                continue;
-            }
-
-            if (await ShellProfileIntegration.RemoveHookFromShellProfileAsync(shellProfilePath, cancellationToken).ConfigureAwait(false))
-            {
-                await stdout.WriteLineAsync($"Removed shell integration from: {shellProfilePath}").ConfigureAwait(false);
-            }
-        }
-    }
-
-    private async Task RemoveDockerContextsAsync(bool dryRun, CancellationToken cancellationToken)
-    {
-        var contextsToRemove = new[] { "containai-docker", "containai-secure", "docker-containai" };
-        foreach (var context in contextsToRemove)
-        {
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove Docker context: {context}").ConfigureAwait(false);
-                continue;
-            }
-
-            await CaiRuntimeDockerHelpers.DockerCaptureAsync(["context", "rm", "-f", context], cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task<UninstallContainerRemovalResult> RemoveManagedContainersAndCollectVolumesAsync(
-        bool dryRun,
-        bool removeVolumes,
-        CancellationToken cancellationToken)
-    {
-        var list = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["ps", "-aq", "--filter", "label=containai.managed=true"], cancellationToken).ConfigureAwait(false);
-        if (list.ExitCode != 0)
-        {
-            await stderr.WriteLineAsync(list.StandardError.Trim()).ConfigureAwait(false);
-            return new UninstallContainerRemovalResult(1, []);
-        }
-
-        var containerIds = list.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var volumeNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var containerId in containerIds)
-        {
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove container {containerId}").ConfigureAwait(false);
-            }
-            else
-            {
-                await CaiRuntimeDockerHelpers.DockerCaptureAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
-            }
-
-            if (!removeVolumes)
-            {
-                continue;
-            }
-
-            var inspect = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-                ["inspect", "--format", "{{range .Mounts}}{{if and (eq .Type \"volume\") (eq .Destination \"/mnt/agent-data\")}}{{.Name}}{{end}}{{end}}", containerId],
-                cancellationToken).ConfigureAwait(false);
-            if (inspect.ExitCode == 0)
-            {
-                var volumeName = inspect.StandardOutput.Trim();
-                if (!string.IsNullOrWhiteSpace(volumeName))
-                {
-                    volumeNames.Add(volumeName);
-                }
-            }
-        }
-
-        return new UninstallContainerRemovalResult(0, volumeNames);
-    }
-
-    private async Task RemoveVolumesAsync(IReadOnlyCollection<string> volumeNames, bool dryRun, CancellationToken cancellationToken)
-    {
-        foreach (var volume in volumeNames)
-        {
-            if (dryRun)
-            {
-                await stdout.WriteLineAsync($"Would remove volume {volume}").ConfigureAwait(false);
-                continue;
-            }
-
-            await CaiRuntimeDockerHelpers.DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private readonly record struct UninstallContainerRemovalResult(int ExitCode, HashSet<string> VolumeNames);
 }

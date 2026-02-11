@@ -17,152 +17,55 @@ internal static class TomlCommandAgentSectionValidationService
             return new TomlAgentValidationResult(false, null, $"Error: [agent] section must be a table/dict in {sourceFile}");
         }
 
-        var nameError = ValidateRequiredAgentString(agentTable, "name", sourceFile, out var name);
-        if (nameError is not null)
+        if (!TomlCommandAgentFieldValidation.TryValidateRequiredString(agentTable, "name", sourceFile, out var name, out var nameError))
         {
-            return nameError.Value;
+            return nameError!.Value;
         }
 
-        var binaryError = ValidateRequiredAgentString(agentTable, "binary", sourceFile, out var binary);
-        if (binaryError is not null)
+        if (!TomlCommandAgentFieldValidation.TryValidateRequiredString(agentTable, "binary", sourceFile, out var binary, out var binaryError))
         {
-            return binaryError.Value;
+            return binaryError!.Value;
         }
 
-        var defaultArgsError = ValidateDefaultArgs(parser, agentTable, sourceFile, out var defaultArgs);
-        if (defaultArgsError is not null)
+        if (!TomlCommandAgentFieldValidation.TryValidateStringList(
+                parser,
+                agentTable,
+                key: "default_args",
+                sourceFile,
+                requireNonEmptyItems: false,
+                out var defaultArgs,
+                out var defaultArgsError))
         {
-            return defaultArgsError.Value;
+            return defaultArgsError!.Value;
         }
 
-        var aliasesError = ValidateAliases(parser, agentTable, sourceFile, out var aliases);
-        if (aliasesError is not null)
+        if (!TomlCommandAgentFieldValidation.TryValidateStringList(
+                parser,
+                agentTable,
+                key: "aliases",
+                sourceFile,
+                requireNonEmptyItems: true,
+                out var aliases,
+                out var aliasesError))
         {
-            return aliasesError.Value;
+            return aliasesError!.Value;
         }
 
-        var optionalError = ValidateOptional(parser, agentTable, sourceFile, out var optional);
-        if (optionalError is not null)
+        if (!TomlCommandAgentFieldValidation.TryValidateOptionalBoolean(
+                parser,
+                agentTable,
+                key: "optional",
+                sourceFile,
+                out var optional,
+                out var optionalError))
         {
-            return optionalError.Value;
+            return optionalError!.Value;
         }
 
         return new TomlAgentValidationResult(
             true,
             BuildResult(sourceFile, name, binary, defaultArgs, aliases, optional),
             null);
-    }
-
-    private static TomlAgentValidationResult? ValidateRequiredAgentString(
-        IReadOnlyDictionary<string, object?> agentTable,
-        string key,
-        string sourceFile,
-        out string value)
-    {
-        if (!agentTable.TryGetValue(key, out var rawValue) || rawValue is not string parsedValue || string.IsNullOrEmpty(parsedValue))
-        {
-            value = string.Empty;
-            return new TomlAgentValidationResult(false, null, $"Error: [agent].{key} is required in {sourceFile}");
-        }
-
-        value = parsedValue;
-        return null;
-    }
-
-    private static TomlAgentValidationResult? ValidateDefaultArgs(
-        ITomlCommandParser parser,
-        IReadOnlyDictionary<string, object?> agentTable,
-        string sourceFile,
-        out List<string> defaultArgs)
-    {
-        defaultArgs = new List<string>();
-        if (!agentTable.TryGetValue("default_args", out var defaultArgsObj) || defaultArgsObj is null)
-        {
-            return null;
-        }
-
-        if (!parser.TryGetList(defaultArgsObj, out var defaultArgsArray))
-        {
-            return new TomlAgentValidationResult(
-                false,
-                null,
-                $"Error: [agent].default_args must be a list, got {parser.GetValueTypeName(defaultArgsObj)} in {sourceFile}");
-        }
-
-        for (var index = 0; index < defaultArgsArray.Count; index++)
-        {
-            if (defaultArgsArray[index] is not string arg)
-            {
-                return new TomlAgentValidationResult(
-                    false,
-                    null,
-                    $"Error: [agent].default_args[{index}] must be a string, got {parser.GetValueTypeName(defaultArgsArray[index])} in {sourceFile}");
-            }
-
-            defaultArgs.Add(arg);
-        }
-
-        return null;
-    }
-
-    private static TomlAgentValidationResult? ValidateAliases(
-        ITomlCommandParser parser,
-        IReadOnlyDictionary<string, object?> agentTable,
-        string sourceFile,
-        out List<string> aliases)
-    {
-        aliases = new List<string>();
-        if (!agentTable.TryGetValue("aliases", out var aliasesObj) || aliasesObj is null)
-        {
-            return null;
-        }
-
-        if (!parser.TryGetList(aliasesObj, out var aliasesArray))
-        {
-            return new TomlAgentValidationResult(
-                false,
-                null,
-                $"Error: [agent].aliases must be a list, got {parser.GetValueTypeName(aliasesObj)} in {sourceFile}");
-        }
-
-        for (var index = 0; index < aliasesArray.Count; index++)
-        {
-            if (aliasesArray[index] is not string alias || string.IsNullOrEmpty(alias))
-            {
-                return new TomlAgentValidationResult(
-                    false,
-                    null,
-                    $"Error: [agent].aliases[{index}] must be a non-empty string in {sourceFile}");
-            }
-
-            aliases.Add(alias);
-        }
-
-        return null;
-    }
-
-    private static TomlAgentValidationResult? ValidateOptional(
-        ITomlCommandParser parser,
-        IReadOnlyDictionary<string, object?> agentTable,
-        string sourceFile,
-        out bool optional)
-    {
-        optional = false;
-        if (!agentTable.TryGetValue("optional", out var optionalObj) || optionalObj is null)
-        {
-            return null;
-        }
-
-        if (optionalObj is not bool optionalBool)
-        {
-            return new TomlAgentValidationResult(
-                false,
-                null,
-                $"Error: [agent].optional must be a boolean, got {parser.GetValueTypeName(optionalObj)} in {sourceFile}");
-        }
-
-        optional = optionalBool;
-        return null;
     }
 
     private static Dictionary<string, object?> BuildResult(
