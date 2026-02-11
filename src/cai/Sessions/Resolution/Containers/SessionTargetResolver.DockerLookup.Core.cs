@@ -3,24 +3,40 @@ namespace ContainAI.Cli.Host;
 internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLookupService
 {
     private readonly ISessionTargetWorkspaceDiscoveryService workspaceDiscoveryService;
-    private readonly ISessionTargetParsingValidationService parsingValidationService;
+    private readonly ISessionDockerQueryRunner dockerQueryRunner;
+    private readonly ISessionWorkspaceConfigReader workspaceConfigReader;
 
     public SessionTargetDockerLookupService()
-        : this(new SessionTargetWorkspaceDiscoveryService(), new SessionTargetParsingValidationService())
+        : this(
+            new SessionTargetWorkspaceDiscoveryService(),
+            new SessionDockerQueryRunner(),
+            new SessionWorkspaceConfigReader())
     {
     }
 
     internal SessionTargetDockerLookupService(
         ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService,
         ISessionTargetParsingValidationService sessionTargetParsingValidationService)
+        : this(
+            sessionTargetWorkspaceDiscoveryService,
+            new SessionDockerQueryRunner(),
+            new SessionWorkspaceConfigReader(sessionTargetParsingValidationService))
+    {
+    }
+
+    internal SessionTargetDockerLookupService(
+        ISessionTargetWorkspaceDiscoveryService sessionTargetWorkspaceDiscoveryService,
+        ISessionDockerQueryRunner sessionDockerQueryRunner,
+        ISessionWorkspaceConfigReader sessionWorkspaceConfigReader)
     {
         workspaceDiscoveryService = sessionTargetWorkspaceDiscoveryService ?? throw new ArgumentNullException(nameof(sessionTargetWorkspaceDiscoveryService));
-        parsingValidationService = sessionTargetParsingValidationService ?? throw new ArgumentNullException(nameof(sessionTargetParsingValidationService));
+        dockerQueryRunner = sessionDockerQueryRunner ?? throw new ArgumentNullException(nameof(sessionDockerQueryRunner));
+        workspaceConfigReader = sessionWorkspaceConfigReader ?? throw new ArgumentNullException(nameof(sessionWorkspaceConfigReader));
     }
 
     public async Task<ContainerLabelState> ReadContainerLabelsAsync(string containerName, string context, CancellationToken cancellationToken)
     {
-        var inspect = await SessionTargetDockerLookupQueries
+        var inspect = await dockerQueryRunner
             .QueryContainerLabelFieldsAsync(containerName, context, cancellationToken)
             .ConfigureAwait(false);
 
@@ -39,7 +55,7 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
             .BuildCandidateContextsAsync(workspace, explicitConfig, cancellationToken)
             .ConfigureAwait(false);
 
-        var foundContexts = await SessionTargetDockerLookupQueries
+        var foundContexts = await dockerQueryRunner
             .FindContextsContainingContainerAsync(containerName, contexts, cancellationToken)
             .ConfigureAwait(false);
 
@@ -95,7 +111,7 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
         string context,
         CancellationToken cancellationToken)
     {
-        var inspect = await SessionTargetDockerLookupQueries.QueryContainerInspectAsync(candidate, context, cancellationToken).ConfigureAwait(false);
+        var inspect = await dockerQueryRunner.QueryContainerInspectAsync(candidate, context, cancellationToken).ConfigureAwait(false);
         if (inspect.ExitCode != 0)
         {
             return true;
@@ -105,12 +121,12 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
         return string.Equals(labels.Workspace, workspace, StringComparison.Ordinal);
     }
 
-    private static async Task<(bool ContinueSearch, ContainerLookupResult Result)> TryResolveWorkspaceContainerByLabelAsync(
+    private async Task<(bool ContinueSearch, ContainerLookupResult Result)> TryResolveWorkspaceContainerByLabelAsync(
         string workspace,
         string context,
         CancellationToken cancellationToken)
     {
-        var byLabel = await SessionTargetDockerLookupQueries.QueryContainersByWorkspaceLabelAsync(workspace, context, cancellationToken).ConfigureAwait(false);
+        var byLabel = await dockerQueryRunner.QueryContainersByWorkspaceLabelAsync(workspace, context, cancellationToken).ConfigureAwait(false);
         if (byLabel.ExitCode != 0)
         {
             return (false, ContainerLookupResult.Empty());
@@ -122,7 +138,7 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
             return (selection.ContinueSearch, selection.Result);
         }
 
-        var nameResult = await SessionTargetDockerLookupQueries.QueryContainerNameByIdAsync(context, selection.ContainerId, cancellationToken).ConfigureAwait(false);
+        var nameResult = await dockerQueryRunner.QueryContainerNameByIdAsync(context, selection.ContainerId, cancellationToken).ConfigureAwait(false);
         if (nameResult.ExitCode == 0)
         {
             return (false, ContainerLookupResult.Success(SessionTargetDockerLookupParsing.ParseContainerName(nameResult.StandardOutput)));
@@ -136,27 +152,15 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
         string context,
         CancellationToken cancellationToken)
     {
-        var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
-        if (!File.Exists(configPath))
-        {
-            return null;
-        }
-
-        var workspaceState = await SessionRuntimeInfrastructure.RunTomlAsync(
-            () => TomlCommandProcessor.GetWorkspace(configPath, workspace),
-            cancellationToken).ConfigureAwait(false);
-        if (workspaceState.ExitCode != 0 || string.IsNullOrWhiteSpace(workspaceState.StandardOutput))
-        {
-            return null;
-        }
-
-        var configuredName = parsingValidationService.TryReadWorkspaceStringProperty(workspaceState.StandardOutput, "container_name");
+        var configuredName = await workspaceConfigReader
+            .TryResolveWorkspaceContainerNameAsync(workspace, cancellationToken)
+            .ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(configuredName))
         {
             return null;
         }
 
-        var inspect = await SessionTargetDockerLookupQueries.QueryContainerInspectAsync(configuredName, context, cancellationToken).ConfigureAwait(false);
+        var inspect = await dockerQueryRunner.QueryContainerInspectAsync(configuredName, context, cancellationToken).ConfigureAwait(false);
         if (inspect.ExitCode != 0)
         {
             return null;
@@ -174,7 +178,7 @@ internal sealed class SessionTargetDockerLookupService : ISessionTargetDockerLoo
         CancellationToken cancellationToken)
     {
         var generated = await workspaceDiscoveryService.GenerateContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
-        var generatedExists = await SessionTargetDockerLookupQueries.QueryContainerInspectAsync(generated, context, cancellationToken).ConfigureAwait(false);
+        var generatedExists = await dockerQueryRunner.QueryContainerInspectAsync(generated, context, cancellationToken).ConfigureAwait(false);
 
         return generatedExists.ExitCode == 0
             ? ContainerLookupResult.Success(generated)
