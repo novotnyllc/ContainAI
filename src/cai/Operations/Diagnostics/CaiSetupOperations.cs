@@ -1,12 +1,16 @@
 using ContainAI.Cli.Host.Operations.Diagnostics.Setup;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiSetupOperations : CaiRuntimeSupport
+internal sealed class CaiSetupOperations
 {
     private const string SetupUsage = "Usage: cai setup [--dry-run] [--verbose] [--skip-templates]";
     private const string RuntimeSocketPath = "/var/run/containai-docker.sock";
 
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly CaiTemplateRestoreOperations templateRestoreOperations;
     private readonly Func<CancellationToken, Task<int>> runDoctorPostSetupAsync;
 
@@ -15,8 +19,9 @@ internal sealed class CaiSetupOperations : CaiRuntimeSupport
         TextWriter standardError,
         CaiTemplateRestoreOperations templateRestoreOperations,
         Func<CancellationToken, Task<int>> runDoctorPostSetupAsync)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.templateRestoreOperations = templateRestoreOperations ?? throw new ArgumentNullException(nameof(templateRestoreOperations));
         this.runDoctorPostSetupAsync = runDoctorPostSetupAsync ?? throw new ArgumentNullException(nameof(runDoctorPostSetupAsync));
     }
@@ -49,7 +54,7 @@ internal sealed class CaiSetupOperations : CaiRuntimeSupport
 
     private static SetupPaths ResolveSetupPaths()
     {
-        var home = ResolveHomeDirectory();
+        var home = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
         var containAiDir = Path.Combine(home, ".config", "containai");
         var sshDir = Path.Combine(home, ".ssh", "containai.d");
         var sshKeyPath = Path.Combine(containAiDir, "id_containai");
@@ -66,7 +71,7 @@ internal sealed class CaiSetupOperations : CaiRuntimeSupport
         await stdout.WriteLineAsync("Would create Docker context containai-docker").ConfigureAwait(false);
         if (!skipTemplates)
         {
-            await stdout.WriteLineAsync($"Would install templates to {ResolveTemplatesDirectory()}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"Would install templates to {CaiRuntimeConfigRoot.ResolveTemplatesDirectory()}").ConfigureAwait(false);
         }
     }
 
@@ -127,7 +132,7 @@ internal sealed class CaiSetupOperations : CaiRuntimeSupport
 
     private static async Task EnsureRuntimeSocketForSetupAsync(string socketPath, CancellationToken cancellationToken)
         => await CaiSetupPrerequisiteHelper
-            .EnsureRuntimeSocketForSetupAsync(socketPath, CommandSucceedsAsync, RunSetupProcessCaptureAsync, cancellationToken)
+            .EnsureRuntimeSocketForSetupAsync(socketPath, CaiRuntimeProcessRunner.CommandSucceedsAsync, RunSetupProcessCaptureAsync, cancellationToken)
             .ConfigureAwait(false);
 
     private async Task EnsureSetupDockerContextAsync(string socketPath, bool verbose, CancellationToken cancellationToken)
@@ -136,14 +141,14 @@ internal sealed class CaiSetupOperations : CaiRuntimeSupport
             .ConfigureAwait(false);
 
     private CaiSetupPrerequisiteHelper CreateSetupPrerequisiteHelper()
-        => new(stderr, CommandSucceedsAsync, RunSetupProcessCaptureAsync);
+        => new(stderr, CaiRuntimeProcessRunner.CommandSucceedsAsync, RunSetupProcessCaptureAsync);
 
     private static async Task<CaiSetupPrerequisiteCommandResult> RunSetupProcessCaptureAsync(
         string executable,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
     {
-        var result = await RunProcessCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
+        var result = await CaiRuntimeProcessRunner.RunProcessCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
         return new CaiSetupPrerequisiteCommandResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 

@@ -1,16 +1,20 @@
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiDiagnosticsStatusOperations : CaiRuntimeSupport
+internal sealed class CaiDiagnosticsStatusOperations
 {
+    private readonly TextWriter stderr;
     private readonly CaiDiagnosticsStatusCollector statusCollector;
     private readonly CaiDiagnosticsStatusRenderer statusRenderer;
 
     public CaiDiagnosticsStatusOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         var commandDispatcher = new CaiDiagnosticsStatusCommandDispatcher(standardOutput, standardError);
         statusCollector = new CaiDiagnosticsStatusCollector(commandDispatcher);
-        statusRenderer = new CaiDiagnosticsStatusRenderer(standardOutput, EscapeJson);
+        statusRenderer = new CaiDiagnosticsStatusRenderer(standardOutput, CaiRuntimeJsonEscaper.EscapeJson);
     }
 
     public async Task<int> RunStatusAsync(
@@ -23,7 +27,7 @@ internal sealed class CaiDiagnosticsStatusOperations : CaiRuntimeSupport
         var statusRequest = new CaiDiagnosticsStatusRequest(
             workspace,
             container,
-            Path.GetFullPath(ExpandHomePath(workspace ?? Directory.GetCurrentDirectory())));
+            Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(workspace ?? Directory.GetCurrentDirectory())));
 
         var collectionResult = await statusCollector.CollectAsync(statusRequest, cancellationToken).ConfigureAwait(false);
         if (!collectionResult.IsSuccess)

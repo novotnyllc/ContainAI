@@ -1,17 +1,29 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiDiagnosticsStatusCommandDispatcher : CaiRuntimeSupport
+internal sealed class CaiDiagnosticsStatusCommandDispatcher
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
+    private readonly TextWriter stderr;
+
     public CaiDiagnosticsStatusCommandDispatcher(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        _ = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
-    public Task<string?> ResolveContainerForWorkspaceAsync(string workspace, CancellationToken cancellationToken)
-        => ResolveWorkspaceContainerNameAsync(workspace, cancellationToken);
+    public Task<string?> ResolveContainerForWorkspaceAsync(string workspace, CancellationToken cancellationToken) =>
+        CaiRuntimeCommandParsingHelpers.ResolveWorkspaceContainerNameAsync(workspace, stderr, ConfigFileNames, cancellationToken);
 
     public static async Task<IReadOnlyList<string>> DiscoverContainerContextsAsync(string container, CancellationToken cancellationToken)
-        => await FindContainerContextsAsync(container, cancellationToken).ConfigureAwait(false);
+        => await CaiRuntimeDockerHelpers.FindContainerContextsAsync(container, cancellationToken).ConfigureAwait(false);
 
     public static Task<CaiDiagnosticsStatusCommandResult> InspectManagedLabelAsync(string context, string container, CancellationToken cancellationToken)
         => ExecuteForContextAsync(
@@ -36,7 +48,7 @@ internal sealed class CaiDiagnosticsStatusCommandDispatcher : CaiRuntimeSupport
         IReadOnlyList<string> args,
         CancellationToken cancellationToken)
     {
-        var result = await DockerCaptureForContextAsync(context, args, cancellationToken).ConfigureAwait(false);
+        var result = await CaiRuntimeDockerHelpers.DockerCaptureForContextAsync(context, args, cancellationToken).ConfigureAwait(false);
         return new CaiDiagnosticsStatusCommandResult(result.ExitCode, result.StandardOutput, result.StandardError);
     }
 }

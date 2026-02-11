@@ -1,10 +1,19 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiDoctorOperations : CaiRuntimeSupport
+internal sealed class CaiDoctorOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiDoctorOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunDoctorAsync(
@@ -19,18 +28,18 @@ internal sealed class CaiDoctorOperations : CaiRuntimeSupport
             return resetExitCode.Value;
         }
 
-        var dockerCli = await CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
-        var contextName = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
+        var dockerCli = await CaiRuntimeProcessRunner.CommandSucceedsAsync("docker", ["--version"], cancellationToken).ConfigureAwait(false);
+        var contextName = await CaiRuntimeDockerHelpers.ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var contextExists = !string.IsNullOrWhiteSpace(contextName);
         var dockerInfoArgs = BuildDockerInfoArgs(contextName, contextExists);
-        var dockerInfo = await CommandSucceedsAsync("docker", dockerInfoArgs, cancellationToken).ConfigureAwait(false);
+        var dockerInfo = await CaiRuntimeProcessRunner.CommandSucceedsAsync("docker", dockerInfoArgs, cancellationToken).ConfigureAwait(false);
 
         var runtimeArgs = new List<string>(dockerInfoArgs)
         {
             "--format",
             "{{json .Runtimes}}",
         };
-        var runtimeInfo = await RunProcessCaptureAsync("docker", runtimeArgs, cancellationToken).ConfigureAwait(false);
+        var runtimeInfo = await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", runtimeArgs, cancellationToken).ConfigureAwait(false);
         var sysboxRuntime = runtimeInfo.ExitCode == 0 && runtimeInfo.StandardOutput.Contains("sysbox-runc", StringComparison.Ordinal);
         var templateStatus = await ResolveTemplateStatusAsync(buildTemplates, cancellationToken).ConfigureAwait(false);
         await WriteDoctorStatusAsync(
@@ -60,8 +69,8 @@ internal sealed class CaiDoctorOperations : CaiRuntimeSupport
         }
 
         await stdout.WriteLineAsync("Resetting Lima VM containai...").ConfigureAwait(false);
-        await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
-        await RunProcessCaptureAsync("docker", ["context", "rm", "-f", "containai-docker"], cancellationToken).ConfigureAwait(false);
+        await CaiRuntimeProcessRunner.RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
+        await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", ["context", "rm", "-f", "containai-docker"], cancellationToken).ConfigureAwait(false);
         return null;
     }
 
@@ -85,7 +94,7 @@ internal sealed class CaiDoctorOperations : CaiRuntimeSupport
 
     private static async Task<bool> ValidateTemplatesAsync(CancellationToken cancellationToken)
     {
-        var templatesRoot = ResolveTemplatesDirectory();
+        var templatesRoot = CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
             return false;
@@ -96,7 +105,7 @@ internal sealed class CaiDoctorOperations : CaiRuntimeSupport
             cancellationToken.ThrowIfCancellationRequested();
             var directory = Path.GetDirectoryName(dockerfile)!;
             var imageName = $"containai-template-check-{Path.GetFileName(directory)}";
-            var build = await DockerCaptureAsync(["build", "-q", "-f", dockerfile, "-t", imageName, directory], cancellationToken).ConfigureAwait(false);
+            var build = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["build", "-q", "-f", dockerfile, "-t", imageName, directory], cancellationToken).ConfigureAwait(false);
             if (build.ExitCode != 0)
             {
                 return false;
