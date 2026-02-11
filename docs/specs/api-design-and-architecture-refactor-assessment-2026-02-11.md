@@ -34,8 +34,7 @@ Finish the runtime reorganization so the codebase is folder-first, namespace-coh
 
 ## Non-Negotiable Standards For Remaining Work
 - .NET 10 coding style and analyzer-clean patterns only.
-- Folder names must stay dot-free.
-- Preserve public/externally consumed command/API signatures unless explicitly versioned.
+- Folder names underneath the project's root must stay dot-free.
 - Avoid broad namespace sweeps; migrate by bounded domain with build verification after each slice.
 - Reduce partial usage by extracting cohesive types (services, workflows, parsers, validators, models).
 - Keep composition roots explicit; avoid service locator drift.
@@ -113,7 +112,6 @@ Remaining work:
 ## Gates Per Slice
 - Build clean:
   - `dotnet build src/cai/cai.csproj -c Release -warnaserror`
-- No unintended public API break in command surface.
 - Dot-free folder naming.
 - New code follows SRP boundaries with explicit constructor contracts.
 
