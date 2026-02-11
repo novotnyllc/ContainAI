@@ -139,10 +139,10 @@ internal abstract class CaiRuntimeSupport
         => CaiRuntimeDockerHelpers.ResolveDataVolumeFromContainerAsync(containerName, explicitVolume, cancellationToken);
 
     protected static string EscapeJson(string value)
-        => CaiRuntimeProcessHelpers.EscapeJson(value);
+        => CaiRuntimeJsonEscaper.EscapeJson(value);
 
     protected static Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
-        => CaiRuntimeProcessHelpers.CopyDirectoryAsync(sourceDirectory, destinationDirectory, cancellationToken);
+        => CaiRuntimeDirectoryCopier.CopyDirectoryAsync(sourceDirectory, destinationDirectory, cancellationToken);
 
     protected static async Task<ProcessResult> RunProcessCaptureAsync(
         string fileName,
@@ -150,7 +150,7 @@ internal abstract class CaiRuntimeSupport
         CancellationToken cancellationToken,
         string? standardInput = null)
     {
-        var result = await CaiRuntimeProcessHelpers
+        var result = await CaiRuntimeProcessRunner
             .RunProcessCaptureAsync(fileName, arguments, cancellationToken, standardInput)
             .ConfigureAwait(false);
 
@@ -161,10 +161,10 @@ internal abstract class CaiRuntimeSupport
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
-        => CaiRuntimeProcessHelpers.RunProcessInteractiveAsync(fileName, arguments, cancellationToken);
+        => CaiRuntimeProcessRunner.RunProcessInteractiveAsync(fileName, arguments, cancellationToken);
 
     protected static Task<bool> CommandSucceedsAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-        => CaiRuntimeProcessHelpers.CommandSucceedsAsync(fileName, arguments, cancellationToken);
+        => CaiRuntimeProcessRunner.CommandSucceedsAsync(fileName, arguments, cancellationToken);
 
     protected Task<string?> ResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken)
         => CaiRuntimeCommandParsingHelpers.ResolveWorkspaceContainerNameAsync(workspace, stderr, ConfigFileNames, cancellationToken);

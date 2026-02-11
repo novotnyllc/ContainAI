@@ -2,7 +2,7 @@ using ContainAI.Cli.Host.RuntimeSupport.Models;
 
 namespace ContainAI.Cli.Host.RuntimeSupport.Process;
 
-internal static class CaiRuntimeProcessHelpers
+internal static class CaiRuntimeProcessRunner
 {
     internal static async Task<RuntimeProcessResult> RunProcessCaptureAsync(
         string fileName,
@@ -62,42 +62,5 @@ internal static class CaiRuntimeProcessHelpers
     {
         var result = await RunProcessCaptureAsync(fileName, arguments, cancellationToken).ConfigureAwait(false);
         return result.ExitCode == 0;
-    }
-
-    internal static async Task CopyDirectoryAsync(string sourceDirectory, string destinationDirectory, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        Directory.CreateDirectory(destinationDirectory);
-
-        foreach (var sourceFile in Directory.EnumerateFiles(sourceDirectory))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var destinationFile = Path.Combine(destinationDirectory, Path.GetFileName(sourceFile));
-            using var sourceStream = File.OpenRead(sourceFile);
-            using var destinationStream = File.Create(destinationFile);
-            await sourceStream.CopyToAsync(destinationStream, cancellationToken).ConfigureAwait(false);
-        }
-
-        foreach (var sourceSubdirectory in Directory.EnumerateDirectories(sourceDirectory))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var destinationSubdirectory = Path.Combine(destinationDirectory, Path.GetFileName(sourceSubdirectory));
-            await CopyDirectoryAsync(sourceSubdirectory, destinationSubdirectory, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    internal static string EscapeJson(string value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            return string.Empty;
-        }
-
-        return value
-            .Replace("\\", "\\\\", StringComparison.Ordinal)
-            .Replace("\"", "\\\"", StringComparison.Ordinal)
-            .Replace("\r", "\\r", StringComparison.Ordinal)
-            .Replace("\n", "\\n", StringComparison.Ordinal)
-            .Replace("\t", "\\t", StringComparison.Ordinal);
     }
 }

@@ -29,14 +29,14 @@ internal static class CaiRuntimeDockerHelpers
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = PrependContextIfNeeded(context, args);
-        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
+        return await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
     internal static async Task<RuntimeProcessResult> DockerCaptureAsync(IReadOnlyList<string> args, string standardInput, CancellationToken cancellationToken)
     {
         var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
         var dockerArgs = PrependContextIfNeeded(context, args);
-        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
+        return await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken, standardInput).ConfigureAwait(false);
     }
 
     internal static async Task<CommandExecutionResult> ExecuteDockerCommandAsync(
@@ -54,7 +54,7 @@ internal static class CaiRuntimeDockerHelpers
     {
         foreach (var contextName in PreferredDockerContexts)
         {
-            var probe = await CaiRuntimeProcessHelpers
+            var probe = await CaiRuntimeProcessRunner
                 .RunProcessCaptureAsync("docker", ["context", "inspect", contextName], cancellationToken)
                 .ConfigureAwait(false);
             if (probe.ExitCode == 0)
@@ -79,7 +79,7 @@ internal static class CaiRuntimeDockerHelpers
             }
 
             inspectArgs.AddRange(["inspect", "--type", "container", "--", containerName]);
-            var inspect = await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", inspectArgs, cancellationToken).ConfigureAwait(false);
+            var inspect = await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", inspectArgs, cancellationToken).ConfigureAwait(false);
             if (inspect.ExitCode == 0)
             {
                 contexts.Add(contextName);
@@ -94,7 +94,7 @@ internal static class CaiRuntimeDockerHelpers
         var contexts = new List<string>();
         foreach (var contextName in PreferredDockerContexts)
         {
-            var probe = await CaiRuntimeProcessHelpers
+            var probe = await CaiRuntimeProcessRunner
                 .RunProcessCaptureAsync("docker", ["context", "inspect", contextName], cancellationToken)
                 .ConfigureAwait(false);
             if (probe.ExitCode == 0)
@@ -117,7 +117,7 @@ internal static class CaiRuntimeDockerHelpers
         }
 
         dockerArgs.AddRange(args);
-        return await CaiRuntimeProcessHelpers.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
+        return await CaiRuntimeProcessRunner.RunProcessCaptureAsync("docker", dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
     internal static async Task<string?> ResolveDataVolumeFromContainerAsync(string containerName, string? explicitVolume, CancellationToken cancellationToken)
