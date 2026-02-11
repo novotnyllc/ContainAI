@@ -1,6 +1,5 @@
 using ContainAI.Cli.Host;
 using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Paths;
 
@@ -8,11 +7,32 @@ internal sealed class ImportAdditionalPathTransferOperations : IImportAdditional
 {
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
+    private readonly IImportAdditionalPathTargetEnsurer targetEnsurer;
+    private readonly IImportAdditionalPathRsyncCommandBuilder rsyncCommandBuilder;
+    private readonly IImportAdditionalPathRsyncErrorNormalizer rsyncErrorNormalizer;
 
     public ImportAdditionalPathTransferOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            standardOutput,
+            standardError,
+            new ImportAdditionalPathTargetEnsurer(standardError),
+            new ImportAdditionalPathRsyncCommandBuilder(),
+            new ImportAdditionalPathRsyncErrorNormalizer())
+    {
+    }
+
+    internal ImportAdditionalPathTransferOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportAdditionalPathTargetEnsurer importAdditionalPathTargetEnsurer,
+        IImportAdditionalPathRsyncCommandBuilder importAdditionalPathRsyncCommandBuilder,
+        IImportAdditionalPathRsyncErrorNormalizer importAdditionalPathRsyncErrorNormalizer)
     {
         stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
         stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        targetEnsurer = importAdditionalPathTargetEnsurer ?? throw new ArgumentNullException(nameof(importAdditionalPathTargetEnsurer));
+        rsyncCommandBuilder = importAdditionalPathRsyncCommandBuilder ?? throw new ArgumentNullException(nameof(importAdditionalPathRsyncCommandBuilder));
+        rsyncErrorNormalizer = importAdditionalPathRsyncErrorNormalizer ?? throw new ArgumentNullException(nameof(importAdditionalPathRsyncErrorNormalizer));
     }
 
     public async Task<int> ImportAdditionalPathAsync(
@@ -34,80 +54,22 @@ internal sealed class ImportAdditionalPathTransferOperations : IImportAdditional
             await stdout.WriteLineAsync("[INFO] --no-excludes does not disable .priv. filtering for additional paths").ConfigureAwait(false);
         }
 
-        var ensureCommand = additionalPath.IsDirectory
-            ? $"mkdir -p '/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(additionalPath.TargetPath)}'"
-            : $"mkdir -p \"$(dirname '/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(additionalPath.TargetPath)}')\"";
-        var ensureResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", ensureCommand],
-            cancellationToken).ConfigureAwait(false);
-        if (ensureResult.ExitCode != 0)
+        var ensureResult = await targetEnsurer.EnsureAsync(volume, additionalPath, cancellationToken).ConfigureAwait(false);
+        if (ensureResult != 0)
         {
-            if (!string.IsNullOrWhiteSpace(ensureResult.StandardError))
-            {
-                await stderr.WriteLineAsync(ensureResult.StandardError.Trim()).ConfigureAwait(false);
-            }
-
             return 1;
         }
 
         var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-            BuildRsyncArgs(volume, additionalPath),
+            rsyncCommandBuilder.Build(volume, additionalPath),
             cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0)
         {
-            var errorOutput = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
-            var normalizedError = errorOutput.Trim();
-            if (normalizedError.Contains("could not make way for new symlink", StringComparison.OrdinalIgnoreCase) &&
-                !normalizedError.Contains("cannot delete non-empty directory", StringComparison.OrdinalIgnoreCase))
-            {
-                normalizedError += $"{System.Environment.NewLine}cannot delete non-empty directory";
-            }
-
+            var normalizedError = rsyncErrorNormalizer.Normalize(result.StandardOutput, result.StandardError);
             await stderr.WriteLineAsync(normalizedError).ConfigureAwait(false);
             return 1;
         }
 
         return 0;
-    }
-
-    private static List<string> BuildRsyncArgs(string volume, ImportAdditionalPath additionalPath)
-    {
-        var rsyncArgs = new List<string>
-        {
-            "run",
-            "--rm",
-            "--entrypoint",
-            "rsync",
-            "-v",
-            $"{volume}:/target",
-            "-v",
-            $"{additionalPath.SourcePath}:/source:ro",
-            ResolveRsyncImage(),
-            "-a",
-        };
-
-        if (additionalPath.ApplyPrivFilter)
-        {
-            rsyncArgs.Add("--exclude=*.priv.*");
-        }
-
-        if (additionalPath.IsDirectory)
-        {
-            rsyncArgs.Add("/source/");
-            rsyncArgs.Add($"/target/{additionalPath.TargetPath.TrimEnd('/')}/");
-        }
-        else
-        {
-            rsyncArgs.Add("/source");
-            rsyncArgs.Add($"/target/{additionalPath.TargetPath}");
-        }
-
-        return rsyncArgs;
-    }
-
-    private static string ResolveRsyncImage()
-    {
-        var configured = System.Environment.GetEnvironmentVariable("CONTAINAI_RSYNC_IMAGE");
-        return string.IsNullOrWhiteSpace(configured) ? "instrumentisto/rsync-ssh" : configured;
     }
 }
