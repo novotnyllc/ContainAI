@@ -62,7 +62,6 @@ Current issue:
 - One large orchestration concept split across many partial files.
 
 Remaining work:
-- Keep external facade stable (`ContainAiDockerProxy`).
 - Extract cohesive internals by responsibility:
   - Workflow
   - Parsing
@@ -71,7 +70,6 @@ Remaining work:
   - Execution
   - System side-effects
   - Models
-- Preserve compatibility shims where existing internal call sites rely on legacy type names.
 
 ### 3. Sessions Resolution Domain
 Current issue:
@@ -116,7 +114,7 @@ Remaining work:
 - New code follows SRP boundaries with explicit constructor contracts.
 
 ## Definition Of Done
-- Top fragmented roots (`TomlCommandProcessor`, `ContainAiDockerProxy`, `SessionTargetResolver`, `ContainerRuntimeCommandService`) are no longer multi-dozen partial clusters.
+- All fragmented roots (`TomlCommandProcessor`, `ContainAiDockerProxy`, `SessionTargetResolver`, `ContainerRuntimeCommandService`, etc) are no longer multi-dozen partial clusters.
 - Partial count is materially reduced and isolated to justified cases.
 - Folder and namespace structure is coherent and domain-based.
 - Build is green with analyzers and no regressions in command behavior.
