@@ -1,5 +1,4 @@
 using ContainAI.Cli.Abstractions;
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
@@ -13,9 +12,9 @@ internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOpe
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
     private readonly ImportRunContextResolver runContextResolver;
-    private readonly ImportManifestEntryLoader manifestEntryLoader;
-    private readonly ImportArchiveHandler archiveHandler;
-    private readonly ImportDirectoryHandler directoryHandler;
+    private readonly ImportDataVolumeEnsurer dataVolumeEnsurer;
+    private readonly ImportManifestLoadingService manifestLoadingService;
+    private readonly ImportSourceDispatcher sourceDispatcher;
 
     public CaiImportOrchestrationOperations(TextWriter standardOutput, TextWriter standardError)
         : this(
@@ -45,15 +44,20 @@ internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOpe
         var pathOperations = importPathOperations ?? throw new ArgumentNullException(nameof(importPathOperations));
         ArgumentNullException.ThrowIfNull(importTransferOperations);
         ArgumentNullException.ThrowIfNull(importEnvironmentOperations);
+
         runContextResolver = new ImportRunContextResolver(standardOutput, standardError, pathOperations);
-        manifestEntryLoader = new ImportManifestEntryLoader(manifestTomlParser, importManifestCatalog);
-        archiveHandler = new ImportArchiveHandler(standardOutput, standardError, importTransferOperations);
-        directoryHandler = new ImportDirectoryHandler(
+        var manifestEntryLoader = new ImportManifestEntryLoader(manifestTomlParser, importManifestCatalog);
+        dataVolumeEnsurer = new ImportDataVolumeEnsurer(standardError);
+        manifestLoadingService = new ImportManifestLoadingService(manifestEntryLoader);
+
+        var archiveHandler = new ImportArchiveHandler(standardOutput, standardError, importTransferOperations);
+        var directoryHandler = new ImportDirectoryHandler(
             standardOutput,
             standardError,
             pathOperations,
             importTransferOperations,
             importEnvironmentOperations);
+        sourceDispatcher = new ImportSourceDispatcher(archiveHandler, directoryHandler);
     }
 
     public Task<int> RunImportAsync(ImportCommandOptions options, CancellationToken cancellationToken)
@@ -65,12 +69,9 @@ internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOpe
     private static string ResolveDockerContextName()
     {
         var explicitContext = Environment.GetEnvironmentVariable("DOCKER_CONTEXT");
-        if (!string.IsNullOrWhiteSpace(explicitContext))
-        {
-            return explicitContext;
-        }
-
-        return "default";
+        return !string.IsNullOrWhiteSpace(explicitContext)
+            ? explicitContext
+            : "default";
     }
 
     private async Task<int> RunImportCoreAsync(ImportCommandOptions options, CancellationToken cancellationToken)
@@ -90,47 +91,23 @@ internal sealed class CaiImportOrchestrationOperations : IImportOrchestrationOpe
             await stdout.WriteLineAsync($"Dry-run context: {ResolveDockerContextName()}").ConfigureAwait(false);
         }
 
-        if (!options.DryRun)
+        var ensureVolumeCode = await dataVolumeEnsurer
+            .EnsureVolumeAsync(context.Volume, options.DryRun, cancellationToken)
+            .ConfigureAwait(false);
+        if (ensureVolumeCode != 0)
         {
-            var ensureVolume = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["volume", "create", context.Volume], cancellationToken).ConfigureAwait(false);
-            if (ensureVolume.ExitCode != 0)
-            {
-                await stderr.WriteLineAsync(ensureVolume.StandardError.Trim()).ConfigureAwait(false);
-                return 1;
-            }
+            return ensureVolumeCode;
         }
 
-        ManifestEntry[] manifestEntries;
-        try
+        var manifestLoadResult = manifestLoadingService.LoadManifestEntries();
+        if (!manifestLoadResult.Success)
         {
-            manifestEntries = manifestEntryLoader.LoadManifestEntries();
-        }
-        catch (InvalidOperationException ex)
-        {
-            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
-            return 1;
-        }
-        catch (IOException ex)
-        {
-            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
-            return 1;
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            await stderr.WriteLineAsync($"Failed to load import manifests: {ex.Message}").ConfigureAwait(false);
+            await stderr.WriteLineAsync(manifestLoadResult.ErrorMessage!).ConfigureAwait(false);
             return 1;
         }
 
-        return File.Exists(context.SourcePath)
-            ? await archiveHandler.HandleArchiveImportAsync(options, context.SourcePath, context.Volume, context.ExcludePriv, manifestEntries, cancellationToken).ConfigureAwait(false)
-            : await directoryHandler.HandleDirectoryImportAsync(
-                options,
-                context.Workspace,
-                context.ExplicitConfigPath,
-                context.SourcePath,
-                context.Volume,
-                context.ExcludePriv,
-                manifestEntries,
-                cancellationToken).ConfigureAwait(false);
+        return await sourceDispatcher
+            .DispatchAsync(options, context, manifestLoadResult.Entries!, cancellationToken)
+            .ConfigureAwait(false);
     }
 }

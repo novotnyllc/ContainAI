@@ -4,13 +4,9 @@ namespace ContainAI.Cli.Host.Importing.Transfer;
 
 internal sealed class ImportManifestTransferOperations : IImportManifestTransferOperations
 {
-    private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
     private readonly IImportPostCopyOperations postCopyOperations;
-    private readonly IImportManifestTargetInitializer targetInitializer;
-    private readonly IImportManifestPlanBuilder planBuilder;
-    private readonly IImportManifestCopyOperations copyOperations;
-    private readonly IImportManifestPostCopyTransferOperations postCopyTransferOperations;
+    private readonly IImportManifestTargetInitializationOperations targetInitializationOperations;
+    private readonly IImportManifestEntryTransferPipeline manifestEntryTransferPipeline;
 
     public ImportManifestTransferOperations(TextWriter standardOutput, TextWriter standardError)
         : this(
@@ -51,16 +47,26 @@ internal sealed class ImportManifestTransferOperations : IImportManifestTransfer
         IImportManifestPlanBuilder importManifestPlanBuilder,
         IImportManifestCopyOperations importManifestCopyOperations,
         IImportManifestPostCopyTransferOperations importManifestPostCopyTransferOperations)
+        : this(
+            importPostCopyOperations,
+            CreateTargetInitializationOperations(importManifestTargetInitializer),
+            CreateEntryTransferPipeline(
+                standardOutput,
+                standardError,
+                importManifestPlanBuilder,
+                importManifestCopyOperations,
+                importManifestPostCopyTransferOperations))
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
-        (postCopyOperations, targetInitializer, planBuilder, copyOperations, postCopyTransferOperations) = (
-            importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
-            importManifestTargetInitializer ?? throw new ArgumentNullException(nameof(importManifestTargetInitializer)),
-            importManifestPlanBuilder ?? throw new ArgumentNullException(nameof(importManifestPlanBuilder)),
-            importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)),
-            importManifestPostCopyTransferOperations ?? throw new ArgumentNullException(nameof(importManifestPostCopyTransferOperations)));
     }
+
+    private ImportManifestTransferOperations(
+        IImportPostCopyOperations importPostCopyOperations,
+        IImportManifestTargetInitializationOperations importManifestTargetInitializationOperations,
+        IImportManifestEntryTransferPipeline importManifestEntryTransferPipeline)
+        => (postCopyOperations, targetInitializationOperations, manifestEntryTransferPipeline) = (
+            importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
+            importManifestTargetInitializationOperations ?? throw new ArgumentNullException(nameof(importManifestTargetInitializationOperations)),
+            importManifestEntryTransferPipeline ?? throw new ArgumentNullException(nameof(importManifestEntryTransferPipeline)));
 
     public async Task<int> InitializeImportTargetsAsync(
         string volume,
@@ -68,23 +74,12 @@ internal sealed class ImportManifestTransferOperations : IImportManifestTransfer
         IReadOnlyList<ManifestEntry> entries,
         bool noSecrets,
         CancellationToken cancellationToken)
-    {
-        foreach (var entry in entries)
-        {
-            var ensureCode = await targetInitializer.EnsureEntryTargetAsync(
-                volume,
-                sourceRoot,
-                entry,
-                noSecrets,
-                cancellationToken).ConfigureAwait(false);
-            if (ensureCode != 0)
-            {
-                return ensureCode;
-            }
-        }
-
-        return 0;
-    }
+        => await targetInitializationOperations.InitializeTargetsAsync(
+            volume,
+            sourceRoot,
+            entries,
+            noSecrets,
+            cancellationToken).ConfigureAwait(false);
 
     public async Task<int> ImportManifestEntryAsync(
         string volume,
@@ -95,45 +90,15 @@ internal sealed class ImportManifestTransferOperations : IImportManifestTransfer
         bool dryRun,
         bool verbose,
         CancellationToken cancellationToken)
-    {
-        var importPlan = planBuilder.Create(sourceRoot, entry);
-        if (!importPlan.SourceExists)
-        {
-            if (verbose && !entry.Optional)
-            {
-                await stderr.WriteLineAsync($"Source not found: {entry.Source}").ConfigureAwait(false);
-            }
-
-            return 0;
-        }
-
-        if (dryRun)
-        {
-            await stdout.WriteLineAsync($"[DRY-RUN] Would sync {entry.Source} -> {entry.Target}").ConfigureAwait(false);
-            return 0;
-        }
-
-        var copyCode = await copyOperations.CopyManifestEntryAsync(
+        => await manifestEntryTransferPipeline.ImportAsync(
             volume,
             sourceRoot,
             entry,
             excludePriv,
             noExcludes,
-            importPlan,
-            cancellationToken).ConfigureAwait(false);
-        if (copyCode != 0)
-        {
-            return copyCode;
-        }
-
-        return await postCopyTransferOperations.ApplyManifestPostCopyAsync(
-            volume,
-            entry,
-            importPlan,
             dryRun,
             verbose,
             cancellationToken).ConfigureAwait(false);
-    }
 
     public Task<int> EnforceSecretPathPermissionsAsync(
         string volume,
@@ -149,4 +114,21 @@ internal sealed class ImportManifestTransferOperations : IImportManifestTransfer
         => new ImportManifestPostCopyTransferOperations(
             importPostCopyOperations ?? throw new ArgumentNullException(nameof(importPostCopyOperations)),
             importSymlinkRelinker ?? throw new ArgumentNullException(nameof(importSymlinkRelinker)));
+
+    private static ImportManifestTargetInitializationOperations CreateTargetInitializationOperations(
+        IImportManifestTargetInitializer importManifestTargetInitializer)
+        => new(importManifestTargetInitializer ?? throw new ArgumentNullException(nameof(importManifestTargetInitializer)));
+
+    private static ImportManifestEntryTransferPipeline CreateEntryTransferPipeline(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportManifestPlanBuilder importManifestPlanBuilder,
+        IImportManifestCopyOperations importManifestCopyOperations,
+        IImportManifestPostCopyTransferOperations importManifestPostCopyTransferOperations)
+        => new(
+            standardOutput ?? throw new ArgumentNullException(nameof(standardOutput)),
+            standardError ?? throw new ArgumentNullException(nameof(standardError)),
+            importManifestPlanBuilder ?? throw new ArgumentNullException(nameof(importManifestPlanBuilder)),
+            importManifestCopyOperations ?? throw new ArgumentNullException(nameof(importManifestCopyOperations)),
+            importManifestPostCopyTransferOperations ?? throw new ArgumentNullException(nameof(importManifestPostCopyTransferOperations)));
 }
