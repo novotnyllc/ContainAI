@@ -11,7 +11,7 @@ internal interface IDevcontainerFeatureInitLinkApplier
 
 internal readonly record struct DevcontainerFeatureLinkApplyResult(int Created, int Skipped);
 
-internal sealed partial class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureInitLinkApplier
+internal sealed class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureInitLinkApplier
 {
     private readonly TextWriter stdout;
     private readonly TextWriter stderr;
@@ -73,5 +73,65 @@ internal sealed partial class DevcontainerFeatureInitLinkApplier : IDevcontainer
         }
 
         return new DevcontainerFeatureLinkApplyResult(created, skipped);
+    }
+
+    private async Task<bool> PrepareDestinationAsync(string rewrittenLink, bool removeFirst)
+    {
+        if (Directory.Exists(rewrittenLink) && !processHelpers.IsSymlink(rewrittenLink))
+        {
+            if (!removeFirst)
+            {
+                await stderr.WriteLineAsync($"  [FAIL] {rewrittenLink} (directory exists, remove_first not set)").ConfigureAwait(false);
+                return false;
+            }
+
+            Directory.Delete(rewrittenLink, recursive: true);
+        }
+        else if (File.Exists(rewrittenLink) || processHelpers.IsSymlink(rewrittenLink))
+        {
+            File.Delete(rewrittenLink);
+        }
+
+        return true;
+    }
+
+    private static void CreateSymbolicLink(string rewrittenLink, string target)
+    {
+        if (Directory.Exists(target))
+        {
+            Directory.CreateSymbolicLink(rewrittenLink, target);
+        }
+        else
+        {
+            File.CreateSymbolicLink(rewrittenLink, target);
+        }
+    }
+
+    private static string ResolveSourceHome(string? homeDirectory)
+        => string.IsNullOrWhiteSpace(homeDirectory) ? "/home/agent" : homeDirectory;
+
+    private static bool HasRequiredPaths(LinkEntry? link)
+        => link is { Link: { } linkPath, Target: { } targetPath }
+            && !string.IsNullOrWhiteSpace(linkPath)
+            && !string.IsNullOrWhiteSpace(targetPath);
+
+    private static bool ShouldSkipCredentialLink(LinkEntry link, bool enableCredentials)
+        => !enableCredentials && DevcontainerFeaturePaths.CredentialTargets.Contains(link.Target);
+
+    private static bool TargetExists(string target)
+        => File.Exists(target) || Directory.Exists(target);
+
+    private static string RewriteLinkPath(string linkPath, string sourceHome, string userHome)
+        => linkPath.StartsWith(sourceHome, StringComparison.Ordinal)
+            ? userHome + linkPath[sourceHome.Length..]
+            : linkPath;
+
+    private static void EnsureParentDirectoryExists(string rewrittenLink)
+    {
+        var parentDirectory = Path.GetDirectoryName(rewrittenLink);
+        if (!string.IsNullOrWhiteSpace(parentDirectory))
+        {
+            Directory.CreateDirectory(parentDirectory);
+        }
     }
 }
