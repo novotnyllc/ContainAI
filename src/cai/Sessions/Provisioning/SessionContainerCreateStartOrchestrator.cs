@@ -47,7 +47,7 @@ internal sealed class SessionContainerCreateStartOrchestrator : ISessionContaine
         }
 
         var sshPort = sshPortResolution.Value!;
-        var image = SessionRuntimeInfrastructure.ResolveImage(options);
+        var image = SessionRuntimeDockerHelpers.ResolveImage(options);
         if (!string.IsNullOrWhiteSpace(options.Template))
         {
             await stderr.WriteLineAsync($"Template '{options.Template}' requested; using image '{image}' in native mode.").ConfigureAwait(false);
@@ -62,7 +62,7 @@ internal sealed class SessionContainerCreateStartOrchestrator : ISessionContaine
         if (create.ExitCode != 0)
         {
             return ResolutionResult<CreateContainerResult>.ErrorResult(
-                $"Failed to create container: {SessionRuntimeInfrastructure.TrimOrFallback(create.StandardError, "docker run failed")}");
+                $"Failed to create container: {SessionRuntimeTextHelpers.TrimOrFallback(create.StandardError, "docker run failed")}");
         }
 
         var waitRunning = await stateWaiter.WaitForContainerStateAsync(
@@ -91,7 +91,7 @@ internal sealed class SessionContainerCreateStartOrchestrator : ISessionContaine
         if (start.ExitCode != 0)
         {
             return ResolutionResult<bool>.ErrorResult(
-                $"Failed to start container '{containerName}': {SessionRuntimeInfrastructure.TrimOrFallback(start.StandardError, "docker start failed")}");
+                $"Failed to start container '{containerName}': {SessionRuntimeTextHelpers.TrimOrFallback(start.StandardError, "docker start failed")}");
         }
 
         return ResolutionResult<bool>.SuccessResult(true);

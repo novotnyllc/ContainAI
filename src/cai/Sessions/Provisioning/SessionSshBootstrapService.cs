@@ -12,18 +12,28 @@ internal sealed class SessionSshBootstrapService : ISessionSshBootstrapService
 {
     private readonly ISessionSshLocalConfigService localConfigService;
     private readonly ISessionSshPortReadinessService portReadinessService;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     public SessionSshBootstrapService()
-        : this(new SessionSshLocalConfigService(), new SessionSshPortReadinessService())
+        : this(new SessionSshLocalConfigService(), new SessionSshPortReadinessService(), new SessionRuntimeOperations())
     {
     }
 
     internal SessionSshBootstrapService(
         ISessionSshLocalConfigService sessionSshLocalConfigService,
         ISessionSshPortReadinessService sessionSshPortReadinessService)
+        : this(sessionSshLocalConfigService, sessionSshPortReadinessService, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionSshBootstrapService(
+        ISessionSshLocalConfigService sessionSshLocalConfigService,
+        ISessionSshPortReadinessService sessionSshPortReadinessService,
+        ISessionRuntimeOperations sessionRuntimeOperations)
     {
         localConfigService = sessionSshLocalConfigService ?? throw new ArgumentNullException(nameof(sessionSshLocalConfigService));
         portReadinessService = sessionSshPortReadinessService ?? throw new ArgumentNullException(nameof(sessionSshPortReadinessService));
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
     }
 
     public async Task<ResolutionResult<bool>> EnsureSshBootstrapAsync(
@@ -48,15 +58,15 @@ internal sealed class SessionSshBootstrapService : ISessionSshBootstrapService
             return ResolutionResult<bool>.ErrorResult($"SSH port {sshPort} is not ready for container '{resolved.ContainerName}'.", 12);
         }
 
-        var publicKey = await File.ReadAllTextAsync(SessionRuntimeInfrastructure.ResolveSshPublicKeyPath(), cancellationToken).ConfigureAwait(false);
+        var publicKey = await File.ReadAllTextAsync(runtimeOperations.ResolveSshPublicKeyPath(), cancellationToken).ConfigureAwait(false);
         var keyLine = publicKey.Trim();
         if (string.IsNullOrWhiteSpace(keyLine))
         {
             return ResolutionResult<bool>.ErrorResult("SSH public key is empty.", 12);
         }
 
-        var escapedKey = SessionRuntimeInfrastructure.EscapeForSingleQuotedShell(keyLine);
-        var authorize = await SessionRuntimeInfrastructure.DockerCaptureAsync(
+        var escapedKey = runtimeOperations.EscapeForSingleQuotedShell(keyLine);
+        var authorize = await runtimeOperations.DockerCaptureAsync(
             resolved.Context,
             [
                 "exec",
@@ -70,7 +80,7 @@ internal sealed class SessionSshBootstrapService : ISessionSshBootstrapService
         if (authorize.ExitCode != 0)
         {
             return ResolutionResult<bool>.ErrorResult(
-                $"Failed to install SSH public key: {SessionRuntimeInfrastructure.TrimOrFallback(authorize.StandardError, "docker exec failed")}",
+                $"Failed to install SSH public key: {runtimeOperations.TrimOrFallback(authorize.StandardError, "docker exec failed")}",
                 12);
         }
 

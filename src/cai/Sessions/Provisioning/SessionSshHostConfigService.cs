@@ -11,12 +11,12 @@ internal sealed class SessionSshHostConfigService : ISessionSshHostConfigService
 {
     public async Task<ResolutionResult<bool>> EnsureSshHostConfigAsync(string containerName, string sshPort, CancellationToken cancellationToken)
     {
-        var configDir = SessionRuntimeInfrastructure.ResolveSshConfigDir();
+        var configDir = SessionRuntimePathHelpers.ResolveSshConfigDir();
         Directory.CreateDirectory(configDir);
 
         var hostConfigPath = Path.Combine(configDir, $"{containerName}.conf");
-        var identityFile = SessionRuntimeInfrastructure.ResolveSshPrivateKeyPath();
-        var knownHostsFile = SessionRuntimeInfrastructure.ResolveKnownHostsFilePath();
+        var identityFile = SessionRuntimePathHelpers.ResolveSshPrivateKeyPath();
+        var knownHostsFile = SessionRuntimePathHelpers.ResolveKnownHostsFilePath();
 
         var hostEntry = $"""
 Host {containerName}
@@ -32,7 +32,7 @@ Host {containerName}
 
         await File.WriteAllTextAsync(hostConfigPath, hostEntry, cancellationToken).ConfigureAwait(false);
 
-        var userSshConfig = Path.Combine(SessionRuntimeInfrastructure.ResolveHomeDirectory(), ".ssh", "config");
+        var userSshConfig = Path.Combine(SessionRuntimePathHelpers.ResolveHomeDirectory(), ".ssh", "config");
         Directory.CreateDirectory(Path.GetDirectoryName(userSshConfig)!);
         if (!File.Exists(userSshConfig))
         {

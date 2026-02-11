@@ -3,20 +3,29 @@ namespace ContainAI.Cli.Host;
 internal sealed class SessionStateStore
 {
     private readonly string dataVolumeEnvironmentVariable;
+    private readonly ISessionRuntimeOperations runtimeOperations;
 
     public SessionStateStore(string dataVolumeEnvironmentVariable = "CONTAINAI_DATA_VOLUME")
-        => this.dataVolumeEnvironmentVariable = dataVolumeEnvironmentVariable;
+        : this(dataVolumeEnvironmentVariable, new SessionRuntimeOperations())
+    {
+    }
+
+    internal SessionStateStore(string dataVolumeEnvironmentVariable, ISessionRuntimeOperations sessionRuntimeOperations)
+    {
+        this.dataVolumeEnvironmentVariable = dataVolumeEnvironmentVariable;
+        runtimeOperations = sessionRuntimeOperations ?? throw new ArgumentNullException(nameof(sessionRuntimeOperations));
+    }
 
     public async Task PersistAsync(EnsuredSession session, CancellationToken cancellationToken)
     {
-        var configPath = SessionRuntimeInfrastructure.ResolveUserConfigPath();
+        var configPath = runtimeOperations.ResolveUserConfigPath();
         Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
         if (!File.Exists(configPath))
         {
             await File.WriteAllTextAsync(configPath, string.Empty, cancellationToken).ConfigureAwait(false);
         }
 
-        await SessionRuntimeInfrastructure.RunTomlAsync(
+        await runtimeOperations.RunTomlAsync(
             () => TomlCommandProcessor.SetWorkspaceKey(configPath, session.Workspace, "container_name", session.ContainerName),
             cancellationToken).ConfigureAwait(false);
 
@@ -25,7 +34,7 @@ internal sealed class SessionStateStore
             return;
         }
 
-        await SessionRuntimeInfrastructure.RunTomlAsync(
+        await runtimeOperations.RunTomlAsync(
             () => TomlCommandProcessor.SetWorkspaceKey(configPath, session.Workspace, "data_volume", session.DataVolume),
             cancellationToken).ConfigureAwait(false);
     }

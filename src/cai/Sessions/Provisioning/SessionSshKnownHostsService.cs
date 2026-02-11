@@ -9,14 +9,14 @@ internal sealed class SessionSshKnownHostsService : ISessionSshKnownHostsService
 {
     public async Task<ResolutionResult<bool>> UpdateKnownHostsAsync(string containerName, string sshPort, CancellationToken cancellationToken)
     {
-        var knownHostsFile = SessionRuntimeInfrastructure.ResolveKnownHostsFilePath();
+        var knownHostsFile = SessionRuntimePathHelpers.ResolveKnownHostsFilePath();
         Directory.CreateDirectory(Path.GetDirectoryName(knownHostsFile)!);
         if (!File.Exists(knownHostsFile))
         {
             await File.WriteAllTextAsync(knownHostsFile, string.Empty, cancellationToken).ConfigureAwait(false);
         }
 
-        var scan = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+        var scan = await SessionRuntimeProcessHelpers.RunProcessCaptureAsync(
             "ssh-keyscan",
             ["-p", sshPort, "-T", "5", "-t", "rsa,ed25519,ecdsa", SessionRuntimeConstants.SshHost],
             cancellationToken).ConfigureAwait(false);
@@ -49,7 +49,7 @@ internal sealed class SessionSshKnownHostsService : ISessionSshKnownHostsService
             }
 
             var aliasHost = $"[{containerName}]:{sshPort}";
-            var alias = SessionRuntimeInfrastructure.ReplaceFirstToken(line, aliasHost);
+            var alias = SessionRuntimeTextHelpers.ReplaceFirstToken(line, aliasHost);
             if (existing.Add(alias))
             {
                 additions.Add(alias);

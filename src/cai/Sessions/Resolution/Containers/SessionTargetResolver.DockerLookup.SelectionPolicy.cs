@@ -42,7 +42,7 @@ internal static class SessionTargetDockerLookupSelectionPolicy
     {
         var suffixText = $"-{suffix + 1}";
         var maxBaseLength = Math.Max(1, MaxDockerContainerNameLength - suffixText.Length);
-        var trimmedBase = SessionRuntimeInfrastructure.TrimTrailingDash(baseName[..Math.Min(baseName.Length, maxBaseLength)]);
+        var trimmedBase = SessionRuntimeTextHelpers.TrimTrailingDash(baseName[..Math.Min(baseName.Length, maxBaseLength)]);
         return trimmedBase + suffixText;
     }
 }

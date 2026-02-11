@@ -13,7 +13,7 @@ internal sealed class SessionSshPortReadinessService : ISessionSshPortReadinessS
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var scan = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+            var scan = await SessionRuntimeProcessHelpers.RunProcessCaptureAsync(
                 "ssh-keyscan",
                 ["-p", sshPort, "-T", "2", SessionRuntimeConstants.SshHost],
                 cancellationToken).ConfigureAwait(false);

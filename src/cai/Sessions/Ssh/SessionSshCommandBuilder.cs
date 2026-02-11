@@ -18,9 +18,9 @@ internal sealed class SessionSshCommandBuilder : ISessionSshCommandBuilder
             "-o", $"HostName={SessionRuntimeConstants.SshHost}",
             "-o", $"Port={sshPort}",
             "-o", "User=agent",
-            "-o", $"IdentityFile={SessionRuntimeInfrastructure.ResolveSshPrivateKeyPath()}",
+            "-o", $"IdentityFile={SessionRuntimePathHelpers.ResolveSshPrivateKeyPath()}",
             "-o", "IdentitiesOnly=yes",
-            "-o", $"UserKnownHostsFile={SessionRuntimeInfrastructure.ResolveKnownHostsFilePath()}",
+            "-o", $"UserKnownHostsFile={SessionRuntimePathHelpers.ResolveKnownHostsFilePath()}",
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "PreferredAuthentications=publickey",
             "-o", "GSSAPIAuthentication=no",
@@ -63,7 +63,7 @@ internal sealed class SessionSshCommandBuilder : ISessionSshCommandBuilder
         }
 
         var inner = JoinForShell(commandArgs);
-        var escaped = SessionRuntimeInfrastructure.EscapeForSingleQuotedShell(inner);
+        var escaped = SessionRuntimeTextHelpers.EscapeForSingleQuotedShell(inner);
         return $"cd /home/agent/workspace && bash -lc '{escaped}'";
     }
 
@@ -86,5 +86,5 @@ internal sealed class SessionSshCommandBuilder : ISessionSshCommandBuilder
     private static string QuoteBash(string value)
         => string.IsNullOrEmpty(value)
             ? "''"
-            : $"'{SessionRuntimeInfrastructure.EscapeForSingleQuotedShell(value)}'";
+            : $"'{SessionRuntimeTextHelpers.EscapeForSingleQuotedShell(value)}'";
 }

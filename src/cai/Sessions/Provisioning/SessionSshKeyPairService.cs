@@ -9,15 +9,15 @@ internal sealed class SessionSshKeyPairService : ISessionSshKeyPairService
 {
     public async Task<ResolutionResult<bool>> EnsureSshKeyPairAsync(CancellationToken cancellationToken)
     {
-        var configDir = SessionRuntimeInfrastructure.ResolveConfigDirectory();
+        var configDir = SessionRuntimePathHelpers.ResolveConfigDirectory();
         Directory.CreateDirectory(configDir);
 
-        var privateKey = SessionRuntimeInfrastructure.ResolveSshPrivateKeyPath();
-        var publicKey = SessionRuntimeInfrastructure.ResolveSshPublicKeyPath();
+        var privateKey = SessionRuntimePathHelpers.ResolveSshPrivateKeyPath();
+        var publicKey = SessionRuntimePathHelpers.ResolveSshPublicKeyPath();
 
         if (!File.Exists(privateKey) || !File.Exists(publicKey))
         {
-            var keygen = await SessionRuntimeInfrastructure.RunProcessCaptureAsync(
+            var keygen = await SessionRuntimeProcessHelpers.RunProcessCaptureAsync(
                 "ssh-keygen",
                 ["-t", "ed25519", "-N", string.Empty, "-f", privateKey, "-C", "containai"],
                 cancellationToken).ConfigureAwait(false);
@@ -25,7 +25,7 @@ internal sealed class SessionSshKeyPairService : ISessionSshKeyPairService
             if (keygen.ExitCode != 0)
             {
                 return ResolutionResult<bool>.ErrorResult(
-                    $"Failed to generate SSH key: {SessionRuntimeInfrastructure.TrimOrFallback(keygen.StandardError, "ssh-keygen failed")}");
+                    $"Failed to generate SSH key: {SessionRuntimeTextHelpers.TrimOrFallback(keygen.StandardError, "ssh-keygen failed")}");
             }
         }
 

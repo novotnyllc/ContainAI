@@ -32,15 +32,15 @@ internal static class SessionTargetDockerLookupParsing
     internal static ContainerLabelState BuildContainerLabelState(ContainerLabelFields fields)
     {
         var managed = string.Equals(fields.ManagedLabel, SessionRuntimeConstants.ManagedLabelValue, StringComparison.Ordinal);
-        var owned = managed || SessionRuntimeInfrastructure.IsContainAiImage(fields.Image);
+        var owned = managed || SessionRuntimeDockerHelpers.IsContainAiImage(fields.Image);
 
         return new ContainerLabelState(
             Exists: true,
             IsOwned: owned,
-            Workspace: SessionRuntimeInfrastructure.NormalizeNoValue(fields.WorkspaceLabel),
-            DataVolume: SessionRuntimeInfrastructure.NormalizeNoValue(fields.DataVolumeLabel),
-            SshPort: SessionRuntimeInfrastructure.NormalizeNoValue(fields.SshPortLabel),
-            State: SessionRuntimeInfrastructure.NormalizeNoValue(fields.State));
+            Workspace: SessionRuntimeTextHelpers.NormalizeNoValue(fields.WorkspaceLabel),
+            DataVolume: SessionRuntimeTextHelpers.NormalizeNoValue(fields.DataVolumeLabel),
+            SshPort: SessionRuntimeTextHelpers.NormalizeNoValue(fields.SshPortLabel),
+            State: SessionRuntimeTextHelpers.NormalizeNoValue(fields.State));
     }
 
     internal static string ParseContainerName(string inspectOutput)

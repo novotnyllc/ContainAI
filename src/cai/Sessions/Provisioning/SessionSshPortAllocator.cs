@@ -13,7 +13,7 @@ internal sealed class SessionSshPortAllocator : ISessionSshPortAllocator
     {
         var reservedPorts = new HashSet<int>();
 
-        var reserved = await SessionRuntimeInfrastructure.DockerCaptureAsync(
+        var reserved = await SessionRuntimeDockerHelpers.DockerCaptureAsync(
             context,
             ["ps", "-a", "--filter", $"label={SessionRuntimeConstants.ManagedLabelKey}={SessionRuntimeConstants.ManagedLabelValue}", "--format", $"{{{{index .Labels \"{SessionRuntimeConstants.SshPortLabelKey}\"}}}}"],
             cancellationToken).ConfigureAwait(false);
@@ -49,17 +49,17 @@ internal sealed class SessionSshPortAllocator : ISessionSshPortAllocator
     {
         var ports = new HashSet<int>();
 
-        var ss = await SessionRuntimeInfrastructure.RunProcessCaptureAsync("ss", ["-Htan"], cancellationToken).ConfigureAwait(false);
+        var ss = await SessionRuntimeProcessHelpers.RunProcessCaptureAsync("ss", ["-Htan"], cancellationToken).ConfigureAwait(false);
         if (ss.ExitCode == 0)
         {
-            SessionRuntimeInfrastructure.ParsePortsFromSocketTable(ss.StandardOutput, ports);
+            SessionRuntimeSystemHelpers.ParsePortsFromSocketTable(ss.StandardOutput, ports);
             return ports;
         }
 
-        var netstat = await SessionRuntimeInfrastructure.RunProcessCaptureAsync("netstat", ["-tan"], cancellationToken).ConfigureAwait(false);
+        var netstat = await SessionRuntimeProcessHelpers.RunProcessCaptureAsync("netstat", ["-tan"], cancellationToken).ConfigureAwait(false);
         if (netstat.ExitCode == 0)
         {
-            SessionRuntimeInfrastructure.ParsePortsFromSocketTable(netstat.StandardOutput, ports);
+            SessionRuntimeSystemHelpers.ParsePortsFromSocketTable(netstat.StandardOutput, ports);
         }
 
         var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();

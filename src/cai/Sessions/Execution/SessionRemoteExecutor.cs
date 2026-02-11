@@ -114,7 +114,7 @@ internal sealed class SessionRemoteExecutor
         CancellationToken cancellationToken)
     {
         var args = sshCommandBuilder.BuildSshArguments(options, sshPort, remoteCommand, forceTty);
-        return await SessionRuntimeInfrastructure.RunProcessInteractiveAsync("ssh", args, stderr, cancellationToken).ConfigureAwait(false);
+        return await SessionRuntimeProcessHelpers.RunProcessInteractiveAsync("ssh", args, stderr, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<ProcessResult> RunSshCaptureAsync(
@@ -125,6 +125,6 @@ internal sealed class SessionRemoteExecutor
         CancellationToken cancellationToken)
     {
         var args = sshCommandBuilder.BuildSshArguments(options, sshPort, remoteCommand, forceTty);
-        return await SessionRuntimeInfrastructure.RunProcessCaptureAsync("ssh", args, cancellationToken).ConfigureAwait(false);
+        return await SessionRuntimeProcessHelpers.RunProcessCaptureAsync("ssh", args, cancellationToken).ConfigureAwait(false);
     }
 }

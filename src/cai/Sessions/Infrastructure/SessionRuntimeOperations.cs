@@ -4,6 +4,11 @@ internal interface ISessionRuntimeOperations
 {
     Task<bool> DockerContextExistsAsync(string context, CancellationToken cancellationToken);
 
+    Task<ProcessResult> DockerCaptureAsync(
+        string context,
+        IReadOnlyList<string> dockerArgs,
+        CancellationToken cancellationToken);
+
     Task<ProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken);
 
     Task<ProcessResult> RunProcessCaptureAsync(
@@ -13,6 +18,8 @@ internal interface ISessionRuntimeOperations
 
     string ResolveUserConfigPath();
 
+    string ResolveSshPublicKeyPath();
+
     string FindConfigFile(string workspace, string? explicitConfig);
 
     string NormalizeWorkspacePath(string path);
@@ -20,34 +27,53 @@ internal interface ISessionRuntimeOperations
     bool IsValidVolumeName(string name);
 
     string GenerateWorkspaceVolumeName(string workspace);
+
+    string EscapeForSingleQuotedShell(string value);
+
+    string TrimOrFallback(string? value, string fallback);
 }
 
 internal sealed class SessionRuntimeOperations : ISessionRuntimeOperations
 {
     public Task<bool> DockerContextExistsAsync(string context, CancellationToken cancellationToken)
-        => SessionRuntimeInfrastructure.DockerContextExistsAsync(context, cancellationToken);
+        => SessionRuntimeDockerHelpers.DockerContextExistsAsync(context, cancellationToken);
+
+    public Task<ProcessResult> DockerCaptureAsync(
+        string context,
+        IReadOnlyList<string> dockerArgs,
+        CancellationToken cancellationToken)
+        => SessionRuntimeDockerHelpers.DockerCaptureAsync(context, dockerArgs, cancellationToken);
 
     public Task<ProcessResult> RunTomlAsync(Func<TomlCommandResult> operation, CancellationToken cancellationToken)
-        => SessionRuntimeInfrastructure.RunTomlAsync(operation, cancellationToken);
+        => SessionRuntimeProcessHelpers.RunTomlAsync(operation, cancellationToken);
 
     public Task<ProcessResult> RunProcessCaptureAsync(
         string fileName,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken)
-        => SessionRuntimeInfrastructure.RunProcessCaptureAsync(fileName, arguments, cancellationToken);
+        => SessionRuntimeProcessHelpers.RunProcessCaptureAsync(fileName, arguments, cancellationToken);
 
     public string ResolveUserConfigPath()
-        => SessionRuntimeInfrastructure.ResolveUserConfigPath();
+        => SessionRuntimePathHelpers.ResolveUserConfigPath();
+
+    public string ResolveSshPublicKeyPath()
+        => SessionRuntimePathHelpers.ResolveSshPublicKeyPath();
 
     public string FindConfigFile(string workspace, string? explicitConfig)
-        => SessionRuntimeInfrastructure.FindConfigFile(workspace, explicitConfig);
+        => SessionRuntimePathHelpers.FindConfigFile(workspace, explicitConfig);
 
     public string NormalizeWorkspacePath(string path)
-        => SessionRuntimeInfrastructure.NormalizeWorkspacePath(path);
+        => SessionRuntimePathHelpers.NormalizeWorkspacePath(path);
 
     public bool IsValidVolumeName(string name)
-        => SessionRuntimeInfrastructure.IsValidVolumeName(name);
+        => SessionRuntimeDockerHelpers.IsValidVolumeName(name);
 
     public string GenerateWorkspaceVolumeName(string workspace)
-        => SessionRuntimeInfrastructure.GenerateWorkspaceVolumeName(workspace);
+        => SessionRuntimeVolumeNameGenerator.GenerateWorkspaceVolumeName(workspace);
+
+    public string EscapeForSingleQuotedShell(string value)
+        => SessionRuntimeTextHelpers.EscapeForSingleQuotedShell(value);
+
+    public string TrimOrFallback(string? value, string fallback)
+        => SessionRuntimeTextHelpers.TrimOrFallback(value, fallback);
 }

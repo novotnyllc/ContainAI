@@ -14,7 +14,7 @@ internal sealed class SessionContainerRunCommandBuilder : ISessionContainerRunCo
             "run",
             "--runtime=sysbox-runc",
             "--name", resolved.ContainerName,
-            "--hostname", SessionRuntimeInfrastructure.SanitizeHostname(resolved.ContainerName),
+            "--hostname", SessionRuntimeTextHelpers.SanitizeHostname(resolved.ContainerName),
             "--label", $"{SessionRuntimeConstants.ManagedLabelKey}={SessionRuntimeConstants.ManagedLabelValue}",
             "--label", $"{SessionRuntimeConstants.WorkspaceLabelKey}={resolved.Workspace}",
             "--label", $"{SessionRuntimeConstants.DataVolumeLabelKey}={resolved.DataVolume}",
@@ -25,7 +25,7 @@ internal sealed class SessionContainerRunCommandBuilder : ISessionContainerRunCo
             "-v", $"{resolved.DataVolume}:/mnt/agent-data",
             "-v", $"{resolved.Workspace}:/home/agent/workspace",
             "-e", $"CAI_HOST_WORKSPACE={resolved.Workspace}",
-            "-e", $"TZ={SessionRuntimeInfrastructure.ResolveHostTimeZone()}",
+            "-e", $"TZ={SessionRuntimeSystemHelpers.ResolveHostTimeZone()}",
             "-w", "/home/agent/workspace",
         };
 
