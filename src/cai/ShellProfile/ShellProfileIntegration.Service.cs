@@ -9,24 +9,17 @@ internal sealed class ShellProfileIntegrationService : IShellProfileIntegration
     private readonly IShellProfileHookFileOperations hookFileOperations;
 
     public ShellProfileIntegrationService()
-        : this(
-            new ShellProfilePathResolver(),
-            new ShellProfileScriptContentGenerator(),
-            new ShellProfileHookBlockManager())
     {
-    }
+        var defaultPathResolver = new ShellProfilePathResolver();
+        var defaultScriptContentGenerator = new ShellProfileScriptContentGenerator();
+        var defaultHookBlockManager = new ShellProfileHookBlockManager();
+        var fileSystem = new ShellProfileFileSystem();
 
-    internal ShellProfileIntegrationService(
-        IShellProfilePathResolver pathResolver,
-        IShellProfileScriptContentGenerator scriptContentGenerator,
-        IShellProfileHookBlockManager hookBlockManager)
-        : this(
-            pathResolver,
-            scriptContentGenerator,
-            hookBlockManager,
-            new ShellProfileScriptFileOperations(new ShellProfileFileSystem()),
-            new ShellProfileHookFileOperations(new ShellProfileFileSystem(), hookBlockManager))
-    {
+        pathResolver = defaultPathResolver;
+        scriptContentGenerator = defaultScriptContentGenerator;
+        hookBlockManager = defaultHookBlockManager;
+        scriptFileOperations = new ShellProfileScriptFileOperations(fileSystem);
+        hookFileOperations = new ShellProfileHookFileOperations(fileSystem, defaultHookBlockManager);
     }
 
     internal ShellProfileIntegrationService(

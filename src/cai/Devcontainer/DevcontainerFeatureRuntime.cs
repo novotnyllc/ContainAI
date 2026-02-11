@@ -10,58 +10,24 @@ internal sealed class DevcontainerFeatureRuntime
     private readonly IDevcontainerFeatureStartWorkflow startWorkflow;
 
     public DevcontainerFeatureRuntime(TextWriter standardOutput, TextWriter standardError)
-        : this(
-            standardOutput,
-            standardError,
-            new DevcontainerFeatureConfigService(),
-            new DevcontainerProcessHelpers(),
-            Environment.GetEnvironmentVariable)
     {
-    }
-
-    internal DevcontainerFeatureRuntime(
-        TextWriter standardOutput,
-        TextWriter standardError,
-        IDevcontainerFeatureConfigService configService,
-        IDevcontainerProcessHelpers processHelpers,
-        Func<string, string?> environmentVariableReader)
-        : this(
-            standardOutput,
-            standardError,
-            configService,
-            processHelpers,
-            new DevcontainerUserEnvironmentSetup(processHelpers, standardOutput, environmentVariableReader),
-            new DevcontainerServiceBootstrap(processHelpers, standardOutput, standardError, environmentVariableReader),
-            environmentVariableReader)
-    {
-    }
-
-    internal DevcontainerFeatureRuntime(
-        TextWriter standardOutput,
-        TextWriter standardError,
-        IDevcontainerFeatureConfigService configService,
-        IDevcontainerProcessHelpers processHelpers,
-        IDevcontainerUserEnvironmentSetup userEnvironmentSetup,
-        IDevcontainerServiceBootstrap serviceBootstrap,
-        Func<string, string?> environmentVariableReader)
-    {
-        ArgumentNullException.ThrowIfNull(configService);
-        ArgumentNullException.ThrowIfNull(processHelpers);
-        ArgumentNullException.ThrowIfNull(userEnvironmentSetup);
-        ArgumentNullException.ThrowIfNull(serviceBootstrap);
-        ArgumentNullException.ThrowIfNull(environmentVariableReader);
-
+        var configService = new DevcontainerFeatureConfigService();
+        var processHelpers = new DevcontainerProcessHelpers();
+        Func<string, string?> environmentVariableReader = Environment.GetEnvironmentVariable;
+        var userEnvironmentSetup = new DevcontainerUserEnvironmentSetup(processHelpers, standardOutput, environmentVariableReader);
+        var serviceBootstrap = new DevcontainerServiceBootstrap(processHelpers, standardOutput, standardError, environmentVariableReader);
         var output = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        var error = standardError ?? throw new ArgumentNullException(nameof(standardError));
 
         var workflows = DevcontainerFeatureWorkflowFactory.Create(
             output,
-            stderr,
+            error,
             configService,
             processHelpers,
             userEnvironmentSetup,
             serviceBootstrap,
             environmentVariableReader);
+        stderr = error;
         installWorkflow = workflows.InstallWorkflow;
         initWorkflow = workflows.InitWorkflow;
         startWorkflow = workflows.StartWorkflow;
