@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 internal static class CaiRuntimeConfigPathHelpers
 {
@@ -25,7 +25,7 @@ internal static class CaiRuntimeConfigPathHelpers
 
     internal static string ResolveConfigPath(string? workspacePath, IReadOnlyList<string> configFileNames)
     {
-        var explicitConfigPath = Environment.GetEnvironmentVariable("CONTAINAI_CONFIG");
+        var explicitConfigPath = System.Environment.GetEnvironmentVariable("CONTAINAI_CONFIG");
         if (!string.IsNullOrWhiteSpace(explicitConfigPath))
         {
             return Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(explicitConfigPath));
@@ -50,7 +50,7 @@ internal static class CaiRuntimeConfigPathHelpers
     private static string ResolveContainAiConfigDirectory()
     {
         var home = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
-        var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        var xdgConfigHome = System.Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         var configRoot = string.IsNullOrWhiteSpace(xdgConfigHome)
             ? Path.Combine(home, ".config")
             : xdgConfigHome;

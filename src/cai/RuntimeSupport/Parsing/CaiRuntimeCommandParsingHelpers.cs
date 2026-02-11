@@ -1,6 +1,8 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
-namespace ContainAI.Cli.Host.RuntimeSupport;
+namespace ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 internal static class CaiRuntimeCommandParsingHelpers
 {

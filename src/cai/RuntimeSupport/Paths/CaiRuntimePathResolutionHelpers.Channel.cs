@@ -1,11 +1,13 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+
+namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 internal static partial class CaiRuntimePathResolutionHelpers
 {
     internal static async Task<string> ResolveChannelAsync(IReadOnlyList<string> configFileNames, CancellationToken cancellationToken)
     {
-        var envChannel = Environment.GetEnvironmentVariable("CAI_CHANNEL")
-                         ?? Environment.GetEnvironmentVariable("CONTAINAI_CHANNEL");
+        var envChannel = System.Environment.GetEnvironmentVariable("CAI_CHANNEL")
+                         ?? System.Environment.GetEnvironmentVariable("CONTAINAI_CHANNEL");
         if (string.Equals(envChannel, "nightly", StringComparison.OrdinalIgnoreCase))
         {
             return "nightly";

@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Models;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
+namespace ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 internal static partial class CaiRuntimeDockerHelpers
 {

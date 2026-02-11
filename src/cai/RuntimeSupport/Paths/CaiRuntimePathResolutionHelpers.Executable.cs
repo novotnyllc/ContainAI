@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 internal static partial class CaiRuntimePathResolutionHelpers
 {
@@ -9,14 +9,14 @@ internal static partial class CaiRuntimePathResolutionHelpers
             return true;
         }
 
-        var pathValue = Environment.GetEnvironmentVariable("PATH");
+        var pathValue = System.Environment.GetEnvironmentVariable("PATH");
         if (string.IsNullOrWhiteSpace(pathValue))
         {
             return false;
         }
 
         var extensions = OperatingSystem.IsWindows()
-            ? (Environment.GetEnvironmentVariable("PATHEXT")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            ? (System.Environment.GetEnvironmentVariable("PATHEXT")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                ?? [".exe", ".cmd", ".bat"])
             : [string.Empty];
 

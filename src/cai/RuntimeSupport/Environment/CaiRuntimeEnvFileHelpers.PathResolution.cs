@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Models;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
+namespace ContainAI.Cli.Host.RuntimeSupport.Environment;
 
 internal static partial class CaiRuntimeEnvFileHelpers
 {

@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Models;
+
+namespace ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 internal static class CaiRuntimeParseAndTimeHelpers
 {

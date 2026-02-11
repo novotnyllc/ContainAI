@@ -1,6 +1,7 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
-namespace ContainAI.Cli.Host.RuntimeSupport;
+namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 internal static partial class CaiRuntimePathResolutionHelpers
 {
@@ -15,7 +16,7 @@ internal static partial class CaiRuntimePathResolutionHelpers
             return explicitVolume;
         }
 
-        var envVolume = Environment.GetEnvironmentVariable("CONTAINAI_DATA_VOLUME");
+        var envVolume = System.Environment.GetEnvironmentVariable("CONTAINAI_DATA_VOLUME");
         if (!string.IsNullOrWhiteSpace(envVolume))
         {
             return envVolume;

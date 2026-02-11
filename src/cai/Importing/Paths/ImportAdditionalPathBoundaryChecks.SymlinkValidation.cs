@@ -1,4 +1,4 @@
-using ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Paths;
 

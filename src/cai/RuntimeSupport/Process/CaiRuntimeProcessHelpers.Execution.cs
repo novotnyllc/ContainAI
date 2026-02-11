@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+using ContainAI.Cli.Host.RuntimeSupport.Models;
+
+namespace ContainAI.Cli.Host.RuntimeSupport.Process;
 
 internal static partial class CaiRuntimeProcessHelpers
 {

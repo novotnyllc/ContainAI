@@ -1,13 +1,13 @@
-namespace ContainAI.Cli.Host.RuntimeSupport;
+namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 internal static class CaiRuntimeHomePathHelpers
 {
     internal static string ResolveHomeDirectory()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(home))
         {
-            home = Environment.GetEnvironmentVariable("HOME");
+            home = System.Environment.GetEnvironmentVariable("HOME");
         }
 
         return string.IsNullOrWhiteSpace(home) ? Directory.GetCurrentDirectory() : home;
