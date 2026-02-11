@@ -1,16 +1,16 @@
 namespace ContainAI.Cli.Host.RuntimeSupport.Paths;
 
-internal static class CaiRuntimeConfigPathHelpers
+internal static class CaiRuntimeConfigLocator
 {
     internal static string ResolveUserConfigPath(IReadOnlyList<string> configFileNames)
     {
-        var containAiConfigDirectory = ResolveContainAiConfigDirectory();
+        var containAiConfigDirectory = CaiRuntimeConfigRoot.ResolveContainAiConfigDirectory();
         return Path.Combine(containAiConfigDirectory, configFileNames[0]);
     }
 
     internal static string? TryFindExistingUserConfigPath(IReadOnlyList<string> configFileNames)
     {
-        var containAiConfigDirectory = ResolveContainAiConfigDirectory();
+        var containAiConfigDirectory = CaiRuntimeConfigRoot.ResolveContainAiConfigDirectory();
         foreach (var fileName in configFileNames)
         {
             var candidate = Path.Combine(containAiConfigDirectory, fileName);
@@ -39,22 +39,5 @@ internal static class CaiRuntimeConfigPathHelpers
 
         var userConfigPath = TryFindExistingUserConfigPath(configFileNames);
         return userConfigPath ?? ResolveUserConfigPath(configFileNames);
-    }
-
-    internal static string ResolveTemplatesDirectory()
-    {
-        var containAiConfigDirectory = ResolveContainAiConfigDirectory();
-        return Path.Combine(containAiConfigDirectory, "templates");
-    }
-
-    private static string ResolveContainAiConfigDirectory()
-    {
-        var home = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
-        var xdgConfigHome = System.Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
-        var configRoot = string.IsNullOrWhiteSpace(xdgConfigHome)
-            ? Path.Combine(home, ".config")
-            : xdgConfigHome;
-
-        return Path.Combine(configRoot, "containai");
     }
 }

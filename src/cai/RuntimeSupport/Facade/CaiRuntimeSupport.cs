@@ -63,16 +63,16 @@ internal abstract class CaiRuntimeSupport
         => CaiRuntimePathResolutionHelpers.ResolveDataVolumeAsync(workspace, explicitVolume, ConfigFileNames, cancellationToken);
 
     protected static string ResolveUserConfigPath()
-        => CaiRuntimeConfigPathHelpers.ResolveUserConfigPath(ConfigFileNames);
+        => CaiRuntimeConfigLocator.ResolveUserConfigPath(ConfigFileNames);
 
     protected static string? TryFindExistingUserConfigPath()
-        => CaiRuntimeConfigPathHelpers.TryFindExistingUserConfigPath(ConfigFileNames);
+        => CaiRuntimeConfigLocator.TryFindExistingUserConfigPath(ConfigFileNames);
 
     protected static string ResolveConfigPath(string? workspacePath)
-        => CaiRuntimeConfigPathHelpers.ResolveConfigPath(workspacePath, ConfigFileNames);
+        => CaiRuntimeConfigLocator.ResolveConfigPath(workspacePath, ConfigFileNames);
 
     protected static string ResolveTemplatesDirectory()
-        => CaiRuntimeConfigPathHelpers.ResolveTemplatesDirectory();
+        => CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
 
     protected static string ResolveHomeDirectory()
         => CaiRuntimeHomePathHelpers.ResolveHomeDirectory();

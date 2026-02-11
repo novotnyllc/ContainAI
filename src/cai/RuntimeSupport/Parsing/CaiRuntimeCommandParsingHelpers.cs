@@ -12,7 +12,7 @@ internal static class CaiRuntimeCommandParsingHelpers
         IReadOnlyList<string> configFileNames,
         CancellationToken cancellationToken)
     {
-        var configPath = CaiRuntimeConfigPathHelpers.ResolveConfigPath(workspace, configFileNames);
+        var configPath = CaiRuntimeConfigLocator.ResolveConfigPath(workspace, configFileNames);
         if (File.Exists(configPath))
         {
             var workspaceResult = await CaiRuntimeParseAndTimeHelpers.RunTomlAsync(

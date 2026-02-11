@@ -52,7 +52,7 @@ internal static class CaiRuntimePathResolutionHelpers
             return "stable";
         }
 
-        var configPath = CaiRuntimeConfigPathHelpers.ResolveUserConfigPath(configFileNames);
+        var configPath = CaiRuntimeConfigLocator.ResolveUserConfigPath(configFileNames);
         if (!File.Exists(configPath))
         {
             return "stable";
@@ -89,7 +89,7 @@ internal static class CaiRuntimePathResolutionHelpers
             return envVolume;
         }
 
-        var configPath = CaiRuntimeConfigPathHelpers.ResolveConfigPath(workspace, configFileNames);
+        var configPath = CaiRuntimeConfigLocator.ResolveConfigPath(workspace, configFileNames);
         if (!File.Exists(configPath))
         {
             return "containai-data";
