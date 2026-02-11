@@ -1,10 +1,23 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiExportOperations : CaiRuntimeSupport
+internal sealed class CaiExportOperations
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiExportOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunExportAsync(
@@ -16,8 +29,8 @@ internal sealed class CaiExportOperations : CaiRuntimeSupport
     {
         workspace ??= Directory.GetCurrentDirectory();
         var volume = string.IsNullOrWhiteSpace(container)
-            ? await ResolveDataVolumeAsync(workspace, explicitVolume, cancellationToken).ConfigureAwait(false)
-            : await ResolveDataVolumeFromContainerAsync(container, explicitVolume, cancellationToken).ConfigureAwait(false);
+            ? await CaiRuntimePathResolutionHelpers.ResolveDataVolumeAsync(workspace, explicitVolume, ConfigFileNames, cancellationToken).ConfigureAwait(false)
+            : await CaiRuntimeDockerHelpers.ResolveDataVolumeFromContainerAsync(container, explicitVolume, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(volume))
         {
             await stderr.WriteLineAsync("Unable to resolve data volume. Use --data-volume.").ConfigureAwait(false);
@@ -26,7 +39,7 @@ internal sealed class CaiExportOperations : CaiRuntimeSupport
 
         var outputPath = string.IsNullOrWhiteSpace(output)
             ? Path.Combine(Directory.GetCurrentDirectory(), $"containai-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.tgz")
-            : Path.GetFullPath(ExpandHomePath(output));
+            : Path.GetFullPath(CaiRuntimeHomePathHelpers.ExpandHomePath(output));
 
         if (Directory.Exists(outputPath))
         {
@@ -37,7 +50,7 @@ internal sealed class CaiExportOperations : CaiRuntimeSupport
         var outputDir = Path.GetDirectoryName(outputPath)!;
         var outputFile = Path.GetFileName(outputPath);
 
-        var exportResult = await DockerCaptureAsync(
+        var exportResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["run", "--rm", "-v", $"{volume}:/mnt/agent-data", "-v", $"{outputDir}:/out", "alpine:3.20", "sh", "-lc", $"tar -C /mnt/agent-data -czf /out/{outputFile} ."],
             cancellationToken).ConfigureAwait(false);
         if (exportResult.ExitCode != 0)

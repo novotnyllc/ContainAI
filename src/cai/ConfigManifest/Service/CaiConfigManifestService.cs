@@ -1,11 +1,19 @@
 using ContainAI.Cli.Abstractions;
 using ContainAI.Cli.Host.ConfigManifest;
 using ContainAI.Cli.Host.Manifests.Apply;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiConfigManifestService : CaiRuntimeSupport
+internal sealed class CaiConfigManifestService
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
     private readonly IConfigCommandProcessor configCommandProcessor;
     private readonly IManifestCommandProcessor manifestCommandProcessor;
 
@@ -36,32 +44,22 @@ internal sealed class CaiConfigManifestService : CaiRuntimeSupport
                 standardOutput,
                 standardError,
                 new CaiConfigRuntimeAdapter(
-                    ResolveConfigPath,
-                    ExpandHomePath,
-                    NormalizeConfigKey,
-                    (request, normalizedKey) =>
-                    {
-                        var parsed = new ParsedConfigCommand(
-                            request.Action,
-                            request.Key,
-                            request.Value,
-                            request.Global,
-                            request.Workspace,
-                            Error: null);
-                        return ResolveWorkspaceScope(parsed, normalizedKey);
-                    },
+                    workspacePath => CaiRuntimeConfigLocator.ResolveConfigPath(workspacePath, ConfigFileNames),
+                    CaiRuntimeHomePathHelpers.ExpandHomePath,
+                    CaiRuntimeParseAndTimeHelpers.NormalizeConfigKey,
+                    (request, normalizedKey) => CaiRuntimeParseAndTimeHelpers.ResolveWorkspaceScope(request.Global, request.Workspace, normalizedKey),
                     async (operation, cancellationToken) =>
                     {
-                        var result = await RunTomlAsync(operation, cancellationToken).ConfigureAwait(false);
+                        var result = await CaiRuntimeParseAndTimeHelpers.RunTomlAsync(operation, cancellationToken).ConfigureAwait(false);
                         return new TomlProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
                     },
-                    ResolveDataVolumeAsync)),
+                    (workspace, explicitVolume, cancellationToken) => CaiRuntimePathResolutionHelpers.ResolveDataVolumeAsync(workspace, explicitVolume, ConfigFileNames, cancellationToken))),
             new ManifestCommandProcessor(
                 standardOutput,
                 standardError,
                 manifestTomlParser,
                 manifestApplier,
-                new ManifestDirectoryResolver(ExpandHomePath)))
+                new ManifestDirectoryResolver(CaiRuntimeHomePathHelpers.ExpandHomePath)))
     {
     }
 
@@ -72,8 +70,9 @@ internal sealed class CaiConfigManifestService : CaiRuntimeSupport
         IManifestApplier manifestApplier,
         IConfigCommandProcessor configCommandProcessor,
         IManifestCommandProcessor manifestCommandProcessor)
-        : base(standardOutput, standardError)
     {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
         ArgumentNullException.ThrowIfNull(manifestApplier);
         this.configCommandProcessor = configCommandProcessor ?? throw new ArgumentNullException(nameof(configCommandProcessor));

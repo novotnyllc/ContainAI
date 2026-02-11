@@ -1,16 +1,23 @@
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiSyncOperations : CaiRuntimeSupport
+internal sealed class CaiSyncOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiSyncOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunSyncAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var sourceRoot = ResolveHomeDirectory();
+        var sourceRoot = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
         var destinationRoot = "/mnt/agent-data";
         if (!Directory.Exists(destinationRoot))
         {
@@ -28,7 +35,7 @@ internal sealed class CaiSyncOperations : CaiRuntimeSupport
             }
 
             Directory.CreateDirectory(destination);
-            await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
+            await CaiRuntimeDirectoryCopier.CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
         }
 
         await stdout.WriteLineAsync("Sync complete.").ConfigureAwait(false);

@@ -1,10 +1,17 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiUninstallOperations : CaiRuntimeSupport
+internal sealed class CaiUninstallOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiUninstallOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunUninstallAsync(
@@ -44,7 +51,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
 
     private async Task RemoveShellIntegrationAsync(bool dryRun, CancellationToken cancellationToken)
     {
-        var homeDirectory = ResolveHomeDirectory();
+        var homeDirectory = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
         var profileScriptPath = ShellProfileIntegration.GetProfileScriptPath(homeDirectory);
         if (dryRun)
         {
@@ -95,7 +102,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
                 continue;
             }
 
-            await DockerCaptureAsync(["context", "rm", "-f", context], cancellationToken).ConfigureAwait(false);
+            await CaiRuntimeDockerHelpers.DockerCaptureAsync(["context", "rm", "-f", context], cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -104,7 +111,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
         bool removeVolumes,
         CancellationToken cancellationToken)
     {
-        var list = await DockerCaptureAsync(["ps", "-aq", "--filter", "label=containai.managed=true"], cancellationToken).ConfigureAwait(false);
+        var list = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["ps", "-aq", "--filter", "label=containai.managed=true"], cancellationToken).ConfigureAwait(false);
         if (list.ExitCode != 0)
         {
             await stderr.WriteLineAsync(list.StandardError.Trim()).ConfigureAwait(false);
@@ -121,7 +128,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
             }
             else
             {
-                await DockerCaptureAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+                await CaiRuntimeDockerHelpers.DockerCaptureAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
             }
 
             if (!removeVolumes)
@@ -129,7 +136,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
                 continue;
             }
 
-            var inspect = await DockerCaptureAsync(
+            var inspect = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
                 ["inspect", "--format", "{{range .Mounts}}{{if and (eq .Type \"volume\") (eq .Destination \"/mnt/agent-data\")}}{{.Name}}{{end}}{{end}}", containerId],
                 cancellationToken).ConfigureAwait(false);
             if (inspect.ExitCode == 0)
@@ -155,7 +162,7 @@ internal sealed class CaiUninstallOperations : CaiRuntimeSupport
                 continue;
             }
 
-            await DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
+            await CaiRuntimeDockerHelpers.DockerCaptureAsync(["volume", "rm", volume], cancellationToken).ConfigureAwait(false);
         }
     }
 

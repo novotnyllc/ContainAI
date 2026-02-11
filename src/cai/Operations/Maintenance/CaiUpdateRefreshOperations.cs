@@ -1,15 +1,30 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
+internal sealed class CaiUpdateRefreshOperations
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly Func<bool, bool, bool, CancellationToken, Task<int>> runDoctorAsync;
 
     public CaiUpdateRefreshOperations(
         TextWriter standardOutput,
         TextWriter standardError,
         Func<bool, bool, bool, CancellationToken, Task<int>> runDoctorAsync)
-        : base(standardOutput, standardError)
-        => this.runDoctorAsync = runDoctorAsync ?? throw new ArgumentNullException(nameof(runDoctorAsync));
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        this.runDoctorAsync = runDoctorAsync ?? throw new ArgumentNullException(nameof(runDoctorAsync));
+    }
 
     public async Task<int> RunRefreshAsync(bool rebuild, bool showHelp, CancellationToken cancellationToken)
     {
@@ -19,13 +34,13 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var channel = await ResolveChannelAsync(cancellationToken).ConfigureAwait(false);
+        var channel = await CaiRuntimePathResolutionHelpers.ResolveChannelAsync(ConfigFileNames, cancellationToken).ConfigureAwait(false);
         var baseImage = string.Equals(channel, "nightly", StringComparison.Ordinal)
             ? "ghcr.io/novotnyllc/containai:nightly"
             : "ghcr.io/novotnyllc/containai:latest";
 
         await stdout.WriteLineAsync($"Pulling {baseImage}...").ConfigureAwait(false);
-        var pull = await DockerCaptureAsync(["pull", baseImage], cancellationToken).ConfigureAwait(false);
+        var pull = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["pull", baseImage], cancellationToken).ConfigureAwait(false);
         if (pull.ExitCode != 0)
         {
             await stderr.WriteLineAsync(pull.StandardError.Trim()).ConfigureAwait(false);
@@ -38,7 +53,7 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var templatesRoot = ResolveTemplatesDirectory();
+        var templatesRoot = CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
             await stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);
@@ -57,7 +72,7 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
             }
 
             var imageName = $"containai-template-{templateName}:local";
-            var build = await DockerCaptureAsync(
+            var build = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
                 [
                     "build",
                     "--build-arg", $"BASE_IMAGE={baseImage}",
@@ -160,8 +175,8 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
     private async Task<int> RecreateLimaVmAsync(CancellationToken cancellationToken)
     {
         await stdout.WriteLineAsync("Recreating Lima VM 'containai'...").ConfigureAwait(false);
-        await RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
-        var start = await RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
+        await CaiRuntimeProcessRunner.RunProcessCaptureAsync("limactl", ["delete", "containai", "--force"], cancellationToken).ConfigureAwait(false);
+        var start = await CaiRuntimeProcessRunner.RunProcessCaptureAsync("limactl", ["start", "containai"], cancellationToken).ConfigureAwait(false);
         if (start.ExitCode != 0)
         {
             await stderr.WriteLineAsync(start.StandardError.Trim()).ConfigureAwait(false);
@@ -173,7 +188,7 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
 
     private static async Task StopManagedContainersAsync(CancellationToken cancellationToken)
     {
-        var stopResult = await DockerCaptureAsync(
+        var stopResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["ps", "-q", "--filter", "label=containai.managed=true"],
             cancellationToken).ConfigureAwait(false);
 
@@ -184,7 +199,7 @@ internal sealed class CaiUpdateRefreshOperations : CaiRuntimeSupport
 
         foreach (var containerId in stopResult.StandardOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            await DockerCaptureAsync(["stop", containerId], cancellationToken).ConfigureAwait(false);
+            await CaiRuntimeDockerHelpers.DockerCaptureAsync(["stop", containerId], cancellationToken).ConfigureAwait(false);
         }
     }
 }

@@ -1,7 +1,12 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiDoctorFixOperations : CaiRuntimeSupport
+internal sealed class CaiDoctorFixOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly Func<bool, CancellationToken, Task<int>> runSshCleanupAsync;
     private readonly CaiTemplateRestoreOperations templateRestoreOperations;
 
@@ -10,8 +15,9 @@ internal sealed class CaiDoctorFixOperations : CaiRuntimeSupport
         TextWriter standardError,
         Func<bool, CancellationToken, Task<int>> runSshCleanupAsync,
         CaiTemplateRestoreOperations templateRestoreOperations)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         this.runSshCleanupAsync = runSshCleanupAsync ?? throw new ArgumentNullException(nameof(runSshCleanupAsync));
         this.templateRestoreOperations = templateRestoreOperations ?? throw new ArgumentNullException(nameof(templateRestoreOperations));
     }
@@ -28,8 +34,9 @@ internal sealed class CaiDoctorFixOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var containAiDir = Path.Combine(ResolveHomeDirectory(), ".config", "containai");
-        var sshDir = Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d");
+        var homeDirectory = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
+        var containAiDir = Path.Combine(homeDirectory, ".config", "containai");
+        var sshDir = Path.Combine(homeDirectory, ".ssh", "containai.d");
         await EnsureDirectoriesAndSshAsync(dryRun, containAiDir, sshDir, cancellationToken).ConfigureAwait(false);
 
         var templateResult = await RunTemplateFixAsync(fixAll, target, targetArg, cancellationToken).ConfigureAwait(false);
@@ -82,8 +89,9 @@ internal sealed class CaiDoctorFixOperations : CaiRuntimeSupport
 
     private static async Task EnsureSshIncludeDirectiveAsync(CancellationToken cancellationToken)
     {
-        var userSshConfig = Path.Combine(ResolveHomeDirectory(), ".ssh", "config");
-        var includeLine = $"Include {Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d")}/*.conf";
+        var homeDirectory = CaiRuntimeHomePathHelpers.ResolveHomeDirectory();
+        var userSshConfig = Path.Combine(homeDirectory, ".ssh", "config");
+        var includeLine = $"Include {Path.Combine(homeDirectory, ".ssh", "containai.d")}/*.conf";
 
         Directory.CreateDirectory(Path.GetDirectoryName(userSshConfig)!);
         if (!File.Exists(userSshConfig))
@@ -141,7 +149,7 @@ internal sealed class CaiDoctorFixOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var exists = await DockerContainerExistsAsync(targetArg, cancellationToken).ConfigureAwait(false);
+        var exists = await CaiRuntimeDockerHelpers.DockerContainerExistsAsync(targetArg, cancellationToken).ConfigureAwait(false);
         if (!exists)
         {
             await stderr.WriteLineAsync($"Container not found: {targetArg}").ConfigureAwait(false);
