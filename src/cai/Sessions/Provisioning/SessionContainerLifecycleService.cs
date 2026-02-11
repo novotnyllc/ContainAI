@@ -11,7 +11,7 @@ internal interface ISessionContainerLifecycleService
     Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken);
 }
 
-internal sealed partial class SessionContainerLifecycleService : ISessionContainerLifecycleService
+internal sealed class SessionContainerLifecycleService : ISessionContainerLifecycleService
 {
     private readonly ISessionSshPortAllocator sshPortAllocator;
     private readonly SessionContainerCreateStartOrchestrator createStartOrchestrator;
@@ -38,5 +38,55 @@ internal sealed partial class SessionContainerLifecycleService : ISessionContain
             new SessionContainerRunCommandBuilder(),
             dockerClient,
             new SessionContainerStateWaiter(dockerClient));
+    }
+
+    public async Task<ResolutionResult<string>> CreateOrStartContainerAsync(
+        SessionCommandOptions options,
+        ResolvedTarget resolved,
+        ExistingContainerAttachment attachment,
+        CancellationToken cancellationToken)
+    {
+        if (!attachment.Exists)
+        {
+            var created = await createStartOrchestrator.CreateContainerAsync(options, resolved, cancellationToken).ConfigureAwait(false);
+            if (!created.Success)
+            {
+                return ResolutionResult<string>.ErrorResult(created.Error!, created.ErrorCode);
+            }
+
+            return ResolutionResult<string>.SuccessResult(created.Value!.SshPort);
+        }
+
+        var sshPort = attachment.SshPort ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(sshPort))
+        {
+            var allocated = await sshPortAllocator.AllocateSshPortAsync(resolved.Context, cancellationToken).ConfigureAwait(false);
+            if (!allocated.Success)
+            {
+                return allocated;
+            }
+
+            sshPort = allocated.Value!;
+        }
+
+        if (!string.Equals(attachment.State, "running", StringComparison.Ordinal))
+        {
+            var start = await createStartOrchestrator.StartContainerAsync(
+                resolved.Context,
+                resolved.ContainerName,
+                cancellationToken).ConfigureAwait(false);
+            if (!start.Success)
+            {
+                return ResolutionResult<string>.ErrorResult(start.Error!, start.ErrorCode);
+            }
+        }
+
+        return ResolutionResult<string>.SuccessResult(sshPort);
+    }
+
+    public async Task RemoveContainerAsync(string context, string containerName, CancellationToken cancellationToken)
+    {
+        await dockerClient.StopContainerAsync(context, containerName, cancellationToken).ConfigureAwait(false);
+        await dockerClient.RemoveContainerAsync(context, containerName, cancellationToken).ConfigureAwait(false);
     }
 }
