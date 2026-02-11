@@ -7,124 +7,104 @@ internal sealed class TomlCommandSetUnsetExecutor(
     Regex workspaceKeyRegex,
     Regex globalKeyRegex)
 {
+    private readonly TomlSetUnsetInputValidator inputValidator = new(services, workspaceKeyRegex, globalKeyRegex);
+    private readonly TomlSetUnsetContentCoordinator contentCoordinator = new(services);
+
     public TomlCommandResult SetWorkspaceKey(string filePath, string workspacePath, string key, string value)
     {
-        if (!workspaceKeyRegex.IsMatch(key))
+        var validationError = inputValidator.ValidateWorkspaceKey(key);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        if (!workspacePath.StartsWith('/'))
+        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathAbsolute(workspacePath);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Workspace path must be absolute: {workspacePath}");
+            return validationError;
         }
 
-        if (workspacePath.Contains('\0'))
+        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathForSet(workspacePath);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, "Error: Workspace path contains null byte");
+            return validationError;
         }
 
-        if (workspacePath.Contains('\n') || workspacePath.Contains('\r'))
-        {
-            return new TomlCommandResult(1, string.Empty, "Error: Workspace path contains newline");
-        }
-
-        var contentRead = services.TryReadText(filePath, out var content, out var readError);
-        if (!contentRead)
-        {
-            return new TomlCommandResult(1, string.Empty, readError!);
-        }
-
-        var updated = services.UpsertWorkspaceKey(content, workspacePath, key, value);
-        return services.WriteConfig(filePath, updated);
+        return contentCoordinator.UpdateContent(
+            filePath,
+            content => services.UpsertWorkspaceKey(content, workspacePath, key, value));
     }
 
     public TomlCommandResult UnsetWorkspaceKey(string filePath, string workspacePath, string key)
     {
-        if (!workspaceKeyRegex.IsMatch(key))
+        var validationError = inputValidator.ValidateWorkspaceKey(key);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        if (!workspacePath.StartsWith('/'))
+        validationError = TomlSetUnsetInputValidator.ValidateWorkspacePathAbsolute(workspacePath);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Workspace path must be absolute: {workspacePath}");
+            return validationError;
         }
 
-        if (!services.FileExists(filePath))
+        var missingFileResult = contentCoordinator.GetUnsetNoOpWhenFileMissing(filePath);
+        if (missingFileResult is not null)
         {
-            return new TomlCommandResult(0, string.Empty, string.Empty);
+            return missingFileResult;
         }
 
-        var contentRead = services.TryReadText(filePath, out var content, out var readError);
-        if (!contentRead)
-        {
-            return new TomlCommandResult(1, string.Empty, readError!);
-        }
-
-        var updated = services.RemoveWorkspaceKey(content, workspacePath, key);
-        return services.WriteConfig(filePath, updated);
+        return contentCoordinator.UpdateContent(
+            filePath,
+            content => services.RemoveWorkspaceKey(content, workspacePath, key));
     }
 
     public TomlCommandResult SetKey(string filePath, string key, string value)
     {
-        if (!globalKeyRegex.IsMatch(key))
+        var validationError = inputValidator.ValidateGlobalKey(key);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        var parts = key.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0)
+        validationError = TomlSetUnsetInputValidator.ValidateGlobalSetKeyParts(key, out var parts);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        if (parts.Length > 2)
+        validationError = inputValidator.ValidateGlobalSetValue(key, value, out var formattedValue);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Key nesting too deep (max 2 levels): {key}");
+            return validationError;
         }
 
-        var formattedValue = services.FormatTomlValueForKey(key, value);
-        if (formattedValue is null)
-        {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid value for key '{key}'");
-        }
-
-        var contentRead = services.TryReadText(filePath, out var content, out var readError);
-        if (!contentRead)
-        {
-            return new TomlCommandResult(1, string.Empty, readError!);
-        }
-
-        var updated = services.UpsertGlobalKey(content, parts, formattedValue);
-        return services.WriteConfig(filePath, updated);
+        return contentCoordinator.UpdateContent(
+            filePath,
+            content => services.UpsertGlobalKey(content, parts, formattedValue));
     }
 
     public TomlCommandResult UnsetKey(string filePath, string key)
     {
-        if (!globalKeyRegex.IsMatch(key))
+        var validationError = inputValidator.ValidateGlobalKey(key);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        if (!services.FileExists(filePath))
+        var missingFileResult = contentCoordinator.GetUnsetNoOpWhenFileMissing(filePath);
+        if (missingFileResult is not null)
         {
-            return new TomlCommandResult(0, string.Empty, string.Empty);
+            return missingFileResult;
         }
 
-        var parts = key.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0)
+        validationError = TomlSetUnsetInputValidator.ValidateGlobalUnsetKeyParts(key, out var parts);
+        if (validationError is not null)
         {
-            return new TomlCommandResult(1, string.Empty, $"Error: Invalid key name: {key}");
+            return validationError;
         }
 
-        var contentRead = services.TryReadText(filePath, out var content, out var readError);
-        if (!contentRead)
-        {
-            return new TomlCommandResult(1, string.Empty, readError!);
-        }
-
-        var updated = services.RemoveGlobalKey(content, parts);
-        return services.WriteConfig(filePath, updated);
+        return contentCoordinator.UpdateContent(filePath, content => services.RemoveGlobalKey(content, parts));
     }
 }

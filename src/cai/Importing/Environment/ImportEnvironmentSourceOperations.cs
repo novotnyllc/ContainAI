@@ -1,5 +1,5 @@
 using System.Text.Json;
-using ContainAI.Cli.Host.RuntimeSupport.Environment;
+using ContainAI.Cli.Host.Importing.Environment.Source;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
@@ -22,76 +22,47 @@ internal interface IImportEnvironmentSourceOperations
 
 internal sealed class ImportEnvironmentSourceOperations : IImportEnvironmentSourceOperations
 {
-    private readonly TextWriter stderr;
+    private readonly IImportEnvironmentFileVariableResolver fileVariableResolver;
+    private readonly IImportEnvironmentFromHostFlagResolver fromHostFlagResolver;
+    private readonly IImportEnvironmentHostValueResolver hostValueResolver;
+    private readonly IImportEnvironmentVariableMerger variableMerger;
 
     public ImportEnvironmentSourceOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            standardOutput,
+            standardError,
+            new ImportEnvironmentFileVariableResolver(standardError),
+            new ImportEnvironmentFromHostFlagResolver(standardError),
+            new ImportEnvironmentHostValueResolver(standardError),
+            new ImportEnvironmentVariableMerger())
     {
-        ArgumentNullException.ThrowIfNull(standardOutput);
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
-    public async Task<Dictionary<string, string>?> ResolveFileVariablesAsync(
+    internal ImportEnvironmentSourceOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportEnvironmentFileVariableResolver importEnvironmentFileVariableResolver,
+        IImportEnvironmentFromHostFlagResolver importEnvironmentFromHostFlagResolver,
+        IImportEnvironmentHostValueResolver importEnvironmentHostValueResolver,
+        IImportEnvironmentVariableMerger importEnvironmentVariableMerger)
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        fileVariableResolver = importEnvironmentFileVariableResolver ?? throw new ArgumentNullException(nameof(importEnvironmentFileVariableResolver));
+        fromHostFlagResolver = importEnvironmentFromHostFlagResolver ?? throw new ArgumentNullException(nameof(importEnvironmentFromHostFlagResolver));
+        hostValueResolver = importEnvironmentHostValueResolver ?? throw new ArgumentNullException(nameof(importEnvironmentHostValueResolver));
+        variableMerger = importEnvironmentVariableMerger ?? throw new ArgumentNullException(nameof(importEnvironmentVariableMerger));
+    }
+
+    public Task<Dictionary<string, string>?> ResolveFileVariablesAsync(
         JsonElement envSection,
         string workspaceRoot,
         IReadOnlyCollection<string> validatedKeys,
         CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
+        => fileVariableResolver.ResolveAsync(envSection, workspaceRoot, validatedKeys, cancellationToken);
 
-        var fileVariables = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (envSection.TryGetProperty("env_file", out var envFileElement) && envFileElement.ValueKind == JsonValueKind.String)
-        {
-            var envFile = envFileElement.GetString();
-            if (!string.IsNullOrWhiteSpace(envFile))
-            {
-                var envFileResolution = CaiRuntimeEnvFileHelpers.ResolveEnvFilePath(workspaceRoot, envFile);
-                if (envFileResolution.Error is not null)
-                {
-                    await stderr.WriteLineAsync(envFileResolution.Error).ConfigureAwait(false);
-                    return null;
-                }
-
-                if (envFileResolution.Path is not null)
-                {
-                    var parsed = CaiRuntimeEnvFileHelpers.ParseEnvFile(envFileResolution.Path);
-                    foreach (var warning in parsed.Warnings)
-                    {
-                        await stderr.WriteLineAsync(warning).ConfigureAwait(false);
-                    }
-
-                    foreach (var (key, value) in parsed.Values)
-                    {
-                        if (validatedKeys.Contains(key))
-                        {
-                            fileVariables[key] = value;
-                        }
-                    }
-                }
-            }
-        }
-
-        return fileVariables;
-    }
-
-    public async Task<bool> ResolveFromHostFlagAsync(JsonElement envSection, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (envSection.TryGetProperty("from_host", out var fromHostElement))
-        {
-            if (fromHostElement.ValueKind == JsonValueKind.True)
-            {
-                return true;
-            }
-
-            if (fromHostElement.ValueKind != JsonValueKind.False)
-            {
-                await stderr.WriteLineAsync("[WARN] [env].from_host must be a boolean; using false").ConfigureAwait(false);
-            }
-        }
-
-        return false;
-    }
+    public Task<bool> ResolveFromHostFlagAsync(JsonElement envSection, CancellationToken cancellationToken)
+        => fromHostFlagResolver.ResolveAsync(envSection, cancellationToken);
 
     public async Task<Dictionary<string, string>> MergeVariablesWithHostValuesAsync(
         Dictionary<string, string> fileVariables,
@@ -101,35 +72,14 @@ internal sealed class ImportEnvironmentSourceOperations : IImportEnvironmentSour
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var merged = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var (key, value) in fileVariables)
-        {
-            merged[key] = value;
-        }
-
         if (!fromHost)
         {
-            return merged;
+            return variableMerger.Merge(
+                fileVariables,
+                new Dictionary<string, string>(StringComparer.Ordinal));
         }
 
-        foreach (var key in validatedKeys)
-        {
-            var envValue = System.Environment.GetEnvironmentVariable(key);
-            if (envValue is null)
-            {
-                await stderr.WriteLineAsync($"[WARN] Missing host env var: {key}").ConfigureAwait(false);
-                continue;
-            }
-
-            if (envValue.Contains('\n', StringComparison.Ordinal))
-            {
-                await stderr.WriteLineAsync($"[WARN] source=host: key '{key}' skipped (multiline value)").ConfigureAwait(false);
-                continue;
-            }
-
-            merged[key] = envValue;
-        }
-
-        return merged;
+        var hostVariables = await hostValueResolver.ResolveAsync(validatedKeys, cancellationToken).ConfigureAwait(false);
+        return variableMerger.Merge(fileVariables, hostVariables);
     }
 }
