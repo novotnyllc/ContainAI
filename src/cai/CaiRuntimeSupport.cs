@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.RuntimeSupport;
+
 namespace ContainAI.Cli.Host;
 
 internal abstract partial class CaiRuntimeSupport

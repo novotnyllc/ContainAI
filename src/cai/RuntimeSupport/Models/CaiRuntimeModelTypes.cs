@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.RuntimeSupport;
 
 internal readonly record struct RuntimeProcessResult(int ExitCode, string StandardOutput, string StandardError);
 

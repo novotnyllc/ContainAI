@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.RuntimeSupport;
 
 internal static partial class CaiRuntimeEnvRegexHelpers
 {

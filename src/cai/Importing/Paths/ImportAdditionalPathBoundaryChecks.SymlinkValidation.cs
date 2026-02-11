@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.RuntimeSupport;
+
 namespace ContainAI.Cli.Host.Importing.Paths;
 
 internal static partial class ImportAdditionalPathBoundaryChecks
