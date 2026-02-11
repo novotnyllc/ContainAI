@@ -1,17 +1,9 @@
 using ContainAI.Cli.Abstractions;
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
 internal sealed class CaiOperationsService
 {
-    private static readonly string[] ContainAiImagePrefixes =
-    [
-        "containai:",
-        "ghcr.io/containai/",
-        "ghcr.io/novotnyllc/containai",
-    ];
-
     private readonly CaiDiagnosticsCommandHandler diagnosticsHandler;
     private readonly CaiMaintenanceCommandHandler maintenanceHandler;
     private readonly CaiSystemCommandHandler systemHandler;
@@ -31,40 +23,11 @@ internal sealed class CaiOperationsService
         ArgumentNullException.ThrowIfNull(standardError);
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
 
-        var containerRuntimeCommandService = new ContainerRuntimeCommandService(
-            standardOutput,
-            standardError,
-            manifestTomlParser,
-            new ContainerRuntimeOptionParser());
-
-        var containerLinkRepairService = new ContainerLinkRepairService(
-            standardOutput,
-            standardError,
-            CaiRuntimeDockerHelpers.ExecuteDockerCommandAsync);
-
-        var sshCleanupOperations = new CaiSshCleanupOperations(standardOutput, standardError);
-        var diagnosticsOperations = new CaiDiagnosticsAndSetupOperations(
-            standardOutput,
-            standardError,
-            sshCleanupOperations.RunSshCleanupAsync);
-
-        var maintenanceOperations = new CaiMaintenanceOperations(
-            standardOutput,
-            standardError,
-            containerLinkRepairService,
-            diagnosticsOperations.RunDoctorAsync);
-
-        var templateSshAndGcOperations = new CaiTemplateSshAndGcOperations(
-            standardOutput,
-            standardError,
-            ContainAiImagePrefixes,
-            maintenanceOperations.RunExportAsync,
-            sshCleanupOperations);
-
-        diagnosticsHandler = new CaiDiagnosticsCommandHandler(diagnosticsOperations);
-        maintenanceHandler = new CaiMaintenanceCommandHandler(maintenanceOperations);
-        systemHandler = new CaiSystemCommandHandler(containerRuntimeCommandService);
-        templateSshGcHandler = new CaiTemplateSshGcCommandHandler(templateSshAndGcOperations);
+        var handlers = CaiOperationsCommandHandlersFactory.Create(standardOutput, standardError, manifestTomlParser);
+        diagnosticsHandler = handlers.DiagnosticsHandler;
+        maintenanceHandler = handlers.MaintenanceHandler;
+        systemHandler = handlers.SystemHandler;
+        templateSshGcHandler = handlers.TemplateSshGcHandler;
     }
 
     public static Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
