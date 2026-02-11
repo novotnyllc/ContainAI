@@ -39,20 +39,13 @@ internal sealed class CaiCommandRuntime : ICaiCommandRuntime
 
         stdout = standardOutput ?? Console.Out;
         stderr = standardError ?? Console.Error;
-
-        var sessionRuntime = new SessionCommandRuntime(stdout, stderr);
-        var operationsService = new CaiOperationsService(stdout, stderr, manifestTomlParser);
-        var configManifestService = new CaiConfigManifestService(stdout, stderr, manifestTomlParser);
-        var importService = new CaiImportService(stdout, stderr, manifestTomlParser);
-        var installRuntime = new InstallCommandRuntime();
-        var examplesRuntime = new ExamplesCommandRuntime();
-
-        operationsHandler = new CaiRuntimeOperationsCommandHandler(operationsService);
-        configHandler = new CaiRuntimeConfigCommandHandler(configManifestService);
-        importHandler = new CaiRuntimeImportCommandHandler(importService);
-        sessionHandler = new CaiRuntimeSessionCommandHandler(sessionRuntime);
-        systemHandler = new CaiRuntimeSystemCommandHandler(operationsService);
-        toolsHandler = new CaiRuntimeToolsCommandHandler(proxyRunner, installRuntime, examplesRuntime);
+        var handlers = CaiCommandRuntimeHandlersFactory.Create(proxyRunner, manifestTomlParser, stdout, stderr);
+        operationsHandler = handlers.OperationsHandler;
+        configHandler = handlers.ConfigHandler;
+        importHandler = handlers.ImportHandler;
+        sessionHandler = handlers.SessionHandler;
+        systemHandler = handlers.SystemHandler;
+        toolsHandler = handlers.ToolsHandler;
     }
 
     public Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)
