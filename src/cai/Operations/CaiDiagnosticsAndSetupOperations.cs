@@ -1,41 +1,37 @@
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
-using ContainAI.Cli.Host.RuntimeSupport.Process;
-
 namespace ContainAI.Cli.Host;
 
 internal sealed class CaiDiagnosticsAndSetupOperations
 {
-    private readonly TextWriter stdout;
     private readonly CaiDiagnosticsStatusOperations statusOperations;
     private readonly CaiDoctorOperations doctorOperations;
     private readonly CaiSetupOperations setupOperations;
     private readonly CaiDoctorFixOperations doctorFixOperations;
+    private readonly ICaiDockerCommandForwarder dockerCommandForwarder;
+    private readonly ICaiVersionCommandWriter versionCommandWriter;
 
     public CaiDiagnosticsAndSetupOperations(
         TextWriter standardOutput,
         TextWriter standardError,
         Func<bool, CancellationToken, Task<int>> runSshCleanupAsync)
+        : this(
+            CaiDiagnosticsOperationSetFactory.Create(standardOutput, standardError, runSshCleanupAsync),
+            new CaiDockerCommandForwarder(),
+            new CaiVersionCommandWriter(standardOutput))
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+    }
 
-        var templateRestoreOperations = new CaiTemplateRestoreOperations(standardOutput, standardError);
-        statusOperations = new CaiDiagnosticsStatusOperations(standardOutput, standardError);
-        doctorOperations = new CaiDoctorOperations(standardOutput, standardError);
-        setupOperations = new CaiSetupOperations(
-            standardOutput,
-            standardError,
-            templateRestoreOperations,
-            cancellationToken => doctorOperations.RunDoctorAsync(
-                outputJson: false,
-                buildTemplates: false,
-                resetLima: false,
-                cancellationToken));
-        doctorFixOperations = new CaiDoctorFixOperations(
-            standardOutput,
-            standardError,
-            runSshCleanupAsync,
-            templateRestoreOperations);
+    internal CaiDiagnosticsAndSetupOperations(
+        CaiDiagnosticsOperationSet operationSet,
+        ICaiDockerCommandForwarder caiDockerCommandForwarder,
+        ICaiVersionCommandWriter caiVersionCommandWriter)
+    {
+        ArgumentNullException.ThrowIfNull(operationSet);
+        statusOperations = operationSet.StatusOperations;
+        doctorOperations = operationSet.DoctorOperations;
+        setupOperations = operationSet.SetupOperations;
+        doctorFixOperations = operationSet.DoctorFixOperations;
+        dockerCommandForwarder = caiDockerCommandForwarder ?? throw new ArgumentNullException(nameof(caiDockerCommandForwarder));
+        versionCommandWriter = caiVersionCommandWriter ?? throw new ArgumentNullException(nameof(caiVersionCommandWriter));
     }
 
     public Task<int> RunStatusAsync(
@@ -70,43 +66,8 @@ internal sealed class CaiDiagnosticsAndSetupOperations
         => doctorFixOperations.RunDoctorFixAsync(fixAll, dryRun, target, targetArg, cancellationToken);
 
     public static async Task<int> RunDockerAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken)
-    {
-        var executable = CaiRuntimePathResolutionHelpers.IsExecutableOnPath("containai-docker")
-            ? "containai-docker"
-            : "docker";
-
-        var dockerArgs = new List<string>();
-        if (string.Equals(executable, "docker", StringComparison.Ordinal))
-        {
-            var context = await CaiRuntimeDockerHelpers.ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(context))
-            {
-                dockerArgs.Add("--context");
-                dockerArgs.Add(context);
-            }
-        }
-
-        foreach (var argument in dockerArguments)
-        {
-            dockerArgs.Add(argument);
-        }
-
-        return await CaiRuntimeProcessRunner.RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
-    }
+        => await new CaiDockerCommandForwarder().RunAsync(dockerArguments, cancellationToken).ConfigureAwait(false);
 
     public async Task<int> RunVersionAsync(bool json, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var versionInfo = InstallMetadata.ResolveVersionInfo();
-        var installType = InstallMetadata.GetInstallTypeLabel(versionInfo.InstallType);
-
-        if (json)
-        {
-            await stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{CaiRuntimeJsonEscaper.EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
-            return 0;
-        }
-
-        await stdout.WriteLineAsync(versionInfo.Version).ConfigureAwait(false);
-        return 0;
-    }
+        => await versionCommandWriter.WriteVersionAsync(json, cancellationToken).ConfigureAwait(false);
 }

@@ -5,6 +5,8 @@ internal sealed class ShellProfileIntegrationService : IShellProfileIntegration
     private readonly IShellProfilePathResolver pathResolver;
     private readonly IShellProfileScriptContentGenerator scriptContentGenerator;
     private readonly IShellProfileHookBlockManager hookBlockManager;
+    private readonly IShellProfileScriptFileOperations scriptFileOperations;
+    private readonly IShellProfileHookFileOperations hookFileOperations;
 
     public ShellProfileIntegrationService()
         : this(
@@ -18,10 +20,27 @@ internal sealed class ShellProfileIntegrationService : IShellProfileIntegration
         IShellProfilePathResolver pathResolver,
         IShellProfileScriptContentGenerator scriptContentGenerator,
         IShellProfileHookBlockManager hookBlockManager)
+        : this(
+            pathResolver,
+            scriptContentGenerator,
+            hookBlockManager,
+            new ShellProfileScriptFileOperations(new ShellProfileFileSystem()),
+            new ShellProfileHookFileOperations(new ShellProfileFileSystem(), hookBlockManager))
+    {
+    }
+
+    internal ShellProfileIntegrationService(
+        IShellProfilePathResolver pathResolver,
+        IShellProfileScriptContentGenerator scriptContentGenerator,
+        IShellProfileHookBlockManager hookBlockManager,
+        IShellProfileScriptFileOperations scriptFileOperations,
+        IShellProfileHookFileOperations hookFileOperations)
     {
         this.pathResolver = pathResolver ?? throw new ArgumentNullException(nameof(pathResolver));
         this.scriptContentGenerator = scriptContentGenerator ?? throw new ArgumentNullException(nameof(scriptContentGenerator));
         this.hookBlockManager = hookBlockManager ?? throw new ArgumentNullException(nameof(hookBlockManager));
+        this.scriptFileOperations = scriptFileOperations ?? throw new ArgumentNullException(nameof(scriptFileOperations));
+        this.hookFileOperations = hookFileOperations ?? throw new ArgumentNullException(nameof(hookFileOperations));
     }
 
     public string GetProfileDirectoryPath(string homeDirectory)
@@ -45,65 +64,28 @@ internal sealed class ShellProfileIntegrationService : IShellProfileIntegration
         ArgumentException.ThrowIfNullOrWhiteSpace(binDirectory);
 
         var profileScriptPath = GetProfileScriptPath(homeDirectory);
-        Directory.CreateDirectory(Path.GetDirectoryName(profileScriptPath)!);
-
         var script = scriptContentGenerator.BuildProfileScript(homeDirectory, binDirectory);
-        if (File.Exists(profileScriptPath))
-        {
-            var existing = await File.ReadAllTextAsync(profileScriptPath, cancellationToken).ConfigureAwait(false);
-            if (string.Equals(existing, script, StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        await File.WriteAllTextAsync(profileScriptPath, script, cancellationToken).ConfigureAwait(false);
-        return true;
+        return await scriptFileOperations
+            .EnsureProfileScriptAsync(profileScriptPath, script, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<bool> EnsureHookInShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
 
-        var shellProfileDirectory = Path.GetDirectoryName(shellProfilePath);
-        if (!string.IsNullOrWhiteSpace(shellProfileDirectory))
-        {
-            Directory.CreateDirectory(shellProfileDirectory);
-        }
-
-        var existing = File.Exists(shellProfilePath)
-            ? await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false)
-            : string.Empty;
-        if (HasHookBlock(existing))
-        {
-            return false;
-        }
-
-        var hookBlock = hookBlockManager.BuildHookBlock();
-        var updated = string.IsNullOrWhiteSpace(existing)
-            ? hookBlock + Environment.NewLine
-            : existing.TrimEnd() + Environment.NewLine + Environment.NewLine + hookBlock + Environment.NewLine;
-        await File.WriteAllTextAsync(shellProfilePath, updated, cancellationToken).ConfigureAwait(false);
-        return true;
+        return await hookFileOperations
+            .EnsureHookInShellProfileAsync(shellProfilePath, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<bool> RemoveHookFromShellProfileAsync(string shellProfilePath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(shellProfilePath);
 
-        if (!File.Exists(shellProfilePath))
-        {
-            return false;
-        }
-
-        var existing = await File.ReadAllTextAsync(shellProfilePath, cancellationToken).ConfigureAwait(false);
-        if (!hookBlockManager.TryRemoveHookBlock(existing, out var updated))
-        {
-            return false;
-        }
-
-        await File.WriteAllTextAsync(shellProfilePath, updated, cancellationToken).ConfigureAwait(false);
-        return true;
+        return await hookFileOperations
+            .RemoveHookFromShellProfileAsync(shellProfilePath, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public Task<bool> RemoveProfileScriptAsync(string homeDirectory, CancellationToken cancellationToken)
@@ -112,19 +94,7 @@ internal sealed class ShellProfileIntegrationService : IShellProfileIntegration
         cancellationToken.ThrowIfCancellationRequested();
 
         var profileScriptPath = GetProfileScriptPath(homeDirectory);
-        if (!File.Exists(profileScriptPath))
-        {
-            return Task.FromResult(false);
-        }
-
-        File.Delete(profileScriptPath);
-
         var profileDirectory = GetProfileDirectoryPath(homeDirectory);
-        if (Directory.Exists(profileDirectory) && !Directory.EnumerateFileSystemEntries(profileDirectory).Any())
-        {
-            Directory.Delete(profileDirectory);
-        }
-
-        return Task.FromResult(true);
+        return scriptFileOperations.RemoveProfileScriptAsync(profileDirectory, profileScriptPath, cancellationToken);
     }
 }
