@@ -13,7 +13,7 @@ internal interface IInstallPathResolver
     string? GetEnvironmentVariable(string variableName);
 }
 
-internal sealed partial class InstallPathResolver : IInstallPathResolver
+internal sealed class InstallPathResolver : IInstallPathResolver
 {
     private const string ContainAiDataHomeRelative = ".local/share/containai";
     private const string ContainAiBinHomeRelative = ".local/bin";
@@ -29,6 +29,37 @@ internal sealed partial class InstallPathResolver : IInstallPathResolver
             optionValue,
             GetEnvironmentVariable("CAI_BIN_DIR"),
             ContainAiBinHomeRelative);
+
+    public string ResolveHomeDirectory()
+    {
+        var home = GetEnvironmentVariable("HOME");
+        if (!string.IsNullOrWhiteSpace(home))
+        {
+            return home;
+        }
+
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(userProfile))
+        {
+            return userProfile;
+        }
+
+        return Directory.GetCurrentDirectory();
+    }
+
+    public string? GetEnvironmentVariable(string variableName)
+        => Environment.GetEnvironmentVariable(variableName);
+
+    public string? ResolveCurrentExecutablePath()
+    {
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            return null;
+        }
+
+        return File.Exists(processPath) ? processPath : null;
+    }
 
     private string ResolveDirectory(string? optionValue, string? envValue, string homeRelative)
     {
