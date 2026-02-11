@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed partial class AcpProxyRunner
+internal sealed class AcpProxyRunner
 {
     private readonly Func<string, Stream, TextWriter, IAcpProxyProcess> proxyFactory;
     private readonly Func<Stream> stdinFactory;
@@ -73,5 +73,35 @@ internal sealed partial class AcpProxyRunner
         {
             return await WriteErrorAndReturnAsync(ex.Message).ConfigureAwait(false);
         }
+    }
+
+    private async Task<int> RunProxyAsync(string resolvedAgent, CancellationToken cancellationToken)
+    {
+        using var proxy = proxyFactory(
+            resolvedAgent,
+            stdoutFactory(),
+            stderr);
+
+        ConsoleCancelEventHandler handler = (_, e) =>
+        {
+            e.Cancel = true;
+            proxy.Cancel();
+        };
+
+        subscribeCancelHandler(handler);
+        try
+        {
+            return await proxy.RunAsync(stdinFactory(), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            unsubscribeCancelHandler(handler);
+        }
+    }
+
+    private async Task<int> WriteErrorAndReturnAsync(string message)
+    {
+        await stderr.WriteLineAsync(message).ConfigureAwait(false);
+        return 1;
     }
 }
