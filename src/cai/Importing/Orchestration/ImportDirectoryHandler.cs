@@ -5,10 +5,13 @@ namespace ContainAI.Cli.Host;
 internal sealed class ImportDirectoryHandler
 {
     private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
-    private readonly IImportPathOperations pathOperations;
-    private readonly IImportTransferOperations transferOperations;
+    private readonly ImportDirectoryAdditionalPathResolver additionalPathResolver;
+    private readonly ImportDirectoryTargetInitializer targetInitializer;
+    private readonly ImportDirectoryManifestEntryImporter manifestEntryImporter;
+    private readonly ImportDirectorySecretPermissionsEnforcer secretPermissionsEnforcer;
+    private readonly ImportDirectoryAdditionalPathImporter additionalPathImporter;
     private readonly IImportEnvironmentOperations environmentOperations;
+    private readonly ImportDirectoryOverridesApplier overridesApplier;
 
     public ImportDirectoryHandler(
         TextWriter standardOutput,
@@ -16,12 +19,39 @@ internal sealed class ImportDirectoryHandler
         IImportPathOperations pathOperations,
         IImportTransferOperations transferOperations,
         IImportEnvironmentOperations environmentOperations)
+        : this(
+            standardOutput,
+            standardError,
+            new ImportDirectoryAdditionalPathResolver(pathOperations),
+            new ImportDirectoryTargetInitializer(transferOperations),
+            new ImportDirectoryManifestEntryImporter(standardError, transferOperations),
+            new ImportDirectorySecretPermissionsEnforcer(transferOperations),
+            new ImportDirectoryAdditionalPathImporter(pathOperations),
+            environmentOperations,
+            new ImportDirectoryOverridesApplier(transferOperations))
+    {
+    }
+
+    internal ImportDirectoryHandler(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        ImportDirectoryAdditionalPathResolver importDirectoryAdditionalPathResolver,
+        ImportDirectoryTargetInitializer importDirectoryTargetInitializer,
+        ImportDirectoryManifestEntryImporter importDirectoryManifestEntryImporter,
+        ImportDirectorySecretPermissionsEnforcer importDirectorySecretPermissionsEnforcer,
+        ImportDirectoryAdditionalPathImporter importDirectoryAdditionalPathImporter,
+        IImportEnvironmentOperations importEnvironmentOperations,
+        ImportDirectoryOverridesApplier importDirectoryOverridesApplier)
     {
         stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
-        this.pathOperations = pathOperations ?? throw new ArgumentNullException(nameof(pathOperations));
-        this.transferOperations = transferOperations ?? throw new ArgumentNullException(nameof(transferOperations));
-        this.environmentOperations = environmentOperations ?? throw new ArgumentNullException(nameof(environmentOperations));
+        _ = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        additionalPathResolver = importDirectoryAdditionalPathResolver ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathResolver));
+        targetInitializer = importDirectoryTargetInitializer ?? throw new ArgumentNullException(nameof(importDirectoryTargetInitializer));
+        manifestEntryImporter = importDirectoryManifestEntryImporter ?? throw new ArgumentNullException(nameof(importDirectoryManifestEntryImporter));
+        secretPermissionsEnforcer = importDirectorySecretPermissionsEnforcer ?? throw new ArgumentNullException(nameof(importDirectorySecretPermissionsEnforcer));
+        additionalPathImporter = importDirectoryAdditionalPathImporter ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathImporter));
+        environmentOperations = importEnvironmentOperations ?? throw new ArgumentNullException(nameof(importEnvironmentOperations));
+        overridesApplier = importDirectoryOverridesApplier ?? throw new ArgumentNullException(nameof(importDirectoryOverridesApplier));
     }
 
     public async Task<int> HandleDirectoryImportAsync(
@@ -34,7 +64,7 @@ internal sealed class ImportDirectoryHandler
         ManifestEntry[] manifestEntries,
         CancellationToken cancellationToken)
     {
-        var additionalImportPaths = await pathOperations.ResolveAdditionalImportPathsAsync(
+        var additionalImportPaths = await additionalPathResolver.ResolveAsync(
             workspace,
             explicitConfigPath,
             excludePriv,
@@ -42,25 +72,33 @@ internal sealed class ImportDirectoryHandler
             options.Verbose,
             cancellationToken).ConfigureAwait(false);
 
-        var initCode = await InitializeTargetsIfNeededAsync(options, volume, sourcePath, manifestEntries, cancellationToken).ConfigureAwait(false);
+        var initCode = await targetInitializer
+            .InitializeIfNeededAsync(options, volume, sourcePath, manifestEntries, cancellationToken)
+            .ConfigureAwait(false);
         if (initCode != 0)
         {
             return initCode;
         }
 
-        var manifestImportCode = await ImportManifestEntriesAsync(options, volume, sourcePath, excludePriv, manifestEntries, cancellationToken).ConfigureAwait(false);
+        var manifestImportCode = await manifestEntryImporter
+            .ImportAsync(options, volume, sourcePath, excludePriv, manifestEntries, cancellationToken)
+            .ConfigureAwait(false);
         if (manifestImportCode != 0)
         {
             return manifestImportCode;
         }
 
-        var secretPermissionsCode = await EnforceSecretPermissionsIfNeededAsync(options, volume, manifestEntries, cancellationToken).ConfigureAwait(false);
+        var secretPermissionsCode = await secretPermissionsEnforcer
+            .EnforceIfNeededAsync(options, volume, manifestEntries, cancellationToken)
+            .ConfigureAwait(false);
         if (secretPermissionsCode != 0)
         {
             return secretPermissionsCode;
         }
 
-        var additionalPathImportCode = await ImportAdditionalPathsAsync(options, volume, additionalImportPaths, cancellationToken).ConfigureAwait(false);
+        var additionalPathImportCode = await additionalPathImporter
+            .ImportAsync(options, volume, additionalImportPaths, cancellationToken)
+            .ConfigureAwait(false);
         if (additionalPathImportCode != 0)
         {
             return additionalPathImportCode;
@@ -78,120 +116,15 @@ internal sealed class ImportDirectoryHandler
             return environmentCode;
         }
 
-        var overrideCode = await transferOperations.ApplyImportOverridesAsync(
-            volume,
-            manifestEntries,
-            options.NoSecrets,
-            options.DryRun,
-            options.Verbose,
-            cancellationToken).ConfigureAwait(false);
+        var overrideCode = await overridesApplier
+            .ApplyAsync(options, volume, manifestEntries, cancellationToken)
+            .ConfigureAwait(false);
         if (overrideCode != 0)
         {
             return overrideCode;
         }
 
         await stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);
-        return 0;
-    }
-
-    private async Task<int> InitializeTargetsIfNeededAsync(
-        ImportCommandOptions options,
-        string volume,
-        string sourcePath,
-        ManifestEntry[] manifestEntries,
-        CancellationToken cancellationToken)
-    {
-        if (options.DryRun)
-        {
-            return 0;
-        }
-
-        return await transferOperations.InitializeImportTargetsAsync(
-            volume,
-            sourcePath,
-            manifestEntries,
-            options.NoSecrets,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<int> ImportManifestEntriesAsync(
-        ImportCommandOptions options,
-        string volume,
-        string sourcePath,
-        bool excludePriv,
-        ManifestEntry[] manifestEntries,
-        CancellationToken cancellationToken)
-    {
-        foreach (var entry in manifestEntries)
-        {
-            if (options.NoSecrets && entry.Flags.Contains('s', StringComparison.Ordinal))
-            {
-                if (options.Verbose)
-                {
-                    await stderr.WriteLineAsync($"Skipping secret entry: {entry.Source}").ConfigureAwait(false);
-                }
-
-                continue;
-            }
-
-            var copyCode = await transferOperations.ImportManifestEntryAsync(
-                volume,
-                sourcePath,
-                entry,
-                excludePriv,
-                options.NoExcludes,
-                options.DryRun,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (copyCode != 0)
-            {
-                return copyCode;
-            }
-        }
-
-        return 0;
-    }
-
-    private async Task<int> EnforceSecretPermissionsIfNeededAsync(
-        ImportCommandOptions options,
-        string volume,
-        ManifestEntry[] manifestEntries,
-        CancellationToken cancellationToken)
-    {
-        if (options.DryRun)
-        {
-            return 0;
-        }
-
-        return await transferOperations.EnforceSecretPathPermissionsAsync(
-            volume,
-            manifestEntries,
-            options.NoSecrets,
-            options.Verbose,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<int> ImportAdditionalPathsAsync(
-        ImportCommandOptions options,
-        string volume,
-        IReadOnlyList<ImportAdditionalPath> additionalImportPaths,
-        CancellationToken cancellationToken)
-    {
-        foreach (var additionalPath in additionalImportPaths)
-        {
-            var copyCode = await pathOperations.ImportAdditionalPathAsync(
-                volume,
-                additionalPath,
-                options.NoExcludes,
-                options.DryRun,
-                options.Verbose,
-                cancellationToken).ConfigureAwait(false);
-            if (copyCode != 0)
-            {
-                return copyCode;
-            }
-        }
-
         return 0;
     }
 }

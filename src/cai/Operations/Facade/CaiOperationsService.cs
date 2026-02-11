@@ -40,31 +40,25 @@ internal sealed class CaiOperationsService
             manifestTomlParser,
             new ContainerRuntimeOptionParser());
         containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, CaiRuntimeDockerHelpers.ExecuteDockerCommandAsync);
+        var sshCleanupOperations = new CaiSshCleanupOperations(stdout, stderr);
 
-        CaiDiagnosticsAndSetupOperations diagnostics = null!;
-        CaiMaintenanceOperations maintenance = null!;
-        CaiTemplateSshAndGcOperations templateSshAndGc = null!;
+        diagnosticsAndSetupOperations = new CaiDiagnosticsAndSetupOperations(
+            stdout,
+            stderr,
+            sshCleanupOperations.RunSshCleanupAsync);
 
-        maintenance = new CaiMaintenanceOperations(
+        maintenanceOperations = new CaiMaintenanceOperations(
             stdout,
             stderr,
             containerLinkRepairService,
-            (outputJson, buildTemplates, resetLima, cancellationToken) => diagnostics.RunDoctorAsync(outputJson, buildTemplates, resetLima, cancellationToken));
+            diagnosticsAndSetupOperations.RunDoctorAsync);
 
-        templateSshAndGc = new CaiTemplateSshAndGcOperations(
+        templateSshAndGcOperations = new CaiTemplateSshAndGcOperations(
             stdout,
             stderr,
             ContainAiImagePrefixes,
-            (output, explicitVolume, container, workspace, cancellationToken) => maintenance.RunExportAsync(output, explicitVolume, container, workspace, cancellationToken));
-
-        diagnostics = new CaiDiagnosticsAndSetupOperations(
-            stdout,
-            stderr,
-            (dryRun, cancellationToken) => templateSshAndGc.RunSshCleanupAsync(dryRun, cancellationToken));
-
-        diagnosticsAndSetupOperations = diagnostics;
-        maintenanceOperations = maintenance;
-        templateSshAndGcOperations = templateSshAndGc;
+            maintenanceOperations.RunExportAsync,
+            sshCleanupOperations);
     }
 
     public static Task<int> RunDockerAsync(DockerCommandOptions options, CancellationToken cancellationToken)

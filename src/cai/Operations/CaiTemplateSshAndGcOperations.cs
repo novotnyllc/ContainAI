@@ -12,11 +12,40 @@ internal sealed class CaiTemplateSshAndGcOperations
         TextWriter standardError,
         IReadOnlyList<string> containAiImagePrefixes,
         Func<string?, string?, string?, string?, CancellationToken, Task<int>> runExportAsync)
+        : this(
+            standardOutput,
+            standardError,
+            containAiImagePrefixes,
+            runExportAsync,
+            new CaiSshCleanupOperations(standardOutput, standardError))
+    {
+    }
+
+    internal CaiTemplateSshAndGcOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IReadOnlyList<string> containAiImagePrefixes,
+        Func<string?, string?, string?, string?, CancellationToken, Task<int>> runExportAsync,
+        CaiSshCleanupOperations caiSshCleanupOperations)
     {
         stopOperations = new CaiStopOperations(standardOutput, standardError, runExportAsync);
-        gcOperations = new CaiGcOperations(standardOutput, standardError, containAiImagePrefixes);
+
+        var ageParser = new CaiGcAgeParser();
+        var candidateCollector = new CaiGcCandidateCollector(standardError);
+        var confirmationPrompt = new CaiGcConfirmationPrompt(standardOutput, standardError);
+        var containerPruner = new CaiGcContainerPruner(standardOutput);
+        var imagePruner = new CaiGcImagePruner(standardOutput, containAiImagePrefixes);
+        gcOperations = new CaiGcOperations(
+            standardOutput,
+            standardError,
+            ageParser,
+            candidateCollector,
+            confirmationPrompt,
+            containerPruner,
+            imagePruner);
+
         templateUpgradeOperations = new CaiTemplateUpgradeOperations(standardOutput, standardError);
-        sshCleanupOperations = new CaiSshCleanupOperations(standardOutput, standardError);
+        sshCleanupOperations = caiSshCleanupOperations ?? throw new ArgumentNullException(nameof(caiSshCleanupOperations));
     }
 
     public Task<int> RunStopAsync(

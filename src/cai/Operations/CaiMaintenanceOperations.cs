@@ -7,7 +7,8 @@ internal sealed class CaiMaintenanceOperations
     private readonly CaiExportOperations exportOperations;
     private readonly CaiSyncOperations syncOperations;
     private readonly CaiLinksOperations linksOperations;
-    private readonly CaiUpdateRefreshOperations updateRefreshOperations;
+    private readonly CaiUpdateOperations updateOperations;
+    private readonly CaiRefreshOperations refreshOperations;
     private readonly CaiUninstallOperations uninstallOperations;
 
     public CaiMaintenanceOperations(
@@ -19,7 +20,27 @@ internal sealed class CaiMaintenanceOperations
         exportOperations = new CaiExportOperations(standardOutput, standardError);
         syncOperations = new CaiSyncOperations(standardOutput, standardError);
         linksOperations = new CaiLinksOperations(standardOutput, standardError, containerLinkRepairService);
-        updateRefreshOperations = new CaiUpdateRefreshOperations(standardOutput, standardError, runDoctorAsync);
+
+        var baseImageResolver = new CaiBaseImageResolver();
+        var imagePuller = new CaiDockerImagePuller();
+        var templateRebuilder = new CaiTemplateRebuilder(standardOutput, standardError);
+        refreshOperations = new CaiRefreshOperations(
+            standardOutput,
+            standardError,
+            baseImageResolver,
+            imagePuller,
+            templateRebuilder);
+
+        var containerStopper = new CaiManagedContainerStopper();
+        var limaVmRecreator = new CaiLimaVmRecreator(standardOutput, standardError);
+        updateOperations = new CaiUpdateOperations(
+            standardOutput,
+            standardError,
+            refreshOperations,
+            containerStopper,
+            limaVmRecreator,
+            runDoctorAsync);
+
         uninstallOperations = new CaiUninstallOperations(standardOutput, standardError);
     }
 
@@ -49,10 +70,10 @@ internal sealed class CaiMaintenanceOperations
         bool limaRecreate,
         bool showHelp,
         CancellationToken cancellationToken)
-        => updateRefreshOperations.RunUpdateAsync(dryRun, stopContainers, limaRecreate, showHelp, cancellationToken);
+        => updateOperations.RunUpdateAsync(dryRun, stopContainers, limaRecreate, showHelp, cancellationToken);
 
     public Task<int> RunRefreshAsync(bool rebuild, bool showHelp, CancellationToken cancellationToken)
-        => updateRefreshOperations.RunRefreshAsync(rebuild, showHelp, cancellationToken);
+        => refreshOperations.RunRefreshAsync(rebuild, showHelp, cancellationToken);
 
     public Task<int> RunUninstallAsync(
         bool dryRun,
