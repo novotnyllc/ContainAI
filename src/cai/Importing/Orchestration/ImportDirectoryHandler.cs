@@ -5,13 +5,7 @@ namespace ContainAI.Cli.Host;
 internal sealed class ImportDirectoryHandler
 {
     private readonly TextWriter stdout;
-    private readonly ImportDirectoryAdditionalPathResolver additionalPathResolver;
-    private readonly ImportDirectoryTargetInitializer targetInitializer;
-    private readonly ImportDirectoryManifestEntryImporter manifestEntryImporter;
-    private readonly ImportDirectorySecretPermissionsEnforcer secretPermissionsEnforcer;
-    private readonly ImportDirectoryAdditionalPathImporter additionalPathImporter;
-    private readonly IImportEnvironmentOperations environmentOperations;
-    private readonly ImportDirectoryOverridesApplier overridesApplier;
+    private readonly DirectoryImportStepRunner stepRunner;
 
     public ImportDirectoryHandler(
         TextWriter standardOutput,
@@ -45,13 +39,25 @@ internal sealed class ImportDirectoryHandler
     {
         stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
         _ = standardError ?? throw new ArgumentNullException(nameof(standardError));
-        additionalPathResolver = importDirectoryAdditionalPathResolver ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathResolver));
-        targetInitializer = importDirectoryTargetInitializer ?? throw new ArgumentNullException(nameof(importDirectoryTargetInitializer));
-        manifestEntryImporter = importDirectoryManifestEntryImporter ?? throw new ArgumentNullException(nameof(importDirectoryManifestEntryImporter));
-        secretPermissionsEnforcer = importDirectorySecretPermissionsEnforcer ?? throw new ArgumentNullException(nameof(importDirectorySecretPermissionsEnforcer));
-        additionalPathImporter = importDirectoryAdditionalPathImporter ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathImporter));
-        environmentOperations = importEnvironmentOperations ?? throw new ArgumentNullException(nameof(importEnvironmentOperations));
-        overridesApplier = importDirectoryOverridesApplier ?? throw new ArgumentNullException(nameof(importDirectoryOverridesApplier));
+        var additionalPathResolver = importDirectoryAdditionalPathResolver ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathResolver));
+        var targetInitializer = importDirectoryTargetInitializer ?? throw new ArgumentNullException(nameof(importDirectoryTargetInitializer));
+        var manifestEntryImporter = importDirectoryManifestEntryImporter ?? throw new ArgumentNullException(nameof(importDirectoryManifestEntryImporter));
+        var secretPermissionsEnforcer = importDirectorySecretPermissionsEnforcer ?? throw new ArgumentNullException(nameof(importDirectorySecretPermissionsEnforcer));
+        var additionalPathImporter = importDirectoryAdditionalPathImporter ?? throw new ArgumentNullException(nameof(importDirectoryAdditionalPathImporter));
+        var environmentOperations = importEnvironmentOperations ?? throw new ArgumentNullException(nameof(importEnvironmentOperations));
+        var overridesApplier = importDirectoryOverridesApplier ?? throw new ArgumentNullException(nameof(importDirectoryOverridesApplier));
+
+        stepRunner = new DirectoryImportStepRunner(
+            new IDirectoryImportStep[]
+            {
+                new ResolveAdditionalPathsDirectoryImportStep(additionalPathResolver),
+                new InitializeTargetDirectoryImportStep(targetInitializer),
+                new ImportManifestEntriesDirectoryImportStep(manifestEntryImporter),
+                new EnforceSecretPermissionsDirectoryImportStep(secretPermissionsEnforcer),
+                new ImportAdditionalPathsDirectoryImportStep(additionalPathImporter),
+                new ImportEnvironmentVariablesDirectoryImportStep(environmentOperations),
+                new ApplyOverridesDirectoryImportStep(overridesApplier),
+            });
     }
 
     public async Task<int> HandleDirectoryImportAsync(
@@ -64,64 +70,18 @@ internal sealed class ImportDirectoryHandler
         ManifestEntry[] manifestEntries,
         CancellationToken cancellationToken)
     {
-        var additionalImportPaths = await additionalPathResolver.ResolveAsync(
+        var context = new DirectoryImportContext(
+            options,
             workspace,
             explicitConfigPath,
-            excludePriv,
             sourcePath,
-            options.Verbose,
-            cancellationToken).ConfigureAwait(false);
-
-        var initCode = await targetInitializer
-            .InitializeIfNeededAsync(options, volume, sourcePath, manifestEntries, cancellationToken)
-            .ConfigureAwait(false);
-        if (initCode != 0)
-        {
-            return initCode;
-        }
-
-        var manifestImportCode = await manifestEntryImporter
-            .ImportAsync(options, volume, sourcePath, excludePriv, manifestEntries, cancellationToken)
-            .ConfigureAwait(false);
-        if (manifestImportCode != 0)
-        {
-            return manifestImportCode;
-        }
-
-        var secretPermissionsCode = await secretPermissionsEnforcer
-            .EnforceIfNeededAsync(options, volume, manifestEntries, cancellationToken)
-            .ConfigureAwait(false);
-        if (secretPermissionsCode != 0)
-        {
-            return secretPermissionsCode;
-        }
-
-        var additionalPathImportCode = await additionalPathImporter
-            .ImportAsync(options, volume, additionalImportPaths, cancellationToken)
-            .ConfigureAwait(false);
-        if (additionalPathImportCode != 0)
-        {
-            return additionalPathImportCode;
-        }
-
-        var environmentCode = await environmentOperations.ImportEnvironmentVariablesAsync(
             volume,
-            workspace,
-            explicitConfigPath,
-            options.DryRun,
-            options.Verbose,
-            cancellationToken).ConfigureAwait(false);
-        if (environmentCode != 0)
+            excludePriv,
+            manifestEntries);
+        var importCode = await stepRunner.RunAsync(context, cancellationToken).ConfigureAwait(false);
+        if (importCode != 0)
         {
-            return environmentCode;
-        }
-
-        var overrideCode = await overridesApplier
-            .ApplyAsync(options, volume, manifestEntries, cancellationToken)
-            .ConfigureAwait(false);
-        if (overrideCode != 0)
-        {
-            return overrideCode;
+            return importCode;
         }
 
         await stdout.WriteLineAsync($"Imported data into volume {volume}").ConfigureAwait(false);

@@ -15,18 +15,33 @@ internal interface IDevcontainerProcessExecution
 
 internal sealed class DevcontainerProcessExecution : IDevcontainerProcessExecution
 {
-    private readonly DevcontainerFileSystem fileSystem;
     private readonly DevcontainerProcessCaptureRunner processCaptureRunner;
-    private readonly Func<string> userNameProvider;
+    private readonly IDevcontainerProcessCommandProbe commandProbe;
+    private readonly IDevcontainerProcessLivenessChecker livenessChecker;
+    private readonly IDevcontainerRootCommandExecutor rootCommandExecutor;
 
     public DevcontainerProcessExecution(
         DevcontainerFileSystem fileSystem,
         DevcontainerProcessCaptureRunner processCaptureRunner,
         Func<string> userNameProvider)
+        : this(
+            processCaptureRunner,
+            CreateCommandProbe(processCaptureRunner),
+            new DevcontainerProcessLivenessChecker(fileSystem, processCaptureRunner),
+            CreateRootCommandExecutor(processCaptureRunner, userNameProvider))
     {
-        this.fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+    }
+
+    internal DevcontainerProcessExecution(
+        DevcontainerProcessCaptureRunner processCaptureRunner,
+        IDevcontainerProcessCommandProbe devcontainerProcessCommandProbe,
+        IDevcontainerProcessLivenessChecker devcontainerProcessLivenessChecker,
+        IDevcontainerRootCommandExecutor devcontainerRootCommandExecutor)
+    {
         this.processCaptureRunner = processCaptureRunner ?? throw new ArgumentNullException(nameof(processCaptureRunner));
-        this.userNameProvider = userNameProvider ?? throw new ArgumentNullException(nameof(userNameProvider));
+        commandProbe = devcontainerProcessCommandProbe ?? throw new ArgumentNullException(nameof(devcontainerProcessCommandProbe));
+        livenessChecker = devcontainerProcessLivenessChecker ?? throw new ArgumentNullException(nameof(devcontainerProcessLivenessChecker));
+        rootCommandExecutor = devcontainerRootCommandExecutor ?? throw new ArgumentNullException(nameof(devcontainerRootCommandExecutor));
     }
 
     public async Task<DevcontainerProcessResult> RunProcessCaptureAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
@@ -36,86 +51,44 @@ internal sealed class DevcontainerProcessExecution : IDevcontainerProcessExecuti
     }
 
     public async Task<bool> CommandExistsAsync(string command, CancellationToken cancellationToken)
-    {
-        var result = await RunProcessCaptureAsync("sh", ["-c", $"command -v {command} >/dev/null 2>&1"], cancellationToken).ConfigureAwait(false);
-        return result.ExitCode == 0;
-    }
+        => await commandProbe.CommandExistsAsync(command, cancellationToken).ConfigureAwait(false);
 
     public async Task<bool> CommandSucceedsAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
-    {
-        var result = await RunProcessCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
-        return result.ExitCode == 0;
-    }
+        => await commandProbe.CommandSucceedsAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
 
     public bool IsProcessAlive(int processId)
-    {
-        if (processId <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            if (OperatingSystem.IsLinux() && fileSystem.DirectoryExists($"/proc/{processId}"))
-            {
-                return true;
-            }
-
-            if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
-            {
-                var result = processCaptureRunner
-                    .RunCaptureAsync("kill", ["-0", processId.ToString(System.Globalization.CultureInfo.InvariantCulture)], CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult();
-                return result.ExitCode == 0;
-            }
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (NotSupportedException)
-        {
-            return false;
-        }
-
-        return false;
-    }
+        => livenessChecker.IsProcessAlive(processId);
 
     public async Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        => await rootCommandExecutor.RunAsRootAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
+
+    private static DevcontainerRootCommandExecutor CreateRootCommandExecutor(
+        DevcontainerProcessCaptureRunner processCaptureRunner,
+        Func<string> userNameProvider)
     {
-        if (IsRunningAsRoot())
-        {
-            var direct = await RunProcessCaptureAsync(executable, arguments, cancellationToken).ConfigureAwait(false);
-            if (direct.ExitCode != 0)
-            {
-                throw new InvalidOperationException(direct.StandardError.Trim());
-            }
-
-            return;
-        }
-
-        if (!await CommandSucceedsAsync("sudo", ["-n", "true"], cancellationToken).ConfigureAwait(false))
-        {
-            throw new InvalidOperationException($"Root privileges required for command: {executable}");
-        }
-
-        var sudoArgs = new List<string>(arguments.Count + 2) { "-n", executable };
-        foreach (var argument in arguments)
-        {
-            sudoArgs.Add(argument);
-        }
-
-        var sudoResult = await RunProcessCaptureAsync("sudo", sudoArgs, cancellationToken).ConfigureAwait(false);
-        if (sudoResult.ExitCode != 0)
-        {
-            throw new InvalidOperationException(sudoResult.StandardError.Trim());
-        }
+        ArgumentNullException.ThrowIfNull(processCaptureRunner);
+        ArgumentNullException.ThrowIfNull(userNameProvider);
+        var processResultRunner = CreateProcessResultRunner(processCaptureRunner);
+        var commandProbe = new DevcontainerProcessCommandProbe(processResultRunner);
+        return new DevcontainerRootCommandExecutor(
+            processResultRunner,
+            userNameProvider,
+            commandProbe);
     }
 
-    private bool IsRunningAsRoot() => string.Equals(userNameProvider(), "root", StringComparison.Ordinal);
+    private static DevcontainerProcessCommandProbe CreateCommandProbe(DevcontainerProcessCaptureRunner processCaptureRunner)
+        => new(CreateProcessResultRunner(processCaptureRunner));
+
+    private static Func<string, IReadOnlyList<string>, CancellationToken, Task<DevcontainerProcessResult>> CreateProcessResultRunner(
+        DevcontainerProcessCaptureRunner processCaptureRunner)
+    {
+        ArgumentNullException.ThrowIfNull(processCaptureRunner);
+        return async (executable, arguments, cancellationToken) =>
+        {
+            var result = await processCaptureRunner
+                .RunCaptureAsync(executable, arguments, cancellationToken)
+                .ConfigureAwait(false);
+            return new DevcontainerProcessResult(result.ExitCode, result.StandardOutput, result.StandardError);
+        };
+    }
 }

@@ -84,7 +84,9 @@ internal sealed class ContainerLinkRepairService
         var commandClient = new ContainerLinkCommandClient(dockerExecutor);
         var repairOperations = new ContainerLinkRepairOperations(commandClient);
         var reporter = new ContainerLinkRepairReporter(standardOutput);
-        return new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), repairOperations, reporter);
+        var stateReporter = new ContainerLinkEntryStateReporter(standardError, reporter);
+        var repairExecutor = new ContainerLinkEntryRepairExecutor(standardError, repairOperations, reporter);
+        return new ContainerLinkEntryProcessor(standardError, new ContainerLinkEntryInspector(commandClient), stateReporter, repairExecutor);
     }
 
     private static ContainerLinkCheckedTimestampUpdater CreateCheckedTimestampUpdater(
