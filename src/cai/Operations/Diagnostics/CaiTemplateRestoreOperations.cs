@@ -1,10 +1,17 @@
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiTemplateRestoreOperations : CaiRuntimeSupport
+internal sealed class CaiTemplateRestoreOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiTemplateRestoreOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RestoreTemplatesAsync(string? templateName, bool includeAll, CancellationToken cancellationToken)
@@ -16,7 +23,7 @@ internal sealed class CaiTemplateRestoreOperations : CaiRuntimeSupport
             return 0;
         }
 
-        var destinationRoot = ResolveTemplatesDirectory();
+        var destinationRoot = CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
         Directory.CreateDirectory(destinationRoot);
 
         var sourceTemplates = Directory.EnumerateDirectories(sourceRoot).ToArray();
@@ -37,7 +44,7 @@ internal sealed class CaiTemplateRestoreOperations : CaiRuntimeSupport
                 Directory.Delete(destination, recursive: true);
             }
 
-            await CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
+            await CaiRuntimeDirectoryCopier.CopyDirectoryAsync(source, destination, cancellationToken).ConfigureAwait(false);
             await stdout.WriteLineAsync($"Restored template '{template}'").ConfigureAwait(false);
         }
 

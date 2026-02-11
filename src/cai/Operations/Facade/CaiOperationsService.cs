@@ -1,8 +1,9 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiOperationsService : CaiRuntimeSupport
+internal sealed class CaiOperationsService
 {
     private static readonly string[] ContainAiImagePrefixes =
     [
@@ -11,6 +12,8 @@ internal sealed class CaiOperationsService : CaiRuntimeSupport
         "ghcr.io/novotnyllc/containai",
     ];
 
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly ContainerRuntimeCommandService containerRuntimeCommandService;
     private readonly ContainerLinkRepairService containerLinkRepairService;
     private readonly CaiDiagnosticsAndSetupOperations diagnosticsAndSetupOperations;
@@ -26,8 +29,9 @@ internal sealed class CaiOperationsService : CaiRuntimeSupport
         TextWriter standardOutput,
         TextWriter standardError,
         IManifestTomlParser manifestTomlParser)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
         ArgumentNullException.ThrowIfNull(manifestTomlParser);
 
         containerRuntimeCommandService = new ContainerRuntimeCommandService(
@@ -35,7 +39,7 @@ internal sealed class CaiOperationsService : CaiRuntimeSupport
             stderr,
             manifestTomlParser,
             new ContainerRuntimeOptionParser());
-        containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, ExecuteDockerCommandAsync);
+        containerLinkRepairService = new ContainerLinkRepairService(stdout, stderr, CaiRuntimeDockerHelpers.ExecuteDockerCommandAsync);
 
         CaiDiagnosticsAndSetupOperations diagnostics = null!;
         CaiMaintenanceOperations maintenance = null!;

@@ -1,7 +1,12 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.RuntimeSupport.Process;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiDiagnosticsAndSetupOperations : CaiRuntimeSupport
+internal sealed class CaiDiagnosticsAndSetupOperations
 {
+    private readonly TextWriter stdout;
     private readonly CaiDiagnosticsStatusOperations statusOperations;
     private readonly CaiDoctorOperations doctorOperations;
     private readonly CaiSetupOperations setupOperations;
@@ -11,8 +16,9 @@ internal sealed class CaiDiagnosticsAndSetupOperations : CaiRuntimeSupport
         TextWriter standardOutput,
         TextWriter standardError,
         Func<bool, CancellationToken, Task<int>> runSshCleanupAsync)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+
         var templateRestoreOperations = new CaiTemplateRestoreOperations(standardOutput, standardError);
         statusOperations = new CaiDiagnosticsStatusOperations(standardOutput, standardError);
         doctorOperations = new CaiDoctorOperations(standardOutput, standardError);
@@ -65,14 +71,14 @@ internal sealed class CaiDiagnosticsAndSetupOperations : CaiRuntimeSupport
 
     public static async Task<int> RunDockerAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken)
     {
-        var executable = IsExecutableOnPath("containai-docker")
+        var executable = CaiRuntimePathResolutionHelpers.IsExecutableOnPath("containai-docker")
             ? "containai-docker"
             : "docker";
 
         var dockerArgs = new List<string>();
         if (string.Equals(executable, "docker", StringComparison.Ordinal))
         {
-            var context = await ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
+            var context = await CaiRuntimeDockerHelpers.ResolveDockerContextAsync(cancellationToken).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(context))
             {
                 dockerArgs.Add("--context");
@@ -85,7 +91,7 @@ internal sealed class CaiDiagnosticsAndSetupOperations : CaiRuntimeSupport
             dockerArgs.Add(argument);
         }
 
-        return await RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
+        return await CaiRuntimeProcessRunner.RunProcessInteractiveAsync(executable, dockerArgs, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<int> RunVersionAsync(bool json, CancellationToken cancellationToken)
@@ -96,7 +102,7 @@ internal sealed class CaiDiagnosticsAndSetupOperations : CaiRuntimeSupport
 
         if (json)
         {
-            await stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
+            await stdout.WriteLineAsync($"{{\"version\":\"{versionInfo.Version}\",\"install_type\":\"{installType}\",\"install_dir\":\"{CaiRuntimeJsonEscaper.EscapeJson(versionInfo.InstallDir)}\"}}").ConfigureAwait(false);
             return 0;
         }
 

@@ -1,10 +1,16 @@
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiTemplateUpgradeOperations : CaiRuntimeSupport
+internal sealed class CaiTemplateUpgradeOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
+
     public CaiTemplateUpgradeOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunTemplateUpgradeAsync(
@@ -12,7 +18,7 @@ internal sealed class CaiTemplateUpgradeOperations : CaiRuntimeSupport
         bool dryRun,
         CancellationToken cancellationToken)
     {
-        var templatesRoot = ResolveTemplatesDirectory();
+        var templatesRoot = CaiRuntimeConfigRoot.ResolveTemplatesDirectory();
         if (!Directory.Exists(templatesRoot))
         {
             await stderr.WriteLineAsync($"Template directory not found: {templatesRoot}").ConfigureAwait(false);

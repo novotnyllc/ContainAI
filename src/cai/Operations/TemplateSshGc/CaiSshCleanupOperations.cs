@@ -1,15 +1,21 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Paths;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiSshCleanupOperations : CaiRuntimeSupport
+internal sealed class CaiSshCleanupOperations
 {
+    private readonly TextWriter stdout;
+
     public CaiSshCleanupOperations(TextWriter standardOutput, TextWriter standardError)
-        : base(standardOutput, standardError)
     {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        _ = standardError ?? throw new ArgumentNullException(nameof(standardError));
     }
 
     public async Task<int> RunSshCleanupAsync(bool dryRun, CancellationToken cancellationToken)
     {
-        var sshDir = Path.Combine(ResolveHomeDirectory(), ".ssh", "containai.d");
+        var sshDir = Path.Combine(CaiRuntimeHomePathHelpers.ResolveHomeDirectory(), ".ssh", "containai.d");
         if (!Directory.Exists(sshDir))
         {
             return 0;
@@ -20,7 +26,7 @@ internal sealed class CaiSshCleanupOperations : CaiRuntimeSupport
         {
             cancellationToken.ThrowIfCancellationRequested();
             var containerName = Path.GetFileNameWithoutExtension(file);
-            var exists = await DockerContainerExistsAsync(containerName, cancellationToken).ConfigureAwait(false);
+            var exists = await CaiRuntimeDockerHelpers.DockerContainerExistsAsync(containerName, cancellationToken).ConfigureAwait(false);
             if (exists)
             {
                 continue;

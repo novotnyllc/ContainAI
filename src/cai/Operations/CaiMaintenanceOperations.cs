@@ -2,7 +2,7 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiMaintenanceOperations : CaiRuntimeSupport
+internal sealed class CaiMaintenanceOperations
 {
     private readonly CaiExportOperations exportOperations;
     private readonly CaiSyncOperations syncOperations;
@@ -15,7 +15,6 @@ internal sealed class CaiMaintenanceOperations : CaiRuntimeSupport
         TextWriter standardError,
         ContainerLinkRepairService containerLinkRepairService,
         Func<bool, bool, bool, CancellationToken, Task<int>> runDoctorAsync)
-        : base(standardOutput, standardError)
     {
         exportOperations = new CaiExportOperations(standardOutput, standardError);
         syncOperations = new CaiSyncOperations(standardOutput, standardError);

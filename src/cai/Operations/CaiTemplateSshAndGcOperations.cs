@@ -1,6 +1,6 @@
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiTemplateSshAndGcOperations : CaiRuntimeSupport
+internal sealed class CaiTemplateSshAndGcOperations
 {
     private readonly CaiStopOperations stopOperations;
     private readonly CaiGcOperations gcOperations;
@@ -12,7 +12,6 @@ internal sealed class CaiTemplateSshAndGcOperations : CaiRuntimeSupport
         TextWriter standardError,
         IReadOnlyList<string> containAiImagePrefixes,
         Func<string?, string?, string?, string?, CancellationToken, Task<int>> runExportAsync)
-        : base(standardOutput, standardError)
     {
         stopOperations = new CaiStopOperations(standardOutput, standardError, runExportAsync);
         gcOperations = new CaiGcOperations(standardOutput, standardError, containAiImagePrefixes);

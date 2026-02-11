@@ -1,15 +1,23 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiGcOperations : CaiRuntimeSupport
+internal sealed class CaiGcOperations
 {
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly IReadOnlyList<string> containAiImagePrefixes;
 
     public CaiGcOperations(
         TextWriter standardOutput,
         TextWriter standardError,
         IReadOnlyList<string> containAiImagePrefixes)
-        : base(standardOutput, standardError)
-        => this.containAiImagePrefixes = containAiImagePrefixes ?? throw new ArgumentNullException(nameof(containAiImagePrefixes));
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        this.containAiImagePrefixes = containAiImagePrefixes ?? throw new ArgumentNullException(nameof(containAiImagePrefixes));
+    }
 
     public async Task<int> RunGcAsync(
         bool dryRun,
@@ -18,7 +26,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
         string ageValue,
         CancellationToken cancellationToken)
     {
-        if (!TryParseAgeDuration(ageValue, out var minimumAge))
+        if (!CaiRuntimeParseAndTimeHelpers.TryParseAgeDuration(ageValue, out var minimumAge))
         {
             await stderr.WriteLineAsync($"Invalid --age value: {ageValue}").ConfigureAwait(false);
             return 1;
@@ -53,7 +61,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
 
     private async Task<CaiGcPruneCandidateResult> CollectContainerPruneCandidatesAsync(TimeSpan minimumAge, CancellationToken cancellationToken)
     {
-        var candidates = await DockerCaptureAsync(
+        var candidates = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
             ["ps", "-aq", "--filter", "label=containai.managed=true", "--filter", "status=exited", "--filter", "status=created"],
             cancellationToken).ConfigureAwait(false);
 
@@ -71,7 +79,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
         foreach (var containerId in containerIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var inspect = await DockerCaptureAsync(
+            var inspect = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
                 ["inspect", "--format", "{{.State.Status}}|{{.State.FinishedAt}}|{{.Created}}|{{with index .Config.Labels \"containai.keep\"}}{{.}}{{end}}", containerId],
                 cancellationToken).ConfigureAwait(false);
             if (inspect.ExitCode != 0)
@@ -96,7 +104,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
                 continue;
             }
 
-            var referenceTime = ParseGcReferenceTime(inspectFields[1], inspectFields[2]);
+            var referenceTime = CaiRuntimeParseAndTimeHelpers.ParseGcReferenceTime(inspectFields[1], inspectFields[2]);
             if (referenceTime is null)
             {
                 continue;
@@ -150,7 +158,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
                 continue;
             }
 
-            var removeResult = await DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
+            var removeResult = await CaiRuntimeDockerHelpers.DockerRunAsync(["rm", "-f", containerId], cancellationToken).ConfigureAwait(false);
             if (removeResult != 0)
             {
                 failures++;
@@ -163,7 +171,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
     private async Task<int> PruneImagesAsync(bool dryRun, CancellationToken cancellationToken)
     {
         var failures = 0;
-        var images = await DockerCaptureAsync(["images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"], cancellationToken).ConfigureAwait(false);
+        var images = await CaiRuntimeDockerHelpers.DockerCaptureAsync(["images", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}"], cancellationToken).ConfigureAwait(false);
         if (images.ExitCode != 0)
         {
             return failures;
@@ -190,7 +198,7 @@ internal sealed class CaiGcOperations : CaiRuntimeSupport
             }
             else
             {
-                var removeImageResult = await DockerRunAsync(["rmi", imageId], cancellationToken).ConfigureAwait(false);
+                var removeImageResult = await CaiRuntimeDockerHelpers.DockerRunAsync(["rmi", imageId], cancellationToken).ConfigureAwait(false);
                 if (removeImageResult != 0)
                 {
                     failures++;

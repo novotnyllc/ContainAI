@@ -1,15 +1,29 @@
+using ContainAI.Cli.Host.RuntimeSupport.Docker;
+using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+
 namespace ContainAI.Cli.Host;
 
-internal sealed class CaiStopOperations : CaiRuntimeSupport
+internal sealed class CaiStopOperations
 {
+    private static readonly string[] ConfigFileNames =
+    [
+        "config.toml",
+        "containai.toml",
+    ];
+
+    private readonly TextWriter stdout;
+    private readonly TextWriter stderr;
     private readonly Func<string?, string?, string?, string?, CancellationToken, Task<int>> runExportAsync;
 
     public CaiStopOperations(
         TextWriter standardOutput,
         TextWriter standardError,
         Func<string?, string?, string?, string?, CancellationToken, Task<int>> runExportAsync)
-        : base(standardOutput, standardError)
-        => this.runExportAsync = runExportAsync ?? throw new ArgumentNullException(nameof(runExportAsync));
+    {
+        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
+        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+        this.runExportAsync = runExportAsync ?? throw new ArgumentNullException(nameof(runExportAsync));
+    }
 
     public async Task<int> RunStopAsync(
         string? containerName,
@@ -55,7 +69,7 @@ internal sealed class CaiStopOperations : CaiRuntimeSupport
         var targets = new List<(string Context, string Container)>();
         if (!string.IsNullOrWhiteSpace(containerName))
         {
-            var contexts = await FindContainerContextsAsync(containerName, cancellationToken).ConfigureAwait(false);
+            var contexts = await CaiRuntimeDockerHelpers.FindContainerContextsAsync(containerName, cancellationToken).ConfigureAwait(false);
             if (!await TryAddSingleTargetAsync(contexts, containerName).ConfigureAwait(false))
             {
                 return null;
@@ -67,9 +81,9 @@ internal sealed class CaiStopOperations : CaiRuntimeSupport
 
         if (stopAll)
         {
-            foreach (var context in await GetAvailableContextsAsync(cancellationToken).ConfigureAwait(false))
+            foreach (var context in await CaiRuntimeDockerHelpers.GetAvailableContextsAsync(cancellationToken).ConfigureAwait(false))
             {
-                var list = await DockerCaptureForContextAsync(
+                var list = await CaiRuntimeDockerHelpers.DockerCaptureForContextAsync(
                     context,
                     ["ps", "-aq", "--filter", "label=containai.managed=true"],
                     cancellationToken).ConfigureAwait(false);
@@ -88,14 +102,16 @@ internal sealed class CaiStopOperations : CaiRuntimeSupport
         }
 
         var workspace = Path.GetFullPath(Directory.GetCurrentDirectory());
-        var workspaceContainer = await ResolveWorkspaceContainerNameAsync(workspace, cancellationToken).ConfigureAwait(false);
+        var workspaceContainer = await CaiRuntimeCommandParsingHelpers
+            .ResolveWorkspaceContainerNameAsync(workspace, stderr, ConfigFileNames, cancellationToken)
+            .ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(workspaceContainer))
         {
             await stderr.WriteLineAsync("Usage: cai stop --all | --container <name> [--remove]").ConfigureAwait(false);
             return null;
         }
 
-        var workspaceContexts = await FindContainerContextsAsync(workspaceContainer, cancellationToken).ConfigureAwait(false);
+        var workspaceContexts = await CaiRuntimeDockerHelpers.FindContainerContextsAsync(workspaceContainer, cancellationToken).ConfigureAwait(false);
         if (!await TryAddSingleTargetAsync(workspaceContexts, workspaceContainer).ConfigureAwait(false))
         {
             return null;
@@ -147,7 +163,7 @@ internal sealed class CaiStopOperations : CaiRuntimeSupport
                 }
             }
 
-            var stopResult = await DockerCaptureForContextAsync(target.Context, ["stop", target.Container], cancellationToken).ConfigureAwait(false);
+            var stopResult = await CaiRuntimeDockerHelpers.DockerCaptureForContextAsync(target.Context, ["stop", target.Container], cancellationToken).ConfigureAwait(false);
             if (stopResult.ExitCode != 0)
             {
                 failures++;
@@ -160,7 +176,7 @@ internal sealed class CaiStopOperations : CaiRuntimeSupport
 
             if (remove)
             {
-                var removeResult = await DockerCaptureForContextAsync(target.Context, ["rm", "-f", target.Container], cancellationToken).ConfigureAwait(false);
+                var removeResult = await CaiRuntimeDockerHelpers.DockerCaptureForContextAsync(target.Context, ["rm", "-f", target.Container], cancellationToken).ConfigureAwait(false);
                 if (removeResult.ExitCode != 0)
                 {
                     failures++;
