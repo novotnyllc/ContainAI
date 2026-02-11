@@ -1,6 +1,4 @@
-using System.Text;
-using ContainAI.Cli.Host.RuntimeSupport.Docker;
-using ContainAI.Cli.Host.RuntimeSupport.Paths;
+using ContainAI.Cli.Host.Importing.Transfer.SecretPermissions;
 
 namespace ContainAI.Cli.Host;
 
@@ -23,12 +21,34 @@ internal interface IImportSecretPermissionOperations
 internal sealed class ImportSecretPermissionOperations : IImportSecretPermissionOperations
 {
     private readonly TextWriter stdout;
-    private readonly TextWriter stderr;
+    private readonly IImportSecretPathCollector secretPathCollector;
+    private readonly ISecretPermissionCommandBuilder permissionCommandBuilder;
+    private readonly ISecretPermissionDockerExecutor permissionDockerExecutor;
 
     public ImportSecretPermissionOperations(TextWriter standardOutput, TextWriter standardError)
+        : this(
+            standardOutput,
+            standardError,
+            new ImportSecretPathCollector(),
+            new SecretPermissionCommandBuilder(),
+            new SecretPermissionDockerExecutor(standardError))
     {
-        stdout = standardOutput ?? throw new ArgumentNullException(nameof(standardOutput));
-        stderr = standardError ?? throw new ArgumentNullException(nameof(standardError));
+    }
+
+    internal ImportSecretPermissionOperations(
+        TextWriter standardOutput,
+        TextWriter standardError,
+        IImportSecretPathCollector importSecretPathCollector,
+        ISecretPermissionCommandBuilder secretPermissionCommandBuilder,
+        ISecretPermissionDockerExecutor secretPermissionDockerExecutor)
+    {
+        ArgumentNullException.ThrowIfNull(standardOutput);
+        ArgumentNullException.ThrowIfNull(standardError);
+        (stdout, secretPathCollector, permissionCommandBuilder, permissionDockerExecutor) = (
+            standardOutput,
+            importSecretPathCollector ?? throw new ArgumentNullException(nameof(importSecretPathCollector)),
+            secretPermissionCommandBuilder ?? throw new ArgumentNullException(nameof(secretPermissionCommandBuilder)),
+            secretPermissionDockerExecutor ?? throw new ArgumentNullException(nameof(secretPermissionDockerExecutor)));
     }
 
     public async Task<int> EnforceSecretPathPermissionsAsync(
@@ -38,25 +58,22 @@ internal sealed class ImportSecretPermissionOperations : IImportSecretPermission
         bool verbose,
         CancellationToken cancellationToken)
     {
-        var (secretDirectories, secretFiles) = CollectSecretPaths(manifestEntries, noSecrets);
+        var secretPaths = secretPathCollector.Collect(manifestEntries, noSecrets);
 
-        if (secretDirectories.Count == 0 && secretFiles.Count == 0)
+        if (secretPaths.IsEmpty)
         {
             return 0;
         }
 
-        var permissionsCommand = BuildBulkPermissionsCommand(secretDirectories, secretFiles);
-
-        var result = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", permissionsCommand],
+        var permissionsCommand = permissionCommandBuilder.BuildBulkPermissionsCommand(
+            secretPaths.SecretDirectories,
+            secretPaths.SecretFiles);
+        var enforceCode = await permissionDockerExecutor.ExecuteAsync(
+            volume,
+            permissionsCommand,
             cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0)
+        if (enforceCode != 0)
         {
-            if (!string.IsNullOrWhiteSpace(result.StandardError))
-            {
-                await stderr.WriteLineAsync(result.StandardError.Trim()).ConfigureAwait(false);
-            }
-
             return 1;
         }
 
@@ -74,87 +91,10 @@ internal sealed class ImportSecretPermissionOperations : IImportSecretPermission
         bool isDirectory,
         CancellationToken cancellationToken)
     {
-        var chmodCommand = BuildEntryPermissionsCommand(normalizedTarget, isDirectory);
-        var chmodResult = await CaiRuntimeDockerHelpers.DockerCaptureAsync(
-            ["run", "--rm", "-v", $"{volume}:/target", "alpine:3.20", "sh", "-lc", chmodCommand],
+        var chmodCommand = permissionCommandBuilder.BuildEntryPermissionsCommand(normalizedTarget, isDirectory);
+        return await permissionDockerExecutor.ExecuteAsync(
+            volume,
+            chmodCommand,
             cancellationToken).ConfigureAwait(false);
-        if (chmodResult.ExitCode != 0)
-        {
-            if (!string.IsNullOrWhiteSpace(chmodResult.StandardError))
-            {
-                await stderr.WriteLineAsync(chmodResult.StandardError.Trim()).ConfigureAwait(false);
-            }
-
-            return 1;
-        }
-
-        return 0;
-    }
-
-    private static (HashSet<string> SecretDirectories, HashSet<string> SecretFiles) CollectSecretPaths(
-        IReadOnlyList<ManifestEntry> manifestEntries,
-        bool noSecrets)
-    {
-        var secretDirectories = new HashSet<string>(StringComparer.Ordinal);
-        var secretFiles = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var entry in manifestEntries)
-        {
-            if (!entry.Flags.Contains('s', StringComparison.Ordinal) || noSecrets)
-            {
-                continue;
-            }
-
-            var normalizedTarget = entry.Target.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
-            if (entry.Flags.Contains('d', StringComparison.Ordinal))
-            {
-                secretDirectories.Add(normalizedTarget);
-                continue;
-            }
-
-            secretFiles.Add(normalizedTarget);
-            var parent = Path.GetDirectoryName(normalizedTarget)?.Replace("\\", "/", StringComparison.Ordinal);
-            if (!string.IsNullOrWhiteSpace(parent))
-            {
-                secretDirectories.Add(parent);
-            }
-        }
-
-        return (secretDirectories, secretFiles);
-    }
-
-    private static string BuildBulkPermissionsCommand(HashSet<string> secretDirectories, HashSet<string> secretFiles)
-    {
-        var commandBuilder = new StringBuilder();
-        foreach (var directory in secretDirectories.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            commandBuilder.Append("if [ -d '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("' ]; then chmod 700 '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(directory));
-            commandBuilder.Append("' || true; fi; ");
-        }
-
-        foreach (var file in secretFiles.OrderBy(static value => value, StringComparer.Ordinal))
-        {
-            commandBuilder.Append("if [ -f '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("' ]; then chmod 600 '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("'; chown 1000:1000 '/target/");
-            commandBuilder.Append(CaiRuntimePathHelpers.EscapeForSingleQuotedShell(file));
-            commandBuilder.Append("' || true; fi; ");
-        }
-
-        return commandBuilder.ToString();
-    }
-
-    private static string BuildEntryPermissionsCommand(string normalizedTarget, bool isDirectory)
-    {
-        var chmodMode = isDirectory ? "700" : "600";
-        return $"target='/target/{CaiRuntimePathHelpers.EscapeForSingleQuotedShell(normalizedTarget)}'; " +
-               "if [ -e \"$target\" ]; then chmod " + chmodMode + " \"$target\"; fi; " +
-               "if [ -e \"$target\" ]; then chown 1000:1000 \"$target\" || true; fi";
     }
 }
