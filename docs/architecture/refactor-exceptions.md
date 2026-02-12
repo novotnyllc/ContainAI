@@ -71,4 +71,12 @@ These files already contained only interface declarations prior to this refactor
 | `src/cai/Manifests/Apply/IManifestApplier.cs` | `IManifestApplier` |
 | `src/cai/Manifests/Apply/IManifestContainerLinkApplier.cs` | `IManifestContainerLinkApplier` |
 | `src/cai/Manifests/Apply/IManifestInitDirectoryApplier.cs` | `IManifestInitDirectoryApplier` |
+
+### Contract/Model Files (No Interface Extraction Applicable)
+
+These files contain models, enums, delegates, or source-generator contexts rather than
+interface+class co-locations. No extraction action was needed.
+
+| File | Contents |
+|---|---|
 | `src/cai/ContainerLinks/Repair/ContainerLinkRepairContracts.cs` | Models: `ContainerLinkRepairMode`, `EntryStateKind`, `ContainerLinkSpecDocument`, `ContainerLinkSpecEntry`; source-gen: `ContainerLinkSpecJsonContext` |
