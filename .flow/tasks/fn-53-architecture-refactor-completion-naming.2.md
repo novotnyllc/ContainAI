@@ -54,9 +54,33 @@ Rename 26 dotted-basename files in `src/cai/DockerProxy/` to clean filenames wit
 - [ ] All existing DockerProxy tests pass unchanged
 - [ ] `git log --follow` confirms rename detection for moved files
 ## Done summary
-TBD
+Renamed 26 dotted-basename files in `src/cai/DockerProxy/` to clean filenames and updated all namespaces to match folder hierarchy.
 
+### Changes
+- **26 file renames** via `git mv` (commit 1): stripped `ContainAiDockerProxy.` prefix from all filenames
+- **Namespace migration** (commit 2): updated all 28 DockerProxy files from flat `ContainAI.Cli.Host` to hierarchical namespaces:
+  - `ContainAI.Cli.Host.DockerProxy.Contracts` (5 DockerProxy-specific interfaces)
+  - `ContainAI.Cli.Host.DockerProxy.Execution` (3 files)
+  - `ContainAI.Cli.Host.DockerProxy.Models` (1 file)
+  - `ContainAI.Cli.Host.DockerProxy.Parsing` (3 files)
+  - `ContainAI.Cli.Host.DockerProxy.Parsing.Arguments` (3 files)
+  - `ContainAI.Cli.Host.DockerProxy.Parsing.Settings` (5 files, renamed from FeatureSettings to avoid namespace-type collision)
+  - `ContainAI.Cli.Host.DockerProxy.Ports` (3 files)
+  - `ContainAI.Cli.Host.DockerProxy.System` (2 files)
+  - `ContainAI.Cli.Host.DockerProxy.Workflow` (5 files)
+  - `ContainAI.Cli.Host.DockerProxy.Workflow.Create` (1 file)
+- **Shared interfaces preserved**: `IContainAiSystemEnvironment` and `IUtcClock` remain in `ContainAI.Cli.Host` namespace (used by RuntimeSupport, Infrastructure)
+- **Facade preserved**: `ContainAiDockerProxy.cs` stays in root `ContainAI.Cli.Host` namespace per WS4 deferral
+- **System namespace collision handled**: Added `global::System` prefix for `Win32Exception` in CommandExecutor.cs
+
+### Verification
+- `dotnet build ContainAI.slnx -c Release -warnaserror` — 0 warnings, 0 errors
+- All 21 DockerProxy tests pass unchanged
+- `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes` — clean
+- `dotnet format analyzers --diagnostics CS8019 --verify-no-changes` — no unnecessary usings
+- Zero dotted basenames in DockerProxy
+- `git log --follow` confirms rename detection
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 648ee916 refactor: rename 26 dotted-basename files in DockerProxy to folder-based organization, ce458ce7 refactor: update namespaces and usings for renamed DockerProxy files
+- Tests: 21/21 DockerProxy tests pass (ContainAiDockerProxyTests); 2 pre-existing failures in unrelated tests (DocumentationLinkTests, SyncIntegrationTests)
 - PRs:
