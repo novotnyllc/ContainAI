@@ -1,6 +1,6 @@
 using System.Net.NetworkInformation;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
 internal sealed class DevcontainerFileSystem
 {

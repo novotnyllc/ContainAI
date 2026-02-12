@@ -1,4 +1,8 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer;
+using ContainAI.Cli.Host.Devcontainer.InitLinks;
+using ContainAI.Cli.Host.Devcontainer.Install;
+
+namespace ContainAI.Cli.Host.Devcontainer.Configuration;
 
 internal static class DevcontainerFeatureWorkflowFactory
 {

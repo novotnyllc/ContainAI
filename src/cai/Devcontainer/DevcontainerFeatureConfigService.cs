@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer.Configuration;
+
+namespace ContainAI.Cli.Host.Devcontainer;
 
 internal interface IDevcontainerFeatureConfigService
 {

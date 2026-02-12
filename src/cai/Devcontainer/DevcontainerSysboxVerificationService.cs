@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer.Sysbox;
+
+namespace ContainAI.Cli.Host.Devcontainer;
 
 internal interface IDevcontainerSysboxVerificationService
 {

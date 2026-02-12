@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer.Install;
 
 internal interface IDevcontainerFeatureOptionalInstaller
 {

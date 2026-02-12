@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer.InitLinks;
 
 internal interface IDevcontainerFeatureInitLinkSpecLoader
 {

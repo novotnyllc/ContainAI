@@ -1,6 +1,6 @@
 using ContainAI.Cli.Abstractions;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer.Configuration;
 
 internal interface IDevcontainerFeatureInstallWorkflow
 {

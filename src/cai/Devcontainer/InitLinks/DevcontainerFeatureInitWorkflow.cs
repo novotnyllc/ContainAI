@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer;
+using ContainAI.Cli.Host.Devcontainer.Configuration;
+
+namespace ContainAI.Cli.Host.Devcontainer.InitLinks;
 
 internal sealed class DevcontainerFeatureInitWorkflow : IDevcontainerFeatureInitWorkflow
 {

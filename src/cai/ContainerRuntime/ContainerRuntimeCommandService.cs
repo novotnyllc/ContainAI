@@ -2,6 +2,7 @@ using ContainAI.Cli.Host.ContainerRuntime.Handlers;
 using ContainAI.Cli.Abstractions;
 using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 using ContainAI.Cli.Host.ContainerRuntime.Services;
+using ContainAI.Cli.Host.Devcontainer;
 
 namespace ContainAI.Cli.Host;
 

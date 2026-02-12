@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer.Configuration;
 
 internal interface IDevcontainerFeatureConfigValidator
 {

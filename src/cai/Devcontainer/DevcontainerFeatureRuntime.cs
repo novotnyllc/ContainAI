@@ -1,6 +1,7 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.Devcontainer.Configuration;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer;
 
 internal sealed class DevcontainerFeatureRuntime
 {

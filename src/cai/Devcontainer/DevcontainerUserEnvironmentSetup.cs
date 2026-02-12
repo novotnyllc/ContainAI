@@ -1,6 +1,6 @@
 using ContainAI.Cli.Host.Devcontainer.UserEnvironment;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer;
 
 internal interface IDevcontainerUserEnvironmentSetup
 {

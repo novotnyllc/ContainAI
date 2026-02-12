@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Devcontainer;
 
 [JsonSerializable(typeof(FeatureConfig))]
 [JsonSerializable(typeof(LinkSpecDocument))]

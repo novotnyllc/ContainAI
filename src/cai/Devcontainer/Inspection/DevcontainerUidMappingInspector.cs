@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer.ProcessExecution;
+
+namespace ContainAI.Cli.Host.Devcontainer.Inspection;
 
 internal interface IDevcontainerUidMappingInspector
 {

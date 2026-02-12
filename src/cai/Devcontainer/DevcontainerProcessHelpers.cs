@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Devcontainer.Inspection;
+using ContainAI.Cli.Host.Devcontainer.ProcessExecution;
+
+namespace ContainAI.Cli.Host.Devcontainer;
 
 internal interface IDevcontainerProcessHelpers
 {
