@@ -20,13 +20,13 @@ Research and document the AOT composition strategy as an architecture decision r
 ### Key context
 - Current composition is already fully AOT-safe (pure `new` wiring, no reflection)
 - MEDI source generator does not exist; MEDI is AOT-safe with explicit registrations
-- `ManifestTomlParser` instantiated in 8 places — evaluate if this warrants centralized wiring
+- `ManifestTomlParser` instantiated in 9 sites across 8 files — evaluate if this warrants centralized wiring
 - CLI startup is already fast with NativeAOT — DI container overhead is marginal concern
 - Practice-scout finding: Jab (200x faster startup than MEDI) vs Pure.DI (zero runtime deps)
 ## Acceptance
 - [ ] `specs/cai-aot-composition-decision-record.md` created with: options considered, tradeoffs, final decision, migration plan
 - [ ] Decision addresses the dual-constructor pattern explicitly
-- [ ] Decision addresses cross-module concrete instantiation hotspots (ManifestTomlParser in 8 places)
+- [ ] Decision addresses cross-module concrete instantiation hotspots (ManifestTomlParser in 9 sites across 8 files)
 - [ ] Trim/AOT compatibility verified for chosen approach
 ## Done summary
 Created AOT composition decision record at specs/cai-aot-composition-decision-record.md. Evaluated manual composition vs Jab vs Pure.DI, decided to keep manual composition as it is already fully AOT-safe, the codebase scale does not warrant a DI container, and risk vs reward is unfavorable. Documented the dual-constructor pattern rationale, cataloged ManifestTomlParser cross-module instantiation hotspots (9 sites across 8 files), and verified trim/AOT compatibility.

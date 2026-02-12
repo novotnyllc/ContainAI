@@ -23,12 +23,13 @@ Examples of this pattern:
 - `CaiCommandRuntime`: public ctor chains through overloads ending at an `internal` ctor accepting `AcpProxyRunner` + `IManifestTomlParser`.
 - `CaiOperationsService`, `CaiConfigManifestService`, `CaiImportService`: each follows the same public/internal constructor split.
 
-There are three composition roots:
+There are four composition roots:
 
 | Root | Location | Responsibility |
 |------|----------|---------------|
 | Program.cs (top-level) | `src/cai/Program.cs` | Entry point; creates `ManifestTomlParser`, `AgentShimDispatcher`, `CaiCommandRuntime` |
 | CaiCommandRuntimeHandlersFactory | `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs` | Central factory creating all command handlers from injected `AcpProxyRunner` + `IManifestTomlParser` |
+| ContainerRuntimeCommandService | `src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs` | Builds `ContainerRuntimeExecutionContext`, workflows, and handlers for container runtime commands |
 | ContainAiDockerProxy | `src/cai/DockerProxy/ContainAiDockerProxy.cs` | Static factory methods wiring the DockerProxy subsystem |
 
 ### Cross-module concrete instantiation
@@ -46,7 +47,7 @@ There are three composition roots:
 | `CaiImportOrchestrationOperations.cs` | Public constructor (line 15) |
 | `ManifestGenerators.cs` | Static convenience overload (line 9) |
 
-Of the 9 sites, 8 follow the dual-constructor pattern: the `new ManifestTomlParser()` call lives in a public convenience constructor that chains to an internal constructor accepting `IManifestTomlParser`. The ninth (`ManifestGenerators`) is a static convenience overload that chains to a method accepting `IManifestTomlParser`. The runtime entry path through `Program.cs` creates a single `ManifestTomlParser` instance and passes it to `CaiCommandRuntime`, which passes it to `CaiCommandRuntimeHandlersFactory.Create()`, which distributes it to all handlers. The other 8 instantiation sites are convenience constructors or static overloads used only in tests or standalone invocations.
+Of the 9 sites, 8 follow the dual-constructor pattern: the `new ManifestTomlParser()` call lives in a public convenience constructor that chains to an internal constructor accepting `IManifestTomlParser`. The ninth (`ManifestGenerators`) is a static convenience overload that chains to a method accepting `IManifestTomlParser`. The runtime entry path through `Program.cs` creates a single `ManifestTomlParser` instance and passes it to `CaiCommandRuntime`, which passes it to `CaiCommandRuntimeHandlersFactory.Create()`, which distributes it to all handlers. The other 8 instantiation sites are convenience constructors or static overloads primarily used for testing ergonomics and standalone invocations; some (e.g., `ContainerRuntimeCommandService`) may also serve as entry points for subsystem-scoped runtime paths.
 
 ## Options Considered
 
@@ -108,7 +109,7 @@ Replace manual composition with Pure.DI, which generates code indistinguishable 
 - Requires rewriting all composition roots and removing the dual-constructor pattern.
 - Fluent API has a learning curve and non-obvious error messages when wiring is misconfigured.
 - Source generator interaction risk with CsToml generator (same concern as Jab).
-- For a codebase with 3 composition roots and ~20 services, the framework overhead exceeds the wiring complexity it solves.
+- For a codebase with 4 composition roots and ~20 services, the framework overhead exceeds the wiring complexity it solves.
 
 ## Decision
 
@@ -118,7 +119,7 @@ Replace manual composition with Pure.DI, which generates code indistinguishable 
 
 1. **The composition is already AOT-safe.** The primary motivation for evaluating DI frameworks -- AOT/trim compatibility -- is a non-issue. The current manual wiring produces zero trim analyzer warnings and zero AOT compatibility warnings. There is nothing to fix.
 
-2. **The codebase scale does not warrant a DI container.** The CLI has 3 composition roots creating approximately 20 service instances total. This is well within the range where manual wiring is clearer and more maintainable than a DI framework. DI containers provide value when there are hundreds of registrations, complex lifetime management, or runtime service resolution -- none of which apply here.
+2. **The codebase scale does not warrant a DI container.** The CLI has 4 composition roots creating approximately 20 service instances total. This is well within the range where manual wiring is clearer and more maintainable than a DI framework. DI containers provide value when there are hundreds of registrations, complex lifetime management, or runtime service resolution -- none of which apply here.
 
 3. **Startup time is already optimal.** NativeAOT eliminates JIT, and manual composition has zero overhead beyond the constructor calls themselves. Neither Jab's 200x improvement over MEDI nor Pure.DI's zero-runtime claim provides a meaningful benefit when the baseline is already sub-millisecond.
 
@@ -199,4 +200,4 @@ Until a trigger is met, manual composition remains the correct choice for this c
 - [.NET trimming compatibility](https://learn.microsoft.com/en-us/dotnet/core/deploying/trimming/prepare-libraries-for-trimming)
 - Architecture assessment: `docs/specs/api-design-and-architecture-refactor-assessment-2026-02-11.md`
 - PRD: `specs/cai-architecture-refactor-completion-prd.md`
-- Composition roots: `src/cai/Program.cs`, `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs`, `src/cai/DockerProxy/ContainAiDockerProxy.cs`
+- Composition roots: `src/cai/Program.cs`, `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs`, `src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs`, `src/cai/DockerProxy/ContainAiDockerProxy.cs`
