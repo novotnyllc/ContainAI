@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Infrastructure;
+using ContainAI.Cli.Host.Sessions.Models;
+
+namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
 internal interface ISessionContainerRunCommandBuilder
 {

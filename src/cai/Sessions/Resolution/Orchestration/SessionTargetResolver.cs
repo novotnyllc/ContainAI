@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Models;
+using ContainAI.Cli.Host.Sessions.Resolution.Containers;
+
+namespace ContainAI.Cli.Host.Sessions.Resolution.Orchestration;
 
 internal interface ISessionTargetResolver
 {

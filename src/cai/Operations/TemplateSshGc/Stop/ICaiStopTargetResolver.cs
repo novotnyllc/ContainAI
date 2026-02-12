@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.Sessions.Models;
+
 namespace ContainAI.Cli.Host;
 
 internal interface ICaiStopTargetResolver

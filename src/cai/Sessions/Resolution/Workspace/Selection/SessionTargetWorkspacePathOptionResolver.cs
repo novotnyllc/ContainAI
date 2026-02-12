@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Models;
+using ContainAI.Cli.Host.Sessions.Resolution.Validation;
+
+namespace ContainAI.Cli.Host.Sessions.Resolution.Workspace.Selection;
 
 internal interface ISessionTargetWorkspacePathOptionResolver
 {

@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
 internal sealed record ExistingContainerAttachment(
     bool Exists,

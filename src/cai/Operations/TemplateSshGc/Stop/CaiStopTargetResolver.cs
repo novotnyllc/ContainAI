@@ -1,5 +1,6 @@
 using ContainAI.Cli.Host.RuntimeSupport.Docker;
 using ContainAI.Cli.Host.RuntimeSupport.Parsing;
+using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host;
 

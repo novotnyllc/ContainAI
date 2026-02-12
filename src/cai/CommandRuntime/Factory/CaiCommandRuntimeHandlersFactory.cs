@@ -1,3 +1,5 @@
+using ContainAI.Cli.Host.Sessions.Runtime;
+
 namespace ContainAI.Cli.Host;
 
 internal static class CaiCommandRuntimeHandlersFactory

@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Resolution.Models;
 
 internal sealed record SessionTargetVolumeSelection(string DataVolume, bool GeneratedFromReset);
 

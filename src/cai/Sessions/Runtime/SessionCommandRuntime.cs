@@ -1,6 +1,11 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.Sessions.Execution;
+using ContainAI.Cli.Host.Sessions.Options;
+using ContainAI.Cli.Host.Sessions.Provisioning;
+using ContainAI.Cli.Host.Sessions.Resolution.Orchestration;
+using ContainAI.Cli.Host.Sessions.State;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Runtime;
 
 internal sealed class SessionCommandRuntime
 {

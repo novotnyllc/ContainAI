@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Models;
 
 internal enum SessionMode
 {

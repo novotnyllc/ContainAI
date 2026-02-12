@@ -1,4 +1,8 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Execution.Ssh;
+using ContainAI.Cli.Host.Sessions.Models;
+using ContainAI.Cli.Host.Sessions.Ssh;
+
+namespace ContainAI.Cli.Host.Sessions.Execution.Modes;
 
 internal interface ISessionAgentModeExecutor
 {

@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Models;
 
 internal sealed record ResolutionResult<T>(bool Success, T? Value, string? Error, int ErrorCode)
 {

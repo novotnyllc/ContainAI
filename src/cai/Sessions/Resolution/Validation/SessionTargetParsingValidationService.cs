@@ -1,6 +1,8 @@
 using System.Text.Json;
+using ContainAI.Cli.Host.Sessions.Infrastructure;
+using ContainAI.Cli.Host.Sessions.Models;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Resolution.Validation;
 
 internal interface ISessionTargetParsingValidationService
 {

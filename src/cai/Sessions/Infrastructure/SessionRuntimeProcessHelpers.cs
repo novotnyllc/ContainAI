@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Models;
+
+namespace ContainAI.Cli.Host.Sessions.Infrastructure;
 
 internal static class SessionRuntimeProcessHelpers
 {

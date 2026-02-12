@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Models;
+using ContainAI.Cli.Host.Sessions.Resolution.Orchestration;
+
+namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
 internal sealed class SessionContainerProvisioner
 {

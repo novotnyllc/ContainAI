@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Infrastructure;
+
+namespace ContainAI.Cli.Host.Sessions.Resolution.Workspace;
 
 internal interface ISessionTargetConfiguredContextResolver
 {

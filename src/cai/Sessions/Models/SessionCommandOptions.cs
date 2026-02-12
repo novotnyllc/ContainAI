@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Models;
 
 internal sealed record SessionCommandOptions(
     SessionMode Mode,

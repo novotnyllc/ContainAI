@@ -1,4 +1,5 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.Sessions.Runtime;
 
 namespace ContainAI.Cli.Host;
 

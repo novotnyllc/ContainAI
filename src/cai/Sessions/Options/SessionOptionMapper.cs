@@ -1,6 +1,7 @@
 using ContainAI.Cli.Abstractions;
+using ContainAI.Cli.Host.Sessions.Models;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.Sessions.Options;
 
 internal interface ISessionOptionMapper
 {

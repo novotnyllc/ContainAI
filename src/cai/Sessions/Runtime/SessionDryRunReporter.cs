@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Models;
+
+namespace ContainAI.Cli.Host.Sessions.Runtime;
 
 internal sealed class SessionDryRunReporter(TextWriter standardOutput)
 {

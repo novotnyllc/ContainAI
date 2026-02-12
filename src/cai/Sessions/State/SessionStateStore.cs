@@ -1,4 +1,8 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host;
+using ContainAI.Cli.Host.Sessions.Infrastructure;
+using ContainAI.Cli.Host.Sessions.Models;
+
+namespace ContainAI.Cli.Host.Sessions.State;
 
 internal sealed class SessionStateStore
 {
