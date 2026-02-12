@@ -1,0 +1,233 @@
+{
+  "created_at": "2026-02-12T00:55:17.909704Z",
+  "epic": {
+    "data": {
+      "branch_name": "refactor/architecture-completion",
+      "completion_review_status": "unknown",
+      "completion_reviewed_at": null,
+      "created_at": "2026-02-12T00:50:02.750764Z",
+      "default_impl": null,
+      "default_review": null,
+      "default_sync": null,
+      "depends_on_epics": [
+        "fn-52-net-10-aot-first-di-strategy-and"
+      ],
+      "id": "fn-53-architecture-refactor-completion-naming",
+      "next_task": 1,
+      "plan_review_status": "unknown",
+      "plan_reviewed_at": null,
+      "spec_path": ".flow/specs/fn-53-architecture-refactor-completion-naming.md",
+      "status": "open",
+      "title": "Architecture refactor completion: naming, contracts, layering, AOT composition",
+      "updated_at": "2026-02-12T00:51:20.409750Z"
+    },
+    "spec": "# Architecture Refactor Completion: Naming, Contracts, Layering, AOT Composition\n\n## Overview\n\nComplete the architectural cleanup of `src/cai` to reach a consistent .NET 10 codebase: folder-based organization (no dotted basenames), separated contracts/implementations, explicit module layering, and a documented AOT composition strategy.\n\n**Current baseline (measured):**\n- 97 files with dotted basenames across 7 module groups\n- 213 files co-locating interface + implementation declarations\n- 385/583 files (66%) using flat `ContainAI.Cli.Host` namespace despite deep folder hierarchy\n- Manual composition (pure `new` wiring) \u2014 already AOT-safe but undocumented\n\n**PRD source:** `specs/cai-architecture-refactor-completion-prd.md`\n\n## Scope\n\n**In scope:**\n- WS1: Remove all dotted basenames in hand-written `src/cai` source files (97 files)\n- WS2: Separate co-located interfaces/implementations (213 files, with approved exceptions)\n- WS3: Establish consistent module layering for P0 modules (Devcontainer, ContainerRuntime, DockerProxy)\n- WS4: AOT composition decision record (research + document)\n- WS5: Verification and quality gates\n- Namespace alignment for restructured modules (companion to file renames)\n- Documentation updates for 8 affected docs + 2 new docs\n\n**Out of scope:**\n- Behavioral feature changes\n- CLI command surface changes\n- Public API breaking changes in `ContainAI.Cli.Abstractions`\n- Full namespace sweep of all 583 files (only modules being restructured)\n- P1 module layering (Sessions, RuntimeSupport) \u2014 tracked separately after P0 completes\n\n## Design Decisions\n\n### Namespace migration strategy\nAlign namespaces to match folder hierarchy **only for modules being restructured** in WS1/WS3. This avoids creating a worse folder-namespace mismatch while keeping scope bounded. The `RootNamespace` stays as `ContainAI.Cli.Host` \u2014 files in subfolders get explicit namespace declarations matching their path.\n\n### WS1/WS3 combined execution\nFile renames (WS1) and folder restructuring (WS3) execute per-module as a single pass. Separating them would require two rename cycles for the same files. However, **each module uses two commits**: (1) `git mv` only (preserves rename detection), (2) namespace/using fixups + folder structure changes.\n\n### WS2 as separate sweep\nContract separation runs after WS1/WS3 per module. This keeps rename commits clean (no content changes) and allows contract splits to be reviewed as distinct architectural changes.\n\n### WS3/WS4 dependency\nWS3 establishes folder structure and module boundaries but **does not change the dual-constructor composition pattern**. WS4 decides whether to keep manual composition or adopt source-generated DI. WS3 creates the module shapes that WS4 can optionally rewire.\n\n### Module layering flexibility\nThe PRD prescribes Contracts/Models/Services/Orchestration/Infrastructure subfolders. Modules with existing well-structured subfolders (e.g., DockerProxy already has Contracts/, Execution/, Parsing/) keep their current structure if it serves the same purpose. The prescribed shape is a guideline, not a rigid template.\n\n### fn-49 coordination\nDevcontainer restructure (task 5) runs last in the rename sequence to minimize conflict with fn-49 (devcontainer integration). If fn-49 is still active, task 5 can be deferred.\n\n## Phases\n\n```mermaid\ngraph LR\n    T1[ContainerRuntime<br/>rename+restructure] --> T6[Contract separation<br/>P0 modules]\n    T2[DockerProxy<br/>rename+restructure] --> T6\n    T3[ShellProfile+Toml+Other<br/>rename] --> T7[Contract separation<br/>P1 modules]\n    T4[Sessions<br/>rename+restructure] --> T7\n    T5[Devcontainer<br/>rename+restructure] --> T6\n    T6 --> T9[Docs update]\n    T7 --> T9\n    T8[AOT decision record] --> T10[Final validation]\n    T9 --> T10\n```\n\n**Phase 1 \u2014 Module renames (WS1+WS3):** Tasks 1-5, can run in parallel per module.\n**Phase 2 \u2014 Contract separation (WS2):** Tasks 6-7, after Phase 1 per dependency.\n**Phase 3 \u2014 Composition & validation (WS4+WS5):** Tasks 8-10, research + docs + final gate.\n\n## Risks and Mitigations\n\n| Risk | Likelihood | Impact | Mitigation |\n|------|-----------|--------|------------|\n| Large rename sets break internal references | High | Medium | Two-commit strategy (git mv first, fixups second); build+test per batch |\n| fn-49 merge conflicts with Devcontainer work | Medium | High | Devcontainer task runs last; coordinate with fn-49 status |\n| Coverage line mappings break after namespace changes | Medium | Low | Re-baseline coverage after each module restructure; 97% gate stays |\n| Analyzer rule churn during broad moves | Medium | Low | Run `-warnaserror` and slopwatch on each batch; fix immediately |\n| Dual-constructor pattern creates fragile composition | Low | Medium | Defer to WS4; WS3 only restructures folders, not composition |\n| CsToml source-generator breaks on file moves | Low | High | Validate CsToml partial classes compile after each Manifests/Toml rename |\n| Scope creep from 213-file contract split | Medium | Medium | Default-split with documented exceptions; size threshold: <15 lines total for adapter exception |\n\n## Non-functional Targets\n\n- Build clean: `dotnet build ContainAI.slnx -c Release -warnaserror`\n- Slopwatch clean: `dotnet tool run slopwatch analyze -d . --fail-on warning`\n- Coverage: >=97% line coverage for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy\n- Naming: `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`\n- Zero dotted basenames in hand-written `src/cai` source files\n- Zero behavioral regressions (all existing tests pass unchanged)\n\n## Quick commands\n\n```bash\n# Build with analyzers as errors\ndotnet build ContainAI.slnx -c Release -warnaserror\n\n# Run tests\ndotnet test --solution ContainAI.slnx -c Release --xunit-info\n\n# Naming analyzer check\ndotnet format analyzers --diagnostics IDE1006 --verify-no-changes\n\n# Slopwatch\ndotnet tool run slopwatch analyze -d . --fail-on warning\n\n# Count remaining dotted basenames (portable, macOS-safe)\nfind src/cai -type f -name \"*.cs\" | xargs -I{} basename {} | sed \"s/\\.cs$//\" | awk \"index(\\$0,\\\".\\\")>0\" | wc -l\n\n# Verify rename detection\ngit diff --stat --diff-filter=R HEAD~1\n```\n\n## Acceptance\n\n- [ ] Zero dotted basenames in hand-written `src/cai` source files\n- [ ] Mixed interface/class files reduced to approved exceptions only (documented in `docs/architecture/refactor-exceptions.md`)\n- [ ] P0 module folders (ContainerRuntime, DockerProxy, Devcontainer) reflect stable architecture boundaries\n- [ ] Namespaces match folder hierarchy for restructured modules\n- [ ] AOT composition decision record complete at `specs/cai-aot-composition-decision-record.md`\n- [ ] Cross-module dependencies point inward to contracts, not across concrete classes\n- [ ] Build + slopwatch + naming analyzer gates pass\n- [ ] Coverage >= 97% for CLI libraries\n- [ ] 8 existing docs updated + 2 new docs created\n- [ ] All existing tests pass without behavioral changes\n\n## References\n\n- PRD: `specs/cai-architecture-refactor-completion-prd.md`\n- Architecture assessment: `docs/specs/api-design-and-architecture-refactor-assessment-2026-02-11.md`\n- Composition roots: `src/cai/Program.cs`, `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs`\n- Central factory: `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs:5-31`\n- DockerProxy factory: `src/cai/DockerProxy/ContainAiDockerProxy.cs:29-61`\n- Epic dependency: fn-52 (AOT DI strategy \u2014 WS4 depends on this)\n- Epic coordination: fn-49 (devcontainer integration \u2014 task 5 may conflict)\n- Conventions: `.flow/memory/conventions.md`\n- Pitfalls: `.flow/memory/pitfalls.md`\n"
+  },
+  "epic_id": "fn-53-architecture-refactor-completion-naming",
+  "schema_version": 2,
+  "tasks": [
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:33.191943Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.1",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.1.md",
+        "status": "todo",
+        "title": "ContainerRuntime naming normalization and folder restructure",
+        "updated_at": "2026-02-12T00:52:22.283774Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.1",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.1 ContainerRuntime naming normalization and folder restructure\n\n## Description\nRename 15 dotted-basename files in `src/cai/ContainerRuntime/` to folder-based organization and align namespaces.\n\n**Size:** M\n**Files:** ~15 renames + ~30 dependent using-statement fixups\n\n### Target files\n- `ContainerRuntimeCommandService.CommandDispatch.cs`\n- `ContainerRuntimeCommandService.CommandWiring.DevcontainerForwarders.cs`\n- `ContainerRuntimeCommandService.CommandWiring.Init.cs`\n- `ContainerRuntimeCommandService.CommandWiring.LinkRepair.cs`\n- `ContainerRuntimeCommandService.CommandWiring.LinkWatcher.cs`\n- `ContainerRuntimeCommandService.EnvFile.cs`\n- `ContainerRuntimeCommandService.GitConfigMigration.cs`\n- `ContainerRuntimeCommandService.Initialization.cs`\n- `ContainerRuntimeCommandService.LinkSpecParsing.Construction.cs`\n- `ContainerRuntimeCommandService.LinkSpecParsing.cs`\n- `ContainerRuntimeCommandService.ManifestHooks.cs`\n- `ContainerRuntimeCommandService.OutputHandling.cs`\n- `ContainerRuntimeCommandService.WorkspaceLinks.cs`\n- `ContainerRuntimeOptionParser.Models.cs`\n\n### Approach\n- Use two-commit strategy: (1) `git mv` only for rename detection, (2) namespace/using fixups\n- Existing subfolders already present: `Handlers/`, `Services/`, `Infrastructure/`, `Inspection/`\n- Move renamed files into appropriate existing or new subfolders\n- Update namespaces from flat `ContainAI.Cli.Host` to `ContainAI.Cli.Host.ContainerRuntime.<Subfolder>`\n- Follow pattern at `src/cai/CommandRuntime/Dispatch/CaiCommandRuntimeDispatchBase.cs` (already uses subfolder namespaces)\n- Set `git config diff.renameLimit 1000` before operations\n\n### Key context\n- ContainerRuntime already has 4/49 files using sub-namespaces; expand this to all files\n- `ContainerRuntimeCommandService.cs` (the main class) stays in place; only the dotted pseudo-partials move\n- Cross-module concrete dep: `ContainerRuntimeCommandService.cs:48` directly instantiates `new DevcontainerFeatureRuntime()` \u2014 do NOT change this (WS4 scope)\n## Acceptance\n- [ ] Zero dotted basenames in `src/cai/ContainerRuntime/`\n- [ ] All ContainerRuntime files use namespace matching folder hierarchy\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing ContainerRuntime tests pass unchanged\n- [ ] `git log --follow` confirms rename detection for moved files\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:57.803237Z",
+        "depends_on": [
+          "fn-53-architecture-refactor-completion-naming.8",
+          "fn-53-architecture-refactor-completion-naming.9"
+        ],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.10",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.10.md",
+        "status": "todo",
+        "title": "Final validation sweep and quality gates",
+        "updated_at": "2026-02-12T00:54:43.234467Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.10",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.10 Final validation sweep and quality gates\n\n## Description\nFinal validation sweep across the entire refactored codebase. Verify all acceptance criteria from the PRD are met and all quality gates pass.\n\n**Size:** S\n**Files:** 0 new files (verification only, fix any remaining issues)\n\n### Approach\n- Run full quality gate suite:\n  - `dotnet build ContainAI.slnx -c Release -warnaserror`\n  - `dotnet test --solution ContainAI.slnx -c Release --xunit-info`\n  - `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`\n  - `dotnet tool run slopwatch analyze -d . --fail-on warning`\n- Verify zero dotted basenames: `find src/cai -type f -name \"*.cs\" | xargs -I{} basename {} | sed \"s/\\.cs$//\" | awk \"index(\\$0,\\\".\\\")>0\" | wc -l` should return 0\n- Verify coverage >= 97% for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy\n- Verify `docs/architecture/refactor-exceptions.md` is complete and all exceptions justified\n- Verify `specs/cai-aot-composition-decision-record.md` is complete\n- Verify all cross-module dependencies point inward to contracts\n- Fix any remaining issues found during validation\n\n### Key context\n- This is a gate task \u2014 it verifies but does not introduce new changes\n- If issues are found, fix them in this task rather than creating new tasks\n- PR notes should include module-by-module migration summary (PRD requirement)\n## Acceptance\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] `dotnet test --solution ContainAI.slnx -c Release --xunit-info` passes (all tests)\n- [ ] `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes` passes\n- [ ] `dotnet tool run slopwatch analyze -d . --fail-on warning` passes\n- [ ] Zero dotted basenames in hand-written src/cai source files\n- [ ] Coverage >= 97% for CLI libraries\n- [ ] All PRD Definition of Done criteria verified\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:34.861213Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.2",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.2.md",
+        "status": "todo",
+        "title": "DockerProxy naming normalization and folder restructure",
+        "updated_at": "2026-02-12T00:52:36.430471Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.2",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.2 DockerProxy naming normalization and folder restructure\n\n## Description\nRename 25 dotted-basename files in `src/cai/DockerProxy/` to clean filenames within the existing folder structure.\n\n**Size:** M\n**Files:** ~25 renames + ~15 dependent using-statement fixups\n\n### Target files (by existing subfolder)\n**Contracts/** (1): `ContainAiDockerProxy.ServiceContracts.cs`\n**Execution/** (3): `ContainAiDockerProxy.CommandExecutor.cs`, `.DockerProcessHelpers.cs`, `.ProcessRunner.cs`\n**Models/** (1): `ContainAiDockerProxy.Models.cs`\n**Parsing/** (6): `ContainAiDockerProxy.Parsing.ArgumentParser.cs`, `.Parsing.Contracts.cs`, `.Parsing.Validation.cs`, and 3 in `Arguments/`, 5 in `FeatureSettings/`\n**Ports/** (3): `ContainAiDockerProxy.PortAllocation.cs`, `.PortAllocation.Locking.cs`, `.PortAllocation.State.cs`\n**System/** (2): `ContainAiDockerProxy.SshProfileUpdate.cs`, `.VolumeValidation.cs`\n**Workflow/** (5): `ContainAiDockerProxy.CoreWorkflow.cs`, `.CoreWorkflow.Output.cs`, `.CoreWorkflow.RequestParsing.cs`, `.CreateWorkflow.cs`, `.PassthroughWorkflow.cs`\n\n### Approach\n- DockerProxy already has well-structured subfolders \u2014 files just need the `ContainAiDockerProxy.` prefix stripped from names\n- Example: `ContainAiDockerProxy.Parsing.ArgumentParser.cs` \u2192 `Parsing/DockerProxyArgumentParser.cs`\n- Two-commit strategy: (1) `git mv` only, (2) namespace/using fixups\n- Update namespaces from flat `ContainAI.Cli.Host` to `ContainAI.Cli.Host.DockerProxy.<Subfolder>`\n- Fix `RegexOptions.Compiled` \u2192 `RegexOptions.CultureInvariant` on 3 `[GeneratedRegex]` usages (opportunistic cleanup, not a behavioral change)\n\n### Key context\n- `ContainAiDockerProxy.cs` (static facade class at root) is a composition root \u2014 rename decision deferred to WS4\n- All 28 DockerProxy files currently use flat `ContainAI.Cli.Host` namespace\n- Tests: `ContainAiDockerProxyTests.cs` calls static methods on the facade \u2014 test API preserved\n## Acceptance\n- [ ] Zero dotted basenames in `src/cai/DockerProxy/`\n- [ ] All DockerProxy files use namespace matching folder hierarchy\n- [ ] RegexOptions.Compiled replaced with RegexOptions.CultureInvariant on [GeneratedRegex] usages\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing DockerProxy tests pass unchanged\n- [ ] `git log --follow` confirms rename detection for moved files\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:36.025823Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.3",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.3.md",
+        "status": "todo",
+        "title": "ShellProfile, Manifests/Toml, AcpProxy, Install, Importing naming normalization",
+        "updated_at": "2026-02-12T00:52:51.724198Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.3",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.3 ShellProfile, Manifests/Toml, AcpProxy, Install, Importing naming normalization\n\n## Description\nRename dotted-basename files in 5 smaller modules: ShellProfile (6 files), Manifests/Toml (5 files), AcpProxy (1 file), Install (3 files), Importing (3 files).\n\n**Size:** M\n**Files:** ~18 renames + ~20 dependent using-statement fixups\n\n### Target files by module\n\n**ShellProfile (6):**\n- `ShellProfileIntegration.Constants.cs`, `.Contracts.cs`, `.ProfileFileMutation.cs`, `.ProfileScriptContentGeneration.cs`, `.Service.cs`, `.ShellDetectionAndPathResolution.cs`\n\n**Manifests/Toml (5):**\n- `ManifestTomlParser.Models.Agent.cs`, `.Models.Document.cs`, `.Models.Entry.cs`, `.Models.ManifestAgentEntry.cs`, `.Models.ManifestEntry.cs`\n\n**AcpProxy (1):** `AcpProxyRunner.Process.cs`\n\n**Install (3):** `InstallCommandRuntime.ExecutionFlow.cs`, `.OptionsAndEnvironment.cs`, `.OutputReporting.cs`\n\n**Importing (3):** `CaiImportService.CommandSurface.cs`, `.ImportEnvironment.cs`, `.ImportOrchestration.cs`\n\n### Approach\n- Two-commit strategy per module batch: (1) `git mv` only, (2) namespace/using fixups\n- ShellProfile: strip `ShellProfileIntegration.` prefix, move into subfolders (e.g., `FileOperations/`)\n- Manifests/Toml: the 5 `ManifestTomlParser.Models.*.cs` files are `partial class` types with `[TomlSerializedObject]` \u2014 validate CsToml source generator compiles after rename. Keep partial classes in same folder.\n- AcpProxy, Install, Importing: straightforward prefix stripping\n- Update namespaces where modules currently use flat `ContainAI.Cli.Host`\n\n### Key context\n- CsToml source-generator edge case: `ManifestTomlDocument`, `ManifestTomlEntry`, `ManifestTomlAgent` are `partial class` with `[TomlSerializedObject]`. Renames are safe as long as all partial parts stay in same namespace. Build immediately after each rename to verify.\n- `ShellProfileIntegration.cs` is a static facade (like DockerProxy) \u2014 preserved as-is\n- Sessions/Models has 5 similar files (`SessionRuntimeModels.*.cs`) but those are in task 4\n## Acceptance\n- [ ] Zero dotted basenames in ShellProfile, Manifests/Toml, AcpProxy, Install, Importing modules\n- [ ] CsToml source-generated partial classes compile correctly after rename\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing tests for affected modules pass unchanged\n- [ ] `git log --follow` confirms rename detection\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:36.582920Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.4",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.4.md",
+        "status": "todo",
+        "title": "Sessions naming normalization and folder restructure",
+        "updated_at": "2026-02-12T00:53:16.453491Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.4",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.4 Sessions naming normalization and folder restructure\n\n## Description\nRename 27 dotted-basename files in `src/cai/Sessions/` and establish folder-based namespace hierarchy. This is the deepest restructure \u2014 72 files all use flat `ContainAI.Cli.Host` despite 6+ levels of folder nesting.\n\n**Size:** M (borderline L due to namespace scope, but operations are mechanical)\n**Files:** ~27 renames + ~72 namespace fixups + ~40 dependent using-statement fixups\n\n### Target files by subfolder\n\n**Sessions/Models (5):**\n- `SessionRuntimeModels.CommandOptions.cs`, `.ProcessResult.cs`, `.ResolutionResults.cs`, `.SessionMode.cs`, `.TargetAndSession.cs`\n\n**Sessions/Resolution/Containers (7):**\n- `SessionTargetResolver.DockerLookup.Abstractions.cs`, `.Core.cs`, `.LabelReader.cs`, `.NameReservation.cs`, `.Parsing.cs`, `.SelectionPolicy.cs`, `.WorkspaceResolver.cs`\n\n**Sessions/Resolution/Models (1):** `SessionTargetResolver.Models.cs`\n\n**Sessions/Resolution/Orchestration (4):**\n- `SessionTargetResolver.ExplicitContainerResolver.cs`, `.ResolutionPipeline.cs`, `.TargetFactory.cs`, `.WorkspaceResolver.cs`\n\n**Sessions/Resolution/Validation (1):** `SessionTargetResolver.ParsingValidation.cs`\n\n**Sessions/Resolution/Workspace (5+):**\n- `SessionTargetResolver.ConfiguredContextResolver.cs`, `.ContainerNameGenerationService.cs`, `.ContextDiscoveryService.cs`, `.DataVolumeResolutionService.cs`, `.WorkspaceDiscovery.cs`\n- Selection subfolder (3): `SessionTargetResolver.SelectionHelpers.WorkspaceContainer.cs`, `.WorkspaceContext.cs`, `.WorkspacePath.cs`, `.WorkspaceVolume.cs`\n\n### Approach\n- Two-commit strategy: (1) `git mv` only, (2) namespace/using fixups\n- Strip `SessionTargetResolver.` and `SessionRuntimeModels.` prefixes from filenames\n- These are **separate classes** (not partial), despite the misleading dotted filenames\n- Update all 72 Sessions files from `namespace ContainAI.Cli.Host` to `ContainAI.Cli.Host.Sessions.<Subfolder>`\n- This is the highest-risk rename because dependency analysis is invisible at namespace level (everything was in one namespace)\n- Build after every subfolder batch, not just at the end\n\n### Key context\n- Sessions has the deepest folder nesting (Resolution/Workspace/Selection/) \u2014 namespace hierarchy must match\n- All session types are currently in one namespace, so all `using` changes are additions (adding `using ContainAI.Cli.Host.Sessions.*`) rather than modifications\n- `SessionLifecycleParityTests.cs` and `ContainerNamingTests.cs` are the key test files to verify\n## Acceptance\n- [ ] Zero dotted basenames in `src/cai/Sessions/`\n- [ ] All Sessions files (72) use namespace matching folder hierarchy\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing Sessions tests pass unchanged\n- [ ] `git log --follow` confirms rename detection for moved files\n- [ ] No type name collisions introduced by namespace changes\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:36.990273Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.5",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.5.md",
+        "status": "todo",
+        "title": "Devcontainer naming normalization and folder restructure",
+        "updated_at": "2026-02-12T00:53:28.440703Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.5",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.5 Devcontainer naming normalization and folder restructure\n\n## Description\nRename 12 dotted-basename files in `src/cai/Devcontainer/` and establish consistent folder layering. Runs last in Phase 1 to minimize conflict with fn-49 (devcontainer integration).\n\n**Size:** M\n**Files:** ~12 renames + ~20 dependent using-statement fixups\n\n### Target files\n**DevcontainerFeatureRuntime pseudo-partials (8):**\n- `DevcontainerFeatureRuntime.EntrypointOrchestration.cs`, `.FeatureFlags.cs`, `.Init.cs`, `.Init.ConfigLoader.cs`, `.Init.LinkApplier.cs`, `.Init.LinkSpecLoader.cs`, `.Install.cs`, `.Start.cs`\n\n**DevcontainerProcessHelpers pseudo-partials (4):**\n- `DevcontainerProcessHelpers.Collaborators.cs`, `.FileAndProc.cs`, `.Network.cs`, `.ProcessExecution.cs`\n\n### Approach\n- Two-commit strategy: (1) `git mv` only, (2) namespace/using fixups\n- Existing subfolders: `Configuration/`, `InitLinks/`, `Inspection/`, `Install/`, `ProcessExecution/`, `Sysbox/`, `UserEnvironment/`\n- Map dotted files into appropriate existing subfolders\n- DevcontainerFeatureRuntime.Init.* files \u2192 `InitLinks/` or new `Init/` subfolder\n- DevcontainerProcessHelpers.* files \u2192 `ProcessExecution/`\n- Update namespaces from flat `ContainAI.Cli.Host` to `ContainAI.Cli.Host.Devcontainer.<Subfolder>`\n- Coordinate with fn-49 status: if fn-49 has pending PRs touching Devcontainer, defer or rebase after fn-49 merges\n\n### Key context\n- `DevcontainerFeatureWorkflowFactory.cs` (in `Configuration/`) is the composition root for this module \u2014 follow its pattern\n- 42 of 45 Devcontainer files use flat `ContainAI.Cli.Host` namespace\n- PRD says Devcontainer is the \"largest visible debt; user pain point\" \u2014 but we run it last to avoid fn-49 conflicts\n## Acceptance\n- [ ] Zero dotted basenames in `src/cai/Devcontainer/`\n- [ ] All Devcontainer files use namespace matching folder hierarchy\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing Devcontainer tests pass unchanged\n- [ ] No merge conflicts with fn-49 work (verify before starting)\n- [ ] `git log --follow` confirms rename detection\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:51.280345Z",
+        "depends_on": [
+          "fn-53-architecture-refactor-completion-naming.1",
+          "fn-53-architecture-refactor-completion-naming.2",
+          "fn-53-architecture-refactor-completion-naming.5"
+        ],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.6",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.6.md",
+        "status": "todo",
+        "title": "Contract/implementation separation: P0 modules (ContainerRuntime, DockerProxy, Devcontainer)",
+        "updated_at": "2026-02-12T00:53:44.113439Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.6",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.6 Contract/implementation separation: P0 modules (ContainerRuntime, DockerProxy, Devcontainer)\n\n## Description\nExtract co-located interfaces from implementation files in P0 modules: ContainerRuntime (~25 mixed files), DockerProxy (~5 mixed files), Devcontainer (~25 mixed files). Create separate `I*.cs` files following .NET conventions.\n\n**Size:** M\n**Files:** ~55 files to evaluate, ~40-45 splits expected, ~10-15 approved exceptions\n\n### Approach\n- Process module by module: ContainerRuntime \u2192 DockerProxy \u2192 Devcontainer\n- For each mixed file: extract `interface I*` declaration into adjacent `I*.cs` file in same folder\n- Keep mixed only when:\n  - Private nested helper type (e.g., inner class used only by the implementation)\n  - Source-generator context pattern (e.g., `JsonSerializerContext` with its serializable types)\n  - Tiny adapter where total interface + class is <15 lines\n- Document each approved exception immediately in `docs/architecture/refactor-exceptions.md`\n- Existing separate contract files serve as models: `DockerProxy/Contracts/`, `ShellProfile/ShellProfileIntegration.Contracts.cs`, `ConfigManifest/ConfigManifestContracts.cs`\n\n### Key context\n- Typical pattern (from `ContainerRuntimeCommandService.Initialization.cs:9-14`): interface + sealed class in one file\n- DockerProxy already has a `Contracts/` subfolder and `Parsing/Contracts` \u2014 extend this pattern\n- Source-generator exception: `DevcontainerFeatureJsonContext` and `ContainerLinkSpecJsonContext` must stay co-located with their types\n- The dual-constructor pattern remains unchanged (WS4 scope)\n## Acceptance\n- [ ] All mixed files in ContainerRuntime, DockerProxy, Devcontainer evaluated\n- [ ] Interface/class splits completed for non-exception files\n- [ ] `docs/architecture/refactor-exceptions.md` created with approved exceptions list\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing tests pass unchanged\n- [ ] slopwatch clean: `dotnet tool run slopwatch analyze -d . --fail-on warning`\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:52.750728Z",
+        "depends_on": [
+          "fn-53-architecture-refactor-completion-naming.3",
+          "fn-53-architecture-refactor-completion-naming.4"
+        ],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.7",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.7.md",
+        "status": "todo",
+        "title": "Contract/implementation separation: P1 modules (Sessions, Importing, Operations, remaining)",
+        "updated_at": "2026-02-12T00:54:02.494583Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.7",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.7 Contract/implementation separation: P1 modules (Sessions, Importing, Operations, remaining)\n\n## Description\nExtract co-located interfaces from implementation files in P1 modules: Sessions (~46 mixed files), Importing (~42 mixed files), Operations (~29 mixed files), and remaining modules (ContainerLinks ~11, Install ~8, ShellProfile ~6, and other small modules ~35).\n\n**Size:** M (high file count but mechanical operations with established pattern from task 6)\n**Files:** ~177 files to evaluate, ~130-140 splits expected, ~35-40 approved exceptions\n\n### Approach\n- Follow the same pattern established in task 6\n- Process by module: Sessions \u2192 Importing \u2192 Operations \u2192 remaining\n- Apply the same exception criteria (private nested, source-generator, <15-line adapter)\n- Add all approved exceptions to `docs/architecture/refactor-exceptions.md` (created in task 6)\n- Sessions is the largest (46 files) \u2014 batch by subfolder (Resolution/, Execution/, Provisioning/, etc.)\n- For Importing (42 files) and Operations (29 files): these modules already have some subfolder structure\n\n### Key context\n- Sessions: all 72 files now have hierarchical namespaces (from task 4), so interface extraction benefits from clear module boundaries\n- Importing already has: `Environment/`, `Facade/`, `Orchestration/`, `Paths/`, `Symlinks/`, `Transfer/`\n- Operations already has: `Diagnostics/`, `DiagnosticsAndSetup/`, `Facade/`, `Maintenance/`, `TemplateSshGc/`\n- `ContainerLinks/Repair/ContainerLinkRepairContracts.cs` already exists as a contracts file \u2014 extend pattern\n## Acceptance\n- [ ] All mixed files in Sessions, Importing, Operations, and remaining modules evaluated\n- [ ] Interface/class splits completed for non-exception files\n- [ ] `docs/architecture/refactor-exceptions.md` updated with all approved exceptions\n- [ ] Mixed file count reduced from 213 baseline to approved exceptions only\n- [ ] `dotnet build ContainAI.slnx -c Release -warnaserror` passes\n- [ ] All existing tests pass unchanged\n- [ ] slopwatch clean\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:54.235344Z",
+        "depends_on": [],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.8",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.8.md",
+        "status": "todo",
+        "title": "AOT composition decision record",
+        "updated_at": "2026-02-12T00:54:21.020740Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.8",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.8 AOT composition decision record\n\n## Description\nResearch and document the AOT composition strategy as an architecture decision record (ADR). Evaluates whether the current manual composition pattern is sufficient or if source-generated DI should be adopted.\n\n**Size:** S (research + writing, no code changes)\n**Files:** 1 new file (`specs/cai-aot-composition-decision-record.md`)\n\n### Approach\n- Review current composition roots:\n  - `src/cai/Program.cs` (top-level entry)\n  - `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs:5-31` (central factory)\n  - `src/cai/DockerProxy/ContainAiDockerProxy.cs:29-61` (DockerProxy factory)\n  - `src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs:16-49` (ContainerRuntime constructor)\n- Evaluate 3 options: (1) keep manual composition, (2) adopt Jab (compile-time DI), (3) adopt Pure.DI\n- Assess against criteria: AOT safety, trim safety, startup overhead, maintenance burden, testing ergonomics\n- Document the dual-constructor pattern (`public` with `new`, `internal` with interfaces) and whether it should continue\n- Coordinate with fn-52 (AOT DI strategy) findings \u2014 this task produces the decision record that fn-52 scoped\n\n### Key context\n- Current composition is already fully AOT-safe (pure `new` wiring, no reflection)\n- MEDI source generator does not exist; MEDI is AOT-safe with explicit registrations\n- `ManifestTomlParser` instantiated in 8 places \u2014 evaluate if this warrants centralized wiring\n- CLI startup is already fast with NativeAOT \u2014 DI container overhead is marginal concern\n- Practice-scout finding: Jab (200x faster startup than MEDI) vs Pure.DI (zero runtime deps)\n## Acceptance\n- [ ] `specs/cai-aot-composition-decision-record.md` created with: options considered, tradeoffs, final decision, migration plan\n- [ ] Decision addresses the dual-constructor pattern explicitly\n- [ ] Decision addresses cross-module concrete instantiation hotspots (ManifestTomlParser in 8 places)\n- [ ] Trim/AOT compatibility verified for chosen approach\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    },
+    {
+      "data": {
+        "assignee": null,
+        "claim_note": "",
+        "claimed_at": null,
+        "created_at": "2026-02-12T00:51:56.560307Z",
+        "depends_on": [
+          "fn-53-architecture-refactor-completion-naming.6",
+          "fn-53-architecture-refactor-completion-naming.7"
+        ],
+        "epic": "fn-53-architecture-refactor-completion-naming",
+        "id": "fn-53-architecture-refactor-completion-naming.9",
+        "priority": null,
+        "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.9.md",
+        "status": "todo",
+        "title": "Documentation updates and refactor exceptions list",
+        "updated_at": "2026-02-12T00:54:30.284079Z"
+      },
+      "id": "fn-53-architecture-refactor-completion-naming.9",
+      "runtime": null,
+      "spec": "# fn-53-architecture-refactor-completion-naming.9 Documentation updates and refactor exceptions list\n\n## Description\nUpdate all documentation affected by the architecture refactor and create the refactor exceptions list.\n\n**Size:** M\n**Files:** 8 existing docs to update + 1 new directory (`docs/architecture/`)\n\n### Documentation updates (by priority)\n\n**High priority (blocking clarity):**\n- `AGENTS.md` lines 36-63: Update Project Structure section with new folder organization\n- `src/README.md` lines 11, 58-93: Update module descriptions and file path references\n- `docs/architecture.md` lines 372-436: Update Component Architecture section, module dependencies table, Mermaid diagrams\n\n**Medium priority (reference accuracy):**\n- `docs/sync-architecture.md` lines 32-34, 409-413: Update file path references\n- `docs/for-security-auditors.md` lines 53-55, 92-93, 117: Update file path references\n- `docs/for-contributors.md` lines 118-134: Update Code Structure section\n- `CONTRIBUTING.md` lines 76-90: Update Project Structure code block\n\n**New documentation:**\n- Create `docs/architecture/` directory\n- Verify `docs/architecture/refactor-exceptions.md` is complete (created in task 6, extended in task 7)\n\n### Approach\n- Update file paths to match post-refactor locations\n- Update Mermaid diagrams in architecture.md to show new module organization\n- Add module layering subsection showing Contracts/Models/Services pattern per module\n- Keep documentation patterns consistent (inline backticks for paths, pipe-delimited tables for modules)\n## Acceptance\n- [ ] All 8 affected docs updated with correct post-refactor file paths\n- [ ] Mermaid diagrams in docs/architecture.md reflect new module structure\n- [ ] AGENTS.md Project Structure section matches actual folder layout\n- [ ] docs/architecture/ directory created\n- [ ] No broken links or stale file path references in docs/\n## Done summary\nTBD\n\n## Evidence\n- Commits:\n- Tests:\n- PRs:\n"
+    }
+  ]
+}

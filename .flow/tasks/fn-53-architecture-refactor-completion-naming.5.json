@@ -1,0 +1,14 @@
+{
+  "assignee": null,
+  "claim_note": "",
+  "claimed_at": null,
+  "created_at": "2026-02-12T00:51:36.990273Z",
+  "depends_on": [],
+  "epic": "fn-53-architecture-refactor-completion-naming",
+  "id": "fn-53-architecture-refactor-completion-naming.5",
+  "priority": null,
+  "spec_path": ".flow/tasks/fn-53-architecture-refactor-completion-naming.5.md",
+  "status": "todo",
+  "title": "Devcontainer naming normalization and folder restructure",
+  "updated_at": "2026-02-12T00:53:28.440703Z"
+}
