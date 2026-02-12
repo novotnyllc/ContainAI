@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Contracts;
+using ContainAI.Cli.Host.DockerProxy.Models;
+
+namespace ContainAI.Cli.Host.DockerProxy.Execution;
 
 internal sealed class DockerProxyCommandExecutor : IDockerProxyCommandExecutor
 {
@@ -22,7 +25,7 @@ internal sealed class DockerProxyCommandExecutor : IDockerProxyCommandExecutor
             await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
             return 127;
         }
-        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        catch (global::System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             await stderr.WriteLineAsync($"Failed to start 'docker': {ex.Message}").ConfigureAwait(false);
             return 127;
@@ -35,7 +38,7 @@ internal sealed class DockerProxyCommandExecutor : IDockerProxyCommandExecutor
         {
             return await processRunner.RunCaptureAsync(args, cancellationToken).ConfigureAwait(false);
         }
-        catch (System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
+        catch (global::System.ComponentModel.Win32Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             return new DockerProxyProcessResult(127, string.Empty, ex.Message);
         }

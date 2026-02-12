@@ -1,7 +1,9 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Contracts;
+
+namespace ContainAI.Cli.Host.DockerProxy.System;
 
 internal interface IDockerProxySshConfigUpdater
 {

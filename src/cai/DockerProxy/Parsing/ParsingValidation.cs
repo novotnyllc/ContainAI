@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.DockerProxy.Parsing;
 
 internal static partial class DockerProxyValidationHelpers
 {

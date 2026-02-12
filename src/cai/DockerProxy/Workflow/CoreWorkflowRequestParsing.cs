@@ -1,4 +1,8 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Contracts;
+using ContainAI.Cli.Host.DockerProxy.Models;
+using ContainAI.Cli.Host.DockerProxy.Parsing;
+
+namespace ContainAI.Cli.Host.DockerProxy.Workflow;
 
 internal enum DockerProxyCreateCommandParseStatus
 {

@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.DockerProxy.Parsing.Settings;
 
 internal static class DockerProxyJsoncCommentStripper
 {

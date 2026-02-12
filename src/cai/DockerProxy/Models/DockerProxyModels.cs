@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.DockerProxy.Models;
 
 internal readonly record struct DockerProxyWrapperFlags(IReadOnlyList<string> DockerArgs, bool Verbose, bool Quiet);
 

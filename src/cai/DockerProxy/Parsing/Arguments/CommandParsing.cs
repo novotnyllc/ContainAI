@@ -1,4 +1,4 @@
-namespace ContainAI.Cli.Host;
+namespace ContainAI.Cli.Host.DockerProxy.Parsing.Arguments;
 
 internal static class DockerProxyCommandParsing
 {

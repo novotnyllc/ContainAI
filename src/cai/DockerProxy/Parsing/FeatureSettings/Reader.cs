@@ -1,6 +1,8 @@
 using System.Text.Json;
 
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Models;
+
+namespace ContainAI.Cli.Host.DockerProxy.Parsing.Settings;
 
 internal static class DockerProxyFeatureSettingsReader
 {

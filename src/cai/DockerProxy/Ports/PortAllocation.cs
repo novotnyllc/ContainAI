@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Contracts;
+using ContainAI.Cli.Host.DockerProxy.Models;
+
+namespace ContainAI.Cli.Host.DockerProxy.Ports;
 
 internal interface IDockerProxyPortAllocator
 {

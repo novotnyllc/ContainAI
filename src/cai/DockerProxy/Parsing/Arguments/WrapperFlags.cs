@@ -1,4 +1,6 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Models;
+
+namespace ContainAI.Cli.Host.DockerProxy.Parsing.Arguments;
 
 internal static class DockerProxyWrapperFlagParsing
 {

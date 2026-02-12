@@ -1,4 +1,7 @@
-namespace ContainAI.Cli.Host;
+using ContainAI.Cli.Host.DockerProxy.Models;
+using ContainAI.Cli.Host.DockerProxy.Parsing.Arguments;
+
+namespace ContainAI.Cli.Host.DockerProxy.Parsing;
 
 internal sealed class DockerProxyArgumentParser : IDockerProxyArgumentParser
 {
