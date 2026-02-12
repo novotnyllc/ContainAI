@@ -12,11 +12,17 @@ Final validation sweep across the entire refactored codebase. Verify all accepta
   - `dotnet test --solution ContainAI.slnx -c Release --xunit-info`
   - `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`
   - `dotnet tool run slopwatch analyze -d . --fail-on warning`
+- Run coverage gate:
+  ```bash
+  dotnet test --solution ContainAI.slnx -c Release --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+  dotnet tool run reportgenerator -reports:**/coverage.opencover.xml -targetdir:coverage-report -reporttypes:"TextSummary"
+  grep "Line coverage" coverage-report/Summary.txt
+  ```
+  Fail condition: any of ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy below 97% line coverage
 - Verify zero dotted basenames: `find src/cai -type f -name "*.cs" | xargs -I{} basename {} | sed "s/\.cs$//" | awk "index(\$0,\".\")>0" | wc -l` should return 0
-- Verify coverage >= 97% for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy
-- Verify `docs/architecture/refactor-exceptions.md` is complete and all exceptions justified
+- Verify `docs/architecture/refactor-exceptions.md` is complete with all exceptions per rubric
 - Verify `specs/cai-aot-composition-decision-record.md` is complete
-- Verify all cross-module dependencies point inward to contracts
+- Verify cross-module dependencies documented in AOT decision record
 - Fix any remaining issues found during validation
 
 ### Key context
@@ -28,8 +34,8 @@ Final validation sweep across the entire refactored codebase. Verify all accepta
 - [ ] `dotnet test --solution ContainAI.slnx -c Release --xunit-info` passes (all tests)
 - [ ] `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes` passes
 - [ ] `dotnet tool run slopwatch analyze -d . --fail-on warning` passes
-- [ ] Zero dotted basenames in hand-written src/cai source files
-- [ ] Coverage >= 97% for CLI libraries
+- [ ] Zero dotted basenames in hand-written src/cai source files (count = 0)
+- [ ] Coverage >= 97% for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy (verified via reportgenerator)
 - [ ] All PRD Definition of Done criteria verified
 ## Done summary
 TBD

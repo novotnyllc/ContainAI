@@ -57,3 +57,6 @@ Use file mtime (via stat) for timestamp checks instead of file content - more re
 
 ## 2026-02-04 manual [convention]
 When epic and task specs define schemas, ensure field names match exactly (e.g., link-spec schema: link, target, remove_first)
+
+## 2026-02-12 manual [convention]
+When epic specs claim tasks can run in parallel, each task must explicitly list shared files it may touch; parallelization is only safe for disjoint file scopes

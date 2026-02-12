@@ -16,7 +16,7 @@ Complete the architectural cleanup of `src/cai` to reach a consistent .NET 10 co
 
 **In scope:**
 - WS1: Remove all dotted basenames in hand-written `src/cai` source files (97 files)
-- WS2: Separate co-located interfaces/implementations 
+- WS2: Separate co-located interfaces/implementations
 - WS3: Establish consistent module layering for P0 modules (Devcontainer, ContainerRuntime, DockerProxy)
 - WS4: AOT composition decision record (research + document)
 - WS5: Verification and quality gates
@@ -27,14 +27,40 @@ Complete the architectural cleanup of `src/cai` to reach a consistent .NET 10 co
 - Behavioral feature changes
 - CLI command surface changes
 - P1 module layering (Sessions, RuntimeSupport) — tracked separately after P0 completes
+- RegexOptions changes (separate concern, tracked independently)
+
+## Audited File Inventory
+
+All 97 dotted basenames mapped to task owners:
+
+| Module | Count | Task |
+|--------|-------|------|
+| ContainerRuntime | 14 | 1 |
+| DockerProxy | 26 | 2 |
+| ShellProfile | 6 | 3 |
+| Manifests/Toml | 5 | 3 |
+| AcpProxy | 1 | 3 |
+| Install | 3 | 3 |
+| Importing | 3 | 3 |
+| Sessions | 27 | 4 |
+| Devcontainer | 12 | 5 |
+| **Total** | **97** | |
+
+**PRD errata:** PRD references `src/cai/Toml/*.*.cs` as a WS1 target, but this directory has 0 dotted basenames. The actual dotted files are in `Manifests/Toml/` (covered by task 3). PRD also prescribes Devcontainer-first execution order; this epic overrides that to Devcontainer-last for fn-49 coordination (see "Execution order" design decision below). The PRD execution order is advisory; this epic spec is the authoritative execution plan.
 
 ## Design Decisions
 
 ### Namespace migration strategy
 Align namespaces to match folder hierarchy **only for modules being restructured** in WS1/WS3. This avoids creating a worse folder-namespace mismatch while keeping scope bounded. The `RootNamespace` stays as `ContainAI.Cli.Host` — files in subfolders get explicit namespace declarations matching their path.
 
+### Execution order (reconciles PRD vs fn-49 coordination)
+**PRD says Devcontainer first** (largest visible debt). **Epic orders Devcontainer last** to reduce fn-49 merge conflict risk. **Resolution: epic order takes precedence.** The PRD execution order is advisory; Devcontainer improvements have equal value regardless of sequence, and fn-49 conflict avoidance is a real constraint. If fn-49 merges before task 5 starts, Devcontainer can be pulled earlier.
+
 ### WS1/WS3 combined execution
 File renames (WS1) and folder restructuring (WS3) execute per-module as a single pass. Separating them would require two rename cycles for the same files. However, **each module uses two commits**: (1) `git mv` only (preserves rename detection), (2) namespace/using fixups + folder structure changes.
+
+### Parallelization model
+Tasks 1-5 can run in parallel for their `git mv` rename commits (disjoint file scopes). **However, namespace/using fixup commits may touch shared files** (`Program.cs`, `CaiCommandRuntimeHandlersFactory.cs`). The fixup phase must be serialized through a final integration pass or coordinated via worktree isolation. **Each task spec lists its shared-file dependencies explicitly** (see "Shared files" section in each task).
 
 ### WS2 as separate sweep
 Contract separation runs after WS1/WS3 per module. This keeps rename commits clean (no content changes) and allows contract splits to be reviewed as distinct architectural changes.
@@ -46,25 +72,35 @@ WS3 establishes folder structure and module boundaries but **does not change the
 The PRD prescribes Contracts/Models/Services/Orchestration/Infrastructure subfolders. Modules with existing well-structured subfolders (e.g., DockerProxy already has Contracts/, Execution/, Parsing/) keep their current structure if it serves the same purpose. The prescribed shape is a guideline, not a rigid template.
 
 ### fn-49 coordination
-Devcontainer restructure (task 5) runs last in the rename sequence to minimize conflict with fn-49 (devcontainer integration). If fn-49 is still active, task 5 can be deferred.
+Devcontainer restructure (task 5) runs last in the rename sequence to minimize conflict with fn-49 (devcontainer integration). If fn-49 is still active, task 5 can be deferred. **Prerequisite for task 5:** fn-49 must be merged or confirmed inactive. Task 5 rebases onto main after fn-49 merge.
+
+### Contract separation exception rubric
+Approved exceptions to the "one type per file" rule are documented in `docs/architecture/refactor-exceptions.md` with:
+- **Exception type:** Private nested helper | Source-generator context | Tiny adapter
+- **Qualifying criteria:**
+  - Private nested: Inner type used only by the containing class, not visible outside assembly
+  - Source-generator: Type decorated with source-generator attributes (e.g., `[TomlSerializedObject]`, `[JsonSerializable]`) that must stay co-located with generated code
+  - Tiny adapter: Total combined interface + class body is ≤15 non-blank, non-comment lines (measured by `wc -l` after stripping blank lines and `//` comments)
+- **Required fields per exception:** File path, exception type, justification (one sentence), line count if tiny adapter
+- **Anti-pattern:** Do not use "convenience" as justification. If an interface is used by more than one consumer, it must be separated regardless of size.
 
 ## Phases
 
 ```mermaid
 graph LR
-    T1[ContainerRuntime<br/>rename+restructure] --> T6[Contract separation<br/>P0 modules]
-    T2[DockerProxy<br/>rename+restructure] --> T6
-    T3[ShellProfile+Toml+Other<br/>rename] --> T7[Contract separation<br/>P1 modules]
-    T4[Sessions<br/>rename+restructure] --> T7
-    T5[Devcontainer<br/>rename+restructure] --> T6
+    T1[ContainerRuntime<br/>14 renames] --> T6[Contract separation<br/>P0 modules]
+    T2[DockerProxy<br/>26 renames] --> T6
+    T3[ShellProfile+Toml+Other<br/>18 renames] --> T7[Contract separation<br/>P1 modules<br/>4 batches]
+    T4[Sessions<br/>27 renames] --> T7
+    T5[Devcontainer<br/>12 renames] --> T6
     T6 --> T9[Docs update]
     T7 --> T9
     T8[AOT decision record] --> T10[Final validation]
     T9 --> T10
 ```
 
-**Phase 1 — Module renames (WS1+WS3):** Tasks 1-5, can run in parallel per module.
-**Phase 2 — Contract separation (WS2):** Tasks 6-7, after Phase 1 per dependency.
+**Phase 1 — Module renames (WS1+WS3):** Tasks 1-5, can run in parallel for `git mv` commits (disjoint scopes). Namespace fixup commits serialized for shared files.
+**Phase 2 — Contract separation (WS2):** Task 6 (P0 modules) and Task 7 (P1 modules, 4 internal batches: Sessions → Importing → Operations → remaining). Each batch has independent build+test gates.
 **Phase 3 — Composition & validation (WS4+WS5):** Tasks 8-10, research + docs + final gate.
 
 ## Risks and Mitigations
@@ -72,18 +108,21 @@ graph LR
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | Large rename sets break internal references | High | Medium | Two-commit strategy (git mv first, fixups second); build+test per batch |
-| fn-49 merge conflicts with Devcontainer work | Medium | High | Devcontainer task runs last; coordinate with fn-49 status |
+| fn-49 merge conflicts with Devcontainer work | Medium | High | Devcontainer task runs last; prerequisite: fn-49 merged or confirmed inactive; rebase onto main after merge |
 | Coverage line mappings break after namespace changes | Medium | Low | Re-baseline coverage after each module restructure; 97% gate stays |
 | Analyzer rule churn during broad moves | Medium | Low | Run `-warnaserror` and slopwatch on each batch; fix immediately |
 | Dual-constructor pattern creates fragile composition | Low | Medium | Defer to WS4; WS3 only restructures folders, not composition |
 | CsToml source-generator breaks on file moves | Low | High | Validate CsToml partial classes compile after each Manifests/Toml rename |
-| Scope creep from 213-file contract split | Medium | Medium | Default-split with documented exceptions; size threshold: <15 lines total for adapter exception |
+| Scope creep from 213-file contract split | Medium | Medium | Default-split with documented exceptions per rubric; task 7 uses 4 batches for manageable review |
+| Shared file conflicts during parallel Phase 1 | Medium | Medium | Serialize namespace fixup commits for shared entrypoint/factory files; or use worktree isolation |
 
 ## Non-functional Targets
 
 - Build clean: `dotnet build ContainAI.slnx -c Release -warnaserror`
 - Slopwatch clean: `dotnet tool run slopwatch analyze -d . --fail-on warning`
 - Coverage: >=97% line coverage for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy
+  - Command: `dotnet test --solution ContainAI.slnx -c Release --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover && dotnet tool run reportgenerator -reports:**/coverage.opencover.xml -targetdir:coverage-report -reporttypes:"TextSummary" && grep "Line coverage" coverage-report/Summary.txt`
+  - Gate: Fail if any target assembly drops below 97% line coverage
 - Naming: `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`
 - Zero dotted basenames in hand-written `src/cai` source files
 - Zero behavioral regressions (all existing tests pass unchanged)
@@ -96,6 +135,11 @@ dotnet build ContainAI.slnx -c Release -warnaserror
 
 # Run tests
 dotnet test --solution ContainAI.slnx -c Release --xunit-info
+
+# Coverage gate (97% threshold)
+dotnet test --solution ContainAI.slnx -c Release --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+dotnet tool run reportgenerator -reports:**/coverage.opencover.xml -targetdir:coverage-report -reporttypes:"TextSummary"
+grep "Line coverage" coverage-report/Summary.txt
 
 # Naming analyzer check
 dotnet format analyzers --diagnostics IDE1006 --verify-no-changes
@@ -112,25 +156,25 @@ git diff --stat --diff-filter=R HEAD~1
 
 ## Acceptance
 
-- [ ] Zero dotted basenames in hand-written `src/cai` source files
-- [ ] Mixed interface/class files reduced to approved exceptions only (documented in `docs/architecture/refactor-exceptions.md`)
+- [ ] Zero dotted basenames in hand-written `src/cai` source files (verified: 97 files across 7 module groups)
+- [ ] Mixed interface/class files reduced to approved exceptions only (documented in `docs/architecture/refactor-exceptions.md` per exception rubric)
 - [ ] P0 module folders (ContainerRuntime, DockerProxy, Devcontainer) reflect stable architecture boundaries
 - [ ] Namespaces match folder hierarchy for restructured modules
 - [ ] AOT composition decision record complete at `specs/cai-aot-composition-decision-record.md`
-- [ ] Cross-module dependencies point inward to contracts, not across concrete classes
+- [ ] Cross-module concrete instantiation hotspots documented in AOT decision record; inward-pointing dependency rule enforced for newly-created contract interfaces (existing concrete cross-module deps preserved, remediation deferred to WS4 decision)
 - [ ] Build + slopwatch + naming analyzer gates pass
-- [ ] Coverage >= 97% for CLI libraries
+- [ ] Coverage >= 97% for CLI libraries (verified via coverage gate command)
 - [ ] 8 existing docs updated + 2 new docs created
 - [ ] All existing tests pass without behavioral changes
 
 ## References
 
-- PRD: `specs/cai-architecture-refactor-completion-prd.md`
+- PRD: `specs/cai-architecture-refactor-completion-prd.md` (see PRD errata above for known discrepancies)
 - Architecture assessment: `docs/specs/api-design-and-architecture-refactor-assessment-2026-02-11.md`
 - Composition roots: `src/cai/Program.cs`, `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs`
 - Central factory: `src/cai/CommandRuntime/Factory/CaiCommandRuntimeHandlersFactory.cs:5-31`
 - DockerProxy factory: `src/cai/DockerProxy/ContainAiDockerProxy.cs:29-61`
 - Epic dependency: fn-52 (AOT DI strategy — WS4 depends on this)
-- Epic coordination: fn-49 (devcontainer integration — task 5 may conflict)
+- Epic coordination: fn-49 (devcontainer integration — task 5 prerequisite)
 - Conventions: `.flow/memory/conventions.md`
 - Pitfalls: `.flow/memory/pitfalls.md`
