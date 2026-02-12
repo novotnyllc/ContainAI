@@ -49,9 +49,8 @@ Extract co-located interfaces from implementation files in P1 modules. Processed
 - [ ] All existing tests pass unchanged
 - [ ] slopwatch clean
 ## Done summary
-TBD
-
+Extracted co-located interfaces from 156 implementation files across P1 modules (Sessions 46, Importing 42, Operations 27, remaining 41) into separate I*.cs files. Two tiny-adapter exceptions documented (CaiDockerImagePuller, CaiGcAgeParser). Mixed file count reduced from 213 baseline to 3 approved exceptions only.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 05f6a6d3, 5cebb2ec, 45ed941d
+- Tests: dotnet build ContainAI.slnx -c Release -warnaserror, dotnet test --solution ContainAI.slnx -c Release --xunit-info, dotnet tool run slopwatch analyze -d . --fail-on warning
 - PRs:
