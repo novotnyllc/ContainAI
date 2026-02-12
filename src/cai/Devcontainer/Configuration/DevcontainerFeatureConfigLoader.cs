@@ -1,36 +1,31 @@
-using System.Text.Json;
-
 namespace ContainAI.Cli.Host;
 
-internal interface IDevcontainerFeatureOptionsLoader
+internal sealed class DevcontainerFeatureConfigLoader : IDevcontainerFeatureConfigLoader
 {
-    Task<FeatureConfig?> LoadAsync(string path, CancellationToken cancellationToken);
-}
+    private readonly IDevcontainerFeatureConfigService configService;
+    private readonly TextWriter stderr;
 
-internal sealed class DevcontainerFeatureOptionsLoader : IDevcontainerFeatureOptionsLoader
-{
-    public async Task<FeatureConfig?> LoadAsync(string path, CancellationToken cancellationToken)
+    public DevcontainerFeatureConfigLoader(IDevcontainerFeatureConfigService configService, TextWriter stderr)
     {
-        try
+        this.configService = configService ?? throw new ArgumentNullException(nameof(configService));
+        this.stderr = stderr ?? throw new ArgumentNullException(nameof(stderr));
+    }
+
+    public async Task<FeatureConfig?> LoadFeatureConfigOrWriteErrorAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(DevcontainerFeaturePaths.DefaultConfigPath))
         {
-            var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            return JsonSerializer.Deserialize(json, DevcontainerFeatureJsonContext.Default.FeatureConfig);
-        }
-        catch (IOException)
-        {
+            await stderr.WriteLineAsync($"ERROR: Configuration file not found: {DevcontainerFeaturePaths.DefaultConfigPath}").ConfigureAwait(false);
             return null;
         }
-        catch (UnauthorizedAccessException)
+
+        var settings = await configService.LoadFeatureConfigAsync(DevcontainerFeaturePaths.DefaultConfigPath, cancellationToken).ConfigureAwait(false);
+        if (settings is null)
         {
+            await stderr.WriteLineAsync($"ERROR: Failed to parse configuration file: {DevcontainerFeaturePaths.DefaultConfigPath}").ConfigureAwait(false);
             return null;
         }
-        catch (JsonException)
-        {
-            return null;
-        }
-        catch (NotSupportedException)
-        {
-            return null;
-        }
+
+        return settings;
     }
 }
