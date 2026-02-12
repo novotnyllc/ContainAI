@@ -11,7 +11,7 @@ declarations under the approved exception rubric.
 | Category | Criteria |
 |---|---|
 | **source-generator** | Type participates in `[JsonSerializable]`, `[GeneratedRegex]`, or similar source-gen that requires adjacency |
-| **tiny-adapter** | Implementation is 15 non-blank lines and has a single consumer |
+| **tiny-adapter** | Implementation is &le; 15 non-blank lines and has a single consumer |
 | **private-nested** | Interface is private/nested and not visible outside its containing type |
 
 ## Approved Exceptions
