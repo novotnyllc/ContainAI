@@ -33,7 +33,7 @@ There are three composition roots:
 
 ### Cross-module concrete instantiation
 
-`ManifestTomlParser` is instantiated via `new ManifestTomlParser()` in 9 locations across 7 files:
+`ManifestTomlParser` is instantiated via `new ManifestTomlParser()` in 9 locations across 8 files:
 
 | File | Context |
 |------|---------|
@@ -46,7 +46,7 @@ There are three composition roots:
 | `CaiImportOrchestrationOperations.cs` | Public constructor (line 15) |
 | `ManifestGenerators.cs` | Static convenience overload (line 9) |
 
-All 9 sites follow the dual-constructor pattern: the `new ManifestTomlParser()` call lives in a public convenience constructor that chains to an internal constructor accepting `IManifestTomlParser`. The runtime entry path through `Program.cs` creates a single `ManifestTomlParser` instance and passes it to `CaiCommandRuntime`, which passes it to `CaiCommandRuntimeHandlersFactory.Create()`, which distributes it to all handlers. The other 7 instantiation sites are convenience constructors used only in tests or standalone invocations (e.g., `ManifestGenerators` called from manifest commands).
+Of the 9 sites, 8 follow the dual-constructor pattern: the `new ManifestTomlParser()` call lives in a public convenience constructor that chains to an internal constructor accepting `IManifestTomlParser`. The ninth (`ManifestGenerators`) is a static convenience overload that chains to a method accepting `IManifestTomlParser`. The runtime entry path through `Program.cs` creates a single `ManifestTomlParser` instance and passes it to `CaiCommandRuntime`, which passes it to `CaiCommandRuntimeHandlersFactory.Create()`, which distributes it to all handlers. The other 8 instantiation sites are convenience constructors or static overloads used only in tests or standalone invocations.
 
 ## Options Considered
 
@@ -159,7 +159,7 @@ The `ManifestTomlParser` instantiation pattern is the primary cross-module hotsp
 | `CaiImportOrchestrationOperations` | No | Convenience constructor; runtime creates via factory |
 | `ManifestGenerators` | Sometimes | Static convenience overload; main path uses injected parser |
 
-**Assessment:** At runtime, exactly one `ManifestTomlParser` instance is created (in `Program.cs`) and threaded through the composition graph via `CaiCommandRuntime` and `CaiCommandRuntimeHandlersFactory`. The other 8 instantiation sites are convenience constructors that exist solely for testing ergonomics and standalone usage. This is acceptable: the convenience constructors create lightweight, stateless parser instances with no side effects.
+**Assessment:** On the primary CLI command runtime path (non-docker-proxy invocations), a single `ManifestTomlParser` instance is created in `Program.cs` and threaded through the composition graph via `CaiCommandRuntime` and `CaiCommandRuntimeHandlersFactory`. The DockerProxy path creates its own instances via `ContainAiDockerProxy`'s static factory methods. The other 8 instantiation sites are convenience constructors or static overloads that exist solely for testing ergonomics and standalone usage. This is acceptable: `ManifestTomlParser` is a lightweight, stateless parser with no side effects, so multiple instances carry no cost.
 
 **No remediation required.** The current pattern does not violate the inward-pointing dependency rule because all runtime dependencies point from concrete services to the `IManifestTomlParser` interface. The convenience constructors are syntactic sugar, not architectural coupling.
 
