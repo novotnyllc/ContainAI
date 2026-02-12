@@ -29,9 +29,8 @@ Research and document the AOT composition strategy as an architecture decision r
 - [ ] Decision addresses cross-module concrete instantiation hotspots (ManifestTomlParser in 8 places)
 - [ ] Trim/AOT compatibility verified for chosen approach
 ## Done summary
-TBD
-
+Created AOT composition decision record at specs/cai-aot-composition-decision-record.md. Evaluated manual composition vs Jab vs Pure.DI, decided to keep manual composition as it is already fully AOT-safe, the codebase scale does not warrant a DI container, and risk vs reward is unfavorable. Documented the dual-constructor pattern rationale, cataloged ManifestTomlParser cross-module instantiation hotspots (9 sites across 8 files), and verified trim/AOT compatibility.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 15fec9ef, 56654fa5
+- Tests: documentation-only task, no tests required
 - PRs:
