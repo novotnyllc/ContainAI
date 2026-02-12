@@ -40,9 +40,30 @@ Keep mixed only when one of these applies:
 - [ ] All existing tests pass unchanged
 - [ ] slopwatch clean: `dotnet tool run slopwatch analyze -d . --fail-on warning`
 ## Done summary
-TBD
+## Summary
 
+Extracted 54 co-located interfaces from implementation files into separate `I*.cs` files across three P0 modules:
+
+- **ContainerRuntime**: 24 interface files extracted
+- **DockerProxy**: 5 interface files extracted  
+- **Devcontainer**: 25 interface files extracted
+
+### Approved Exceptions (documented in `docs/architecture/refactor-exceptions.md`)
+
+- `DevcontainerFeatureModels.cs` — source-generator (`[JsonSerializable]`)
+- `ContainerRuntimeLinkSpecFileReader.cs` — tiny-adapter (6 lines, single consumer)
+
+### Already-Separated (no action needed)
+
+5 files already contained only interface declarations prior to this refactor.
+
+### Quality Gates
+
+- `dotnet build ContainAI.slnx -c Release -warnaserror` — 0 warnings, 0 errors
+- `dotnet test` — 340/342 pass; 2 pre-existing failures (DocumentationLinkTests references deleted files, SyncIntegrationTests references moved files)
+- `slopwatch analyze` — 0 issues
+- No test modifications required
 ## Evidence
 - Commits:
-- Tests:
+- Tests: 340/342 pass, 2 pre-existing failures unrelated to changes
 - PRs:
