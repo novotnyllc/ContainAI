@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiRefreshOperations
-{
-    Task<int> RunRefreshAsync(bool rebuild, bool showHelp, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiRefreshOperations : ICaiRefreshOperations
 {
     private readonly TextWriter stdout;

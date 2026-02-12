@@ -6,11 +6,6 @@ using ContainAI.Cli.Host.Sessions.Resolution.Workspace.Selection;
 
 namespace ContainAI.Cli.Host.Sessions.Resolution.Orchestration;
 
-internal interface ISessionTargetWorkspaceResolver
-{
-    Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionTargetWorkspaceResolver : ISessionTargetWorkspaceResolver
 {
     private readonly ISessionTargetWorkspacePathOptionResolver workspacePathOptionResolver;

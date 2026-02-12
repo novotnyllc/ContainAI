@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiDoctorTemplateValidator
-{
-    Task<bool> ResolveTemplateStatusAsync(bool buildTemplates, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiDoctorTemplateValidator : ICaiDoctorTemplateValidator
 {
     public Task<bool> ResolveTemplateStatusAsync(bool buildTemplates, CancellationToken cancellationToken)

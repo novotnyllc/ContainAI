@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
-internal interface ISessionSshKeyPairService
-{
-    Task<ResolutionResult<bool>> EnsureSshKeyPairAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class SessionSshKeyPairService : ISessionSshKeyPairService
 {
     public async Task<ResolutionResult<bool>> EnsureSshKeyPairAsync(CancellationToken cancellationToken)

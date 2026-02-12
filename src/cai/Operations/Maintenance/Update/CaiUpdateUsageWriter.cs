@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiUpdateUsageWriter
-{
-    Task<int> WriteUpdateUsageAsync();
-}
-
 internal sealed class CaiUpdateUsageWriter : ICaiUpdateUsageWriter
 {
     private readonly TextWriter stdout;

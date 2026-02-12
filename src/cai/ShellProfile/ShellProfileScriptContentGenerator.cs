@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IShellProfileScriptContentGenerator
-{
-    string BuildProfileScript(string homeDirectory, string binDirectory);
-}
-
 internal sealed class ShellProfileScriptContentGenerator : IShellProfileScriptContentGenerator
 {
     public string BuildProfileScript(string homeDirectory, string binDirectory)

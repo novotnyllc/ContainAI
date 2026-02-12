@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
-internal interface ISessionSshPortAllocator
-{
-    Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionSshPortAllocator : ISessionSshPortAllocator
 {
     public async Task<ResolutionResult<string>> AllocateSshPortAsync(string context, CancellationToken cancellationToken)

@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiUninstallDockerContextCleaner
-{
-    Task CleanAsync(bool dryRun, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiUninstallDockerContextCleaner : ICaiUninstallDockerContextCleaner
 {
     private static readonly string[] ContextsToRemove =

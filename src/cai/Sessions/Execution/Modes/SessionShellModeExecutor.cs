@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Execution.Modes;
 
-internal interface ISessionShellModeExecutor
-{
-    Task<int> RunAsync(SessionCommandOptions options, EnsuredSession session, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionShellModeExecutor : ISessionShellModeExecutor
 {
     private readonly ISessionSshExecutionService sshExecutionService;

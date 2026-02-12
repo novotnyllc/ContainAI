@@ -5,11 +5,6 @@ using ContainAI.Cli.Host.Sessions.Resolution.Workspace.DataVolume;
 
 namespace ContainAI.Cli.Host.Sessions.Resolution.Workspace;
 
-internal interface ISessionTargetDataVolumeResolutionService
-{
-    Task<ResolutionResult<string>> ResolveDataVolumeAsync(string workspace, string? explicitVolume, string? explicitConfig, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionTargetDataVolumeResolutionService : ISessionTargetDataVolumeResolutionService
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;

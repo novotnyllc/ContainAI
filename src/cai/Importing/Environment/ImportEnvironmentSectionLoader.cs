@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 namespace ContainAI.Cli.Host.Importing.Environment;
 
-internal interface IImportEnvironmentSectionLoader
-{
-    Task<ImportEnvironmentSectionLoadResult> LoadAsync(string configPath, CancellationToken cancellationToken);
-}
-
 internal sealed class ImportEnvironmentSectionLoader : IImportEnvironmentSectionLoader
 {
     private readonly TextWriter stderr;

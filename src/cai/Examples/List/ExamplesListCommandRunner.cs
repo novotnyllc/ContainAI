@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IExamplesListCommandRunner
-{
-    Task<int> RunAsync(IReadOnlyDictionary<string, string> examples, CancellationToken cancellationToken);
-}
-
 internal sealed class ExamplesListCommandRunner(TextWriter standardOutput, TextWriter standardError) : IExamplesListCommandRunner
 {
     public async Task<int> RunAsync(IReadOnlyDictionary<string, string> examples, CancellationToken cancellationToken)

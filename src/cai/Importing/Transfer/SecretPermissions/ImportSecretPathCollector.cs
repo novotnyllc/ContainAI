@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Importing.Transfer.SecretPermissions;
 
-internal interface IImportSecretPathCollector
-{
-    SecretPermissionPathCollection Collect(IReadOnlyList<ManifestEntry> manifestEntries, bool noSecrets);
-}
-
 internal sealed class ImportSecretPathCollector : IImportSecretPathCollector
 {
     public SecretPermissionPathCollection Collect(IReadOnlyList<ManifestEntry> manifestEntries, bool noSecrets)

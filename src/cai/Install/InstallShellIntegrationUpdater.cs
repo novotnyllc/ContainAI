@@ -1,14 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IInstallShellIntegrationUpdater
-{
-    Task EnsureShellIntegrationAsync(
-        string binDir,
-        string homeDirectory,
-        bool autoUpdateShellConfig,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class InstallShellIntegrationUpdater : IInstallShellIntegrationUpdater
 {
     private readonly IInstallPathResolver pathResolver;

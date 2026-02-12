@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IInstallFlowExecutor
-{
-    Task<int> ExecuteAsync(InstallCommandContext context, CancellationToken cancellationToken);
-}
-
 internal sealed class InstallFlowExecutor : IInstallFlowExecutor
 {
     private readonly IInstallDeploymentService deploymentService;

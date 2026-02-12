@@ -1,12 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IContainerLinkRepairReporter
-{
-    Task LogInfoAsync(bool quiet, string message);
-
-    Task WriteSummaryAsync(ContainerLinkRepairMode mode, ContainerLinkRepairStats stats, bool quiet);
-}
-
 internal sealed class ContainerLinkRepairReporter(TextWriter standardOutput) : IContainerLinkRepairReporter
 {
     public async Task LogInfoAsync(bool quiet, string message)

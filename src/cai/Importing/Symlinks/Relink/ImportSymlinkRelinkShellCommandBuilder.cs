@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host.Importing.Symlinks;
 
-internal interface IImportSymlinkRelinkShellCommandBuilder
-{
-    string Build(IReadOnlyList<ImportSymlinkRelinkOperation> operations);
-}
-
 internal sealed class ImportSymlinkRelinkShellCommandBuilder : IImportSymlinkRelinkShellCommandBuilder
 {
     public string Build(IReadOnlyList<ImportSymlinkRelinkOperation> operations)

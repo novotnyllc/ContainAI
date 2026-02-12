@@ -1,14 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IImportRunContextReporter
-{
-    Task WriteContextAsync(ImportRunContext context, bool dryRun);
-
-    Task WriteRunContextErrorAsync(string error);
-
-    Task WriteManifestLoadErrorAsync(string error);
-}
-
 internal sealed class ImportRunContextReporter(TextWriter standardOutput, TextWriter standardError) : IImportRunContextReporter
 {
     public async Task WriteContextAsync(ImportRunContext context, bool dryRun)

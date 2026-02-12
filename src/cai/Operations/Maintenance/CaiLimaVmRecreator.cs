@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Process;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiLimaVmRecreator
-{
-    Task<int> RecreateAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class CaiLimaVmRecreator : ICaiLimaVmRecreator
 {
     private readonly TextWriter stdout;

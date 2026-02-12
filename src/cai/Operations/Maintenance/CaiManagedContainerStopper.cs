@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiManagedContainerStopper
-{
-    Task StopAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class CaiManagedContainerStopper : ICaiManagedContainerStopper
 {
     public async Task StopAsync(CancellationToken cancellationToken)

@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.AgentShims;
 
-internal interface IAgentShimCurrentExecutableResolver
-{
-    string Resolve();
-}
-
 internal sealed class AgentShimCurrentExecutableResolver : IAgentShimCurrentExecutableResolver
 {
     public string Resolve()

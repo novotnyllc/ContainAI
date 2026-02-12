@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Resolution.Validation;
 
 namespace ContainAI.Cli.Host.Sessions.Resolution.Workspace.Selection;
 
-internal interface ISessionTargetWorkspacePathOptionResolver
-{
-    ResolutionResult<string> ResolveWorkspace(SessionCommandOptions options);
-}
-
 internal sealed class SessionTargetWorkspacePathOptionResolver : ISessionTargetWorkspacePathOptionResolver
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;

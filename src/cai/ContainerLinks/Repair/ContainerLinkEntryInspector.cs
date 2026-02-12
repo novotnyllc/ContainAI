@@ -1,13 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IContainerLinkEntryInspector
-{
-    Task<ContainerLinkEntryState> GetEntryStateAsync(
-        string containerName,
-        ContainerLinkSpecEntry entry,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class ContainerLinkEntryInspector(IContainerLinkCommandClient commandClient) : IContainerLinkEntryInspector
 {
     public async Task<ContainerLinkEntryState> GetEntryStateAsync(

@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiBaseImageResolver
-{
-    Task<string> ResolveBaseImageAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class CaiBaseImageResolver : ICaiBaseImageResolver
 {
     private static readonly string[] ConfigFileNames =

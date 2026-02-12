@@ -4,14 +4,6 @@ namespace ContainAI.Cli.Host.Importing.Symlinks;
 
 internal readonly record struct ImportSymlinkRelinkOperation(string LinkPath, string RelativeTarget);
 
-internal interface IImportSymlinkRelinkOperationBuilder
-{
-    IReadOnlyList<ImportSymlinkRelinkOperation> Build(
-        string sourceDirectoryPath,
-        string targetRelativePath,
-        IReadOnlyList<ImportSymlink> symlinks);
-}
-
 internal sealed class ImportSymlinkRelinkOperationBuilder(
     TextWriter standardError,
     IPosixPathService posixPathService) : IImportSymlinkRelinkOperationBuilder

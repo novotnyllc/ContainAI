@@ -2,15 +2,6 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal interface IImportSourceDispatcher
-{
-    Task<int> DispatchAsync(
-        ImportCommandOptions options,
-        ImportRunContext context,
-        ManifestEntry[] manifestEntries,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class ImportSourceDispatcher : IImportSourceDispatcher
 {
     private readonly ImportArchiveHandler archiveHandler;

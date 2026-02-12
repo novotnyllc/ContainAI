@@ -11,11 +11,6 @@ internal sealed record ImportRunContext(
     string SourcePath,
     bool ExcludePriv);
 
-internal interface IImportRunContextResolver
-{
-    Task<ResolutionResult<ImportRunContext>> ResolveAsync(ImportCommandOptions options, CancellationToken cancellationToken);
-}
-
 internal sealed class ImportRunContextResolver : IImportRunContextResolver
 {
     private static readonly string[] ConfigFileNames =

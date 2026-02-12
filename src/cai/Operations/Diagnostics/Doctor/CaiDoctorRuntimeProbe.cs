@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Process;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiDoctorRuntimeProbe
-{
-    Task<CaiDoctorRuntimeProbeResult> ProbeAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class CaiDoctorRuntimeProbe : ICaiDoctorRuntimeProbe
 {
     public async Task<CaiDoctorRuntimeProbeResult> ProbeAsync(CancellationToken cancellationToken)

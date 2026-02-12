@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Paths;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiTemplateRebuilder
-{
-    Task<int> RebuildTemplatesAsync(string baseImage, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiTemplateRebuilder : ICaiTemplateRebuilder
 {
     private readonly TextWriter stdout;

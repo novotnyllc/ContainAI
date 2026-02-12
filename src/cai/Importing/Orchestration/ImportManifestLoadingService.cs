@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IImportManifestLoadingService
-{
-    ImportManifestLoadResult LoadManifestEntries();
-}
-
 internal sealed class ImportManifestLoadingService : IImportManifestLoadingService
 {
     private readonly ImportManifestEntryLoader manifestEntryLoader;

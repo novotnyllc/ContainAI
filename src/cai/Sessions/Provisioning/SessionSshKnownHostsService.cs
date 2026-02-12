@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
-internal interface ISessionSshKnownHostsService
-{
-    Task<ResolutionResult<bool>> UpdateKnownHostsAsync(string containerName, string sshPort, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionSshKnownHostsService : ISessionSshKnownHostsService
 {
     public async Task<ResolutionResult<bool>> UpdateKnownHostsAsync(string containerName, string sshPort, CancellationToken cancellationToken)

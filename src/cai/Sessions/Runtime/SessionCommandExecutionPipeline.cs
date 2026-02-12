@@ -6,11 +6,6 @@ using ContainAI.Cli.Host.Sessions.State;
 
 namespace ContainAI.Cli.Host.Sessions.Runtime;
 
-internal interface ISessionCommandExecutionPipeline
-{
-    Task<int> RunAsync(SessionCommandOptions options, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionCommandExecutionPipeline(
     TextWriter stderr,
     ISessionTargetResolver targetResolver,

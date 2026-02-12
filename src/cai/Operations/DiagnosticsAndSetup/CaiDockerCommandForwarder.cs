@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Process;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiDockerCommandForwarder
-{
-    Task<int> RunAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiDockerCommandForwarder : ICaiDockerCommandForwarder
 {
     public async Task<int> RunAsync(IReadOnlyList<string> dockerArguments, CancellationToken cancellationToken)

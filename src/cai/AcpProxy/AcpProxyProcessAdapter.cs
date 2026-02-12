@@ -2,13 +2,6 @@ using AgentClientProtocol.Proxy;
 
 namespace ContainAI.Cli.Host;
 
-internal interface IAcpProxyProcess : IDisposable
-{
-    void Cancel();
-
-    Task<int> RunAsync(Stream stdin, CancellationToken cancellationToken);
-}
-
 internal sealed class AcpProxyProcessAdapter : IAcpProxyProcess
 {
     private readonly AcpProxy proxy;

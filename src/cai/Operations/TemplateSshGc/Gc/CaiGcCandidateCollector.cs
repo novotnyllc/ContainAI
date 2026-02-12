@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiGcCandidateCollector
-{
-    Task<CaiGcPruneCandidateResult> CollectAsync(TimeSpan minimumAge, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiGcCandidateCollector : ICaiGcCandidateCollector
 {
     private readonly TextWriter stderr;

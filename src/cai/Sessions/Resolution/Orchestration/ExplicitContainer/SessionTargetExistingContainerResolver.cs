@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.Sessions.Resolution.Orchestration;
 
 namespace ContainAI.Cli.Host.Sessions.Resolution.Orchestration.ExplicitContainer;
 
-internal interface ISessionTargetExistingContainerResolver
-{
-    Task<ResolvedTarget> ResolveAsync(SessionCommandOptions options, string context, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionTargetExistingContainerResolver(
     ISessionTargetDockerLookupService dockerLookupService,
     ISessionTargetExplicitContainerTargetFactory explicitContainerTargetFactory) : ISessionTargetExistingContainerResolver

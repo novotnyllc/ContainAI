@@ -2,14 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Parsing;
 
 namespace ContainAI.Cli.Host.Importing.Paths;
 
-internal interface IImportAdditionalPathConfigReader
-{
-    Task<IReadOnlyList<string>> ReadRawAdditionalPathsAsync(
-        string configPath,
-        bool verbose,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class ImportAdditionalPathConfigReader : IImportAdditionalPathConfigReader
 {
     private readonly TextWriter standardError;

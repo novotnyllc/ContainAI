@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host.Importing.Transfer.SecretPermissions;
 
-internal interface ISecretPermissionDockerExecutor
-{
-    Task<int> ExecuteAsync(string volume, string shellCommand, CancellationToken cancellationToken);
-}
-
 internal sealed class SecretPermissionDockerExecutor : ISecretPermissionDockerExecutor
 {
     private readonly TextWriter stderr;

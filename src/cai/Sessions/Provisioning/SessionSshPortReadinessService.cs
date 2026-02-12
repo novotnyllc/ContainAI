@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
-internal interface ISessionSshPortReadinessService
-{
-    Task<bool> WaitForSshPortAsync(string sshPort, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionSshPortReadinessService : ISessionSshPortReadinessService
 {
     public async Task<bool> WaitForSshPortAsync(string sshPort, CancellationToken cancellationToken)

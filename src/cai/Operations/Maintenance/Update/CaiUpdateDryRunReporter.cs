@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiUpdateDryRunReporter
-{
-    Task<int> RunUpdateDryRunAsync(bool stopContainers, bool limaRecreate);
-}
-
 internal sealed class CaiUpdateDryRunReporter : ICaiUpdateDryRunReporter
 {
     private readonly TextWriter stdout;

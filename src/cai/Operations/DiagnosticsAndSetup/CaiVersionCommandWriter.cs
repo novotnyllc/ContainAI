@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Process;
 
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiVersionCommandWriter
-{
-    Task<int> WriteVersionAsync(bool json, CancellationToken cancellationToken);
-}
-
 internal sealed class CaiVersionCommandWriter : ICaiVersionCommandWriter
 {
     private readonly TextWriter stdout;

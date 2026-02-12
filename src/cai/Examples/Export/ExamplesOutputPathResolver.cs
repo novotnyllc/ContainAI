@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IExamplesOutputPathResolver
-{
-    string NormalizePath(string value);
-}
-
 internal sealed class ExamplesOutputPathResolver : IExamplesOutputPathResolver
 {
     public string NormalizePath(string value)

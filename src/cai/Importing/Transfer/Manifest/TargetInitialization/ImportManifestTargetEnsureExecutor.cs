@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.RuntimeSupport.Docker;
 
 namespace ContainAI.Cli.Host.Importing.Transfer;
 
-internal interface IImportManifestTargetEnsureExecutor
-{
-    Task<int> EnsureAsync(string volume, string command, CancellationToken cancellationToken);
-}
-
 internal sealed class ImportManifestTargetEnsureExecutor(TextWriter standardError) : IImportManifestTargetEnsureExecutor
 {
     public async Task<int> EnsureAsync(string volume, string command, CancellationToken cancellationToken)

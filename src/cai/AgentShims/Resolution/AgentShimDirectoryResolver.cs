@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.AgentShims;
 
-internal interface IAgentShimDirectoryResolver
-{
-    string[] ResolveDirectories();
-}
-
 internal sealed class AgentShimDirectoryResolver : IAgentShimDirectoryResolver
 {
     public string[] ResolveDirectories()

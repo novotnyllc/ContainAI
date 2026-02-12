@@ -1,18 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IInstallPathResolver
-{
-    string? ResolveCurrentExecutablePath();
-
-    string ResolveInstallDirectory(string? optionValue);
-
-    string ResolveBinDirectory(string? optionValue);
-
-    string ResolveHomeDirectory();
-
-    string? GetEnvironmentVariable(string variableName);
-}
-
 internal sealed class InstallPathResolver : IInstallPathResolver
 {
     private const string ContainAiDataHomeRelative = ".local/share/containai";

@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Sessions.Models;
 
 namespace ContainAI.Cli.Host.Sessions.Provisioning;
 
-internal interface ISessionContainerRunCommandBuilder
-{
-    IReadOnlyList<string> BuildCommand(SessionCommandOptions options, ResolvedTarget resolved, string sshPort, string image);
-}
-
 internal sealed class SessionContainerRunCommandBuilder : ISessionContainerRunCommandBuilder
 {
     public IReadOnlyList<string> BuildCommand(SessionCommandOptions options, ResolvedTarget resolved, string sshPort, string image)

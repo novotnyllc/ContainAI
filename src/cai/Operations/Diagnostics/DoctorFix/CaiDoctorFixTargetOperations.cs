@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiDoctorFixTargetOperations
-{
-    Task<bool> TryWriteAvailableTargetsAsync(string? target, bool fixAll);
-}
-
 internal sealed class CaiDoctorFixTargetOperations : ICaiDoctorFixTargetOperations
 {
     private readonly TextWriter stdout;

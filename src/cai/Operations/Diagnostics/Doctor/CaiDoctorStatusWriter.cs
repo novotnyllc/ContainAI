@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface ICaiDoctorStatusWriter
-{
-    Task WriteAsync(bool outputJson, bool buildTemplates, CaiDoctorRuntimeProbeResult runtimeProbe, bool templateStatus);
-}
-
 internal sealed class CaiDoctorStatusWriter : ICaiDoctorStatusWriter
 {
     private readonly TextWriter stdout;

@@ -2,11 +2,6 @@ using ContainAI.Cli.Abstractions;
 
 namespace ContainAI.Cli.Host;
 
-internal interface IInstallSetupRunner
-{
-    Task<int> RunSetupAsync(string installedBinary, InstallCommandOptions options, CancellationToken cancellationToken);
-}
-
 internal sealed class InstallSetupRunner : IInstallSetupRunner
 {
     private readonly IInstallCommandOutput output;

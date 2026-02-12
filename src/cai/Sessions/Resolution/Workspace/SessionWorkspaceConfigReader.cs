@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.Sessions.Resolution.Validation;
 
 namespace ContainAI.Cli.Host.Sessions.Resolution.Workspace;
 
-internal interface ISessionWorkspaceConfigReader
-{
-    Task<string?> TryResolveWorkspaceContainerNameAsync(string workspace, CancellationToken cancellationToken);
-}
-
 internal sealed class SessionWorkspaceConfigReader : ISessionWorkspaceConfigReader
 {
     private readonly ISessionTargetParsingValidationService parsingValidationService;

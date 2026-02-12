@@ -1,14 +1,5 @@
 namespace ContainAI.Cli.Host;
 
-internal interface IShellProfileHookBlockManager
-{
-    bool HasHookBlock(string content);
-
-    string BuildHookBlock();
-
-    bool TryRemoveHookBlock(string content, out string updated);
-}
-
 internal sealed class ShellProfileHookBlockManager : IShellProfileHookBlockManager
 {
     public bool HasHookBlock(string content)
