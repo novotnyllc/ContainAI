@@ -677,7 +677,7 @@ dotnet run --project src/cai -- manifest check src/manifests
 |------|---------|
 | `src/manifests/*.toml` | Per-agent manifest files (authoritative source) |
 | `artifacts/container-generated/link-spec.json` | Generated link specification JSON |
-| `src/cai/CaiImportService.ImportOrchestration.cs` | Import implementation |
+| `src/cai/Importing/Facade/CaiImportOrchestrationOperations.cs` | Import implementation |
 | `src/container/Dockerfile.agents` | Agent installation instructions |
 | `cai manifest generate ...` | Generator commands for container artifacts |
 | `cai manifest check src/manifests` | Manifest consistency check |

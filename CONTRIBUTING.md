@@ -78,15 +78,24 @@ dotnet build src/cai/cai.csproj -t:BuildContainAITarballs -p:Configuration=Relea
 ```
 containai/
 ├── src/
-│   ├── cai/                 # Native CLI host runtime
-│   ├── ContainAI.Cli/       # System.CommandLine parser and routing
+│   ├── cai/                       # Native CLI host runtime
+│   │   ├── CommandRuntime/        # Command dispatch and handler factory
+│   │   ├── Operations/            # Diagnostics, maintenance, template/GC
+│   │   ├── Sessions/              # Session lifecycle, SSH, state
+│   │   ├── ContainerRuntime/      # Container-side init/link/runtime
+│   │   ├── Devcontainer/          # Devcontainer feature integration
+│   │   ├── DockerProxy/           # Docker context mediation
+│   │   ├── Importing/             # Host-to-container config import
+│   │   └── ...                    # Manifests, AcpProxy, Install, etc.
+│   ├── ContainAI.Cli/             # System.CommandLine parser and routing
 │   ├── AgentClientProtocol.Proxy/ # ACP proxy library
-│   ├── container/           # Container image definitions
-│   └── manifests/           # Authoritative sync manifests
-├── tests/                   # xUnit v3 test suites
-├── docs/                    # Documentation
-├── SECURITY.md              # Security model
-└── README.md                # Project overview
+│   ├── container/                 # Container image definitions
+│   └── manifests/                 # Authoritative sync manifests
+├── tests/                         # xUnit v3 test suites
+├── docs/                          # Documentation
+│   └── architecture/              # Architecture decision records
+├── SECURITY.md                    # Security model
+└── README.md                      # Project overview
 ```
 
 See [docs/architecture.md](docs/architecture.md) for detailed component documentation.

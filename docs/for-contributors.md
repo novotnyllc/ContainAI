@@ -119,18 +119,31 @@ flowchart TD
 
 ```
 containai/
-├── src/                     # Main CLI and runtime libraries
-│   ├── cai/                 # NativeAOT host executable
-│   ├── ContainAI.Cli/       # System.CommandLine surface
+├── src/                           # Main CLI and runtime libraries
+│   ├── cai/                       # NativeAOT host executable
+│   │   ├── CommandRuntime/        # Command dispatch and handler factory
+│   │   ├── Operations/            # Diagnostics, maintenance, template/GC
+│   │   ├── Sessions/              # Session lifecycle, SSH, state
+│   │   ├── ContainerRuntime/      # Container-side init/link/runtime
+│   │   ├── Devcontainer/          # Devcontainer feature integration
+│   │   ├── DockerProxy/           # Docker context mediation
+│   │   ├── Importing/             # Host-to-container config import
+│   │   ├── Manifests/             # TOML manifest parsing and apply
+│   │   ├── ConfigManifest/        # Config/manifest command processing
+│   │   ├── AcpProxy/              # ACP proxy process lifecycle
+│   │   └── ...                    # Install, ShellProfile, Toml, etc.
+│   ├── ContainAI.Cli/             # System.CommandLine surface
 │   ├── ContainAI.Cli.Abstractions/
 │   ├── AgentClientProtocol.Proxy/
-│   ├── container/           # Container-specific content
-│   │   └── Dockerfile*      # Image layers
-│   └── manifests/           # Authoritative sync manifests
+│   ├── container/                 # Container-specific content
+│   │   └── Dockerfile*            # Image layers
+│   └── manifests/                 # Authoritative sync manifests
 ├── tests/
 │   ├── ContainAI.Cli.Tests/
 │   └── AgentClientProtocol.Proxy.Tests/
-└── docs/                    # Documentation
+├── docs/                          # Documentation
+│   └── architecture/              # Architecture decision records
+└── .flow/                         # Flow-Next task tracking
 ```
 
 ## Key Patterns

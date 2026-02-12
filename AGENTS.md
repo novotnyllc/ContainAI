@@ -37,29 +37,46 @@ shellcheck -x install.sh
 
 ```
 src/
-├── cai/                # Native CLI host entrypoint and runtime
-│   ├── Program.cs
-│   ├── CaiCommandRuntime.cs
-│   └── ContainerRuntimeCommandService.cs
-├── ContainAI.Cli/      # System.CommandLine command surface and routing
-├── manifests/          # Per-agent manifest files (sync config source)
-│   ├── 00-common.toml  # Shared entries (fonts, agents dir)
-│   ├── 10-claude.toml  # Claude Code agent
-│   ├── 11-codex.toml   # Codex agent
-│   └── ...             # Other agents/tools
+├── cai/                      # Native CLI host entrypoint and runtime
+│   ├── Program.cs            # NativeAOT entry point
+│   ├── CommandRuntime/       # Command dispatch and handler factory
+│   ├── Operations/           # Diagnostics, maintenance, template/GC
+│   ├── Sessions/             # Session lifecycle, SSH, state
+│   ├── ContainerRuntime/     # Container-side init/link/runtime
+│   ├── Devcontainer/         # Devcontainer feature integration
+│   ├── DockerProxy/          # Docker context mediation
+│   ├── Importing/            # Host-to-container config import
+│   ├── Manifests/            # TOML manifest parsing and apply
+│   ├── ConfigManifest/       # Config/manifest command processing
+│   ├── AcpProxy/             # ACP proxy process lifecycle
+│   ├── Install/              # CLI install/deployment
+│   ├── ShellProfile/         # Shell profile integration
+│   ├── Toml/                 # TOML command processing
+│   ├── ContainerLinks/       # Container link repair
+│   ├── AgentShims/           # Agent shim resolution/launch
+│   ├── Infrastructure/       # Shared infrastructure services
+│   └── RuntimeSupport/       # Paths, parsing, runtime helpers
+├── ContainAI.Cli/            # System.CommandLine command surface and routing
+├── ContainAI.Cli.Abstractions/ # Strongly typed command option records
+├── manifests/                # Per-agent manifest files (sync config source)
+│   ├── 00-common.toml        # Shared entries (fonts, agents dir)
+│   ├── 10-claude.toml        # Claude Code agent
+│   ├── 11-codex.toml         # Codex agent
+│   └── ...                   # Other agents/tools
 ├── AgentClientProtocol.Proxy/ # ACP proxy library integrated into cai
-├── container/          # Container-specific content
+├── container/                # Container-specific content
 │   ├── Dockerfile.template-system # Template wrapper
-│   ├── Dockerfile.base    # Base image
-│   ├── Dockerfile.sdks    # SDK layer
-│   ├── Dockerfile.agents  # Agent layer
-│   └── Dockerfile         # Final image
-├── services/           # systemd units using native cai system commands
-└── templates/          # Template Dockerfiles
+│   ├── Dockerfile.base       # Base image
+│   ├── Dockerfile.sdks       # SDK layer
+│   ├── Dockerfile.agents     # Agent layer
+│   └── Dockerfile            # Final image
+├── services/                 # systemd units using native cai system commands
+└── templates/                # Template Dockerfiles
 
-tests/                  # xUnit v3 test suites
-docs/                   # Architecture, config, quickstart
-.flow/                  # Flow-Next task tracking
+tests/                        # xUnit v3 test suites
+docs/                         # Architecture, config, quickstart
+  architecture/               # Architecture decision records
+.flow/                        # Flow-Next task tracking
 ```
 
 ## Config Sync Architecture

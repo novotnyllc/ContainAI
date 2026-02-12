@@ -8,7 +8,16 @@ ContainAI is implemented as a native `.NET 10` CLI (`cai`) with `System.CommandL
 
 Key implementation areas:
 
-- `cai/` - native host/runtime orchestration (`Program.cs`, runtime services, build/publish targets)
+- `cai/` - native host/runtime orchestration (`Program.cs`, modular runtime services, build/publish targets)
+  - `CommandRuntime/` - command dispatch and handler factory
+  - `Operations/` - diagnostics, maintenance, template/GC orchestration
+  - `Sessions/` - session lifecycle, SSH execution, state management
+  - `ContainerRuntime/` - container-side init, link repair, runtime commands
+  - `Devcontainer/` - devcontainer feature integration
+  - `DockerProxy/` - Docker context mediation and setup helpers
+  - `Importing/` - host-to-container config import orchestration
+  - `Manifests/` - TOML manifest parsing and apply
+  - `AcpProxy/` - ACP proxy process lifecycle
 - `ContainAI.Cli/` - static command/option/argument declarations and routing
 - `ContainAI.Cli.Abstractions/` - strongly typed command option records
 - `AgentClientProtocol.Proxy/` - ACP proxy library used by `cai acp proxy`
@@ -90,7 +99,7 @@ cai manifest generate container-link-spec src/manifests /tmp/link-spec.json
 - validates `cai` exists on `PATH`
 - delegates all logic to `cai system devcontainer install --feature-dir ...`
 
-Feature runtime logic is implemented in C# (`src/cai/DevcontainerFeatureRuntime.cs`).
+Feature runtime logic is implemented in C# (`src/cai/Devcontainer/DevcontainerFeatureRuntime.cs`).
 
 ## Packaging
 

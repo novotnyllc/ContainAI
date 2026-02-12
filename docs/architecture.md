@@ -381,13 +381,13 @@ flowchart LR
 
     subgraph Lib["Library Layer"]
         direction TB
-        Runtime["CaiOperationsService.CommandSurface.cs<br/>(core command orchestration)"]
-        Session["SessionCommandRuntime.cs<br/>(run/shell/exec lifecycle)"]
-        Container["ContainerRuntimeCommandService.cs<br/>(container-internal runtime)"]
-        Manifest["ManifestTomlParser.cs<br/>(TOML parsing)"]
+        Ops["Operations/Facade/CaiOperationsService.cs<br/>(core command orchestration)"]
+        Session["Sessions/Runtime/SessionCommandRuntime.cs<br/>(run/shell/exec lifecycle)"]
+        Container["ContainerRuntime/ContainerRuntimeCommandService.cs<br/>(container-internal runtime)"]
+        Manifest["Manifests/Toml/ManifestTomlParser.cs<br/>(TOML parsing)"]
     end
 
-    subgraph Runtime["Container Runtime"]
+    subgraph ContainerRT["Container Runtime"]
         direction TB
         Entry["/sbin/init (systemd PID 1)"]
         Services["systemd services"]
@@ -395,7 +395,6 @@ flowchart LR
     end
 
     Main --> Lib
-    Container --> SSH
     Container --> Entry
 ```
 
@@ -407,35 +406,49 @@ Shell completion uses the built-in `cai completion suggest` path implemented by 
 
 ## Modular Library Structure
 
-The CLI is split into native C# runtime components:
+The CLI is split into native C# runtime components organized by module:
 
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
 | `src/cai/Program.cs` | Native host entrypoint | `Program` |
 | `src/ContainAI.Cli/` | Command parser/routing | `CaiCli`, `RootCommandBuilder` |
-| `src/cai/CaiOperationsService.CommandSurface.cs` | Host command orchestration | `CaiCommandRuntime` |
-| `src/cai/SessionCommandRuntime.cs` | Session lifecycle and SSH flow | `SessionCommandRuntime` |
-| `src/cai/ContainerRuntimeCommandService.cs` | Container-side init/link/runtime commands | `ContainerRuntimeCommandService` |
-| `src/cai/ManifestTomlParser.cs` | TOML manifest parsing | `ManifestTomlParser` |
-| `src/cai/ManifestGenerators.cs` | Derived artifact generation | `ManifestGenerators` |
-| `src/cai/DevcontainerFeatureRuntime.cs` | Devcontainer feature/system integration | `DevcontainerFeatureRuntime` |
-| `src/cai/ContainAiDockerProxy.cs` | Docker context mediation and setup helpers | `ContainAiDockerProxy` |
-| `src/cai/AcpProxyRunner.cs` | ACP proxy process lifecycle | `AcpProxyRunner` |
+| `src/cai/CommandRuntime/` | Command dispatch and handler factory | `CaiCommandRuntime`, `CaiCommandRuntimeHandlersFactory` |
+| `src/cai/Operations/` | Host command orchestration (diagnostics, maintenance, GC) | `CaiOperationsService`, `CaiDoctorOperations` |
+| `src/cai/Sessions/` | Session lifecycle and SSH flow | `SessionCommandRuntime`, `SessionSshExecutionService` |
+| `src/cai/ContainerRuntime/` | Container-side init/link/runtime commands | `ContainerRuntimeCommandService` |
+| `src/cai/Importing/` | Host-to-container config import | `CaiImportService`, `CaiImportOrchestrationOperations` |
+| `src/cai/Manifests/` | TOML manifest parsing and apply | `ManifestTomlParser`, `ManifestGenerators`, `ManifestApplier` |
+| `src/cai/ConfigManifest/` | Config/manifest command processing | `ManifestCommandProcessor`, `ConfigCommandProcessor` |
+| `src/cai/Devcontainer/` | Devcontainer feature/system integration | `DevcontainerFeatureRuntime` |
+| `src/cai/DockerProxy/` | Docker context mediation and setup helpers | `ContainAiDockerProxy` |
+| `src/cai/AcpProxy/` | ACP proxy process lifecycle | `AcpProxyRunner` |
+| `src/cai/Install/` | CLI install and deployment | `InstallDeploymentService` |
+| `src/cai/ShellProfile/` | Shell profile integration | `ShellProfileIntegrationService` |
+| `src/cai/Toml/` | TOML command processing | `TomlCommandProcessor` |
+| `src/cai/ContainerLinks/` | Container link spec repair | `ContainerLinkRepairService` |
+| `src/cai/AgentShims/` | Agent shim resolution and launch | `AgentShimDispatcher` |
 | `src/AgentClientProtocol.Proxy/` | ACP transport/proxy library | `AcpProxy`, `AcpSession`, `PathTranslator` |
+
+Each module follows the co-located `I*.cs` interface extraction pattern: interfaces are extracted
+into separate `I<ClassName>.cs` files adjacent to their implementations (not into `Contracts/`
+subfolders). Approved exceptions are documented in
+[architecture/refactor-exceptions.md](architecture/refactor-exceptions.md).
 
 ### Module Dependencies
 
 ```mermaid
 flowchart TD
     Main["Program.cs"] --> Cli["ContainAI.Cli (System.CommandLine)"]
-    Cli --> Runtime["CaiOperationsService.CommandSurface.cs"]
-    Runtime --> Session["SessionCommandRuntime.cs"]
-    Runtime --> Container["ContainerRuntimeCommandService.cs"]
-    Runtime --> Manifest["ManifestTomlParser.cs / ManifestGenerators.cs"]
-    Runtime --> DockerProxy["ContainAiDockerProxy.cs"]
-    Cli --> AcpRunner["AcpProxyRunner.cs"]
+    Cli --> CmdRT["CommandRuntime/CaiCommandRuntime.cs"]
+    CmdRT --> Ops["Operations/Facade/CaiOperationsService.cs"]
+    CmdRT --> Session["Sessions/Runtime/SessionCommandRuntime.cs"]
+    CmdRT --> Container["ContainerRuntime/ContainerRuntimeCommandService.cs"]
+    CmdRT --> Import["Importing/Facade/CaiImportService.cs"]
+    Ops --> Session
+    Ops --> DockerProxy["DockerProxy/ContainAiDockerProxy.cs"]
+    Ops --> Manifest["Manifests/Toml/ManifestTomlParser.cs"]
+    CmdRT --> AcpRunner["AcpProxy/AcpProxyRunner.cs"]
     AcpRunner --> AcpLib["AgentClientProtocol.Proxy"]
-
 ```
 
 ## Data Flow

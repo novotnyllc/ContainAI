@@ -863,8 +863,8 @@ TOML syntax error in discovered config (using defaults).
 ## Implementation Details
 
 Configuration is implemented in:
-- [`SessionCommandRuntime.cs`](../src/cai/SessionCommandRuntime.cs) - Config discovery and workspace resolution
-- [`TomlCommandProcessor.cs`](../src/cai/TomlCommandProcessor.cs) - TOML parsing and mutation logic
+- [`SessionCommandRuntime.cs`](../src/cai/Sessions/Runtime/SessionCommandRuntime.cs) - Config discovery and workspace resolution
+- [`TomlCommandProcessor.cs`](../src/cai/Toml/CommandProcessor/TomlCommandProcessor.cs) - TOML parsing and mutation logic
 
 Key functions:
 - `_containai_find_config()` - Discovery with git boundary

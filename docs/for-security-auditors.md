@@ -50,9 +50,9 @@ flowchart TD
         BIC
     end
 
-    SM -.->|"What we protect"| SRC1["src/cai/SessionCommandRuntime.cs"]
-    SM -.->|"Detection logic"| SRC2["src/cai/CaiOperationsService.CommandSurface.cs"]
-    ARCH -.->|"Runtime init/link security"| SRC3["src/cai/ContainerRuntimeCommandService.cs"]
+    SM -.->|"What we protect"| SRC1["src/cai/Sessions/Runtime/SessionCommandRuntime.cs"]
+    SM -.->|"Detection logic"| SRC2["src/cai/Operations/Facade/CaiOperationsService.cs"]
+    ARCH -.->|"Runtime init/link security"| SRC3["src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs"]
 ```
 
 ## Isolation Model
@@ -88,10 +88,10 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 
 | Input | Validation Location | Notes |
 |-------|---------------------|-------|
-| TOML config files | [TomlCommandProcessor.cs](../src/cai/TomlCommandProcessor.cs) | Parsed without shell eval |
-| Environment variables | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Key/value validation |
-| Volume mount paths | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Symlink and traversal checks |
-| Container names | [ContainerNameGenerator.cs](../src/cai/ContainerNameGenerator.cs) | RFC 1123 hostname compliance |
+| TOML config files | [TomlCommandProcessor.cs](../src/cai/Toml/CommandProcessor/TomlCommandProcessor.cs) | Parsed without shell eval |
+| Environment variables | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs) | Key/value validation |
+| Volume mount paths | [ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs) | Symlink and traversal checks |
+| Container names | [ContainerNameGenerator.cs](../src/cai/ContainerRuntime/ContainerNameGenerator.cs) | RFC 1123 hostname compliance |
 
 ### In-Scope for Vulnerability Reports
 
@@ -112,10 +112,10 @@ See [SECURITY.md > Unsafe Opt-ins](../SECURITY.md#unsafe-opt-ins) for details an
 
 | File | Security Role |
 |------|---------------|
-| [src/cai/CaiOperationsService.CommandSurface.cs](../src/cai/CaiOperationsService.CommandSurface.cs) | Isolation detection and verification |
-| [src/cai/SessionCommandRuntime.cs](../src/cai/SessionCommandRuntime.cs) | Container start with isolation checks |
-| [src/cai/ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntimeCommandService.cs) | Volume mount security, .env parsing |
-| [src/cai/TomlCommandProcessor.cs](../src/cai/TomlCommandProcessor.cs) | TOML parsing (no shell eval) |
+| [src/cai/Operations/Facade/CaiOperationsService.cs](../src/cai/Operations/Facade/CaiOperationsService.cs) | Isolation detection and verification |
+| [src/cai/Sessions/Runtime/SessionCommandRuntime.cs](../src/cai/Sessions/Runtime/SessionCommandRuntime.cs) | Container start with isolation checks |
+| [src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs](../src/cai/ContainerRuntime/ContainerRuntimeCommandService.cs) | Volume mount security, .env parsing |
+| [src/cai/Toml/CommandProcessor/TomlCommandProcessor.cs](../src/cai/Toml/CommandProcessor/TomlCommandProcessor.cs) | TOML parsing (no shell eval) |
 
 ## Reporting Vulnerabilities
 
