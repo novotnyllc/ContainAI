@@ -40,9 +40,8 @@ Rename 12 dotted-basename files in `src/cai/Devcontainer/` and establish consist
 - [ ] Rebased onto main after fn-49 merge (if applicable)
 - [ ] `git log --follow` confirms rename detection
 ## Done summary
-TBD
-
+Renamed 12 dotted-basename files in src/cai/Devcontainer/ to folder-based organization and updated all 42 Devcontainer files from flat ContainAI.Cli.Host namespace to hierarchical namespaces matching folder structure (ContainAI.Cli.Host.Devcontainer.*). Also fixed existing misnamed Configuration/DevcontainerFeatureConfigLoader.cs to DevcontainerFeatureOptionsLoader.cs to match its class name.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 3564552c, e83226ef
+- Tests: dotnet build ContainAI.slnx -c Release -warnaserror, dotnet test --solution ContainAI.slnx -c Release --xunit-info
 - PRs:
