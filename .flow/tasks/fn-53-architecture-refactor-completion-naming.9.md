@@ -51,9 +51,8 @@ Update all documentation affected by the architecture refactor and create the re
 - [ ] docs/architecture/ directory exists (already created in task 6, verify contents)
 - [ ] No broken links or stale file path references in docs/
 ## Done summary
-TBD
-
+Updated file path references across 11 documentation files (AGENTS.md, CONTRIBUTING.md, SECURITY.md, docs/architecture.md, docs/sync-architecture.md, docs/for-security-auditors.md, docs/for-contributors.md, docs/cli-reference.md, docs/configuration.md, docs/adding-agents.md, src/README.md) to match the post-refactor modular folder structure in src/cai/. Updated Mermaid diagrams, module dependency tables, and project structure trees. Verified docs/architecture/refactor-exceptions.md exists with 4 approved exceptions.
 ## Evidence
-- Commits:
-- Tests:
+- Commits: 55872171365b136031ed1ddf76f1968d41d06047
+- Tests: grep-sweep for stale file path references across all markdown files
 - PRs:

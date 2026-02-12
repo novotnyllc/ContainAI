@@ -38,9 +38,18 @@ Final validation sweep across the entire refactored codebase. Verify all accepta
 - [ ] Coverage >= 97% for ContainAI.Cli, ContainAI.Cli.Abstractions, AgentClientProtocol.Proxy (verified via reportgenerator)
 - [ ] All PRD Definition of Done criteria verified
 ## Done summary
-TBD
+Final validation sweep completed. Fixed one test broken by the refactoring (SyncIntegrationTests.ImportRuntimeSource_ContainsEnvGuardMessages searched for pre-refactor filenames in src/cai top-level; updated to search for post-refactor filenames recursively). All quality gates pass:
 
+- `dotnet build -warnaserror`: 0 warnings, 0 errors
+- `dotnet test`: 342 passed, 0 failed
+- `dotnet format analyzers --diagnostics IDE1006 --verify-no-changes`: clean
+- `slopwatch analyze --fail-on warning`: 0 issues
+- Coverage: ContainAI.Cli 98.66%, ContainAI.Cli.Abstractions 100%, AgentClientProtocol.Proxy 97.83% (all >= 97%)
+- Zero dotted basenames in src/cai
+- refactor-exceptions.md complete with all exceptions per rubric
+- AOT composition decision record complete and accepted
+- All PRD Definition of Done criteria verified
 ## Evidence
 - Commits:
-- Tests:
+- Tests: 342 passed, 0 failed - all quality gates pass
 - PRs:

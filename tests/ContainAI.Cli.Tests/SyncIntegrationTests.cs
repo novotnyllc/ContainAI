@@ -611,13 +611,13 @@ public sealed class SyncIntegrationTests
         var caiSourceDir = LocateRepositoryPath("src", "cai");
         var sourceBuilder = new StringBuilder();
 
-        foreach (var importSourcePath in Directory.GetFiles(caiSourceDir, "CaiImportService.ImportEnvironment*.cs", SearchOption.TopDirectoryOnly))
+        foreach (var importSourcePath in Directory.GetFiles(caiSourceDir, "CaiImportEnvironment*.cs", SearchOption.AllDirectories))
         {
             sourceBuilder.AppendLine();
             sourceBuilder.Append(File.ReadAllText(importSourcePath));
         }
 
-        foreach (var utilitySourcePath in Directory.GetFiles(caiSourceDir, "CaiRuntimeSupport.Utilities*.cs", SearchOption.TopDirectoryOnly))
+        foreach (var utilitySourcePath in Directory.GetFiles(caiSourceDir, "CaiRuntimeEnvFile*.cs", SearchOption.AllDirectories))
         {
             sourceBuilder.AppendLine();
             sourceBuilder.Append(File.ReadAllText(utilitySourcePath));
