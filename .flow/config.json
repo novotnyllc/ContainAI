@@ -7,9 +7,9 @@
     "enabled": true
   },
   "review": {
-    "backend": "codex"
+    "backend": "rp"
   },
   "scouts": {
-    "github": false
+    "github": true
   }
 }
