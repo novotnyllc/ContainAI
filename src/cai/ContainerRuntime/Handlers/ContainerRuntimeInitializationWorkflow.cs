@@ -7,11 +7,6 @@ using ContainAI.Cli.Host;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal interface IContainerRuntimeInitializationWorkflow
-{
-    Task RunAsync(InitCommandParsing options, CancellationToken cancellationToken);
-}
-
 internal sealed class ContainerRuntimeInitializationWorkflow : IContainerRuntimeInitializationWorkflow
 {
     private readonly IContainerRuntimeExecutionContext context;

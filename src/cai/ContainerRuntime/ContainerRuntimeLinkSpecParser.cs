@@ -2,11 +2,6 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal interface IContainerRuntimeLinkSpecParser
-{
-    IReadOnlyList<ContainerRuntimeLinkSpecRawEntry> ParseEntries(string specPath, string specJson);
-}
-
 internal sealed class ContainerRuntimeLinkSpecParser : IContainerRuntimeLinkSpecParser
 {
     public IReadOnlyList<ContainerRuntimeLinkSpecRawEntry> ParseEntries(string specPath, string specJson)

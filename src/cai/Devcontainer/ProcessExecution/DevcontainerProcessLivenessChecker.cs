@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
-internal interface IDevcontainerProcessLivenessChecker
-{
-    bool IsProcessAlive(int processId);
-}
-
 internal sealed class DevcontainerProcessLivenessChecker : IDevcontainerProcessLivenessChecker
 {
     private readonly DevcontainerFileSystem fileSystem;

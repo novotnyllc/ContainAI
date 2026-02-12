@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
 namespace ContainAI.Cli.Host.Devcontainer.Inspection;
 
-internal interface IDevcontainerSymlinkInspector
-{
-    bool IsSymlink(string path);
-}
-
 internal sealed class DevcontainerSymlinkInspector(DevcontainerFileSystem fileSystem) : IDevcontainerSymlinkInspector
 {
     public bool IsSymlink(string path)

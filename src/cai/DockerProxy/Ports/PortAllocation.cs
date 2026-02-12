@@ -3,17 +3,6 @@ using ContainAI.Cli.Host.DockerProxy.Models;
 
 namespace ContainAI.Cli.Host.DockerProxy.Ports;
 
-internal interface IDockerProxyPortAllocator
-{
-    Task<string> AllocateSshPortAsync(
-        string lockPath,
-        string containAiConfigDir,
-        string contextName,
-        string workspaceName,
-        string workspaceSafe,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class DockerProxyPortAllocator : IDockerProxyPortAllocator
 {
     private readonly ContainAiDockerProxyOptions options;

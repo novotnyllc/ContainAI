@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
 namespace ContainAI.Cli.Host.Devcontainer.Inspection;
 
-internal interface IDevcontainerSshdProcessInspector
-{
-    Task<bool> IsSshdRunningFromPidFileAsync(string pidFilePath, CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerSshdProcessInspector(
     DevcontainerFileSystem fileSystem,
     IDevcontainerProcessExecution processExecution) : IDevcontainerSshdProcessInspector

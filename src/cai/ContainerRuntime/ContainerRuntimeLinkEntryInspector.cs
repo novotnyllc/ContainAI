@@ -4,16 +4,6 @@ using ContainAI.Cli.Host.ContainerRuntime.Models;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal interface IContainerRuntimeLinkEntryInspector
-{
-    Task<ContainerRuntimeLinkInspectionResult> InspectAsync(
-        string linkPath,
-        string targetPath,
-        bool removeFirst,
-        bool quiet,
-        LinkRepairStats stats);
-}
-
 internal sealed class ContainerRuntimeLinkEntryInspector : IContainerRuntimeLinkEntryInspector
 {
     private readonly IContainerRuntimeExecutionContext context;

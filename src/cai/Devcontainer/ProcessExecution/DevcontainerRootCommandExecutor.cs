@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
-internal interface IDevcontainerRootCommandExecutor
-{
-    Task RunAsRootAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerRootCommandExecutor : IDevcontainerRootCommandExecutor
 {
     private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task<DevcontainerProcessResult>> runProcessCaptureAsync;

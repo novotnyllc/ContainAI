@@ -5,11 +5,6 @@ using ContainAI.Cli.Host.DockerProxy.Contracts;
 
 namespace ContainAI.Cli.Host.DockerProxy.System;
 
-internal interface IDockerProxySshConfigUpdater
-{
-    Task UpdateAsync(string workspaceName, string sshPort, string remoteUser, TextWriter stderr, CancellationToken cancellationToken);
-}
-
 internal sealed class DockerProxySshConfigUpdater : IDockerProxySshConfigUpdater
 {
     private readonly IContainAiSystemEnvironment environment;

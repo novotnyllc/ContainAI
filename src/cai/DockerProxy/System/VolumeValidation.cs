@@ -2,17 +2,6 @@ using ContainAI.Cli.Host.DockerProxy.Contracts;
 
 namespace ContainAI.Cli.Host.DockerProxy.System;
 
-internal interface IDockerProxyVolumeCredentialValidator
-{
-    Task<bool> ValidateAsync(
-        string contextName,
-        string dataVolume,
-        bool enableCredentials,
-        bool quiet,
-        TextWriter stderr,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class DockerProxyVolumeCredentialValidator : IDockerProxyVolumeCredentialValidator
 {
     private readonly IDockerProxyCommandExecutor commandExecutor;

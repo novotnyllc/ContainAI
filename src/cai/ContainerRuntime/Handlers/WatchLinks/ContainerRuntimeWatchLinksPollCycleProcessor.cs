@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Handlers;
 
-internal interface IContainerRuntimeWatchLinksPollCycleProcessor
-{
-    Task ProcessCycleAsync(WatchLinksCommandParsing options, CancellationToken cancellationToken);
-}
-
 internal sealed class ContainerRuntimeWatchLinksPollCycleProcessor(
     IContainerRuntimeExecutionContext context,
     IContainerRuntimeWatchLinksRepairRunner repairRunner) : IContainerRuntimeWatchLinksPollCycleProcessor

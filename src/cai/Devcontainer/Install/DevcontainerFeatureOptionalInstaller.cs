@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.Install;
 
-internal interface IDevcontainerFeatureOptionalInstaller
-{
-    Task InstallAsync(FeatureConfig settings, CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerFeatureOptionalInstaller(
     TextWriter stdout,
     IDevcontainerProcessHelpers processHelpers,

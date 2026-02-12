@@ -2,13 +2,6 @@ using ContainAI.Cli.Host.Devcontainer.UserEnvironment;
 
 namespace ContainAI.Cli.Host.Devcontainer;
 
-internal interface IDevcontainerUserEnvironmentSetup
-{
-    Task<string> DetectUserHomeAsync(string remoteUser, CancellationToken cancellationToken);
-
-    Task AddUserToDockerGroupIfPresentAsync(string user, CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerUserEnvironmentSetup : IDevcontainerUserEnvironmentSetup
 {
     private readonly DockerGroupMembershipUpdater dockerGroupMembershipUpdater;

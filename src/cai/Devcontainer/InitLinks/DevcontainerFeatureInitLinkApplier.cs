@@ -1,14 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.InitLinks;
 
-internal interface IDevcontainerFeatureInitLinkApplier
-{
-    Task<DevcontainerFeatureLinkApplyResult> ApplyLinksAsync(
-        LinkSpecDocument linkSpec,
-        FeatureConfig settings,
-        string userHome,
-        CancellationToken cancellationToken);
-}
-
 internal readonly record struct DevcontainerFeatureLinkApplyResult(int Created, int Skipped);
 
 internal sealed class DevcontainerFeatureInitLinkApplier : IDevcontainerFeatureInitLinkApplier

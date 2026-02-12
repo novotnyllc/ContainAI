@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.Devcontainer.Sysbox;
 
 namespace ContainAI.Cli.Host.Devcontainer;
 
-internal interface IDevcontainerSysboxVerificationService
-{
-    Task<int> VerifySysboxAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerSysboxVerificationService(
     IDevcontainerProcessHelpers processHelpers,
     TextWriter standardOutput,

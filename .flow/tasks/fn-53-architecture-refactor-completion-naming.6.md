@@ -31,6 +31,7 @@ Keep mixed only when one of these applies:
 - DockerProxy already has a `Contracts/` subfolder and `Parsing/Contracts` — extend this pattern
 - Source-generator exception: `DevcontainerFeatureJsonContext` and `ContainerLinkSpecJsonContext` must stay co-located with their types
 - The dual-constructor pattern remains unchanged (WS4 scope)
+- **Updated by plan-sync (fn-53.5):** Devcontainer files now use hierarchical namespaces: `ContainAI.Cli.Host.Devcontainer.*` per folder. Files organized in: Configuration/, InitLinks/, Install/, ProcessExecution/, Inspection/, Sysbox/, UserEnvironment/. When extracting interfaces, preserve folder placement and namespace hierarchy.
 ## Acceptance
 - [ ] All mixed files in ContainerRuntime, DockerProxy, Devcontainer evaluated
 - [ ] Interface/class splits completed for non-exception files

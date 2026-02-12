@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
-internal interface IDevcontainerPortUsageInspection
-{
-    bool IsPortInUse(string portValue);
-}
-
 internal sealed class DevcontainerPortUsageInspection : IDevcontainerPortUsageInspection
 {
     private readonly DevcontainerPortInspector portInspector;

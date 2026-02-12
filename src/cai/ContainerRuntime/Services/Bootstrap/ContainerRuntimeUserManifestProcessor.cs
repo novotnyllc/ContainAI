@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Manifests.Apply;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal interface IContainerRuntimeUserManifestProcessor
-{
-    Task ProcessUserManifestsAsync(string dataDir, string homeDir, bool quiet);
-}
-
 internal sealed class ContainerRuntimeUserManifestProcessor : IContainerRuntimeUserManifestProcessor
 {
     private readonly IContainerRuntimeExecutionContext context;

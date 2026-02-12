@@ -3,11 +3,6 @@ using ContainAI.Cli.Host.Manifests.Apply;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal interface IContainerRuntimeVolumeBootstrapper
-{
-    Task EnsureVolumeStructureAsync(string dataDir, string manifestsDir, bool quiet);
-}
-
 internal sealed class ContainerRuntimeVolumeBootstrapper : IContainerRuntimeVolumeBootstrapper
 {
     private readonly IContainerRuntimeExecutionContext context;

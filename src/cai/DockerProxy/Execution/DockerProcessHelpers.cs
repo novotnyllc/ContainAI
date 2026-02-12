@@ -4,11 +4,6 @@ using ContainAI.Cli.Host.DockerProxy.Parsing;
 
 namespace ContainAI.Cli.Host.DockerProxy.Execution;
 
-internal interface IDockerProxyContextSelector
-{
-    Task<bool> ShouldUseContainAiContextAsync(IReadOnlyList<string> args, string contextName, CancellationToken cancellationToken);
-}
-
 internal sealed class DockerProxyContextSelector : IDockerProxyContextSelector
 {
     private static readonly HashSet<string> ContainerTargetingSubcommands =

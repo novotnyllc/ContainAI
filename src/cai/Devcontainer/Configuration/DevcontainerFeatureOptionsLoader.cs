@@ -2,11 +2,6 @@ using System.Text.Json;
 
 namespace ContainAI.Cli.Host.Devcontainer.Configuration;
 
-internal interface IDevcontainerFeatureOptionsLoader
-{
-    Task<FeatureConfig?> LoadAsync(string path, CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerFeatureOptionsLoader : IDevcontainerFeatureOptionsLoader
 {
     public async Task<FeatureConfig?> LoadAsync(string path, CancellationToken cancellationToken)

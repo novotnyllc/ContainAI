@@ -2,16 +2,6 @@ using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal interface IContainerRuntimeHookRunner
-{
-    Task RunHooksAsync(
-        string hooksDirectory,
-        string workspaceDirectory,
-        string homeDirectory,
-        bool quiet,
-        CancellationToken cancellationToken);
-}
-
 internal sealed class ContainerRuntimeHookRunner : IContainerRuntimeHookRunner
 {
     private readonly IContainerRuntimeExecutionContext context;

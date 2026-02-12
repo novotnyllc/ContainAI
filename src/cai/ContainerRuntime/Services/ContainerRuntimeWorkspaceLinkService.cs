@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal interface IContainerRuntimeWorkspaceLinkService
-{
-    Task SetupWorkspaceSymlinkAsync(string workspaceDir, bool quiet);
-}
-
 internal sealed class ContainerRuntimeWorkspaceLinkService : IContainerRuntimeWorkspaceLinkService
 {
     private readonly IContainerRuntimeExecutionContext context;

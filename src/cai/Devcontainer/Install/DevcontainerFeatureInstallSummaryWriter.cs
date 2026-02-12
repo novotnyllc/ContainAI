@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer.Install;
 
-internal interface IDevcontainerFeatureInstallSummaryWriter
-{
-    Task WriteAsync(FeatureConfig settings);
-}
-
 internal sealed class DevcontainerFeatureInstallSummaryWriter(
     TextWriter stdout) : IDevcontainerFeatureInstallSummaryWriter
 {

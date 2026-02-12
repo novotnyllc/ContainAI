@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.ContainerRuntime.Infrastructure;
 
 namespace ContainAI.Cli.Host.ContainerRuntime.Services;
 
-internal interface IContainerRuntimeEnvironmentFileLoader
-{
-    Task LoadEnvFileAsync(string envFilePath, bool quiet);
-}
-
 internal sealed class ContainerRuntimeEnvironmentFileLoader : IContainerRuntimeEnvironmentFileLoader
 {
     private readonly IContainerRuntimeExecutionContext context;

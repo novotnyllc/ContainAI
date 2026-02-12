@@ -1,10 +1,5 @@
 namespace ContainAI.Cli.Host.Devcontainer;
 
-internal interface IDevcontainerSshdStartupService
-{
-    Task<int> StartSshdAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerSshdStartupService(
     IDevcontainerProcessHelpers processHelpers,
     TextWriter standardOutput,

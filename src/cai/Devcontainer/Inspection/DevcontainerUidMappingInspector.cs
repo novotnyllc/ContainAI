@@ -2,11 +2,6 @@ using ContainAI.Cli.Host.Devcontainer.ProcessExecution;
 
 namespace ContainAI.Cli.Host.Devcontainer.Inspection;
 
-internal interface IDevcontainerUidMappingInspector
-{
-    Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken);
-}
-
 internal sealed class DevcontainerUidMappingInspector(DevcontainerFileSystem fileSystem) : IDevcontainerUidMappingInspector
 {
     public async Task<bool> HasUidMappingIsolationAsync(CancellationToken cancellationToken)

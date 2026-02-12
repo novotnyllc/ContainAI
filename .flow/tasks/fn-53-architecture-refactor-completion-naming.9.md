@@ -28,6 +28,13 @@ Update all documentation affected by the architecture refactor and create the re
 - Update Mermaid diagrams in architecture.md to show new module organization
 - Add module layering subsection showing Contracts/Models/Services pattern per module
 - Keep documentation patterns consistent (inline backticks for paths, pipe-delimited tables for modules)
+
+**Key Devcontainer updates (completed by fn-53.5):**
+- All 42 Devcontainer files now use hierarchical namespaces: `ContainAI.Cli.Host.Devcontainer.*`
+- Root files use `ContainAI.Cli.Host.Devcontainer`
+- Each subfolder maps to namespace: Configuration/, InitLinks/, Install/, ProcessExecution/, Inspection/, Sysbox/, UserEnvironment/
+- Namespace examples: `InitLinks/DevcontainerFeatureInitWorkflow.cs` uses `ContainAI.Cli.Host.Devcontainer.InitLinks`
+- Updated by plan-sync: All 12 previously dotted-basename files now use folder-based names matching their new locations
 ## Acceptance
 - [ ] All 8 affected docs updated with correct post-refactor file paths
 - [ ] Mermaid diagrams in docs/architecture.md reflect new module structure
